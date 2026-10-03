@@ -1,0 +1,37 @@
+# INBOX
+yatsengenesis@inbox.eu
+Whydoyouthink?955
+
+# OUTLOOK
+yatsengenesis@outlook.com
+Whydoyouthink?955
+
+# SYNCTHING
+yatsen
+Whatdoyouwant?844
+
+# PLATFORM.OPENAI & CHATGPT
+yatsengenesis@outlook.com
+Whatdoyouwant?844
+
+# SUPABASE
+yatsengenesis@outlook.com
+Whatdoyouwant?844
+
+# CLAUDE
+idontclaude2@inbox.eu
+
+
+yatsengenesis@outlook.com
+Whatdoyouwant?844
+
+# upstash
+yatsengenesis@outlook.com
+Yatsenupstash833!
+
+# ELEVENLABS
+yatsengenesis@outlook.com
+Whatdoyouneed?833
+
+
+  npm run seed-admin -- admin 'Joker1234!' 'Hephephooray'    

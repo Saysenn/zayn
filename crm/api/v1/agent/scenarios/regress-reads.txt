@@ -1,0 +1,15 @@
+# STAGE 1: every read-only fix, against known truth.
+#   MILKMAN future payment start  8
+#   NEXUS bank                    2
+#   NEXUS crypto                  0
+#   Gloria difference             1 row, AED 150
+#   Henrique sort code            30 - 97 - 90
+show me bank details of nexus
+show me those paid in bank in exus
+whats the percentage rate for nexus?
+show me milkman people whose payment start is a future month
+you sure?
+show me gloria details
+sohw me gloria - diference
+show me henrique goncalves bank details
+what is nexus owed this month?

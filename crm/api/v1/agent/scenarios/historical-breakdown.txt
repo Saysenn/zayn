@@ -1,0 +1,9 @@
+# HISTORICAL BREAKDOWN, SCOPE CARRY AND EXPORT SUPPRESSION
+# The first answer must use August's saved snapshot and keep every exact group separate.
+# MANBAT must never become MILKMAN. "all group" means the literal ALL GROUPS group.
+# The second turn keeps August and all five groups, but narrows to cash.
+# The third turn keeps August and all five groups, replacing cash with bank and crypto.
+# No turn may call export_sheet or show an export session.
+show me the breakdown for milkman, manbat, nexus, all group and indigo last august
+and only cash?
+what about bank and crypto?

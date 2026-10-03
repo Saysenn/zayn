@@ -1,0 +1,21 @@
+-- WHERE THE BUSINESS IS, so the export can say what has to be sent.
+--
+-- The payout breakdown splits cash into what stays local and what leaves
+-- the country, and until now that rule did not exist anywhere: the boss
+-- worked it out by eye each month. It cannot be derived, because a
+-- location is free text on tb_mastersheet and nothing in the row says
+-- which country it is in.
+--
+-- THE LOCAL LIST, NOT THE AWAY LIST, and the direction is the decision.
+-- Away places are open ended and unknowable (any UK town the sheet has
+-- not used yet); local ones are few and known. Listing the away side
+-- would let a new UK town count as local by default, which understates
+-- what has to be sent, and understating money going out is the expensive
+-- direction to be wrong in.
+--
+-- text[] rather than a table: this is one short list of names, edited
+-- rarely, with nothing hanging off it. A tb_locations table is the right
+-- answer the day a location needs a country, a contact or a filter of its
+-- own, and this column is what it would be seeded from.
+ALTER TABLE tb_settings
+  ADD COLUMN IF NOT EXISTS local_locations text[] NOT NULL DEFAULT '{"Abu Dhabi"}';

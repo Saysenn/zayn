@@ -1,0 +1,27 @@
+api/node_modules/*
+web/node_modules/*
+
+# Secrets. The admin credential lives in tb_accounts, but the database URL,
+# JWT_SECRET, COOKIE_SECRET and AGENT_API_KEY live here.
+.env
+.env.*
+!.env.example
+
+# Build output. vite writes straight into the API's public dir.
+api/public/assets/
+web/dist/
+
+# Export output. Nothing reads these back: the xlsx and PDF are built per
+# request and streamed to the browser, so anything on disk is a leftover.
+api/generated/
+
+# Verification scripts. Written to check one thing against the live
+# database, then deleted. Committing one leaves dead code that still holds
+# real credentials open.
+api/_*.js
+web/_*.js
+
+# The live sheet is ./master.xlsx at the repo root and is not ours to keep
+# copies of. A second copy goes stale and gets tested against by mistake.
+**/master.xlsx
+!../master.xlsx

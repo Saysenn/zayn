@@ -1,0 +1,28 @@
+# THE EXPORT SESSION'S THREE EXITS, and the question that is none of them.
+#
+# PAUSE AND CANCEL WERE BUTTONS ONLY. Saying "pause that" reached no tool
+# at all, so she had to answer as though she had done it while nothing on
+# screen moved. Same class as claiming to uncheck a column.
+#
+# WHAT TO WATCH FOR, in order:
+#   1. the panel opens on INDIGO cash, 30 rows
+#   2. a question mid session ANSWERS and does NOT touch the panel
+#   3. "hold on, park that" pauses: she says every choice is KEPT and how
+#      to bring it back. Not "cancelled", not "done"
+#   4. "back to the sheet" resumes with the SAME 30 rows and the same hides
+#   5. "forget it" cancels: she says nothing was written and nothing to
+#      undo, and does NOT ask for a confirmation
+#   6. after cancelling, "is it still there" must say NO. Resuming a dead
+#      panel is the worst outcome here
+#
+# PAUSE KEEPS, CANCEL DROPS. If she treats them as the same word, that is
+# the failure, whichever way round.
+
+give me the cash sheet for INDIGO
+drop the postcode column
+what is Gloria owed this month?
+hold on, park that for a minute
+what is the exchange rate?
+right, back to the sheet
+forget it, drop the export
+is the export panel still open?

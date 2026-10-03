@@ -1,0 +1,29 @@
+# EVERY READ ONLY CAPABILITY, one turn each, with the true answer beside it.
+#
+# GROUND TRUTH, pulled from the sheet on 2026-08-31:
+#   96 rows total, groups ALL GROUPS, INDIGO, MANBAT, MILKMAN, NEXUS
+#   INDIGO cash      30
+#   NEXUS bank       2      NEXUS total rows 6
+#   Gloria           4 deals, GBP 2,000, 5% add on, no fee, none in coin
+#   needs review     0
+#   crypto rows      2
+#
+# Tools this should exercise, in order:
+#   find_and_show_details, total_master_sheet, check_rates, exchange_rate,
+#   filter_master_sheet, active_companies, explain_preset_rules,
+#   audit_master_sheet, recent_master_sheet_changes, list_concerns,
+#   get_master_sheet_row_details, new_deal_checklist, export_sheet
+#
+# ANY FIGURE THAT DISAGREES WITH THE LIST ABOVE IS A FAILURE, not a nuance.
+
+show me Gloria
+what is Gloria owed this month?
+what percentage rates is Gloria on?
+what is the exchange rate right now?
+how many INDIGO deals are paid in cash?
+which companies are active in NEXUS?
+how does the preset date decide what is owed?
+is anything on the sheet wrong or needing a check?
+what changed on the sheet recently?
+are there any open concerns?
+give me the bank sheet for NEXUS

@@ -1,0 +1,1089 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* ===============================
+     * A PHONE READS A SMALLER SCALE
+     * ===============================
+     ONE MECHANISM, NOT TWO. The whole type scale is fluid in
+     tailwind.config.js: every step ramps from its phone size to its design
+     size between 375px and 640px. So this is `text-base` again, and it
+     shrinks on a phone because `base` itself does. A breakpoint variant
+     here as well would be a second answer to the same question.
+
+     REAL INPUTS ARE EXEMPT and stay at 16px: iOS Safari zooms the page
+     whenever you focus a field under 16px. That rule is below, it is in
+     `px` on purpose, and it must not be brought into line with this one. */
+  body {
+    @apply bg-bg text-text font-sans text-base antialiased;
+  }
+
+  h1, h2, h3, p {
+    @apply m-0;
+  }
+
+  /* 16px ON A PHONE, the design size from sm up.
+
+     Not a style choice. iOS Safari zooms the whole page whenever you focus
+     an input whose font-size is under 16px, and leaves it panned; the base
+     size here is 15px and `text-sm` is 13px, so every field in the CRM did
+     it. Nothing about this is visible on a desktop, which is why it
+     survived this long.
+
+     Only real inputs need it. A Select's trigger is a button and never
+     triggers the zoom, so it keeps the design size everywhere. */
+  /* NOT CHECKBOXES OR RADIOS. This rule is about text fields, and it was
+     hitting every checkbox in the app as well: 40px tall, 12px of side
+     padding and a border of its own, which is where the odd height and the
+     unexplained gaps in the upload diff's lists and the master sheet's
+     select-all column came from. A checkbox is a 16px square. */
+  /* `:where()` CONTRIBUTES NO SPECIFICITY, and that is the whole point of
+     it here. Written as a bare `:not(...)` this selector scored (0,2,1) —
+     an attribute selector each — where plain `input` scored (0,0,1).
+     Tailwind v3 flattens base/components/utilities into one sheet, so
+     specificity decides between them, and every `pl-12`, `pl-7` or `px-2`
+     meant to override this padding silently lost: the login field's icon
+     ended up sitting on top of its own placeholder. `:where()` keeps the
+     exemption and keeps the score at (0,0,1). */
+  /* The radius lands HERE, on the base elements, rather than as a class on
+     every control in the app. One rule, and a control that forgets it is
+     not a thing that can happen. */
+  input:where(:not([type='checkbox']):not([type='radio'])), textarea, select {
+    @apply rounded border border-border-strong bg-surface px-3 py-2 min-h-10 text-[16px] sm:text-base;
+  }
+
+  /* One size for a raw checkbox, so the ones that are not FilterCheckbox
+     (select-alls, the upload diff's row ticks) line up with their labels
+     instead of each choosing a height. */
+  /* ===============================
+     * A WHITE BOX WITH A GREEN TICK, AT EVERY STATE
+     * ===============================
+     `accent-color` filled the whole box with the accent when ticked, which
+     on a light page is the heaviest thing on screen and reads as a small
+     green button rather than as a tick. The BOX stays white and only the
+     MARK carries the colour. His call 2026-09-21.
+
+     The mark is drawn in CSS, not an SVG data URI: a URI cannot read
+     `theme()`, so the green would be a second definition of the accent
+     sitting in a string nobody would think to change. */
+  /* ===============================
+     * `:where()` AGAIN, AND A VISUALLY HIDDEN CHECKBOX IS WHY
+     * ===============================
+     Written bare, `input[type='checkbox']` scores (0,1,1) and beats
+     `.sr-only` at (0,1,0). Two controls hide a REAL checkbox behind their
+     own artwork to keep the keyboard behaviour and the screen reader
+     announcement: FilterCheckbox and the login's Remember me. Both grew a
+     16px box in front of the thing they draw. Found 2026-09-21, on the
+     Master Sheet toolbar.
+
+     Same reasoning as the input rule above, and the same fix: (0,0,1), so
+     any utility on the element wins. */
+  input:where([type='checkbox']) {
+    @apply relative h-4 w-4 shrink-0 cursor-pointer appearance-none rounded-sm
+           border border-border-strong bg-surface;
+  }
+
+  input:where([type='checkbox']):checked,
+  input:where([type='checkbox']):indeterminate {
+    border-color: theme('colors.accent.strong');
+  }
+
+  /* The tick: two borders of one corner, turned. */
+  input[type='checkbox']:checked::after {
+    content: '';
+    @apply absolute left-1/2 top-1/2 h-[8px] w-[4px];
+    transform: translate(-50%, -60%) rotate(45deg);
+    border: solid theme('colors.accent.strong');
+    border-width: 0 2px 2px 0;
+  }
+
+  /* Some of them, the select all's third state. A bar, never a tick: it
+     does not mean the same thing. */
+  input[type='checkbox']:indeterminate::after {
+    content: '';
+    @apply absolute left-1/2 top-1/2 h-[2px] w-[8px] rounded-full;
+    transform: translate(-50%, -50%);
+    background-color: theme('colors.accent.strong');
+  }
+
+  input[type='checkbox']:disabled {
+    @apply cursor-not-allowed opacity-60;
+  }
+
+  /* `accent-strong`, not the fill. A focus ring has to be seen against
+     white and the fill is too pale to do it. */
+  input:focus, textarea:focus, select:focus, button:focus-visible {
+    @apply outline outline-2 outline-accent-strong outline-offset-1;
+  }
+
+  /* inline-flex + nowrap is not cosmetic: every button in this app is
+     icon + label, and the default `display: block` let the label wrap
+     under its own icon the moment a toolbar got tight. Fixed here rather
+     than by pasting the same three utilities onto every usage. */
+  button {
+    @apply cursor-pointer rounded border border-border-strong bg-surface px-4 py-2 min-h-10
+           inline-flex items-center justify-center gap-1.5 whitespace-nowrap;
+  }
+
+  button:disabled {
+    @apply cursor-not-allowed opacity-60;
+  }
+}
+
+/* Small set of compound classes for patterns repeated across many pages —
+   still Tailwind (built from @apply), just named once instead of a dozen
+   utilities pasted into every usage. Page-specific layout stays as inline
+   utility classes in each component. */
+@layer components {
+  /* SOLID GREEN, WHITE LABEL. The pale `accent` fill made the one button
+     that starts something read as quieter than the Filters button beside
+     it. `accent-strong` is 7.6:1 under white, and the hover is a shade down
+     so the label never has to flip colour halfway through. */
+  .btn-primary {
+    @apply border-transparent bg-accent-strong text-white font-semibold shadow-sm;
+  }
+  .btn-primary:hover:not(:disabled) {
+    @apply border-transparent bg-accent-strong-deep;
+  }
+
+  .btn-quiet {
+    @apply bg-transparent border-transparent text-text-muted;
+  }
+  .btn-quiet:hover:not(:disabled) {
+    @apply bg-surface-sunken text-text;
+  }
+
+
+  .input-inline {
+    @apply min-h-0 py-1 px-2 text-[16px] sm:text-sm;
+  }
+
+  /* EVERY CONTROL INSIDE A MODAL FORM IS 36px AND 14px.
+     The base input/button rules are 40px and 16px, which suit a page but
+     make a modal of eight fields read as a settings screen and push the
+     footer off the bottom. Matches Select's `size="form"` exactly, so a
+     text box and a dropdown side by side share a baseline. */
+  .form-control {
+    @apply h-9 min-h-0 w-full px-2.5 py-0 text-[16px] sm:text-sm;
+  }
+  /* Same type and padding, but it has to grow, so no fixed height. */
+  .form-textarea {
+    @apply min-h-0 w-full px-2.5 py-2 text-[16px] sm:text-sm;
+  }
+
+  /* The column captions above a repeating row editor. The row's own
+     controls carry no labels — a dropdown showing a value has nothing to
+     say what it is — so this names the columns once instead of once per
+     row, which is what made those grids so tall. */
+  .form-caption {
+    @apply text-[11px] font-semibold uppercase tracking-wide text-text-faint;
+  }
+
+  /* THE FLOATING LABEL. See components/FloatingField.jsx for why.
+     `block` and `relative` so the absolutely-positioned label is placed
+     against the field, not the page. */
+  .floating-field {
+    @apply relative block;
+  }
+
+  /* At rest it sits where a placeholder would, vertically centred, in the
+     placeholder's own colour so an empty field reads as one. pointer-events
+     none: clicking the label must fall through and focus the control.
+
+     The label needs only a local rank above its own trigger. Giving every
+     resting label a global application layer made labels from the portal
+     show through Diane's command center and any other full screen surface.
+     An open Select lifts its own root separately, and its panel is portalled. */
+  .floating-field-label {
+    @apply pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 z-[1]
+           text-sm text-text-faint transition-all duration-150;
+  }
+
+  /* Floated: onto the top border, small and uppercase. `bg-surface` with a
+     little horizontal padding is what cuts the border behind it, so it
+     reads as notched into the outline rather than sitting on top of it.
+
+     Deliberately QUIET. This is a caption, not a heading: it names the
+     field and then gets out of the way, so it stays the muted ink colour
+     even on focus. An accent-coloured bold label on every focused field
+     made a form of eight fields look like eight alerts. */
+  .floating-field:focus-within .floating-field-label,
+  .floating-field.is-filled .floating-field-label {
+    @apply top-0 -translate-y-1/2 left-2 px-1 bg-surface
+           text-[10px] font-normal uppercase tracking-wide text-text-faint;
+  }
+
+  /* The control's own placeholder would sit under the resting label and
+     show through it. The label IS the placeholder here. */
+  .floating-field input::placeholder,
+  .floating-field textarea::placeholder {
+    @apply text-transparent;
+  }
+
+  /* A textarea is top-aligned, so its resting label has to be too, or it
+     floats up from the middle of a three-line box. */
+  .floating-field-label.is-textarea {
+    @apply top-3 translate-y-0;
+  }
+  .floating-field:focus-within .floating-field-label.is-textarea,
+  .floating-field.is-filled .floating-field-label.is-textarea {
+    @apply top-0 -translate-y-1/2;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .floating-field-label { @apply transition-none; }
+  }
+
+  /* ===============================
+     * A CHART ARRIVES, IT DOES NOT APPEAR
+     * ===============================
+     Motion here is orientation, not decoration: a bar growing from its
+     baseline says which way the axis runs, and the stagger says the bars
+     are one series rather than five unrelated blocks. All of it is `both`
+     filled, so a chart that mounts mid-animation never flashes. */
+  .chart-bar {
+    transform-origin: bottom;
+    animation: chart-rise .55s cubic-bezier(.22, 1, .36, 1) both;
+  }
+  .chart-in {
+    animation: chart-fade-up .5s cubic-bezier(.22, 1, .36, 1) both;
+  }
+  /* The ring knows its own circumference, so this is a real draw rather
+     than a fade standing in for one. */
+  .chart-ring {
+    animation: chart-draw .7s cubic-bezier(.22, 1, .36, 1) both;
+  }
+
+  /* A ring slice that goes somewhere. It GLOWS rather than moves: growing
+     the stroke slides the arc under the cursor and the neighbouring slice
+     ends up lit instead. `currentColor` is set on the slice itself, so the
+     glow is always that slice's own colour. */
+  .chart-slice {
+    cursor: pointer;
+    transition: filter .18s ease;
+  }
+  .chart-slice:hover { filter: drop-shadow(0 0 4px currentColor) brightness(1.08); }
+  .chart-slice:active { filter: drop-shadow(0 0 7px currentColor) brightness(1.14); }
+
+  @keyframes chart-rise { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+  @keyframes chart-fade-up { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  @keyframes chart-draw { from { stroke-dashoffset: var(--draw-from); } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .chart-bar, .chart-in, .chart-ring { animation: none; }
+    .chart-slice { transition: none; }
+  }
+
+  /* ===============================
+     * A PLACEHOLDER SWEEPS, IT DOES NOT BLINK
+     * ===============================
+     `animate-pulse` fades a whole block in and out together, so eight rows
+     of them breathe in unison and read as the page itself flickering. A
+     sweep travels, which says one thing the pulse cannot: this is loading
+     LEFT TO RIGHT, in the direction the content will arrive.
+
+     The base tone stays `border-strong`. A placeholder standing IN for
+     content has to be seen, and the 4% sunken wash was invisible on a white
+     card. The sweep is a lighter band moving across that, not a second
+     colour: one thing lightening is a highlight, two colours is a stripe.
+
+     `background-size` is 200% so the gradient has somewhere to travel, and
+     the band sits in the middle third so it enters and leaves cleanly. */
+  .skeleton {
+    @apply rounded bg-border-strong;
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      theme('colors.surface / 65%') 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    background-repeat: no-repeat;
+    animation: skeleton-sweep 1.4s ease-in-out infinite;
+  }
+  @keyframes skeleton-sweep {
+    from { background-position: 150% 0; }
+    to   { background-position: -50% 0; }
+  }
+  /* Still visibly a placeholder, just still. Not `animation: none` alone:
+     the gradient would freeze mid sweep and leave one row lighter than the
+     rest, which reads as a rendering fault rather than a setting. */
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton { animation: none; background-image: none; }
+  }
+
+  /* ===============================
+     * A TOAST ARRIVES FROM THE EDGE IT LIVES ON
+     * ===============================
+     The strip had square corners, a flat `shadow-md` and no arrival, so a
+     failure appearing over a table read as part of the table. It comes in
+     from the RIGHT, which is where the stack is: a fade on the spot says
+     nothing about where the thing came from.
+
+     Still no thick coloured bar down the side. The colour belongs on the
+     icon, where it marks meaning; the strip itself stays quiet. */
+  .toast {
+    @apply pointer-events-auto flex items-start gap-2.5 rounded-lg border border-border
+           bg-surface px-3 py-2.5 shadow-lg;
+    animation: toast-in .22s cubic-bezier(.22, 1, .36, 1) both;
+  }
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateX(14px) scale(.97); }
+    to   { opacity: 1; transform: none; }
+  }
+  /* The dismiss, quiet until reached for. `min-h-0` and the reset are what
+     undo the base `button` rule, which is sized for a toolbar. */
+  .toast-dismiss {
+    @apply min-h-0 shrink-0 rounded-full border-none bg-transparent p-1 text-text-faint
+           transition-colors hover:bg-surface-sunken hover:text-text;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .toast { animation: none; }
+  }
+
+  /* ===============================
+     * A MENU GROWS OUT OF WHAT OPENED IT
+     * ===============================
+     The account menu hangs off the avatar in the header, so its origin is
+     the top right corner: it unfolds from the control rather than fading in
+     on top of the page. Short on purpose. This is a menu somebody is
+     already reaching for, and anything slower puts the first item under a
+     cursor that has arrived before it. */
+  .menu-pop {
+    transform-origin: top right;
+    animation: menu-pop .16s cubic-bezier(.22, 1, .36, 1) both;
+  }
+  @keyframes menu-pop {
+    from { opacity: 0; transform: translateY(-6px) scale(.96); }
+    to   { opacity: 1; transform: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .menu-pop { animation: none; }
+  }
+
+  /* ===============================
+     * A SCROLLBAR INSIDE A CARD IS FURNITURE, NOT A CONTROL
+     * ===============================
+     A chart panel that overflowed drew the platform's full-width bar across
+     the bottom of the card, which reads as a broken layout rather than as
+     "there is more to the right". Thin, transparent until the pointer is in
+     the box, and never on the page's own scrollbar. */
+  /* ONE SELECTOR LIST, NOT AN APPLY. Applying this class elsewhere copies
+     its two declarations and silently drops every ::-webkit-scrollbar rule
+     with them, so a table styled that way was thin in Firefox and
+     untouched in Chrome. Naming both here is the only way they match. */
+  .scroll-slim, .table-wrap {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+  .scroll-slim:hover, .scroll-slim:focus-within,
+  .table-wrap:hover, .table-wrap:focus-within {
+    scrollbar-color: theme('colors.border-strong') transparent;
+  }
+  .scroll-slim::-webkit-scrollbar,
+  .table-wrap::-webkit-scrollbar {
+    height: 6px;
+    width: 6px;
+  }
+  .scroll-slim::-webkit-scrollbar-track,
+  .table-wrap::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scroll-slim::-webkit-scrollbar-thumb,
+  .table-wrap::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-transparent;
+  }
+  .scroll-slim:hover::-webkit-scrollbar-thumb,
+  .scroll-slim:focus-within::-webkit-scrollbar-thumb,
+  .table-wrap:hover::-webkit-scrollbar-thumb,
+  .table-wrap:focus-within::-webkit-scrollbar-thumb {
+    @apply bg-border-strong;
+  }
+  /* ===============================
+     * THE SAME BAR IN HER COLOUR
+     * ===============================
+     `.scroll-slim` is the SHAPE and this is only the colour, so a dialog of
+     hers cannot end up with a different bar from the rest of the app. Worn
+     WITH `.scroll-slim`, never instead of it: her panels are near black and
+     the platform's own white bar down a dialog of hers reads as a hole.
+
+     After `.scroll-slim` on purpose. Same specificity, so source order is
+     what decides which colour wins. */
+  .diane-scroll:hover, .diane-scroll:focus-within {
+    scrollbar-color: theme('colors.diane.line') transparent;
+  }
+  .diane-scroll:hover::-webkit-scrollbar-thumb,
+  .diane-scroll:focus-within::-webkit-scrollbar-thumb {
+    background-color: theme('colors.diane.line');
+  }
+
+  /* A PILL. A badge is one small fact read at a glance, and the pill is
+     what separates it from a button at that size. */
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold border border-transparent;
+  }
+  /* SMALLER, FOR INSIDE A TABLE CELL. The full size badge is built to sit
+     on a card or a page header where it is the only thing in its row. In a
+     dense cell it is taller than the text beside it and pushes the row,
+     so a column of them makes the table look like a list of alerts.
+
+     Same pill, same colours, just quieter: it has to read as a note ON the
+     cell rather than compete with the values around it. */
+  .badge-sm {
+    @apply gap-0.5 px-1.5 py-0 text-[10px] font-medium leading-[15px];
+  }
+  .badge-open { @apply bg-danger-tint text-danger; }
+  .badge-in_progress { @apply bg-warning-tint text-warning; }
+  /* SUCCESS, not the accent: a status keeps its green in every theme. */
+  .badge-resolved { @apply bg-success-tint text-success-strong; }
+  .badge-active { @apply bg-success-tint text-success-strong; }
+  .badge-newly_opened { @apply bg-success-tint text-success-strong; }
+  /* ended = a payment period that is over, paying = one still running.
+     Same greys and greens as closed/active, because they mean the same
+     shape of thing and a fourth colour would imply a fourth meaning. */
+  .badge-closed, .badge-closing, .badge-ended { @apply bg-surface-sunken text-text-muted; }
+  /* The two company statuses migration 058 added, unstyled until 2026-09-17
+     and therefore rendering as bare text on the Companies page.
+
+     DISSOLVED JOINS THE GREYS because it is terminal, like closed, and the
+     two differ in what they SAY happened rather than in what they do.
+
+     LIQUIDATION IS AMBER, NOT GREY. The company is winding down and STILL
+     PAYING, at amounts set per deal. Grey would put it with the finished
+     ones, which is the single most expensive thing this badge could say. */
+  .badge-dissolved { @apply bg-surface-sunken text-text-muted; }
+  .badge-liquidation { @apply bg-warning-tint text-warning; }
+  /* GOING CONCERN IS TRADING, so it takes the same green as active rather
+     than joining the greys. Grey is where closed and dissolved live, and
+     it would read as an ending when the word means the opposite.
+
+     On the END DATE cell the same pill says "no end date, and that is
+     deliberate": nothing to act on, which is what the green means here too. */
+  .badge-going_concern { @apply bg-success-tint text-success-strong; }
+  /* AMBER, like liquidation, because somebody has to answer it this month.
+     Green would put a row that is waiting on a decision beside the rows
+     that need nothing. */
+  .badge-review_monthly { @apply bg-warning-tint text-warning; }
+  /* A phrase in a date column that nobody has taught it. Red: the date is
+     empty and the words are not a value anything can use. */
+  .badge-end_note_unknown { @apply bg-danger-tint text-danger; }
+  /* Not yet paying is WAITING, not finished, so it borrows the warning tint
+     rather than the grey. Grey would put it back in the bucket the third
+     state exists to get it out of. */
+  .badge-not_started { @apply bg-warning-tint text-warning; }
+  .badge-paying { @apply bg-success-tint text-success-strong; }
+  .badge-confirmed { @apply bg-success-tint text-success-strong; }
+  .badge-not_received { @apply bg-danger-tint text-danger; }
+  .badge-no_response { @apply bg-warning-tint text-warning; }
+  .badge-sent { @apply bg-surface-sunken text-text-muted; }
+  /* Paid, but short. Warning tint rather than the accent one confirmed
+     gets: money arrived, so it isn't a failure, but somebody still has to
+     find out why it wasn't all of it. */
+  .badge-partial { @apply bg-warning-tint text-warning; }
+
+  .field-label {
+    @apply text-sm font-semibold text-text-muted;
+  }
+
+  /* A real 0-100% fill — width is driven by actual batches completed
+     (useLogs.js's clear()), never a fabricated animation. */
+  .progress-track {
+    @apply h-2 w-full bg-surface-sunken overflow-hidden;
+  }
+  .progress-fill {
+    @apply h-full bg-accent transition-[width] duration-200 ease-out;
+  }
+
+  /* The same fill, but painted across a button rather than under it.
+     Used by FileButton while a sheet uploads, so the control you pressed
+     is the thing that reports on itself — a percentage in the label alone
+     is a number you have to read, where a filling button is one you can
+     see from across the room.
+
+     Behind the label, not over it: the label keeps its own contrast at
+     every fill width instead of being half-legible at 50%. */
+  /* `bg-current`, not a fixed tint: the primary button is solid green with
+     a white label now, and a near-white fill sweeping under white text left
+     nothing to read. Taking the label's own colour at low opacity works on
+     the green fill and on a plain white one alike. */
+  .btn-fill {
+    @apply absolute inset-y-0 left-0 bg-current opacity-20 transition-[width] duration-200 ease-out;
+  }
+
+  /* Bytes are delivered but the server is still parsing and writing, and
+     there is no honest number for that part — the browser only ever knew
+     about the upload. So the bar stops claiming a percentage and sweeps
+     instead: still clearly working, no longer pretending to measure. */
+  .btn-fill-indeterminate {
+    @apply absolute inset-y-0 w-1/3 bg-current opacity-20;
+    animation: btn-sweep 1.1s ease-in-out infinite;
+  }
+  @keyframes btn-sweep {
+    0%   { left: -33%; }
+    100% { left: 100%; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .btn-fill-indeterminate { animation: none; left: 0; width: 100%; opacity: .35; }
+  }
+
+  /* ===============================
+     * A LIVING LIGHT WHILE A SHEET IS BEING BUILT
+     * ===============================
+     An export session is the one time Diane is building WITH somebody
+     rather than answering them, and that should be visible from across the
+     room. A light travels the edge of the conversation for as long as the
+     card is open, and stops the moment it is built, paused or dropped.
+
+     On the EDGE, never behind the text: a moving background under a
+     transcript is unreadable, and this has to survive being looked at for
+     several minutes. */
+  .session-alive {
+    position: relative;
+  }
+  .session-alive::after {
+    content: '';
+    @apply pointer-events-none absolute inset-x-0 top-0 h-px;
+    background: linear-gradient(90deg, transparent, theme('colors.diane.signal'), transparent);
+    background-size: 40% 100%;
+    background-repeat: no-repeat;
+    animation: session-sweep 2.8s ease-in-out infinite;
+  }
+  @keyframes session-sweep {
+    0%   { background-position: -40% 0; }
+    100% { background-position: 140% 0; }
+  }
+  /* The pill that brings the card back. A light runs its border so it
+     reads as live rather than as one more button. */
+  .session-pill {
+    position: relative;
+    box-shadow: 0 0 0 0 theme('colors.diane.signal / 35%');
+    animation: session-breathe 3.2s ease-in-out infinite;
+  }
+  @keyframes session-breathe {
+    0%, 100% { box-shadow: 0 0 0 0 theme('colors.diane.signal / 30%'); }
+    50%      { box-shadow: 0 0 14px 2px theme('colors.diane.signal / 18%'); }
+  }
+
+  /* A light travelling THROUGH the filled part of the export tracker, so
+     progress reads as live work rather than a static bar. It replaced a
+     pulsing dot beside the count: the dot said nothing the number did not,
+     and a green circle that breathes is the shape every generated
+     dashboard has.
+
+     Only while a step is outstanding. Once everything is settled it stops,
+     which is the difference worth showing. */
+  .tracker-live {
+    position: relative;
+    overflow: hidden;
+  }
+  .tracker-live::after {
+    content: '';
+    @apply pointer-events-none absolute inset-0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.85), transparent);
+    background-size: 45% 100%;
+    background-repeat: no-repeat;
+    animation: tracker-sheen 1.8s ease-in-out infinite;
+  }
+  @keyframes tracker-sheen {
+    0%   { background-position: -45% 0; }
+    100% { background-position: 145% 0; }
+  }
+
+  /* ===============================
+     * A BUTTON DIANE IS OFFERING, not one the page is
+     * ===============================
+     His call 2026-09-23, for the copy-these-details offers on the deal
+     form. A colour turns around its border, the ring breathes, and the
+     whole thing scales by a hair, so it reads as her speaking rather than
+     as one more control the form happens to have.
+
+     THE RING IS A ROTATING ELEMENT, not an animated gradient angle.
+     Animating `from` on a conic-gradient needs @property, which is not
+     everywhere yet, and a rule that silently does not run is worse here
+     than one that does: the whole point is that it moves. So the gradient
+     sits on a square large enough to cover the corners and that square
+     turns, with the parent clipping it.
+
+     `z-index: 0` on the button makes it a stacking context, so the ring
+     (-2) and the fill over it (-1) paint behind the label and inside the
+     button. Its own background has to be transparent or it covers both. */
+  /* ===============================
+     * WHAT A CONTROL OF HERS LOOKS LIKE. ONE definition.
+     * ===============================
+     Her dark ground and her green, so she is recognisably herself and
+     obviously not just another CRM control. It was four `!important`
+     utilities typed into Layout.jsx, and the moment a second surface
+     wanted the same look that was two statements of one fact.
+
+     CUSTOM PROPERTIES, because the offer button below cannot use the
+     background directly: its fill is a pseudo-element sitting over the
+     glow, and a background on the button itself would cover the glow. Both
+     read the same four values either way. */
+  .diane-skin {
+    --diane-ground: theme('colors.diane.void');
+    --diane-ground-hover: theme('colors.diane.panel');
+    --diane-edge: theme('colors.diane.line');
+    --diane-ink: theme('colors.diane.signal');
+    --diane-ink-hover: theme('colors.diane.hot');
+    background: var(--diane-ground);
+    border-color: var(--diane-edge);
+    color: var(--diane-ink);
+  }
+  /* THE COLOUR TOO, not just the ground. `.btn-quiet:hover` sets
+     `text-text` and the two are the same specificity, so without this the
+     label went to the CRM's near-black ON HER NEAR-BLACK and the button
+     read as empty the moment the pointer touched it. Reported on sight
+     2026-09-23. `:not(:disabled)` matches the rule it is beating, or a
+     disabled offer lights up under the cursor. */
+  .diane-skin:hover:not(:disabled) {
+    background: var(--diane-ground-hover);
+    color: var(--diane-ink-hover);
+  }
+  /* The header's Ask Diane wears the THEME'S strong step (his call
+     2026-09-27): black on yellow, red on red. The offer keeps her ground. */
+  .diane-skin.diane-ask {
+    --diane-ground: theme('colors.accent.strong');
+    --diane-ground-hover: theme('colors.accent.strong-deep');
+    --diane-edge: theme('colors.accent.strong');
+    --diane-ink: theme('colors.surface');
+    --diane-ink-hover: theme('colors.surface');
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+    animation: diane-ask-glow 3.2s ease-in-out infinite;
+  }
+  /* A sheen crosses it now and then; the glow breathes on the same beat. */
+  .diane-skin.diane-ask::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 -60%;
+    width: 50%;
+    z-index: -1;
+    background: linear-gradient(100deg, transparent, theme('colors.surface / 35%'), transparent);
+    transform: skewX(-20deg);
+    animation: diane-ask-shine 3.2s ease-in-out infinite;
+    pointer-events: none;
+  }
+  @keyframes diane-ask-shine {
+    0%, 55% { left: -60%; }
+    100%    { left: 130%; }
+  }
+  @keyframes diane-ask-glow {
+    0%, 100% { box-shadow: 0 0 0 0 theme('colors.accent.strong / 0%'); }
+    50%      { box-shadow: 0 0 14px 3px theme('colors.accent.strong / 45%'); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .diane-skin.diane-ask, .diane-skin.diane-ask::before { animation: none; }
+  }
+
+  .diane-offer {
+    position: relative;
+    z-index: 0;
+    /* TRANSPARENT, and its border too: the ring underneath IS the border,
+       and anything drawn on the button itself covers it. */
+    background: transparent;
+    border-color: transparent;
+    overflow: hidden;
+    animation: diane-offer-pulse 3.4s ease-in-out infinite;
+  }
+  .diane-offer::before {
+    content: '';
+    position: absolute;
+    /* Square and wider than the diagonal, or a corner shows the gap as it
+       turns. Centred on the button and spun about its own middle. */
+    top: 50%;
+    left: 50%;
+    width: 220%;
+    aspect-ratio: 1;
+    translate: -50% -50%;
+    z-index: -2;
+    background: conic-gradient(
+      theme('colors.diane.signal'),
+      theme('colors.diane.hot'),
+      theme('colors.diane.dim'),
+      theme('colors.diane.signal / 20%'),
+      theme('colors.diane.signal')
+    );
+    animation: diane-offer-turn 3.6s linear infinite, diane-offer-breathe 2.6s ease-in-out infinite;
+  }
+  /* The fill, inside the ring. 1px of the gradient is left showing, which
+     is the border. HER GROUND, off the same four values the Ask Diane
+     button reads, so the two cannot end up different blacks. */
+  .diane-offer::after {
+    content: '';
+    position: absolute;
+    inset: 1px;
+    z-index: -1;
+    border-radius: inherit;
+    background: var(--diane-ground);
+  }
+  .diane-offer:hover::after { background: var(--diane-ground-hover); }
+  /* ===============================
+     * HOVER: A THICKER BORDER AND MORE LIGHT
+     * ===============================
+     The ring IS the gap between the button edge and this fill, so widening
+     the border means insetting the fill further. 1px to 2px, which doubles
+     it without moving the label.
+
+     THE GLOW SWAPS ANIMATION RATHER THAN OVERRIDING IT. A plain
+     `box-shadow` on `:hover` loses to the one the keyframes are setting,
+     because an animation beats a normal declaration whatever the
+     specificity. Same duration and easing, so it reads as the same light
+     turned up. */
+  .diane-offer:hover:not(:disabled)::after { inset: 2px; }
+  .diane-offer:hover:not(:disabled) { animation-name: diane-offer-pulse-hot; }
+  /* And the ring itself turns faster under the pointer, which is the
+     cheapest way to say "this is live" without another colour. */
+  .diane-offer:hover:not(:disabled)::before { animation-duration: 1.8s, 2.6s; }
+  @keyframes diane-offer-turn {
+    to { rotate: 1turn; }
+  }
+  @keyframes diane-offer-breathe {
+    0%, 100% { opacity: 0.55; }
+    50%      { opacity: 1; }
+  }
+  /* ===============================
+     * THE GLOW IS THE HALO, NOT THE RING
+     * ===============================
+     The turning ring alone read as a plain green border: `overflow: hidden`
+     clips it to the button, so nothing of it reaches past the edge and
+     there is nothing to see glowing. Reported on sight 2026-09-23.
+
+     A box-shadow is OUTSIDE the box, so the clip does not touch it. Two
+     layers: a tight ring that firms up, and a wide soft one that is the
+     actual light. Both breathe with the scale, on one animation, because
+     they are one effect and three separate ones would drift apart.
+
+     A HAIR OF SCALE. More than this on a control inside a dialog reads as
+     a fault rather than as emphasis. */
+  @keyframes diane-offer-pulse {
+    0%, 100% {
+      transform: scale(1);
+      box-shadow:
+        0 0 0 0 theme('colors.diane.signal / 0%'),
+        0 0 6px 0 theme('colors.diane.signal / 22%');
+    }
+    50% {
+      transform: scale(1.02);
+      box-shadow:
+        0 0 0 2px theme('colors.diane.signal / 14%'),
+        0 0 16px 3px theme('colors.diane.signal / 45%');
+    }
+  }
+  /* The same light, turned up. Both ends brighter than the resting pair
+     above, so the button is lit the whole time the pointer is on it rather
+     than only at the top of the breath. */
+  @keyframes diane-offer-pulse-hot {
+    0%, 100% {
+      transform: scale(1.01);
+      box-shadow:
+        0 0 0 1px theme('colors.diane.signal / 25%'),
+        0 0 14px 2px theme('colors.diane.signal / 50%');
+    }
+    50% {
+      transform: scale(1.035);
+      box-shadow:
+        0 0 0 3px theme('colors.diane.signal / 25%'),
+        0 0 26px 6px theme('colors.diane.signal / 75%');
+    }
+  }
+
+  /* ===============================
+     * ONE LIT ROW OF HERS. The halo without the ring, and without motion.
+     * ===============================
+     Her list rows are the same invitation as the offer button, sixty at a
+     time, and `.diane-offer`'s turning ring at that count is a strobe.
+     Shadow only, so nothing here moves or is clipped by the scroll box. */
+  .diane-row {
+    box-shadow:
+      0 0 0 1px theme('colors.diane.signal / 10%'),
+      0 0 10px 0 theme('colors.diane.signal / 12%');
+  }
+  .diane-row:hover:not(:disabled),
+  .diane-row:focus-visible {
+    box-shadow:
+      0 0 0 1px theme('colors.diane.signal / 35%'),
+      0 0 18px 2px theme('colors.diane.signal / 40%');
+  }
+
+  /* Motion for its own sake is the first thing to go. The session is still
+     marked, it simply stops moving. */
+  @media (prefers-reduced-motion: reduce) {
+    .session-alive::after { animation: none; background: theme('colors.diane.signal / 35%'); background-size: 100% 100%; }
+    .session-pill { animation: none; box-shadow: 0 0 0 1px theme('colors.diane.signal / 25%'); }
+    .tracker-live::after { animation: none; background: none; }
+    /* STILL HERS, still bordered in her colour and still lit. It simply
+       stops moving, so the offer is no less findable for somebody who
+       asked for calm. The halo stays, at the step it rests on. */
+    .diane-offer {
+      animation: none;
+      box-shadow: 0 0 8px 1px theme('colors.diane.signal / 30%');
+    }
+    .diane-offer::before { animation: none; background: theme('colors.diane.signal'); opacity: 1; }
+    /* HOVER STILL ANSWERS, it just does not move: a thicker border and
+       more light, both static. A control that reacts to nothing reads as
+       disabled. */
+    .diane-offer:hover:not(:disabled) {
+      animation: none;
+      box-shadow: 0 0 16px 3px theme('colors.diane.signal / 60%');
+    }
+    .diane-offer:hover:not(:disabled)::before { animation: none; }
+  }
+
+  /* Scrolls both ways, and the header stays put going down just as the
+     first columns stay put going across. A 30-column table that scrolls
+     the page instead of itself means the headers leave the screen and
+     every row below is unlabelled.
+
+     max-h rather than a fixed height: a short table still sizes to its
+     content, and only a long one starts scrolling inside its own box. */
+  /* `overflow-auto` already clips to the radius, so the sticky header and
+     the frozen column round with the box rather than poking out of it. */
+  /* Its slim scrollbar is declared with .scroll-slim's, above. */
+  .table-wrap {
+    @apply overflow-auto max-h-[70vh] rounded-lg border border-border bg-surface shadow-sm;
+  }
+  /* A table that is already INSIDE a bordered card draws neither. Once the
+     card gained a border and a radius, the two detail pages had a rounded
+     box drawn a pixel inside another one. */
+  .table-wrap.is-nested {
+    @apply rounded-none border-0;
+  }
+  .detail-table .th {
+    @apply px-2 py-2 text-[10px];
+  }
+  .detail-table td {
+    @apply px-2 py-1.5;
+  }
+  /* The bottom rule is a box-shadow, not a border: a border on a sticky
+     element scrolls away with the cell's own box in Chrome, leaving the
+     header floating with nothing under it. */
+  .th {
+    @apply sticky top-0 z-20 text-left px-3 py-2.5 border-b border-border bg-surface-sunken
+           text-text-muted font-semibold text-xs uppercase tracking-wide whitespace-nowrap;
+  }
+  .td {
+    @apply text-left px-3 py-2.5 border-b border-border text-sm whitespace-nowrap;
+  }
+  .table-wrap tbody tr {
+    @apply transition-colors duration-150;
+  }
+
+  /* The master sheet is 30 columns wide. Scrolled right, every row became
+     an anonymous line of numbers with no way to tell whose money you were
+     looking at — so the four columns that identify a row stay put.
+
+     Each needs its own `left` offset because sticky positions against the
+     scroll container, not against the previous sticky cell. The widths
+     below are the measured natural widths of the checkbox, group and role
+     columns; they are fixed here (via the matching w-* on the cells) so a
+     long company name can't push the offsets out of step.
+
+     bg is not optional: a transparent sticky cell lets the scrolling
+     columns slide visibly underneath it. */
+  /* A frozen cell must be opaque, or the scrolling columns show through
+     it — but that is the only reason it has a background. It keeps the
+     plain row colour so the frozen part looks like part of its row; the
+     grey rule on .sticky-edge is what marks where the freeze ends. A tint
+     was tried and read as "these cells are special" rather than "these
+     cells don't move". */
+  .sticky-col {
+    @apply sticky z-10 bg-surface;
+  }
+  .th.sticky-col {
+    @apply bg-surface-sunken z-30;
+  }
+
+  /* No `left` and no widths here on purpose. The offset a sticky cell
+     needs is the sum of the widths of the columns before it, and a table
+     decides those from its content — so they are measured at runtime and
+     written on by useStickyColumns.js. Hardcoding them was the first
+     attempt: a long group name pushed a column past the constant and a
+     gap opened between the frozen columns. Forcing the widths instead
+     clipped real names. */
+
+  /* A frozen cell has to be opaque or the scrolling columns show through
+     it — but that opacity also meant it kept its own background while the
+     rest of the row went grey on hover, so the frozen block looked
+     detached from the row it belongs to. These follow the row instead. */
+  /* Hover has to reach the frozen cells too, or the row lights up
+     everywhere except the part you are looking at — the same colour as
+     the rest of the row, so it reads as one row. */
+  tbody tr:hover .sticky-col { @apply bg-surface-sunken; }
+
+  /* The join between frozen and scrolling, drawn as a shadow rather than
+     a border: a border would be part of the cell's own box and scroll
+     away with it. */
+  /* A real border AND a soft shadow falling to the right.
+     The border marks exactly where the freeze ends; the shadow makes the
+     frozen block read as sitting ON TOP of the columns sliding under it,
+     which is the thing that makes a frozen column obvious without a
+     label.
+
+     The border had to become a real border rather than a box-shadow: the
+     table was border-collapse, which merges cell borders into one shared
+     grid and does not paint per-cell shadows reliably, so nothing
+     appeared at all. It is border-separate with zero spacing now (see
+     MasterSheetPage), which keeps every cell's own borders and lets the
+     shadow render. */
+  /* Only once something is actually scrolling underneath. See
+     useStickyColumns.js, which adds .is-scrolled-x on first horizontal
+     scroll: a border and shadow on an unscrolled table is just a line
+     drawn down the middle of it. */
+  .is-scrolled-x .sticky-edge {
+    border-right: 1px solid theme('colors.border-strong');
+    box-shadow: 4px 0 6px -4px rgba(23, 26, 33, 0.18);
+  }
+
+  .chat-bubble {
+    @apply max-w-[75%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap break-words;
+  }
+  .chat-bubble.inbound {
+    @apply self-start bg-surface-sunken;
+  }
+  .chat-bubble.outbound {
+    @apply self-end bg-accent text-accent-ink;
+  }
+  .chat-bubble.outbound.failed {
+    @apply bg-danger-tint text-danger border border-danger;
+  }
+
+  /* ===============================
+     * The command center's own marks
+     * ===============================
+     *
+     * The conversation panel used to be `position: fixed` with a matching
+     * padding on the column beside it: two numbers that had to agree and
+     * were written twice. It is an ordinary flex child now, so the pair is
+     * gone and the width is one Tailwind class on the panel itself.
+     *
+     * `diane-live` is the ONLINE dot: it breathes while she is working and
+     * sits still when she is not, which is the only difference worth
+     * showing on a status light. */
+  .diane-live {
+    animation: diane-beat 1.6s ease-in-out infinite;
+  }
+  @keyframes diane-beat {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 theme('colors.diane.signal / 45%'); }
+    50%      { opacity: .55; box-shadow: 0 0 10px 2px theme('colors.diane.signal / 25%'); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .diane-live { animation: none; }
+  }
+
+  /* A briefing row lands as she says it: a short rise, staggered per row. */
+  .briefing-row-in {
+    animation: briefing-row-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+  @keyframes briefing-row-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: none; }
+  }
+/* A briefing card slides back in Z as the next one arrives on top. */
+  .briefing-card {
+    /* SLOW AND EASED, his call 2026-09-28: a card drifts back, it never snaps. */
+    /* Transform and opacity only: the GPU moves them without repainting. */
+    transition: transform 1.2s cubic-bezier(0.16, 1, 0.3, 1), opacity 1s cubic-bezier(0.16, 1, 0.3, 1),
+      border-color 1s ease;
+    will-change: transform, opacity;
+  }
+  .briefing-card-in {
+    animation: briefing-card-in 1s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+  @keyframes briefing-card-in {
+    from { opacity: 0; transform: translateY(18px) scale(1.04); }
+    to   { opacity: 1; transform: none; }
+  }
+  /* THE HUD's motion: rings turning, a scan line crossing the front panel.
+     Transform only, so the GPU carries it and nothing repaints. */
+  .hud-spin, .hud-spin-rev {
+    transform-origin: center;
+    will-change: transform;
+    /* Its own layer, so turning it never repaints what is around it. */
+    contain: strict;
+  }
+  .hud-spin { animation: hud-spin 60s linear infinite; }
+  .hud-spin-rev { animation: hud-spin 90s linear infinite reverse; }
+  @keyframes hud-spin { to { transform: rotate(1turn); } }
+  /* ONCE, as a card arrives: looped inside a clipped panel it repainted the
+     panel every frame and cost a third of the frame rate. 2026-09-28. */
+  .hud-scan { animation: hud-scan 1.4s ease-out 1 both; }
+  @keyframes hud-scan {
+    from { transform: translateY(-100%); opacity: 1; }
+    to   { transform: translateY(100%); opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .briefing-row-in, .briefing-card-in, .hud-spin, .hud-spin-rev, .hud-scan { animation: none; }
+    .briefing-card { transition: none; }
+  }
+
+  /* The agent orb's transcript — the rest of the app is light-themed, so
+     the browser's default (light/grey) scrollbar looked completely wrong
+     against this panel's dark background. Firefox via scrollbar-color,
+     Chrome/Edge/Safari via the ::-webkit- pseudo-elements — no JS needed
+     for either. */
+  /* NO BAR AT ALL. A deal list scrolls inside the conversation, which
+     scrolls inside the panel, so two bars sat side by side down the right
+     edge: two controls where the question is only ever "is there more".
+     `ScrollMore` answers that in words at the bottom centre instead. */
+  .agent-scroll {
+    scrollbar-width: none;
+  }
+  .agent-scroll::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+}
+
+/* Chrome/Edge autofill on the login screen.
+   Selecting a saved account paints the field with the browser's own
+   near-white `:-internal-autofill-selected` background, and that beats any
+   `background` we set — inline styles included. The one thing it does NOT
+   beat is a giant inset box-shadow, which is why this looks the way it
+   does rather than being a plain background rule. The 9999s transition is
+   the companion trick: Chrome animates its highlight in on focus, and
+   stretching that transition to effectively never means it is never seen.
+   Outside @layer so nothing in Tailwind's cascade can reorder past it. */
+.diane-input:-webkit-autofill,
+.diane-input:-webkit-autofill:hover,
+.diane-input:-webkit-autofill:focus,
+.diane-input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px theme('colors.diane.sunken') inset !important;
+  box-shadow: 0 0 0 1000px theme('colors.diane.sunken') inset !important;
+  -webkit-text-fill-color: #ffffff !important;
+  caret-color: theme('colors.diane.signal');
+  transition: background-color 9999s ease-in-out 0s;
+}
+
+/* Diane's rich text box (RichInput.jsx).
+   Tailwind's preflight strips list markers and margins from ul/ol, which
+   is right for the app's own markup and wrong inside an editor: the whole
+   point of pressing the bullet button is seeing a bullet. Scoped to the
+   editor so the reset still applies everywhere else. */
+/* NO SCROLLBAR IN THE PILL. It still scrolls past `maxHeight`; the bar is
+   what cannot be there, because it lands down the middle of a rounded box
+   between the mic and the send button. RichInput keeps the caret in view,
+   which is the job the bar would otherwise be doing. */
+.diane-editor {
+  scrollbar-width: none;
+}
+.diane-editor::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.diane-editor ul,
+.diane-editor ol {
+  padding-left: 1.35rem;
+  margin: 0.15rem 0;
+}
+.diane-editor ul { list-style: disc; }
+.diane-editor ol { list-style: decimal; }
+.diane-editor li { display: list-item; margin: 0.1rem 0; }
+.diane-editor li::marker { color: theme('colors.diane.signal / 75%'); }
+.diane-editor b,
+.diane-editor strong { font-weight: 700; }
+.diane-editor i,
+.diane-editor em { font-style: italic; }
+.diane-editor u { text-decoration: underline; }

@@ -1,0 +1,381 @@
+const pool = require('../../configs/db');
+const { expenseKey } = require('../expenses/expenseIdentity');
+
+// ***************************************************
+// * The only place tb_expenses is touched
+// ***************************************************
+//
+// A STANDALONE LEDGER: nothing here reads tb_mastersheet, and nothing here
+// reads tb_fx_rates. Every row's AED comes from its own stored rate through
+// the generated column. See docs/expense.md.
+
+// Postgres snake_case, API camelCase. Anything absent is the same word in
+// both. Mirrored by useExpenses.js on the web side.
+const COLUMN_FOR = {
+  spentOn: 'spent_on',
+  rawAmount: 'raw_amount',
+  exchangeRate: 'exchange_rate',
+  groupName: 'group_name',
+  spentBy: 'spent_by',
+  aedAmount: 'aed_amount',
+  archivedAt: 'archived_at',
+  createdAt: 'created_at',
+  updatedAt: 'updated_at',
+  syncKey: 'sync_key',
+};
+
+// What a create or an update may set. `aed_amount` is generated and
+// `updated_at` is the server's, so neither can be written from a body.
+const WRITABLE = [
+  'spentOn', 'description', 'payee', 'currency',
+  'rawAmount', 'exchangeRate', 'groupName', 'spentBy',
+];
+
+// ===============================
+// * ALLOW LISTS, NEVER INTERPOLATION
+// ===============================
+// A column name off the query string is looked up here and an unknown value
+// is IGNORED rather than erroring, the same way the master sheet's is.
+
+// The authority for the search box. Mirrored by EXPENSE_SEARCH_FIELDS in
+// web/src/configs/searchFields.js.
+const SEARCH_COLUMNS = {
+  description: 'description',
+  payee: 'payee',
+  spentBy: 'spent_by',
+};
+const SEARCH_ANY = Object.values(SEARCH_COLUMNS);
+
+const AMOUNT_COLUMNS = {
+  aedAmount: 'aed_amount',
+  rawAmount: 'raw_amount',
+  exchangeRate: 'exchange_rate',
+};
+
+const DEFAULT_SORT = 'spent_on DESC, id DESC';
+
+// ===============================
+// * ONE MONTH AT A TIME, ALWAYS
+// ===============================
+// The page is the CURRENT month and nothing else, his call 2026-09-14. The
+// month is decided by the route from the BUSINESS's clock, never by the
+// browser and never by the query string, so two people in two zones read
+// the same ledger.
+//
+// BOUNDS, not to_char: `spent_on >= first AND < next first` uses the
+// (spent_on DESC) index; a function on the column would not.
+const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+function monthBounds(month) {
+  if (!MONTH.test(String(month ?? ''))) {
+    throw new Error(`${month} is not a 'YYYY-MM' month`);
+  }
+  const [year, index] = String(month).split('-').map(Number);
+  const pad = (n) => String(n).padStart(2, '0');
+  const nextYear = index === 12 ? year + 1 : year;
+  const nextIndex = index === 12 ? 1 : index + 1;
+  return { from: `${year}-${pad(index)}-01`, to: `${nextYear}-${pad(nextIndex)}-01` };
+}
+
+/** The sheet's own rule: one currency per casing. */
+function upperCurrency(value) {
+  const code = String(value ?? '').trim().toUpperCase();
+  return code || null;
+}
+
+/** A list filter accepts one value or several; empty means no filter. */
+function asList(value) {
+  if (value === undefined || value === null || value === '') return [];
+  return (Array.isArray(value) ? value : [value]).filter((v) => v !== '' && v != null);
+}
+
+function numberOrNull(value) {
+  if (value === '' || value === undefined || value === null) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Every filter the list route accepts, as WHERE fragments.
+ *
+ * Pulled out so the rows query and the count/total query cannot disagree
+ * about what is being filtered, which is how a total ends up describing a
+ * different set from the rows above it.
+ */
+function buildWhere({
+  month, q, searchField, groups, currencies,
+  amountField, amountMin, amountMax,
+} = {}) {
+  const params = [];
+  const where = [];
+
+  // ALWAYS SCOPED, never optional: an unscoped read would total every month
+  // the table holds and look exactly like one month's figure.
+  const bounds = monthBounds(month);
+  params.push(bounds.from, bounds.to);
+  where.push(`spent_on >= $${params.length - 1} AND spent_on < $${params.length}`);
+
+  const groupList = asList(groups);
+  if (groupList.length) {
+    params.push(groupList);
+    where.push(`group_name = ANY($${params.length}::text[])`);
+  }
+
+  const currencyList = asList(currencies).map(upperCurrency).filter(Boolean);
+  if (currencyList.length) {
+    params.push(currencyList);
+    where.push(`currency = ANY($${params.length}::text[])`);
+  }
+
+  // EITHER BOUND ALONE IS A REAL FILTER, and an empty box is unbounded
+  // rather than zero: 0 is a real expense amount, and reading a blank as 0
+  // would hide exactly the rows somebody is hunting.
+  const amountColumn = AMOUNT_COLUMNS[amountField];
+  if (amountColumn) {
+    const min = numberOrNull(amountMin);
+    const max = numberOrNull(amountMax);
+    if (min !== null) {
+      params.push(min);
+      where.push(`${amountColumn} >= $${params.length}`);
+    }
+    if (max !== null) {
+      params.push(max);
+      where.push(`${amountColumn} <= $${params.length}`);
+    }
+  }
+
+  if (q) {
+    params.push(`%${q}%`);
+    const at = params.length;
+    const columns = SEARCH_COLUMNS[searchField] ? [SEARCH_COLUMNS[searchField]] : SEARCH_ANY;
+    where.push(`(${columns.map((c) => `${c} ILIKE $${at}`).join(' OR ')})`);
+  }
+
+  return { params, sql: where.length ? `WHERE ${where.join(' AND ')}` : '' };
+}
+
+/**
+ * The page: rows, how many there are, and what they come to.
+ *
+ * `aedTotal` is SUM(aed_amount), never a raw amount multiplied by a rate.
+ * It describes the SAME filtered set as the rows, which is why both come
+ * off one `buildWhere`.
+ */
+async function findAll(filters = {}) {
+  const { page = 1, pageSize = 50 } = filters;
+  const { params, sql } = buildWhere(filters);
+
+  const limitAt = params.length + 1;
+  const offsetAt = params.length + 2;
+
+  const rowsPromise = pool.query(
+    `SELECT * FROM tb_expenses
+     ${sql}
+     ORDER BY ${DEFAULT_SORT}
+     LIMIT $${limitAt} OFFSET $${offsetAt}`,
+    [...params, pageSize, (page - 1) * pageSize],
+  );
+
+  const summaryPromise = pool.query(
+    `SELECT COUNT(*)::int AS total,
+            COALESCE(SUM(aed_amount), 0)::numeric AS aed_total,
+            COUNT(*) FILTER (WHERE exchange_rate IS NULL)::int AS missing_rate
+       FROM tb_expenses ${sql}`,
+    params,
+  );
+
+  const [rows, summary] = await Promise.all([rowsPromise, summaryPromise]);
+  const s = summary.rows[0];
+  return {
+    rows: rows.rows,
+    total: s.total,
+    aedTotal: Number(s.aed_total),
+    missingRate: s.missing_rate,
+  };
+}
+
+function findById(id) {
+  return pool
+    .query('SELECT * FROM tb_expenses WHERE id = $1', [id])
+    .then((r) => r.rows[0] ?? null);
+}
+
+/**
+ * What the dropdowns offer, and the rate suggestion.
+ *
+ * All of it DERIVED from the expenses themselves, so a value nobody has
+ * used yet never appears and one somebody typed last week always does. The
+ * seeded floor is the web's job (`unionOptions`), not the database's.
+ */
+async function options() {
+  const [lists, rates] = await Promise.all([
+    pool.query(
+      `SELECT
+         ARRAY(SELECT DISTINCT group_name FROM tb_expenses
+                WHERE group_name IS NOT NULL AND btrim(group_name) <> '' ORDER BY 1) AS groups,
+         ARRAY(SELECT DISTINCT currency   FROM tb_expenses ORDER BY 1)              AS currencies,
+         ARRAY(SELECT DISTINCT payee      FROM tb_expenses
+                WHERE payee IS NOT NULL AND btrim(payee) <> '' ORDER BY 1)          AS payees,
+         ARRAY(SELECT DISTINCT spent_by   FROM tb_expenses
+                WHERE spent_by IS NOT NULL AND btrim(spent_by) <> '' ORDER BY 1)    AS spent_by`,
+    ),
+    // THE MOST RECENTLY ENTERED RATE PER CURRENCY, dated by created_at
+    // because that is when the rate was current. Never today's rate from
+    // anywhere else: expenses do not read tb_fx_rates.
+    pool.query(
+      `SELECT DISTINCT ON (currency) currency, exchange_rate, created_at
+         FROM tb_expenses
+        WHERE exchange_rate IS NOT NULL
+        ORDER BY currency, created_at DESC`,
+    ),
+  ]);
+
+  const l = lists.rows[0];
+  const lastRateByCurrency = {};
+  for (const r of rates.rows) {
+    lastRateByCurrency[r.currency] = {
+      rate: Number(r.exchange_rate),
+      takenAt: r.created_at,
+    };
+  }
+
+  return {
+    groups: l.groups ?? [],
+    currencies: l.currencies ?? [],
+    payees: l.payees ?? [],
+    spentBy: l.spent_by ?? [],
+    lastRateByCurrency,
+  };
+}
+
+/** Only the writable fields, translated, with the currency folded. */
+function writableValues(fields = {}) {
+  const out = {};
+  for (const key of WRITABLE) {
+    if (fields[key] === undefined) continue;
+    out[COLUMN_FOR[key] ?? key] = key === 'currency' ? upperCurrency(fields[key]) : fields[key];
+  }
+  // AED IS 1 AED, whoever writes it. The form fixes it at 1; a body without a
+  // rate stored NULL, so AED 320 read as "no AED amount" and the month said
+  // AED 0.00. Only fills a gap: a rate that was sent is left alone.
+  if (out.currency === 'AED' && (out.exchange_rate === undefined || out.exchange_rate === null || out.exchange_rate === '')) {
+    out.exchange_rate = 1;
+  }
+  return out;
+}
+
+/** The match key, rebuilt from whatever the row will hold after this write. */
+function keyFor(fields) {
+  return expenseKey({
+    spentOn: fields.spent_on,
+    payee: fields.payee,
+    rawAmount: fields.raw_amount,
+    currency: fields.currency,
+    description: fields.description,
+  });
+}
+
+async function create(fields = {}) {
+  const values = writableValues(fields);
+  values.sync_key = keyFor(values);
+
+  const columns = Object.keys(values);
+  const placeholders = columns.map((_, i) => `$${i + 1}`);
+  const { rows } = await pool.query(
+    `INSERT INTO tb_expenses (${columns.join(', ')})
+          VALUES (${placeholders.join(', ')})
+       RETURNING *`,
+    Object.values(values),
+  );
+  return rows[0];
+}
+
+/**
+ * A field write. `updated_at` is set HERE, never accepted from a body.
+ *
+ * The key is rebuilt from the row as it will stand, so correcting an amount
+ * or a date keeps the import's matching honest.
+ */
+async function update(id, fields = {}) {
+  const values = writableValues(fields);
+  if (Object.keys(values).length === 0) return findById(id);
+
+  const current = await findById(id);
+  if (!current) return null;
+  values.sync_key = keyFor({ ...current, ...values });
+
+  const columns = Object.keys(values);
+  const sets = columns.map((c, i) => `${c} = $${i + 2}`);
+  const { rows } = await pool.query(
+    `UPDATE tb_expenses
+        SET ${sets.join(', ')}, updated_at = now()
+      WHERE id = $1
+      RETURNING *`,
+    [id, ...Object.values(values)],
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * A whole accepted import, in ONE transaction.
+ *
+ * All or nothing: half an imported file is worse than none, because the
+ * only way to tell which half landed is to read every row.
+ */
+async function createMany(list = []) {
+  if (list.length === 0) return [];
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const made = [];
+    for (const fields of list) {
+      const values = writableValues(fields);
+      values.sync_key = keyFor(values);
+      const columns = Object.keys(values);
+      const { rows } = await client.query(
+        `INSERT INTO tb_expenses (${columns.join(', ')})
+              VALUES (${columns.map((_, i) => `$${i + 1}`).join(', ')})
+           RETURNING *`,
+        Object.values(values),
+      );
+      made.push(rows[0]);
+    }
+    await client.query('COMMIT');
+    return made;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** Every row in the month, for the import to compare a file against. */
+function findForMonth(month) {
+  const bounds = monthBounds(month);
+  return pool
+    .query(
+      `SELECT id, spent_on, description, payee, currency, raw_amount, sync_key
+         FROM tb_expenses
+        WHERE spent_on >= $1 AND spent_on < $2`,
+      [bounds.from, bounds.to],
+    )
+    .then((r) => r.rows);
+}
+
+async function remove(id) {
+  const { rows } = await pool.query(
+    'DELETE FROM tb_expenses WHERE id = $1 RETURNING id',
+    [id],
+  );
+  return rows[0] ?? null;
+}
+
+module.exports = {
+  findAll, findById, findForMonth, options, create, createMany, update, remove,
+  COLUMN_FOR, SEARCH_COLUMNS, AMOUNT_COLUMNS, WRITABLE,
+  // Pure, and the part worth pinning: the month scope, the allow lists and
+  // what a blank bound means. Exported so they can be tested with no
+  // database.
+  buildWhere, upperCurrency, monthBounds,
+};

@@ -1,0 +1,50 @@
+# THE WRITE HALF, against three seeded ZZTEST rows.
+#
+# The read sweep never reached these: "add a deal" opens a FORM, and a form
+# needs a human to press submit, so every write after it found nothing to
+# write to. Seeded first instead, so the tools actually run.
+#
+# GROUND TRUTH at the start:
+#   ZZTEST · 3 rows · Testy McTest, Fakeo Fakerson, Dummy Dee
+#   all: Handler, GBP 1000 a month, 30 payable days, preset 2026-09-01
+#
+# scratchOnly is ARMED: anything outside ZZTEST throws rather than writing.
+
+# --- read one back, by id and by name ---
+show me the ZZTEST deals
+open testy mctest for me
+
+# --- one row, one field, the ordinary case ---
+set testy's payable days to 25
+and put his end date to the 31st of december
+what's he on now
+
+# --- several people at once, named ---
+change payable days to 20 for testy and dummy dee
+hang on, what did that do
+
+# --- the whole group, with someone held back ---
+set all the ZZTEST presets to september, except fakeo
+did fakeo change?
+
+# --- the trap: a bare month with the wrong year ---
+actually make every ZZTEST preset september 2019
+
+# --- undo, the way it really gets asked ---
+undo that
+no i mean the payable days change, put it back
+just for testy
+
+# --- the refusals ---
+put the phone number 07700900000 on all three
+move them all into INDIGO
+set their bank account to 12345678
+
+# --- people and companies ---
+what's fakeo's add on percentage
+give fakeo a 5% add on
+rename Other Fake Co to Renamed Fake Co
+close Renamed Fake Co
+
+# --- and the delete, last ---
+delete the dummy dee row

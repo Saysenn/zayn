@@ -1,0 +1,214 @@
+DIANE TEST PLAN, 2026-09-25
+What to test yourself, what to type, and what you should see.
+
+======================================================================
+0. BEFORE YOU START
+======================================================================
+
+1. Run the pending migration once:
+     cd crm/api
+     npm run migrate
+   You should see: "Applying 066_people_display_name_repair.sql".
+
+2. Restart the API so the new code is live.
+
+3. Load the test people. Tell Claude: "seed the Diane test data".
+   It creates these in group ZZTEST (fake, safe to change):
+
+     Orla Quennell   ZZ Rate Co A 2,000    ZZ Rate Co B 1,000 (starts next month)
+     Bram Tevish     ZZ Rate Co A 1,500    ZZ Rate Co B 500 (starts next month)
+                     ZZ Rate Co C 800
+     Bram Okafor     ZZ Rate Co C 1,200    ZZ Close Co 600
+     Suki Varnell    ZZ Rate Co A 3,000    profile add on 5%
+     Dov Ashgrove    ZZ Rate Co B 900 (up for review)
+                     ZZ Rate Co C 700 (up for review)   profile fee 2%
+     Ines Pardew     ZZ Rate Co A 1,100 (up for review)  ZZ Close Co 400
+
+   Only talk about these names. Every change below is real.
+
+4. Open Diane from the Master Sheet page. Type each line exactly.
+   Wait for her answer before typing the next line.
+   CLICK THE TYPING BOX before each line: if it is not focused, a space
+   switches the microphone on and words go missing.
+
+======================================================================
+1. PAGES (no Diane)
+======================================================================
+
+1.1 People page: search "gloria".
+    SEE: "Gloria difference", never "gloria-difference". No name on the
+    page should look like a lowercase slug joined by dashes.
+
+1.2 People page: find Suki Varnell.
+    SEE: monthly total 3,150 (3,000 plus her 5%), not 3,000.
+
+1.3 Open Suki Varnell's page.
+    SEE: Monthly total 3,150.
+
+1.4 Companies page: find ZZ Rate Co A.
+    SEE: 7,750 (7,600 plus Suki's 5%), not 7,600.
+
+======================================================================
+2. PROFILE RATES, SEVERAL PEOPLE, AND UNDO
+======================================================================
+
+Type:  set orla quennell, suki varnell and ines pardew's add on to 5%
+SEE:   one list: Orla PROFILE add on 0% to 5% (both deals), Ines PROFILE
+       add on 0% to 5% (both deals), Suki already on 5%. A question.
+Type:  yes
+SEE:   says Orla and Ines are done, Suki unchanged.
+
+Type:  undo it for ines pardew only
+SEE:   asks to undo Ines Pardew only. A question.
+Type:  yes
+SEE:   Ines back to 0%. Orla keeps 5%.
+
+Type:  undo that
+SEE:   nothing of Ines's is left to undo. Nothing changes.
+
+Type:  undo orlas add on change
+SEE:   asks to undo Orla's add on change, 2 deals. A question.
+Type:  yes
+SEE:   Orla back to 0%.
+
+CHECK: History shows the profile add on entries for Orla and Ines,
+       each with a working Undo button (not "Not hand editable").
+
+======================================================================
+3. THE RIGHT LEVEL, AND "TAKE OFF"
+======================================================================
+
+Type:  give bram tevish another 2% add on
+SEE:   Bram Tevish's PROFILE 0% to 2%, all 3 deals. Never "which company?"
+Type:  yes
+
+Type:  take 1% off suki varnell
+SEE:   Suki's PROFILE fee 0% to 1%. Never "below zero", never her add on.
+Type:  yes
+
+Type:  add 99% to suki varnell's add on
+SEE:   refused: "5% plus 99% is 104%, over the cap". Nothing changes.
+
+Type:  give everyone at ZZ Rate Co B a 1% fee
+SEE:   3 deals at ZZ Rate Co B, each "DEAL fee 0% to 1%". Not the profile.
+Type:  yes
+
+======================================================================
+4. YES OR NO QUESTIONS
+======================================================================
+
+Type:  is dov ashgrove on a 5% fee?
+SEE:   first words "No. Dov Ashgrove is on ..." then the figures.
+
+Type:  is suki varnell on 5%?
+SEE:   first word "Yes."
+
+Type:  is dov ashgrove on a 3% fee?
+SEE:   "Partly." then which company is on 3% and which is not
+       (only if you did the ZZ Rate Co B fee in section 3).
+
+Type:  are bram tevish and bram okafor on a 2% add on?
+SEE:   one Yes or No line for EACH of them.
+
+======================================================================
+5. SPECIAL CASES ON SEVERAL DEALS
+======================================================================
+
+Type:  make orla quennell's ZZ Rate Co B deal and bram tevish ZZ rate co b deal a special case
+SEE:   one list, two lines:
+         Orla Quennell at ZZ Rate Co B: special case ON ..., adding GBP 1,000
+         Bram Tevish at ZZ Rate Co B: special case ON ..., adding GBP 500
+Type:  yes
+SEE:   both done.
+CHECK: Master Sheet: both deals show the special case, payable 1,000 and 500.
+
+Type:  make every ZZTEST deal a special case
+SEE:   refused: special cases are per named deal. Nothing changes.
+
+======================================================================
+6. ADDING TO THE PAYABLE AMOUNT
+======================================================================
+
+Type:  add 500 on suki varnell payable amount this month and then 750 on ines pardew payable amount this month also
+SEE:   asks which of Ines Pardew's two deals (ZZ Close Co or ZZ Rate Co A).
+Type:  the ZZ Rate Co A one
+SEE:   one list, two lines:
+         Suki Varnell at ZZ Rate Co A: payable amount GBP 3,000 to GBP 3,500
+         Ines Pardew at ZZ Rate Co A: payable amount GBP 1,100 to GBP 1,850
+Type:  yes
+SEE:   both done.
+
+Type:  what are suki varnell and ines pardew owed this month?
+SEE:   Suki 3,638.25 (3,500 plus 5% add on, minus the 1% fee from
+       section 3). Ines 2,250 (1,850 plus 400).
+CHECK: Suki's person page shows the same 3,638.25.
+
+WATCH FOR (must NOT happen): Suki at 4,000, Suki at 500, or Diane saying
+"I've added" before you said yes.
+
+======================================================================
+7. MARK AS PAID
+======================================================================
+
+Type:  mark suki varnell and ines pardew as paid
+SEE:   one list: Suki at ZZ Rate Co A, Ines at ZZ Close Co, Ines at
+       ZZ Rate Co A, each "paid: off to on". Never the review list.
+Type:  yes
+SEE:   done, 3 deals.
+
+======================================================================
+8. MONTHLY REVIEW
+======================================================================
+
+Type:  whats up for review this month in ZZTEST
+SEE:   3 deals: Dov Ashgrove x2, Ines Pardew x1, with the stop dates.
+
+Type:  end dov ashgrove's deals that are marked for review
+SEE:   stop 2 deals, their total a month, "stops at the end of last
+       month". A question.
+Type:  yes
+SEE:   both stopped and moved to the Archive.
+CHECK: the Master Sheet page refreshes by itself (Dov's rows gone).
+
+Type:  keep ines pardew's review deal going
+SEE:   done at once, no question: "answered yes, still running".
+
+======================================================================
+9. CLOSE A COMPANY
+======================================================================
+
+Type:  close ZZ Close Co
+SEE:   stop 2 live deals, 1,000 a month. A question.
+Type:  yes
+SEE:   closed, 2 deals to the Archive.
+
+======================================================================
+10. SHE MUST NOT DO THESE
+======================================================================
+
+After any finished change, type:  yes
+SEE:   she says it is already done. NOTHING changes a second time.
+
+Type:  move every ZZTEST preset to next month except dov ashgrove
+SEE:   the preset date is next month THIS year (never 2023 or 2024),
+       Dov held back. A question.
+Type:  no
+SEE:   nothing changes.
+
+======================================================================
+11. WHEN YOU ARE DONE
+======================================================================
+
+Tell Claude: "clean the Diane test data".
+It removes the ZZTEST deals and sets the test people back to 0%.
+
+======================================================================
+IF SOMETHING LOOKS WRONG
+======================================================================
+
+Copy her exact words and the line you typed, and note the step number.
+The things that matter most:
+  1. a figure changed that you did not say yes to
+  2. a figure changed twice
+  3. she said something was done and the Master Sheet shows it was not
+  4. a person you named is missing from her list

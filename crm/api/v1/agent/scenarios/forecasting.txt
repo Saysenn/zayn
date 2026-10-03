@@ -1,0 +1,16 @@
+# FORECASTING AND RECALL. Read only; every turn is a question.
+# 0. "break that down by group" must NOT invent group names to refuse.
+# 1. A forecast with no baseline: does she anchor the next months to this one?
+# 2. One range across past, present and future, and never a step over a gap.
+# 3. The cap must LEAD the answer: "Answering the first 36 of the 40 months".
+# 4. A group scope over months with no snapshot: unavailable, never rebuilt.
+# 5. "ahead of august" is the direction guess. Watch WHICH months come back.
+# 6. A projected month converts at today's rate and must say so.
+# 7. A short follow-up may inherit the period, never a fresh subject.
+what are the next 3 months looking like
+compare august to december
+show me the last 40 months
+how did indigo do over the past 6 months
+what are the months ahead of august
+convert that to usd
+what about nexus

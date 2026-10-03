@@ -1,0 +1,57 @@
+# ***************************************************
+# * Repo root. crm/ and whatbot/ have their own too.
+# ***************************************************
+# A sub-.gitignore only covers its own folder, so anything at the root or
+# in docs/ is unprotected without this file. That includes real payroll
+# sheets and Diane transcripts.
+
+# ===============================
+# * Secrets
+# ===============================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ===============================
+# * Real business data. Never commit.
+# ===============================
+# Payroll sheets, wherever they land. The live one is docs/master.xlsx.
+*.xlsx
+*.xls
+*.csv
+
+# Diane's exported conversations and the boss's own files.
+docs/boss/
+docs/downloads/
+
+# Server build notes: hardware, addresses, access.
+lithu server.txt
+server setup.png
+
+# ===============================
+# * Generated and local
+# ===============================
+node_modules/
+dist/
+build/
+coverage/
+crm/api/public/assets/
+crm/api/generated/
+
+# Verification scripts: written to check one thing, then deleted. Committing
+# one leaves dead code holding real credentials.
+_*.js
+
+# A generated Diane scenario. It is different every run by design, so a
+# committed one is somebody reading last week's conversation.
+crm/api/scripts/.review.txt
+crm/api/scripts/.closure.txt
+crm/api/scripts/.audit.txt
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+Thumbs.db

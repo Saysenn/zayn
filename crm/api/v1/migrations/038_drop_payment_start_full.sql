@@ -1,0 +1,27 @@
+-- Drop payment_start_full. It was the wrong model, twice over.
+--
+-- Migration 037 read "AUGUST END FULL" in the Payment start column as two
+-- claims: that the payment starts on the last day of that August, and that
+-- the deal pays a whole month whatever the preset. The boss's own August
+-- drafts contradict both:
+--
+--   Monument Marketing, his MILKMAN August draft
+--     payment start 2026-08-03, 29 days, £1,169.35 each
+--     -- not 2026-08-31, and not a full £1,250
+--
+--   Social work partners PR, his INDIGO August draft
+--     payment start 2026-11-03, blank days, blank amount
+--     -- "OCTOBER END FULL" did not mean full in August, it meant nothing
+--        in August
+--
+-- Both of his dates are APPOINTMENT + 90 DAYS, which is the formula the
+-- column carries on every other row. So the words were never a date and
+-- never an instruction; the real value was derivable all along.
+--
+-- The flag was also unclearable. uploadColumns deliberately left it out so a
+-- re-uploaded generated sheet could not wipe it, which meant uploading his
+-- CORRECTED August draft could not switch it off either: the row took the
+-- new payment start and kept the stale FULL, and paid a whole month off a
+-- date that says otherwise. A fact nothing can retract does not belong in a
+-- column.
+ALTER TABLE tb_mastersheet DROP COLUMN IF EXISTS payment_start_full;

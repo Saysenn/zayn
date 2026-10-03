@@ -1,0 +1,19 @@
+# THE LIVE TRANSCRIPT OF 2026-08-31, turn for turn.
+#
+# Every fault it exposed is fixed. This is here so they cannot come back:
+#   1. "for Nexus" read as a COMPANY and refused as non-existent
+#   2. she said she had unchecked three columns and called NO tool
+#   3. "go export it", three times, and she described the panel back
+#   4. every call started from a fresh draft, losing the open panel
+#
+# What to watch for, in order:
+#   · the panel opens on the FIRST Nexus turn, not after being corrected
+#   · hiding columns shows up in the panel line as "hiding ..."
+#   · "go export it" ends with BUILT, on the first asking
+#   · she never says "just say go" to somebody who just said go
+
+We need to export.
+yeah I want the bank sheet
+Give me the bank sheet for Nexus, please.
+Can you uncheck the door number, accepting postals and sort code?
+go export it

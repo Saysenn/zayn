@@ -1,0 +1,47 @@
+{
+  "name": "api",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon --config configs/nodemon.json",
+    "migrate": "node scripts/migrate.js",
+    "snapshot:month": "node scripts/monthSnapshot.js",
+    "summary:repair": "node scripts/repairConversationSummaries.js",
+    "seed-admin": "node scripts/seedAdmin.js",
+    "seed-concerns": "node scripts/seedSampleConcerns.js",
+    "backup": "node scripts/backup.js create",
+    "backup:verify": "node scripts/backup.js verify",
+    "backup:restore": "node scripts/backup.js restore",
+    "test": "node --test --test-force-exit v1/**/*.test.js",
+    "test:drift": "node scripts/testDrift.js",
+    "test:diane": "node scripts/dianeSuite/run.mjs",
+    "test:diane:tz": "for z in Asia/Dubai Europe/London America/Los_Angeles; do echo \"== $z\"; TZ=$z node scripts/dianeSuite/run.mjs; done"
+  },
+  "keywords": [],
+  "type": "commonjs",
+  "dependencies": {
+    "archiver": "^5.3.2",
+    "bcrypt": "^6.0.0",
+    "cookie": "^0.7.1",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "exceljs": "^4.4.0",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.2.0",
+    "openai": "^7.4.0",
+    "pg": "^8.13.0",
+    "pino": "^9.4.0",
+    "pino-http": "^10.3.0",
+    "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4",
+    "pino-pretty": "^11.2.2"
+  }
+}

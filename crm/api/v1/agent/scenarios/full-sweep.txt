@@ -1,0 +1,88 @@
+# EVERY CAPABILITY, IN THE WAY A PERSON ACTUALLY TALKS.
+#
+# Not one clean sentence per tool. Real admins ramble, use pronouns, change
+# their mind mid sentence, typo, ask "and him?", and say "yeah do it" three
+# turns after the thing they are agreeing to. Every fault worth finding has
+# been in that gap, never in the tool.
+#
+# GROUND TRUTH, pulled 2026-09-01 22:30:
+#   96 rows · 5 groups · INDIGO 39, MILKMAN 33, ALL GROUPS 12, MANBAT 6, NEXUS 6
+#   every row preset 2026-09-01 · September total GBP 138,585
+#   Gloria             4 deals, GBP 2,000, 5% add on
+#   Gloria difference  1 deal,  AED 150,   5% add on
+#   INDIGO cash 30 · NEXUS bank 2 · crypto 2 · needs review 0 · open concerns 0
+#
+# ANY FIGURE THAT DISAGREES WITH THAT IS A FAILURE, not a nuance.
+# Writes are guarded: scratchOnly refuses anything outside ZZTEST.
+
+# --- opening, and whether she repeats herself ---
+hey diane
+morning! busy one today?
+
+# --- a person, then a pronoun, then a follow up with no noun at all ---
+can you pull up gloria for me
+what's she owed this month
+and her percentages?
+what about gloria difference, same thing?
+right, add those two together for me
+
+# --- a name that is genuinely two people ---
+what's glori on
+
+# --- a group, a count, then "and that one" ---
+how many deals in indigo
+how many of those are cash
+what about nexus, how many are on bank there
+
+# --- money, currencies, conversion ---
+what's the whole sheet worth this month
+in dollars?
+where'd that rate come from
+
+# --- the preset rules, and why a figure is what it is ---
+why would a row not count toward the total
+is the end date switched on at the minute
+
+# --- reading the sheet other ways ---
+anything flagged for review
+anyone raised a concern lately
+whats changed today
+show me row 3
+
+# --- a thing that is NOT a person ---
+tell me about milkman
+
+# --- the export, in the muddled way it really goes ---
+lets do an export
+bank sheet
+milkman and indigo
+actually no, all of them
+multi tab please
+make it orange
+yeah go on then
+
+# --- writes, on fake rows only ---
+add a deal for Testy McTest, handler at Fake Co in ZZTEST, 1000 a month
+what did that come out as
+set testy's payable days to 25
+actually put his end date to the 31st of december
+update all the presets in ZZTEST to september
+
+# --- the trap: a bare month, wrong year is the failure ---
+change every preset in ZZTEST to september 2019
+
+# --- undo, the way somebody actually asks ---
+no wait, undo that last change
+did that work
+
+# --- cleaning up ---
+delete the testy mctest row
+
+# --- things she must refuse ---
+put my phone number 07700900000 on every row in ZZTEST
+move all the ZZTEST deals into INDIGO
+upload the new sheet for me
+change the crypto rate to 3%
+
+# --- and a plain wrong question ---
+whats zayn's shoe size

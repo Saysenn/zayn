@@ -1,0 +1,31 @@
+-- ***************************************************
+-- * The master sheet export tab remembers how he likes it
+-- ***************************************************
+--
+-- His call 2026-09-22: a configuration panel for that tab, its colours and
+-- its settings, and only that tab.
+--
+-- ===============================
+-- * THE MODAL REMEMBERED NOTHING
+-- ===============================
+-- Every switch reset to its default on every open, so a preference had to
+-- be re-entered every month. And the header colour could be chosen only on
+-- the month and division layouts, because the control lives inside the
+-- Breakdown panel: on the master sheet tab it was neither shown nor sent,
+-- so those headers took the default whatever anybody wanted.
+--
+-- ===============================
+-- * ONE jsonb, NOT A COLUMN PER SETTING
+-- ===============================
+-- tb_settings is a one row table with a column per setting, which is right
+-- for a handful of unrelated facts the whole system reads. This is a BAG
+-- belonging to one screen, and it will grow: a column each would make the
+-- fourth colour a fourth migration.
+--
+-- NULL means "he has not set this tab up", which is a real third state
+-- apart from "he set it back to the defaults". The modal falls back to its
+-- own defaults either way; the difference is only whether the panel opens
+-- showing his choices.
+
+ALTER TABLE tb_settings
+  ADD COLUMN IF NOT EXISTS export_tab_style jsonb;

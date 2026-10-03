@@ -1,0 +1,43 @@
+# THE WRITING TOOLS, on THREE FAKE DEALS and nothing else.
+#
+# ============================================================
+# THIS MUTATES THE DATABASE.
+#
+# Everything it creates is in the group ZZTEST, which exists nowhere in the
+# real sheet, on two invented people. The last turns REMOVE all of it, so
+# the delete tools are tested by being the cleanup.
+#
+# Take `node scripts/sheetSnapshot.js before.json` FIRST and diff after.
+# 96 real rows must be 96 real rows, all unchanged.
+#
+# NEVER add a turn that names a real group, person or company.
+# ============================================================
+#
+# Current month is 2026-08. Every preset here is August 2026.
+#
+# WHAT TO WATCH FOR, and these are the ways a write goes wrong:
+#   · she must never invent a field she was not given
+#   · an amount she reads back must match what she was told, exactly
+#   · BULK MUST BE SCOPED. If it touches anything outside ZZTEST the
+#     snapshot diff will say so, and that is the worst outcome here
+#   · a bulk change says HOW MANY before doing it, and confirms after
+#   · undo must NAME what it is reversing, not just say done
+#   · deleting a PERSON blanks their deals and flags them, it does not
+#     cascade. Delete and Remove are different acts
+#   · the last turn must show nothing left
+
+add a deal for Testy McTest, role Mid 1, group ZZTEST, company Scratch Alpha, paid in cash, 1000 GBP a month, preset August 2026
+add a deal for Testy McTest, role Mid 2, group ZZTEST, company Scratch Beta, paid in cash, 500 GBP a month, preset August 2026
+add a deal for Fakeo Fakerson, role Director, group ZZTEST, company Scratch Alpha, paid by bank, 2000 GBP a month, preset August 2026
+show me everything in the ZZTEST group
+change Testy's Mid 1 deal to 1200 GBP a month
+give Testy McTest a 5 percent add on
+mark every ZZTEST deal as paid
+what changed on the sheet in the last hour?
+undo that last change
+rename the company Scratch Alpha to Scratch Alpha Renamed
+show me everything in the ZZTEST group
+delete Fakeo Fakerson
+show me everything in the ZZTEST group
+remove every remaining ZZTEST deal
+show me everything in the ZZTEST group

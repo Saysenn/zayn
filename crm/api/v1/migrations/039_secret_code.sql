@@ -1,0 +1,13 @@
+-- The second gate: checked after the password and BEFORE any session
+-- cookie exists. bcrypt like the password, and never a plaintext here.
+--
+-- NULLABLE, and a NULL DENIES login rather than skipping the step. A code
+-- column that means "no code required" when unset is a bypass that outlives
+-- whoever added it, and it would be live on every account the day this
+-- migration ran.
+--
+-- So set it in the same breath as running this:
+--   npm run seed-admin -- <username> <password> <code>
+-- Until then /auth/login/verify answers 403 saying exactly that, which is
+-- only reachable with a correct username and password anyway.
+ALTER TABLE tb_accounts ADD COLUMN IF NOT EXISTS secret_code_hash text;

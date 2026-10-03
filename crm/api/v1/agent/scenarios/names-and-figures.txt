@@ -1,0 +1,22 @@
+# NAMES SHE MUST NOT GUESS, AND FIGURES SHE MUST NOT INVENT.
+#
+# From the live transcript of 2026-08-30. The faults it exposed:
+#   1. she volunteered the crypto charge for somebody paid entirely in cash
+#   2. "are you sure that's 30?" made her reprint all thirty rows
+#   3. "bank details only" drew seven full cards to say there were none
+#
+# What to watch for:
+#   · "Glori" must ASK, offering both names exactly as written
+#   · "Gloria" typed exactly must RESOLVE, not ask
+#   · Gloria is 2,000 GBP for August across four deals, plus 5% add on
+#   · no crypto charge mentioned: none of her deals is paid in coin
+#   · the second "are you sure" must NOT redraw the list
+#   · "bank details only" is one sentence, not seven cards
+
+show me Glori
+show me Gloria
+give me her totals and the percentage rates
+show me all the deals paid in cash for indigo
+are you sure that's 30?
+show me bank details for Zayn, Gloria and Paddy
+bank details only

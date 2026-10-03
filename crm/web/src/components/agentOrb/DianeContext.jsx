@@ -1,0 +1,83 @@
+import {
+  createContext, useContext, useEffect, useMemo, useState,
+} from 'react';
+import { useAiStatus, useRecheckAi } from '../../hooks/useAiStatus';
+import AiLockedDialog from '../modals/AiLockedDialog';
+
+/**
+ * Diane's working context — which CRM sheet she's currently operating on.
+ *
+ * This is NOT navigation. Selecting "Cash" doesn't take you to the cash
+ * page; it tells Diane that's the workspace she should act in. The value
+ * is sent with every agent turn, and the backend hands her only that
+ * workspace's tools (crm/api/v1/agent/contexts.js), so acting on the
+ * wrong sheet isn't something she can do by mistake.
+ *
+ * Lifted to app level rather than owned by a page because Diane is now
+ * global: one instance, one conversation, reachable from anywhere via the
+ * header button. A page-owned context would reset every time you moved.
+ */
+const DianeCtx = createContext(null);
+
+/**
+ * ONE WORKSPACE, so nothing picks it.
+ *
+ * There was a `WORKSPACES` list and a panel to choose from it, and the
+ * list has only ever had one entry. A chooser with one option is furniture,
+ * so the panel went and the value is fixed here. A second workspace means
+ * a list again, and `setContext` is kept for that day.
+ */
+const ONLY_CONTEXT = 'master-sheet';
+
+export function DianeProvider({ children }) {
+  const [context, setContext] = useState(ONLY_CONTEXT);
+  const [open, setOpen] = useState(false);
+  // Once true, stays true — the overlay keeps rendering (hidden via its
+  // own `open` prop) so the conversation survives closing and reopening,
+  // and Three.js never loads until Diane is actually opened once.
+  const [everOpened, setEverOpened] = useState(false);
+
+  // LOCKED HERE, where every way in passes: no key or no credit shows why instead.
+  const ai = useAiStatus();
+  const recheckAi = useRecheckAi();
+  const [showLock, setShowLock] = useState(false);
+
+  // A lock learned mid conversation closes her and says why.
+  useEffect(() => {
+    if (ai.locked && open) {
+      setOpen(false);
+      setShowLock(true);
+    }
+  }, [ai.locked, open]);
+
+  const value = useMemo(
+    () => ({
+      context,
+      setContext,
+      open,
+      openDiane: () => {
+        if (ai.locked) { setShowLock(true); return; }
+        setEverOpened(true);
+        setOpen(true);
+      },
+      closeDiane: () => setOpen(false),
+      everOpened,
+      ai,
+      recheckAi,
+    }),
+    [context, open, everOpened, ai, recheckAi],
+  );
+
+  return (
+    <DianeCtx.Provider value={value}>
+      {children}
+      {showLock && <AiLockedDialog reason={ai.reason} onClose={() => setShowLock(false)} />}
+    </DianeCtx.Provider>
+  );
+}
+
+export function useDiane() {
+  const ctx = useContext(DianeCtx);
+  if (!ctx) throw new Error('useDiane must be used inside DianeProvider');
+  return ctx;
+}

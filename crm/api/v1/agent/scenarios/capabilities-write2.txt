@@ -1,0 +1,36 @@
+# THE WRITES THAT STOPPED AT THE CONFIRM, now actually EXECUTED.
+#
+# ============================================================
+# THIS MUTATES THE DATABASE. Group ZZTEST only, two invented people.
+# Take `node scripts/sheetSnapshot.js before.json` first and diff after.
+# 96 real rows must still be 96, every fingerprint unchanged.
+# ============================================================
+#
+# The first pass proved they all ASK. Nothing was ever confirmed, so
+# rename_company, update_person, update_company and undo were never
+# actually run. This confirms each.
+#
+# WHAT TO WATCH FOR:
+#   · every destructive turn asks, and the ANSWER makes it happen
+#   · she must NOT describe a pending change as done. That was the fault:
+#     she reported "Scratch Alpha Renamed" having only asked
+#   · "undo the last change" must TAKE the last one, not ask which
+#   · a new deal owes 0 because payable days is 0. She must SAY why
+#   · she has NO delete_person or delete_company. Asked to delete either,
+#     she must say she cannot, not reach for delete_master_sheet_row
+#   · the last turn must show nothing left in ZZTEST
+
+add a deal for Testy McTest, role Mid 1, group ZZTEST, company Scratch Alpha, paid in cash, 1000 GBP a month, 31 payable days, preset August 2026
+add a deal for Fakeo Fakerson, role Director, group ZZTEST, company Scratch Alpha, paid by bank, 2000 GBP a month, 31 payable days, preset August 2026
+set Testy McTest's add on to 5 percent
+set the tier on Scratch Alpha to T3
+rename the company Scratch Alpha to Scratch Renamed
+yes, go ahead and rename it
+show me everything in the ZZTEST group
+change Fakeo's monthly amount to 2500
+what changed on the sheet in the last hour?
+undo the last change
+delete the person Fakeo Fakerson
+remove every remaining deal in ZZTEST
+yes, delete them all
+show me everything in the ZZTEST group
