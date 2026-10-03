@@ -118,6 +118,35 @@ const parkForMonth = {
       return { summary: `That is ${months.length} months. Park at most ${MAX_MONTHS} at a time.` };
     }
 
+    if (check.spec.companyLevel) {
+      const companies = [].concat(args[check.spec.idField] ?? []).map(String).filter(Boolean);
+      const act = args.status === 'dissolved' ? 'dissolve' : args.status === 'active' ? 'reopen' : 'close';
+      const what = `${act} ${companies.join(', ')}, stopping every live deal on ${companies.length === 1 ? 'it' : 'them'}`;
+      const needs = confirmFirst(rawArgs.confirmed, {
+        act: `${act} ${companies.join(', ')} at the START of each month below`,
+        count: months.length,
+        noun: 'month',
+        keeps: 'NOTHING CHANGES NOW. This month is paid in full; the deals stop on the 1st.',
+        lines: months.map((m) => `  ${monthLabel(m)}: ${what}`),
+      });
+      if (needs) return needs;
+      const saved = [];
+      for (const month of months) {
+        // eslint-disable-next-line no-await-in-loop
+        saved.push(await queue.park({
+          dueMonth: month, tool, args, expect: {}, targetIds: [], said: what,
+        }));
+      }
+      return {
+        summary: `Saved: ${what} on 1 ${monthLabel(months[0])}. Nothing has changed yet; this month is `
+          + 'paid in full. Say that plainly, with the month and year.',
+        reply: `Saved. ${companies.join(', ')} will close on 1 ${monthLabel(months[0])}, so `
+          + `${monthLabel(now)} is still paid in full. Nothing has changed yet.`,
+        computedReply: true,
+        parked: saved.map((e) => ({ id: e.id, month: e.due_month })),
+      };
+    }
+
     const rowId = Number(args[check.spec.idField]);
     const row = Number.isInteger(rowId) ? await rowsRepo.findById(rowId) : null;
     if (!row) {
@@ -228,8 +257,12 @@ async function dealIdFor(args, said) {
   const person = resolvePerson(found, args.targetPerson, said);
   if (person.ambiguous || !person.matched) return null;
   const has = (value, want) => !want || fold(value).includes(fold(want));
+  // A GROUP SENT AS THE COMPANY still finds the deal: "gloria's nexus deal"
+  // came as targetCompany "Nexus" and was never found, so she went round
+  // in circles guessing ids. 2026-10-03.
   const rows = person.rows.filter((r) => !r.stopped_on
-    && has(r.company, args.targetCompany) && has(r.group_name, args.targetGroup) && has(r.role_label, args.targetRole));
+    && (has(r.company, args.targetCompany) || has(r.group_name, args.targetCompany))
+    && has(r.group_name, args.targetGroup) && has(r.role_label, args.targetRole));
   return rows.length === 1 ? rows[0].id : null;
 }
 
@@ -240,6 +273,70 @@ function withWhen(tools) {
     : t));
 }
 
+/**
+ * ===============================
+ * * CALLING OFF WHAT WAS PARKED
+ * ===============================
+ * Live 2026-10-03: "actually cancel the gloria one" had no door. She said
+ * "there is no scheduled bump on that deal, so nothing to cancel" while it
+ * sat in the queue for November. Picked by their words against what each
+ * entry does, previewed, and called off on a yes. Only a parked entry: one
+ * that already ran is undone with the undo, not here.
+ */
+const cancelParked = {
+  name: 'cancel_parked_work',
+  writes: true,
+  description:
+    'CALL OFF something PARKED for a later month before it runs. Use for "cancel the November '
+    + 'bump", "don\'t do the gloria one", "scrap what is scheduled for relia pa". Name it with '
+    + '`match` (the person, company or change, as they said it) or `id` from list_parked_work. '
+    + 'First call previews; call again with confirmed true after they say yes.',
+  parameters: {
+    type: 'object',
+    properties: {
+      match: { type: 'string', description: 'Their words for which one: a person, a company or the change.' },
+      id: { type: 'number', description: 'The parked id, when already known from list_parked_work.' },
+      confirmed: { type: 'boolean' },
+    },
+  },
+  async handler(args = {}) {
+    const parked = await queue.upcoming(currentMonth());
+    if (parked.length === 0) return { summary: 'Nothing is parked, so there is nothing to call off. Say so.' };
+    const words = String(args.match ?? args.said ?? '').toLowerCase()
+      .split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !/^(?:the|one|cancel|scrap|that|this|don|dont|for|and|actually|parked|scheduled|change|bump)$/.test(w));
+    const picked = args.id != null
+      ? parked.filter((p) => Number(p.id) === Number(args.id))
+      : parked.filter((p) => words.length > 0 && words.some((w) => String(p.said ?? '').toLowerCase().includes(w)));
+    const listing = parked.map((p) => `#${p.id} ${monthLabel(p.due_month)}: ${p.said}`).join('\n');
+    if (picked.length === 0) {
+      return {
+        summary: `NOTHING WAS CALLED OFF: no parked entry matches that. What IS parked:\n${listing}\n`
+          + 'Say what is parked and ask which one. Never say nothing is parked when the list above has entries.',
+      };
+    }
+    if (picked.length > 1) {
+      return {
+        summary: `NOTHING WAS CALLED OFF: ${picked.length} parked entries match:\n`
+          + `${picked.map((p) => `#${p.id} ${monthLabel(p.due_month)}: ${p.said}`).join('\n')}\nAsk which one.`,
+        ambiguous: true,
+      };
+    }
+    const [one] = picked;
+    const needs = confirmFirst(args.confirmed, {
+      act: 'call off this parked change, so it never runs',
+      count: 1,
+      noun: 'parked change',
+      lines: [`${monthLabel(one.due_month)}: ${one.said}`],
+      identity: `call off parked #${one.id}`,
+    });
+    if (needs) return needs;
+    const gone = await queue.cancel(one.id);
+    if (!gone) return { summary: 'That one has already run or been called off. Nothing was changed. Say so.' };
+    const reply = `Called off: ${one.said}, which was due on 1 ${monthLabel(one.due_month)}. Nothing on the sheet changed.`;
+    return { summary: reply, reply, computedReply: true };
+  },
+};
+
 module.exports = {
-  parkForMonth, listParked, monthsFor, monthLabel, withWhen, dealIdFor, scheduledTools: [parkForMonth, listParked],
+  parkForMonth, listParked, cancelParked, monthsFor, monthLabel, withWhen, dealIdFor, scheduledTools: [parkForMonth, listParked, cancelParked],
 };

@@ -143,7 +143,7 @@ export const WRITES = [
     name: 'adds a deal in the sheet\'s own spelling, then a stray yes does nothing',
     turns: [
       {
-        say: 'put casey test on pinecrest as tech in baker on 900 gbp',
+        say: 'put casey test on pinecrest as tech in baker on 900 gbp, appointed 1 june 2026',
         expect: { db: async (db) => { const r = await deal(db, 'Casey Test', 'Pinecrest'); return r && r.role_label === 'Tech' && Number(r.monthly_amount) === 900 ? null : 'deal not added as Casey Test / Pinecrest / Tech / 900'; } },
       },
       { say: 'yes', expect: { reply: /Nothing is waiting on a yes/ } },
@@ -159,7 +159,7 @@ export const WRITES = [
   {
     name: 'adds several deals from one line with mixed separators',
     turns: [
-      { say: 'add these: Lena Moss - Tech - BAKER - Ironleaf - 700 gbp; Omar Reyes, Closer, CORVID, Pinecrest, 800 gbp' },
+      { say: 'add these, both appointed 1 june 2026: Lena Moss - Tech - BAKER - Ironleaf - 700 gbp; Omar Reyes, Closer, CORVID, Pinecrest, 800 gbp' },
       { say: 'yes' },
       {
         say: 'show me lena moss and omar reyes',
@@ -458,3 +458,131 @@ WRITES.push(
     ],
   },
 );
+
+/*
+ * ===============================
+ * * WATCHED LIVE 2026-10-03: questions nobody had coded a rule for
+ * ===============================
+ * "who's getting the most money from us" got the sheet's total, then a
+ * made-up top three; "actually scrap that" and "cancel the change you just
+ * made" were answered with a total, because the undo tool was never handed
+ * to her.
+ */
+READS.push({
+  name: '"who is owed the most" is a ranking computed in USD, never a total',
+  turns: [{ say: "who's getting the most money from us this month?", expect: { tools: ['total_master_sheet'], reply: /in USD:\s*\n\s*(?:1\.\s*)?Kiran Vale/ } }],
+});
+
+WRITES.push({
+  name: '"actually scrap that" undoes the change just made',
+  turns: [
+    { say: "change juno park's monthly to 650" },
+    { say: 'yes', expect: { db: async (db) => (Number((await deal(db, 'Juno Park', 'Harbor Nine')).monthly_amount) === 650 ? null : 'monthly not set') } },
+    { say: 'actually scrap that', expect: { tools: ['undo_master_sheet_change'] } },
+    { say: 'yes', expect: { db: async (db) => (Number((await deal(db, 'Juno Park', 'Harbor Nine')).monthly_amount) === 600 ? null : 'monthly still 650') } },
+  ],
+});
+
+READS.push(
+  {
+    name: 'a tie at the bottom of a ranking names everyone on that figure',
+    // The check is that "lowest" ranks from the least and names somebody.
+    turns: [{ say: "who's the lowest paid in otter?", expect: { tools: ['total_master_sheet'], reply: /Owed the least, \w+ \d{4}, in USD:\s*\n\S/ } }],
+  },
+  {
+    name: '"no bank details" is a filter, not the whole sheet check',
+    turns: [{ say: 'does anyone have no bank details?', expect: { noTools: ['audit_master_sheet'], reply: /no bank details/i } }],
+  },
+);
+
+READS.push(
+  {
+    name: 'a phone number is said, read from the person asked about, with no card',
+    turns: [
+      { say: "what's kiran vale's phone number?", expect: { reply: /07700900001/, noDraw: true } },
+      { say: "and otto fenn's?", expect: { noReply: /07700900001/, noDraw: true } },
+    ],
+  },
+  {
+    name: 'a question about someone is answered in words, a card only when asked to see it',
+    turns: [
+      { say: 'what deals does kiran vale have?', expect: { reply: /Kiran Vale/, noReply: /\b14 deals\b/ } },
+      { say: "show me kiran vale's ironleaf deal", expect: { draws: 'card' } },
+    ],
+  },
+);
+
+/*
+ * ===============================
+ * * CLOSURE AND SCHEDULING, watched 2026-10-03
+ * ===============================
+ * "close X, they've gone bust" refused over a company called "they've gone
+ * bust"; "ok reopen X then" was a yes to nothing; "close X at the end of
+ * this month" would have closed it TODAY; a parked bump on "gloria's nexus
+ * deal" went round in circles; and nothing could call a parked change off.
+ */
+// About ONE subject: an earlier case leaves its own parked change behind.
+const parkedCount = async (db, about) => (await one(
+  db, "SELECT count(*)::int n FROM tb_scheduled_actions WHERE status = 'parked' AND said ILIKE $1", [`%${about}%`],
+)).n;
+
+WRITES.push(
+  {
+    name: 'a close with a reason closes the company, and "ok reopen it" puts it back',
+    turns: [
+      { say: "close brightwell, they've gone bust" },
+      // "Gone bust" may fairly be read as dissolved: either ends it and stops the deals.
+      { say: 'yes', expect: { db: async (db) => (['closed', 'dissolved'].includes((await company(db, 'Brightwell'))?.status) ? null : 'brightwell not closed') } },
+      { say: "bring theo brandt's deal back", expect: { reply: /reopen/i, db: async (db) => ((await deal(db, 'Theo Brandt', 'Brightwell')).stopped_on ? null : 'resumed a closure stop') } },
+      { say: 'ok reopen brightwell then' },
+      { say: 'yes', expect: { db: async (db) => ((await company(db, 'Brightwell'))?.status === 'active' && !(await deal(db, 'Theo Brandt', 'Brightwell')).stopped_on ? null : 'not reopened') } },
+    ],
+  },
+  {
+    name: 'closing "at the end of this month" is scheduled for the 1st, nothing closes now',
+    turns: [
+      { say: 'close harbor nine at the end of this month' },
+      {
+        say: 'yes',
+        expect: { db: async (db) => {
+          if ((await company(db, 'Harbor Nine'))?.status === 'closed') return 'closed today';
+          return (await parkedCount(db, 'Harbor Nine')) >= 1 ? null : 'not scheduled';
+        } },
+      },
+      { say: 'actually cancel the harbor nine one' },
+      { say: 'yes', expect: { db: async (db) => ((await parkedCount(db, 'Harbor Nine')) === 0 ? null : 'still scheduled') } },
+    ],
+  },
+  {
+    name: 'a bump next month on a deal named by its GROUP is parked, then called off',
+    turns: [
+      { say: "from next month bump mara quill's baker deal to 1200" },
+      { say: 'yes', expect: { db: async (db) => ((await parkedCount(db, 'Mara Quill')) === 1 && Number((await deal(db, 'Mara Quill', 'Pinecrest')).monthly_amount) === 1100 ? null : 'not parked, or changed now') } },
+      { say: 'what have we got scheduled?', expect: { reply: /1,?200|Mara Quill/i } },
+      { say: 'cancel the mara one' },
+      { say: 'yes', expect: { db: async (db) => ((await parkedCount(db, 'Mara Quill')) === 0 ? null : 'still parked') } },
+    ],
+  },
+);
+
+WRITES.push({
+  name: 'a new deal with no dates is asked about, never paid in full by default',
+  turns: [
+    {
+      say: 'add zed park as mid 1 in corvid at ironleaf on 900 gbp',
+      expect: { reply: /appointment date/i, db: async (db) => ((await one(db, "SELECT 1 FROM tb_mastersheet WHERE lower(person_name) = 'zed park'")) ? 'added with no dates' : null) },
+    },
+    {
+      say: 'appointed 1 october 2026',
+      expect: { db: async (db) => {
+        const r = await one(db, "SELECT * FROM tb_mastersheet WHERE lower(person_name) = 'zed park' ORDER BY id DESC LIMIT 1");
+        return r && Number(r.payable_amount) === 0 && r.assigned_on ? null : `payable ${r?.payable_amount}`;
+      } },
+    },
+  ],
+});
+
+READS.push({
+  name: '"who started this month" answers appointments and payment starts both',
+  turns: [{ say: 'who started with us this month?', expect: { reply: /appointed this month/i, noTools: ['audit_master_sheet'] } }],
+});

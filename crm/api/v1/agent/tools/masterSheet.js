@@ -822,8 +822,29 @@ const rowDetails = {
     required: ['ids'],
   },
   async handler(args) {
-    const rows = (await Promise.all(args.ids.map((id) => repo.findById(id)))).filter(Boolean);
+    let rows = (await Promise.all(args.ids.map((id) => repo.findById(id)))).filter(Boolean);
     if (rows.length === 0) return { summary: 'None of those ids matched a row.' };
+    /**
+     * A COMPANY THEY NAMED NARROWS THE IDS. "show me his souracore deal" came
+     * with three remembered ids, two of them other companies. When their
+     * words name a company some rows carry, only those are shown. 2026-10-03.
+     */
+    const heard = String(args.said ?? '').toLowerCase();
+    const onNamed = rows.filter((r) => r.company && heard.includes(String(r.company).toLowerCase()));
+    if (onNamed.length > 0 && onNamed.length < rows.length) rows = onNamed;
+    /**
+     * AND A COMPANY NONE OF THE IDS CARRY is looked up for the same person:
+     * the remembered ids missed the Souracore deal entirely, and she showed
+     * his Social work first PR deal under "show me his souracore deal".
+     */
+    if (onNamed.length === 0) {
+      const persons = [...new Set(rows.map((r) => r.person_name).filter(Boolean))];
+      if (persons.length === 1) {
+        const theirs = ((await repo.findAll({ q: persons[0], pageSize: 200 }).catch(() => null))?.rows ?? [])
+          .filter((r) => r.person_name === persons[0] && r.company && heard.includes(String(r.company).toLowerCase()));
+        if (theirs.length > 0) rows = theirs;
+      }
+    }
 
     /**
      * WHOSE ROWS THESE ACTUALLY ARE, said first.
@@ -883,12 +904,28 @@ const rowDetails = {
         + 'and never add their figures together.\n\n'
       : '';
 
+    // THE SENTENCE IS BUILT from the rows, never written over them. Left
+    // to her, Nathan's Souracore card (payable GBP 474.19 this month) came
+    // with "owed nothing for October 2026". 2026-10-03.
+    const fieldOnly = askedFieldReply(rows, args.said, args.saidRecent);
+    if (fieldOnly) {
+      return { summary: `${fieldOnly} No card was drawn.`, rows: rows.map(summarizeRow), computedMonths: [], reply: fieldOnly, computedReply: true };
+    }
+    const owed = rows.length === 1
+      ? ` ${Number(rows[0].payable_amount) > 0 && isOwedThisMonth(rows[0])
+        ? `Payable this month: ${rows[0].currency || 'GBP'} ${Number(rows[0].payable_amount).toLocaleString('en-GB')}.`
+        : 'Nothing is payable on it this month.'}`
+      : '';
     return {
       summary: whose + cardSummary(rows),
       cards: rows.map(dealCard),
       rows: rows.map(summarizeRow),
       // Dates on detail cards are facts, not computed monthly totals.
       computedMonths: [],
+      reply: names.length === 1
+        ? `${displayPersonName(names[0])}: ${rows.map((r) => [r.company, r.group_name].filter(Boolean).join(' in ')).join('; ')}.${owed}`
+        : detailsCardReply(rows),
+      computedReply: true,
     };
   },
 };
@@ -995,7 +1032,71 @@ function notableOf(row) {
   return out;
 }
 
-function detailsCardReply(rows) {
+/**
+ * ===============================
+ * * ONE DETAIL ASKED, ONE DETAIL SAID
+ * ===============================
+ * Live 2026-10-03: "what's nathan's phone number?" got "Nathan has 5 deals.
+ * The full details are on screen." The number was on the card and never in
+ * the answer. A question about one field is answered with that field.
+ */
+const ASKED_FIELDS = [
+  [/\b(?:phone|mobile|number to call|contact number|phone number)\b/i, 'phone', 'phone number'],
+  [/\bpost ?code\b/i, 'postcode', 'postcode'],
+  [/\b(?:location|where (?:is|are|does) \w+ (?:based|live))\b/i, 'location', 'location'],
+  [/\b(?:account number|bank account)\b/i, 'account_number', 'account number'],
+  [/\bsort code\b/i, 'sort_code', 'sort code'],
+  [/\bbank details\b/i, 'bank_details', 'bank details'],
+  [/\bpayment start\b/i, 'payment_start_on', 'payment start'],
+  [/\bend date\b/i, 'end_on', 'end date'],
+];
+/**
+ * ===============================
+ * * A DEAL CARD ONLY WHEN THEY ASK TO SEE ONE
+ * ===============================
+ * His rule, 2026-10-03: "Diane shouldn't send deal cards unless
+ * specifically asked." A question about somebody is answered in words; the
+ * card is for "show me", "details", "pull up", "open", "the card".
+ */
+const ASKS_FOR_CARD = /\b(?:show(?: me)?|cards?|details?|full|pull (?:up|out)|open|display|view|see|look at|everything (?:on|about)|info(?:rmation)?|profile)\b/i;
+const wantsCard = (said, saidRecent = '') => ASKS_FOR_CARD.test(String(said ?? ''))
+  || (FOLLOW_UP_WORDS.test(String(said ?? '')) && ASKS_FOR_CARD.test(String(saidRecent ?? '')));
+const FOLLOW_UP_WORDS = /^\s*(?:and|what about|how about|also)\b/i;
+
+// In words, when no card is drawn: each deal on one line.
+function dealsInWords(rows) {
+  const names = [...new Set(rows.map((r) => displayPersonName(r.person_name)).filter(Boolean))];
+  const line = (r) => `${r.company || 'no company'} in ${r.group_name || 'no group'}: `
+    + `${r.currency || 'GBP'} ${Number(r.monthly_amount ?? 0).toLocaleString('en-GB')} a month`
+    + `${r.stopped_on ? ', stopped' : ''}`;
+  const head = names.length === 1
+    ? `${names[0]} has ${rows.length === 1 ? 'one deal' : `${rows.length} deals`}`
+    : `${rows.length} deals for ${listOf(names)}`;
+  return `${head}:\n${rows.map(line).join('\n')}`;
+}
+
+// "and gloria's?" right after "what's drew's phone number?" asks the same field.
+const FOLLOW_UP = /^\s*(?:and|what about|how about|also)\b/i;
+
+function askedFieldReply(rows, said, saidRecent = '') {
+  const text = FOLLOW_UP.test(String(said ?? '')) ? `${said} ${saidRecent ?? ''}` : String(said ?? '');
+  const hit = ASKED_FIELDS.find(([re]) => re.test(text));
+  if (!hit || rows.length === 0) return null;
+  const [, column, label] = hit;
+  const names = [...new Set(rows.map((row) => displayPersonName(row.person_name)).filter(Boolean))];
+  if (names.length !== 1) return null;
+  // "Handled internally" is said as what it means, never read out as a number.
+  const shown = (v) => (column.endsWith('_on') ? dateInWords(v) : (SENTINEL_SAYS[v] ?? String(v ?? '').trim()));
+  const values = [...new Set(rows.map((r) => shown(r[column])).filter(Boolean))];
+  if (values.length === 0) return `${names[0]} has no ${label} on file.`;
+  if (values.length === 1) return `${names[0]}'s ${label} is ${values[0]}.`.replace(' is handled internally', ': handled internally');
+  return `${names[0]} has ${values.length} different ${label}s: `
+    + `${rows.filter((r) => shown(r[column])).map((r) => `${shown(r[column])} (${r.company || r.group_name})`).join(', ')}.`;
+}
+
+function detailsCardReply(rows, said = '', saidRecent = '') {
+  const field = askedFieldReply(rows, said, saidRecent);
+  if (field) return field;
   const names = [...new Set(rows.map((row) => displayPersonName(row.person_name)).filter(Boolean))];
   // ONE ROW, ONE SENTENCE. Across several the flags belong to different
   // deals and naming them all here is the card again, in prose.
@@ -1103,11 +1204,12 @@ const findAndShow = {
         ));
         const only = SEND[args.show] ?? null;
         return {
-          summary: cardSummary(selected),
-          cards: selected.map((row) => narrowCard(dealCard(row), only)),
+          summary: wantsCard(args.said, args.saidRecent) ? cardSummary(selected)
+            : `${dealsInWords(selected)}\n\nNO CARD WAS DRAWN: they did not ask to see one. Answer from these rows in words.`,
+          cards: askedFieldReply(selected, args.said, args.saidRecent) || !wantsCard(args.said, args.saidRecent) ? [] : selected.map((row) => narrowCard(dealCard(row), only)),
           rows: selected.map(summarizeRow),
           computedMonths: [],
-          reply: detailsCardReply(selected),
+          reply: askedFieldReply(selected, args.said, args.saidRecent) ?? (wantsCard(args.said, args.saidRecent) ? detailsCardReply(selected, args.said, args.saidRecent) : dealsInWords(selected)),
           computedReply: true,
         };
       }
@@ -1197,10 +1299,10 @@ const findAndShow = {
           summary: `ONLY these ${named.length} people matched the requested name: ${picked.names.join(', ')}. `
             + `Their ${picked.rows.length} matching deals are already on screen, one card each. `
             + 'Name only these people and do not calculate a total from the cards.',
-          cards: selected.map((r) => narrowCard(dealCard(r), SEND[args.show] ?? null)),
+          cards: askedFieldReply(selected, args.said, args.saidRecent) || !wantsCard(args.said, args.saidRecent) ? [] : selected.map((r) => narrowCard(dealCard(r), SEND[args.show] ?? null)),
           rows: selected.map(summarizeRow),
           computedMonths: [],
-          reply: detailsCardReply(selected),
+          reply: askedFieldReply(selected, args.said, args.saidRecent) ?? (wantsCard(args.said, args.saidRecent) ? detailsCardReply(selected, args.said, args.saidRecent) : dealsInWords(selected)),
           computedReply: true,
         };
       }
@@ -1312,9 +1414,9 @@ const findAndShow = {
       const one = rows.length === 1;
       return {
         summary: one
-          ? `${who} holds ONE deal and it is the one they mean: ${dealsWhere(rows)}. THEY ASKED `
-            + 'FOR A CHANGE, not for details, so nothing was drawn and nothing should be. Make '
-            + 'the change they asked for.'
+          ? `${who} holds ONE deal and it is the one they mean: ${dealsWhere(rows)}, id ${rows[0].id}. `
+            + 'THEY ASKED FOR A CHANGE, not for details, so nothing was drawn and nothing should be. '
+            + `Make the change they asked for, on id ${rows[0].id}.`
           : `${who} has ${rows.length} deals, listed on screen. THEY ASKED FOR A CHANGE, not for `
             + 'details, so no cards were drawn and none should be. Ask WHICH ONE, in one short line.',
         ...(one ? {} : { list: dealList(rows, `${who}'s ${rows.length} deals`) }),
@@ -1381,7 +1483,10 @@ const findAndShow = {
       && named.length > 0
       && named.every((f) => fold(f.label) === fold(args.show));
     const asked = setAsk ? [] : named;
-    const answer = fieldAnswer(displayPersonName(rows[0]?.person_name), asked);
+    // THEIR WORDS NAME THE FIELD TOO, when she did not: "what's nathan's
+    // phone number?" drew five full deal cards under the number. 2026-10-03.
+    const answer = fieldAnswer(displayPersonName(rows[0]?.person_name), asked)
+      ?? askedFieldReply(rows, args.said, args.saidRecent);
 
     if (answer) {
       return {
@@ -1396,13 +1501,25 @@ const findAndShow = {
       };
     }
 
+    if (!wantsCard(args.said, args.saidRecent)) {
+      const words = dealsInWords(rows);
+      return {
+        summary: `${scoped}${words}\n\nNO CARD WAS DRAWN: they did not ask to see one. Answer their `
+          + 'question from these rows in words. If they want the full card they will ask.',
+        rows: rows.map(summarizeRow),
+        computedMonths: [],
+        reply: words,
+        computedReply: true,
+      };
+    }
+
     return {
       summary: scoped + cardSummary(rows),
       cards,
       rows: rows.map(summarizeRow),
       // Dates on detail cards are facts, not computed monthly totals.
       computedMonths: [],
-      reply: detailsCardReply(rows),
+      reply: detailsCardReply(rows, args.said, args.saidRecent),
       computedReply: true,
     };
   },
@@ -2172,6 +2289,7 @@ function describeFilter(a) {
   if (a.missingPerson) bits.push('no handler');
   if (a.missingCompany) bits.push('no company');
   if (a.missingPhone) bits.push('no phone');
+  if (a.missingBank) bits.push('no bank details');
   if (a.company) bits.push(`at ${words(a.company)}`);
   if (a.roleLabel) bits.push(`in the ${words(a.roleLabel)} role`);
   if (a.tier) bits.push(`on tier ${words(a.tier)}`);
@@ -2288,6 +2406,8 @@ const FILTER_PARAMS = {
   missingPerson: { type: 'boolean', description: 'Orphaned by a deleted person' },
   missingCompany: { type: 'boolean', description: 'Orphaned by a deleted company' },
   missingPhone: { type: 'boolean', description: 'true: no phone number on the deal' },
+  // "does anyone have no bank details?" ran the whole sheet check. 2026-10-03.
+  missingBank: { type: 'boolean', description: 'true: no bank details and no account number on the deal' },
   company: pluralFilter({
     type: 'string',
     description: 'Exact company names. Use this instead of a text search when the company is known.',
@@ -2589,6 +2709,50 @@ const filterRows = {
   },
   async handler(args) {
     args = await groupOutOfOwnName(args);
+    /**
+     * "WHO STARTED THIS MONTH" HAS TWO ANSWERS, and the admin means both:
+     * who was APPOINTED this month, and whose PAYMENT STARTS this month.
+     * Live 2026-10-03 it named Testy McTest alone, though Nathan, Drew,
+     * Mayah and Louis all start being paid on 11 October.
+     */
+    if (/\bwho\b[^.?!]*\b(?:start(?:ed|s|ing)?|join(?:ed|s|ing)?|began|begin(?:s|ning)?|new)\b[^.?!]*\bthis month\b/i.test(String(args.said ?? ''))) {
+      const month = currentMonth();
+      const all = (await repo.findAll({ pageSize: 2000, ...(args.group ? { group: args.group } : {}) }).catch(() => null))?.rows ?? [];
+      const live = all.filter((r) => !r.stopped_on);
+      const inMonth = (d) => String(d ?? '').slice(0, 7) === month;
+      const label = (r) => `${r.person_name} (${[r.company, r.group_name].filter(Boolean).join(' in ')})`;
+      const appointed = live.filter((r) => inMonth(r.assigned_on));
+      const paying = live.filter((r) => inMonth(r.payment_start_on) && !inMonth(r.assigned_on));
+      const lines = [];
+      lines.push(appointed.length
+        ? `Appointed this month: ${appointed.map(label).join(', ')}.`
+        : 'Nobody was appointed this month.');
+      if (paying.length) {
+        const byDay = new Map();
+        for (const r of paying) {
+          const day = dateInWords(r.payment_start_on);
+          byDay.set(day, [...(byDay.get(day) ?? []), label(r)]);
+        }
+        lines.push(`Payment starts this month: ${[...byDay].map(([day, who]) => `${who.join(', ')} on ${day}`).join('; ')}.`);
+      } else {
+        lines.push('Nobody\'s payment starts this month.');
+      }
+      const reply = lines.join('\n');
+      return { summary: `${reply}\n\nCOMPUTED from the dates. Say it as written.`, reply, computedReply: true, rows: [...appointed, ...paying].map(summarizeRow) };
+    }
+    /**
+     * NOTHING SENT, A PERSON NAMED: "what deals does nathan have?" arrived as
+     * an empty filter and drew all 91 deals. A call with no filter at all,
+     * from a sentence naming somebody on the sheet, is about that somebody.
+     */
+    if (Object.keys(filtersIn(args)).length === 0 && args.said) {
+      const said = String(args.said).toLowerCase();
+      const names = [...new Set(((await repo.findAll({ pageSize: 2000 }).catch(() => null))?.rows ?? [])
+        .map((r) => r.person_name).filter(Boolean))]
+        .filter((n) => namesPerson(said, n))
+        .sort((a, b) => b.length - a.length);
+      if (names.length > 0) args = { ...args, q: names[0] };
+    }
     /**
      * "LIVE" IS THE SHEET, NOT A PAYMENT PERIOD. Asked "how many live deals
      * are on the master sheet right now?" she sent status 'active' (owed
@@ -3349,6 +3513,41 @@ async function totalReply(rows, month, args, whoLabel = null, plural = false, {
   }
 
   /**
+   * ===============================
+   * * "WHO IS OWED THE MOST" IS A RANKING, DONE HERE
+   * ===============================
+   * Live 2026-10-03: asked for the top 3 in USD she named Paddy, Zayn and
+   * Maid, the three people her previous answer happened to mention. The
+   * real top three were Neo, Gary and SV. There was no ranking anywhere,
+   * so she made one up. Each person's net is converted to USD at the same
+   * rates every other total uses, so the order can be compared.
+   */
+  const rankBy = Number.isInteger(args.rank) && args.rank !== 0 ? args.rank : null;
+  if (rankBy !== null) {
+    const fxNow = await fxRates.usdPerGbp();
+    const ranked = [...personTotals].map(([name, byCurrency]) => {
+      const nets = [...byCurrency].map(([code, item]) => [code, item.net]);
+      const { usd } = totalInUsd(nets, fxNow.usdPerGbp, fxNow.perUsd);
+      const native = nets.filter(([, n]) => n > 0).map(([code, n]) => moneyText(code, n)).join(' and ');
+      return { name, usd: Math.round(usd * 100) / 100, native };
+    }).filter((r) => r.usd > 0).sort((a, b) => (rankBy > 0 ? b.usd - a.usd : a.usd - b.usd));
+    const top = ranked.slice(0, Math.min(Math.abs(rankBy), 20));
+    // A TIE AT THE CUT IS NAMED: "the lowest paid in INDIGO" said Abe Lincoln
+    // alone, with Donaldo and Gloria on the same GBP 500. 2026-10-03.
+    while (top.length > 0 && top.length < ranked.length && top.length < 30
+      && ranked[top.length].usd === top[top.length - 1].usd) top.push(ranked[top.length]);
+    const headline = `${rankBy > 0 ? 'Owed the most' : 'Owed the least'}, ${when}, in USD:`;
+    const lines = top.map((r, i) => `${i + 1}. ${r.name}: USD ${amountText(r.usd)} (${r.native})`);
+    const reply = top.length > 0 ? `${headline}\n${lines.join('\n')}` : `Nobody is owed anything ${when}.`;
+    return {
+      summary: `${reply}\n\nCOMPUTED, ranked in code across ${ranked.length} people at the saved rates. `
+        + 'Say it exactly; never reorder it or add a name.',
+      reply,
+      computedReply: true,
+    };
+  }
+
+  /**
    * WHAT THIS PERSON'S RATE DID, and by default NOT what it came to.
    *
    * "Nicola: GBP 2,900 + 5% add on (GBP 145)" is the whole of it: adding
@@ -3644,6 +3843,12 @@ const totalFor = {
           + 'results together yourself.',
       },
       group: { type: 'string', description: 'Narrow to one group, if they named one' },
+      rank: {
+        type: 'integer',
+        description: 'WHO IS OWED THE MOST: the top N people, ranked in USD so currencies compare. '
+          + 'Use it for "who gets the most", "top 3", "biggest earners". A NEGATIVE number ranks '
+          + 'from the least. Never pick the names yourself.',
+      },
       month: {
         type: 'string',
         description: 'YYYY-MM. OMIT IT unless they named a year. "September" on its own means '
@@ -3713,6 +3918,14 @@ const totalFor = {
   },
   async handler(args) {
     const currentSaid = String(args.said ?? '');
+    // THE RANK FROM THEIR WORDS when she left it off: "top 3", "who gets the
+    // most". With no person, a ranking question must never fall back to the
+    // sheet's total, which answered "who is owed the most" with a sum.
+    const rankAsked = rankAskedIn(currentSaid);
+    if (rankAsked && !Number.isInteger(args.rank) && !args.person && !(args.people ?? []).length) {
+      // eslint-disable-next-line no-param-reassign
+      args = { ...args, rank: rankAsked };
+    }
     const asksToSee = /\b(?:show|display|view|open|details?|info|information)\b/i.test(currentSaid);
     const asksForMoney = /\b(?:how much|totals?|owed?|owing|amount|pay|paying|income|convert|dollars?|usd)\b|\$/i.test(currentSaid);
     if (asksToSee && !asksForMoney) {
@@ -4471,6 +4684,31 @@ const createRow = {
     // onCreate matches the page's POST route: an appointment date alone
     // fills the payment start and end, so a deal Diane adds is shaped like
     // one the admin adds rather than one missing four cells.
+    /**
+     * ===============================
+     * * NO DATES, NO GUESSED PAY: ASK
+     * ===============================
+     * His rule ("Structure for the maths"): payment starts about 12 weeks
+     * after the appointment date, and the first month is paid pro rata from
+     * it. Live 2026-10-03: "add these: Zara Lane ... 900 gbp; Omar Bell ...
+     * 1500 gbp" created both owed IN FULL this month, because with no dates
+     * the recompute fills every day. A standing roster row IS owed in full,
+     * so it is not refused either way: they are asked, and "pay from this
+     * month" says which. Nothing is created until then.
+     */
+    const saidAll = `${args.said ?? ''}\n${args.saidRecent ?? ''}`;
+    if (!fields.assignedOn && !fields.paymentStartOn && fields.payableDays == null
+      && !fields.specialCaseDeal && !/\b(?:pay(?:s|ing)? (?:from|in full|this month|now)|ongoing|standing|full month|no dates?)\b/i.test(saidAll)) {
+      const who = fields.personName ?? 'this deal';
+      const ask = `What is ${who}'s appointment date? Payment starts about 12 weeks after it, so I need it `
+        + 'to work out what is owed. If it is an ongoing deal paid in full from now, say "pay from this month".';
+      return {
+        summary: `NOTHING WAS ADDED for ${who}: no appointment or payment start date. ${ask} Ask for it `
+          + 'once, for every deal in their message that has none, then add them with the dates.',
+        reply: ask,
+        computedReply: true,
+      };
+    }
     recomputePayable({}, fields, { onCreate: true });
 
     const { role, seat } = parseRole(fields.roleLabel);
@@ -8638,9 +8876,27 @@ const REDO = /\b(?:redo|undo (?:the|that|my) undo|put (?:it|that) back again)\b/
  * preview said "fee 5% back to 0%", and the yes reverted the 1 October
  * month roll on the same six people. Nothing looked at the field asked for.
  */
+/**
+ * "Who's getting the most", "top 3 in usd", "smallest earners": the number
+ * of places, signed: negative ranks from the least. Null when not a ranking.
+ */
+const RANK_WORDS = /\b(?:who(?:'s| is| are|s)?|which (?:person|people|one)|top|biggest|highest|largest|most|least|lowest|smallest)\b/i;
+const RANK_SUPERLATIVE = /\b(?:top\s*\d+|most|highest|biggest|largest|least|lowest|smallest|bottom\s*\d+)\b/i;
+const MONEY_WORDS = /\b(?:owed|paid|money|earn\w*|getting|gets|make|makes|income|pay|usd|gbp|aed)\b/i;
+function rankAskedIn(said) {
+  const text = String(said ?? '');
+  if (!RANK_WORDS.test(text) || !RANK_SUPERLATIVE.test(text) || !MONEY_WORDS.test(text)) return null;
+  if (/\bmost recent\b/i.test(text)) return null;
+  const n = Number((/\b(?:top|bottom)\s*(\d+)\b/i.exec(text) ?? /\b(\d+)\s+(?:biggest|highest|largest|smallest|lowest|people|earners)\b/i.exec(text) ?? [])[1]) || 5;
+  return /\b(?:least|lowest|smallest|bottom)\b/i.test(text) ? -n : n;
+}
+
 const UNDO_FIELD_WORDS = [
+  // A person's rate is logged under its own name: both count as "the fee".
   [/\bfees?\b/i, 'feePercent'],
+  [/\bfees?\b/i, 'personFeePercent'],
   [/\badd[\s-]?ons?\b/i, 'addonPercent'],
+  [/\badd[\s-]?ons?\b/i, 'personAddonPercent'],
   [/\bmonthl(?:y|ies)\b/i, 'monthlyAmount'],
   [/\bpayable days\b/i, 'payableDays'],
   [/\bpayable(?: amount)?\b(?! days)/i, 'payableAmount'],
@@ -9476,6 +9732,7 @@ const recentChanges = {
 };
 
 module.exports = {
+  rankAskedIn,
   masterSheetTools: [
     // FIRST on purpose. It was fourth and the model never once chose it
     // unprompted across five live turns; ordering is the cheapest lever

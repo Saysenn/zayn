@@ -55,6 +55,12 @@ const AREAS = Object.freeze([
     tools: ['stop_deal', 'resume_deal', 'list_stopped_deals'],
   },
   {
+    // It had no area, so asked what she could do she never said it. 2026-10-03.
+    label: 'schedule a change or a company closure for a later month, say what is scheduled, and '
+      + 'call one off before it runs',
+    tools: ['park_for_month', 'list_parked_work', 'cancel_parked_work'],
+  },
+  {
     label: 'the dead list: who has no live deal left, and one person\'s history company by company',
     tools: ['list_dead_people', 'dead_person_details'],
   },

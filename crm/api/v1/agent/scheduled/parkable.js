@@ -31,6 +31,10 @@ const PARKABLE = Object.freeze({
   update_master_sheet_row: { idField: 'id', setOnly: true, noun: 'deal' },
   update_person: { idField: 'person', setOnly: true, noun: 'person' },
   stop_deal: { idField: 'deal', setOnly: false, noun: 'deal', terminal: true },
+  // A COMPANY CLOSED AT THE END OF THE MONTH: it runs on the 1st, so the
+  // month it was asked in is still paid. No deal to snapshot: the close
+  // finds the company's live deals on the day. 2026-10-03.
+  bulk_close_companies: { idField: 'companies', setOnly: false, noun: 'company', terminal: true, companyLevel: true },
 });
 
 /**
@@ -53,7 +57,7 @@ function isRelative(value) {
 }
 
 // Arguments that are machinery, not values to set.
-const NOT_A_VALUE = new Set(['confirmed', 'said', 'turn', 'id', 'person', 'deal']);
+const NOT_A_VALUE = new Set(['confirmed', 'said', 'turn', 'id', 'person', 'deal', 'companies', 'status']);
 
 /**
  * @returns {{ok: true, spec: object} | {ok: false, why: string}}

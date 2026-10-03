@@ -319,7 +319,7 @@ function listValues(raw, allowed = null) {
  */
 async function findAll({
   group, company, roleLabel, tier, source, needsReview, status, shouldBePaid, paid,
-  missingPerson, missingCompany, missingPhone, presetWhen, paymentStartWhen, endWhen, appointmentWhen,
+  missingPerson, missingCompany, missingPhone, missingBank, presetWhen, paymentStartWhen, endWhen, appointmentWhen,
   acceptingPostals, label, paymentOutcome, oldGroup, sheetShouldBePaid, sheetPaid,
   amountField, amountMin, amountMax, amountMinStrict = false, amountMaxStrict = false, payableVsMonthly, q, searchField,
   currency, paymentMethod, stopped = false, stoppedFrom, stoppedTo, stoppedReason,
@@ -505,6 +505,10 @@ async function findAll({
   // filter here.
   if (missingPerson !== undefined) {
     where.push(missingPerson ? 'orphaned_person' : 'NOT orphaned_person');
+  }
+  if (missingBank !== undefined) {
+    const none = "(COALESCE(trim(bank_details), '') = '' AND COALESCE(trim(account_number), '') = '')";
+    where.push(missingBank ? none : `NOT ${none}`);
   }
   if (missingPhone !== undefined) {
     where.push(missingPhone ? "COALESCE(trim(phone), '') = ''" : "COALESCE(trim(phone), '') <> ''");

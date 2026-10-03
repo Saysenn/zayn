@@ -1307,7 +1307,12 @@ const audioUpload = multer({
 const AUDIO_EXTENSIONS = {
   'audio/webm': 'webm',
   'audio/ogg': 'ogg',
-  'audio/mp4': 'mp4',
+  // Audio-only MP4 (Safari's recorder) is an m4a: sent as .mp4 the
+  // transcription refused it as "Invalid file format". 2026-10-03.
+  'audio/mp4': 'm4a',
+  'audio/x-m4a': 'm4a',
+  'audio/m4a': 'm4a',
+  'audio/aac': 'm4a',
   'audio/mpeg': 'mp3',
   'audio/wav': 'wav',
   'audio/x-wav': 'wav',

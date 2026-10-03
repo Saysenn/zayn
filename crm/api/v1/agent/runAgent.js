@@ -68,7 +68,8 @@ const RESUME_ASK = /\b(?:resume|reinstate|un-?stop|bring\w* (?:[\w'’-]+ ){0,4}
 // A YES TO HER OWN "shall I resume it?" is a resume. Live 2026-10-03 she
 // answered that yes with "it is back live" and called nothing.
 const BARE_YES = /^\s*(?:y|ya|yes|yep|yeah|yup|ok|okay|sure|go ahead|do it|please do)[.!\s]*$/i;
-const RESUME_OFFERED = /\b(?:resum\w*|put (?:it|that|this|them) back|bring (?:it|them) back)\b[^?]*\?\s*$/i;
+// A DEAL put back, never a value: "put it back to 0%?" is an undo's offer.
+const RESUME_OFFERED = /(?:\bresum\w*|\bdeals?\b[^?]*\bback\b)[^?]*\?\s*$/i;
 // "no. set drew's fee on capilano associates to 3%" read the rates back
 // instead of setting one. A rate set ON a named deal has one door. 2026-09-30.
 const DEAL_RATE_SET = /\b(?:set|change|make|put)\b[^.?!]*\b(?:fee|add[\s-]?on)s?\b[^.?!]*\bon\s+(?!top\b)[a-z][^.?!]*\b\d+(?:\.\d+)?\s*(?:%|percent)/i;
@@ -80,6 +81,21 @@ const FORCED_ROUTES = [
   [COMPANIES_IN_ASK, 'list_companies'],
   [COMPANIES_LIST_ASK, 'list_companies'],
   [BREAKDOWN_ASK, 'breakdown_master_sheet'],
+  // "actually cancel the gloria one" had no door at all. See cancel_parked_work.
+  [/\b(?:cancel|scrap|call off|drop|don'?t do|do not do)\b[^.?!]*\b(?:scheduled|parked|planned|the \w+(?: \w+)? one|for (?:next month|january|february|march|april|may|june|july|august|september|october|november|december))\b/i, 'cancel_parked_work'],
+  // A REVIEW ANSWER for a set: "the two at kryptonia are final this month" was
+  // previewed in her own words, nothing was held, and the yes saved nothing
+  // while she said it was answered. The tool previews it itself. 2026-10-03.
+  [/\b(?:are|is|mark\w*|answer\w*|set)\b[^.?!]*\b(?:final(?: month| this month)?|yes|no)\b[^.?!]*\b(?:review|this month|for (?:october|november|december|january|february|march|april|may|june|july|august|september))\b|\breviews?\b[^.?!]*\b(?:as|to) (?:yes|no|final)\b|\b(?:are|is) final\b/i, 'bulk_answer_monthly_review'],
+  // "close brightwell and quarryy lanez" was looked up rather than closed, one
+  // run in three. A company close is one door; a DEAL is stop_deal. 2026-10-03.
+  [/^\s*(?:ok\s+|please\s+|can you\s+)?(?:close|shut(?:\s+down)?|dissolve|wind up)\b(?![^.?!]*\bdeals?\b)/i, 'bulk_close_companies'],
+  // "reopen relia pa" listed the company and reopened nothing. 2026-10-03.
+  [/^\s*(?:ok\s+|okay\s+|please\s+|can you\s+)?(?:reopen|re-open|unclose)\b/i, 'bulk_close_companies'],
+  // A PERSON'S DETAIL is looked up every time, never recalled. 2026-10-03.
+  [/\b(?:what'?s|what is|whats|give me|tell me|send me|do (?:we|you) have)\b[^.?!]*\b(?:phone(?: number)?|mobile|post ?code|sort code|account number|bank details)\b/i, 'find_and_show_details'],
+  // "Who is owed the most" is a ranking: see rankAskedIn. 2026-10-03.
+  [{ test: (said) => Boolean(rankAskedIn(said)) }, 'total_master_sheet'],
 ];
 
 // What a held tool is for, in their words: see contexts.js HELD_UNTIL_NEEDED.
@@ -96,6 +112,13 @@ const UNDO_ASKED = /^\s*(?:ok\s+|please\s+|can you\s+)?(?:undo|revert|reverse|ta
 // "undo that" re-sent the last CHANGE twice and then claimed the fee was
 // "already 3%". An undo has one door. 2026-09-30.
 FORCED_ROUTES.unshift([UNDO_ASKED, 'undo_master_sheet_change']);
+// AND IN THEIR OWN WORDS: "actually scrap that", "cancel the change you just
+// made to abe". A pattern object, so it sits in the same list. See undoIntent.js.
+// NOT RIGHT AFTER A QUESTION: "cancel it" under "shall I set it?" is a no
+// to the proposal, never an undo of an earlier change.
+FORCED_ROUTES.unshift([{
+  test: (said, history = []) => asksUndoPlainly(said) && !/\?\s*$/.test(lastAssistantAnswer(history).trim()),
+}, 'undo_master_sheet_change']);
 const {
   drawnAlready, SAY_IT_INSTEAD, signature: listSignature,
 } = require('./notTwice.list');
@@ -117,6 +140,8 @@ const { checkRateDirection } = require('./checkRateDirection');
 // it is a sentence, so it is checked.
 const { checkPointed, DISABLED } = require('./disabledTools');
 const { bypassAttempt, BYPASS_REPLY } = require('./blockBypass');
+const { asksUndoPlainly } = require('./undoIntent');
+const { rankAskedIn } = require('./tools/masterSheet');
 // A tool's own orders, read out to the admin. See checkLeak.js.
 const { checkLeak } = require('./checkLeak');
 const {
@@ -140,7 +165,7 @@ const { getClient } = require('./chatClient');
 const { screenReading } = require('./screenReading');
 const { noteAiFailure } = require('./aiStatus');
 const { PARKABLE } = require('./scheduled/parkable');
-const { resolveWhen, saysLater } = require('../shared/when.helper');
+const { resolveWhen, saysLater, whenIn } = require('../shared/when.helper');
 const { dealIdFor } = require('./tools/parkForMonth');
 
 // A request naming two people ("update Deividas and Georgina...") needs a
@@ -859,8 +884,12 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
    * stopped and asked, so "starting next month" never lands this month.
    */
   if (PARKABLE[name]) {
-    const { when, forMonths, ...rest } = args;
+    const { when: sentWhen, forMonths, ...rest } = args;
     const said = lastSaid(history);
+    // THEIR SENTENCE'S MONTH WINS: left off, she was sent back and asked
+    // them which month; sent, she once wrote "August 2024" for "the end of
+    // this month". Hers is used only when their words name none. 2026-10-03.
+    const when = (saysLater(said) ? whenIn(said) : null) ?? sentWhen;
     const at = when ? resolveWhen(when, forMonths) : { now: true };
     if (at.error) return { summary: `NOTHING WAS CHANGED. ${at.error}` };
     if (at.months) {
@@ -979,6 +1008,46 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
    * remembered by default, which is the wrong direction.
    */
   args = foldSearchWord(tool, foldIntoSet(tool, args));
+  /**
+   * A GROUP SENT AS A SEARCH WORD IS THE GROUP. "give me the payment
+   * breakdown for corvid this month by company" arrived as q "corvid" one
+   * run in three, and the breakdown, which has no q, refused the whole
+   * call. On any tool that takes a group, a q, company or person that IS a
+   * group name moves to group before anything is refused. 2026-10-03.
+   */
+  const props = tool.parameters?.properties ?? {};
+  if (props.group && !args.group) {
+    for (const key of ['q', 'company', 'person']) {
+      if (typeof args[key] !== 'string' || props[key]) continue;
+      // eslint-disable-next-line no-await-in-loop
+      const group = (await knownGroupNames()).find((g) => String(g).toLowerCase() === args[key].trim().toLowerCase());
+      if (group) {
+        const { [key]: _moved, ...rest } = args;
+        args = { ...rest, group };
+        break;
+      }
+    }
+  }
+  /**
+   * AND A COMPANY SENT AS A GROUP IS THE COMPANY. "the two at kryptonia are
+   * final this month" arrived as group "Kryptonia" and was told nothing was
+   * up for review there. Only when it is no group and is a company.
+   */
+  if (props.group && props.company && typeof args.group === 'string' && !args.company) {
+    const groups = (await knownGroupNames()).map((g) => String(g).toLowerCase());
+    if (!groups.includes(args.group.trim().toLowerCase())) {
+      try {
+        // eslint-disable-next-line global-require
+        const names = await require('../repos/companies.repo').names();
+        const hit = (names ?? []).map((n) => n?.name ?? n)
+          .find((n) => String(n).trim().toLowerCase() === args.group.trim().toLowerCase());
+        if (hit) {
+          const { group: _g, ...rest } = args;
+          args = { ...rest, company: hit };
+        }
+      } catch { /* a guard that cannot read companies leaves the call alone */ }
+    }
+  }
   const modelArgs = { ...args };
 
   const refusal = unknownArgs(tool, args);
@@ -1524,6 +1593,21 @@ const HISTORY_CHAR_BUDGET = Number(process.env.AGENT_HISTORY_CHARS) > 0
  * can interleave, and they are arguments rather than prose: streaming half
  * a JSON payload into a chat bubble would be nonsense.
  */
+/**
+ * AN APOLOGY ONLY WHEN THEY SAID SOMETHING WAS WRONG. Live 2026-10-03:
+ * "anyone paid in crypto?" opened "Sorry for the mix-up, darling!" about an
+ * earlier answer, on a new question. The opening sentence goes when their
+ * message corrected nothing; the answer after it stays.
+ */
+const APOLOGY_OPENING = /^\s*(?:oops|whoops|sorry|apologies|my (?:mistake|bad|apologies))\b[^.!?\n]{0,80}[.!?]+\s*/i;
+const CORRECTED = /\b(?:no|nope|wrong|not right|incorrect|mistake|that'?s not|thats not|you said|why did|meant)\b/i;
+function dropUnaskedApology(text, said) {
+  const t = String(text ?? '');
+  if (CORRECTED.test(String(said ?? '')) || !APOLOGY_OPENING.test(t)) return t;
+  const rest = t.replace(APOLOGY_OPENING, '');
+  return rest.trim() ? rest.charAt(0).toUpperCase() + rest.slice(1) : t;
+}
+
 async function streamCompletion(openai, params) {
   // TOKENS PER ROUND, so cost is measured rather than guessed. OpenAI only:
   // the other providers' streams are not promised to accept the option.
@@ -1753,6 +1837,7 @@ async function runAgentTurn(history, contextName, onEvent) {
   let wroteClaimRetry = false;
   let stopClaimRetry = false;
   let askWhoRetry = false;
+  let contactRetry = false;
   let emptyRetry = false;
   // A "shall I?" with nothing pending. See checkUnbackedAsk.js.
   let unbackedRetry = false;
@@ -1998,7 +2083,7 @@ async function runAgentTurn(history, contextName, onEvent) {
   }
 
   const forcedTool = (FORCED_ROUTES
-    .find(([asked, tool]) => asked.test(lastSaid(history)) && context.tools.some((t) => t.name === tool))?.[1] ?? null)
+    .find(([asked, tool]) => asked.test(lastSaid(history), history) && context.tools.some((t) => t.name === tool))?.[1] ?? null)
     ?? (BARE_YES.test(lastSaid(history)) && RESUME_OFFERED.test(lastAssistantAnswer(history))
       && heldCalls.length === 0 && context.tools.some((t) => t.name === 'resume_deal') ? 'resume_deal' : null);
   if (forcedTool && !roundTools.some((t) => t.function?.name === forcedTool)) roundTools = openAITools;
@@ -2889,6 +2974,32 @@ async function runAgentTurn(history, contextName, onEvent) {
         continue;
       }
 
+      /**
+       * A PHONE OR ACCOUNT NUMBER IS READ, NEVER REMEMBERED. Live 2026-10-03:
+       * "what's drew's phone number?" called nothing and was answered with
+       * NATHAN's number from the previous answer. Drew's is different. A long
+       * digit string in her reply that no tool returned THIS turn goes back.
+       */
+      const digitsIn = (text) => (String(text ?? '').match(/\+?\d[\d\s-]{7,}\d/g) ?? [])
+        .map((d) => d.replace(/[\s-]/g, ''));
+      const stated = raw ? digitsIn(raw) : [];
+      if (stated.length > 0 && !contactRetry) {
+        const seen = JSON.stringify(toolResults);
+        const unbacked = stated.filter((d) => !seen.replace(/[\s-]/g, '').includes(d.replace(/^\+/, '')));
+        if (unbacked.length > 0) {
+          contactRetry = true;
+          logger.warn({ context: context.key, round }, 'diane: stated a number no tool returned this turn');
+          messages.push(choice);
+          messages.push({
+            role: 'user',
+            content: `NOTHING THIS TURN RETURNED ${unbacked.join(', ')}. Never repeat a phone, account or `
+              + 'sort code from memory or from another person. Look the person up now with '
+              + 'find_and_show_details and say only what it returns.',
+          });
+          continue;
+        }
+      }
+
       if (raw && !stopClaimRetry && claimedStop(raw, {
         wrote: Boolean(turnState.wrote.get('__written')), stopped: Boolean(turnState.wrote.get('__stopped')),
       })) {
@@ -3014,7 +3125,7 @@ async function runAgentTurn(history, contextName, onEvent) {
         // "mostly" still leaves literal asterisks in a chat bubble.
         reply: dealWords(withExportReminder(
           easeOffPetNames(raw
-            ? noDashes(stripMarkdown(withVerdict(raw, toolResults, { said: lastSaid(history) })))
+            ? dropUnaskedApology(noDashes(stripMarkdown(withVerdict(raw, toolResults, { said: lastSaid(history) }))), lastSaid(history))
             : emptyReply, history),
           history,
           calledExport,
@@ -3094,7 +3205,18 @@ async function runAgentTurn(history, contextName, onEvent) {
       const wanted = calls
         .filter((c) => c.type === 'function' && HELD_UNTIL_NEEDED.includes(c.function?.name))
         .map((c) => c.function.name);
-      if (wanted.length > 0) {
+      /**
+       * THE ROUTED TOOL RUNS, it is not announced. Live 2026-10-03: "actually
+       * scrap that" was routed to the undo, she called it, the turn widened
+       * instead of running it, and she answered "ready to undo, confirm?" in
+       * prose with nothing previewed, so the yes undid nothing. The route
+       * already chose this tool for this message; it carries its own preview.
+       */
+      if (wanted.length > 0 && wanted.every((n) => n === forcedTool)) {
+        widened = true;
+        roundTools = openAITools;
+      }
+      if (wanted.length > 0 && !widened) {
         widened = true;
         roundTools = openAITools;
         logger.info({ context: context.key, round, tools: wanted }, 'diane: turn widened');

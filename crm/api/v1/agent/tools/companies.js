@@ -68,8 +68,14 @@ function namesInList(said) {
     .replace(/\b(?:companies|company|both|the|all|of)\b/gi, ' ')
     .split(/\s*(?:,|&|\band\b)\s*/i)
     .map((s) => s.trim())
-    .filter((s) => s.length >= 2);
+    // A REASON OR A WHEN IS NOT A NAME. "close souracore, they've gone bust"
+    // refused the whole close over a company called "they've gone bust".
+    // The name is what comes before the reason or the date. 2026-10-03.
+    .map((s) => s.split(REASON_STARTS)[0].trim())
+    .filter((s) => s.length >= 2 && !NOT_A_NAME.test(s));
 }
+const REASON_STARTS = /\s+(?=(?:because|cause|cos|coz|since|as of|on|at|by|from|effective|they|they've|theyve|we|due|today|tomorrow|now|this|next|end of)\b)/i;
+const NOT_A_NAME = /^(?:they|they've|theyve|they're|theyre|we|we've|because|cause|cos|coz|since|as|it|it's|its|he|she|due|gone|went|bust|from|on|at|by|effective|today|tomorrow|now|please|end of|this|next|last)\b|\b\w+'(?:ve|re|s|d|ll)\b|\b(?:gone|bust|liquidat\w*|administration|insolven\w*|went under)\b/i;
 
 async function resolveCompanies(names, said = '') {
   // Their own spelling, kept beside the folded key, so a correction quotes
@@ -337,6 +343,11 @@ const bulkCloseCompanies = {
     required: ['companies', 'status'],
   },
   async handler(args = {}) {
+    // "REOPEN X" IS STATUS ACTIVE, whatever she sent with it.
+    if (/^\s*(?:ok\s+|okay\s+|please\s+|can you\s+)?(?:reopen|re-open|unclose)\b/i.test(String(args.said ?? ''))) {
+      // eslint-disable-next-line no-param-reassign
+      args = { ...args, status: REOPEN };
+    }
     if (!BULK_STATUSES.includes(args.status)) {
       return {
         summary: `"${args.status}" is not one of these. It is closed, or dissolved, or active to `

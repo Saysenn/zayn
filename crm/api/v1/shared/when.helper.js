@@ -29,6 +29,9 @@ function resolveOne(text, now) {
   if (!t || /^(now|today|this month|immediately|right now)$/.test(t)) return 'now';
   if (/^\d{4}-(0[1-9]|1[0-2])(-\d{2})?$/.test(t)) return t.slice(0, 7);
   if (/^next month$/.test(t)) return shift(now, 1);
+  // "AT THE END OF THIS MONTH" is the start of the next: this month is still
+  // paid in full, and the change lands on the 1st. 2026-10-03.
+  if (END_OF_MONTH.test(t)) return shift(now, 1);
   const named = t.match(new RegExp(`^(?:in |from |starting |for )?(${MONTH_WORD})\\b(?:\\s+(\\d{4}))?$`));
   if (named) {
     const idx = monthIndex(named[1]);
@@ -61,16 +64,33 @@ function resolveWhen(when, forMonths, now = currentMonth()) {
  * check: a plain "set her preset to November" is a value, not a timing.
  */
 const NEXT = /\bnext\s+(?:month|\d+\s+months|few months)\b/i;
+const END_OF_MONTH = /\b(?:(?:at |by )?(?:the )?end of (?:this |the )?month|month[- ]end)\b/i;
 const LATER = new RegExp(
   `\\b(?:from|starting(?: in| from)?|beginning|as of|effective|come|in|for|until)\\s+(?:the\\s+)?(${MONTH_WORD})\\b(?:\\s+(\\d{4}))?`,
   'gi',
 );
 const AS_VALUE = new RegExp(`\\b(?:to|preset|end date|start date|payment start)\\s+(?:next month|${MONTH_WORD})\\b`, 'gi');
 
+/**
+ * THE MONTH THEIR SENTENCE NAMES, as a `when`, or null. Used when she left
+ * `when` off a change whose sentence already says it: "close harbor nine
+ * at the end of this month" was sent back for a `when`, and she asked the
+ * admin which month instead of reading it. 2026-10-03.
+ */
+function whenIn(said, now = currentMonth()) {
+  const text = String(said ?? '').replace(AS_VALUE, ' ');
+  if (END_OF_MONTH.test(text) || /\bnext month\b/i.test(text)) return 'next month';
+  for (const m of text.matchAll(LATER)) {
+    const month = resolveOne(m[2] ? `${m[1]} ${m[2]}` : m[1], now);
+    if (month && month !== 'now' && month > now) return month;
+  }
+  return null;
+}
+
 function saysLater(said, now = currentMonth()) {
   // "set the preset to November" names a value, so it is cut out first.
   const text = String(said ?? '').replace(AS_VALUE, ' ');
-  if (NEXT.test(text)) return true;
+  if (NEXT.test(text) || END_OF_MONTH.test(text)) return true;
   for (const m of text.matchAll(LATER)) {
     const month = resolveOne(m[2] ? `${m[1]} ${m[2]}` : m[1], now);
     if (month && month !== 'now' && month > now) return true;
@@ -78,4 +98,5 @@ function saysLater(said, now = currentMonth()) {
   return false;
 }
 
-module.exports = { resolveWhen, saysLater, MONTH_WORD };
+module.exports = {
+  whenIn, resolveWhen, saysLater, MONTH_WORD };

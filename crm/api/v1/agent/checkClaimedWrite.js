@@ -10,7 +10,7 @@
 const { agreed } = require('./confirmReplay');
 
 // A change reported as made. Checked per sentence, never across them.
-const DONE = /\b(?:is now|are now|(?:was|were|has been|have been) (?:set|increased|raised|changed|updated|removed|reduced|lowered|put back|undone|reverted|applied|added|cleared|ended|stopped|closed|archived|answered|made|marked|moved)|all done|all set|(?:is|are|was|were) kept (?:running|going)|answered (?:yes|no) for|(?:is|are) back (?:live|on)|(?:was|were|has been|have been) (?:resumed|reinstated|brought back|renamed))\b/i;
+const DONE = /\b(?:is now|are now|(?:was|were|has been|have been) (?:set|increased|raised|changed|updated|removed|reduced|lowered|put back|undone|reverted|applied|added|cleared|ended|stopped|closed|archived|answered|made|marked|moved)|all done|all set|(?:is|are|was|were) kept (?:running|going)|answered (?:yes|no|final) for|(?:marked|set) (?:as |to )?(?:final|yes|no)\b|(?:is|are) back (?:live|on)|(?:was|were|has been|have been) (?:resumed|reinstated|brought back|renamed))\b/i;
 // First person, past tense: a write she says she made.
 const I_DID = /\bI(?:'ve| have| just)\s+(?:just\s+)?(?:added|set|marked|made|changed|updated|stopped|ended|closed|removed|applied|put|raised|lowered|reduced|increased|resumed|reinstated|brought|renamed|undone|reverted)\b/i;
 // A deal KEPT is a write whatever they said: "ZZ Close Co" alone got "Ines's deal

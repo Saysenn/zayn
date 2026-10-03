@@ -43,10 +43,20 @@ const AGREED = /^(y|ya|yes|yep|yeah|yup|ok|okay|sure|go|go ahead|do it|confirm|c
 // A "but" or a question turns agreement into a discussion.
 const NOT_PLAIN = /\b(but|except|although|instead|change|wait|hold|no)\b|\?/i;
 
+/**
+ * AN "OK" FOLLOWED BY A NEW INSTRUCTION IS THE INSTRUCTION. Live 2026-10-03:
+ * "ok reopen souracore then" was read as a bare yes to nothing, the reopen
+ * was refused, and she said the deal was "already back". An act aimed at
+ * a NAME is new; aimed at it, that or them it is still the agreement
+ * ("go ahead and close it").
+ */
+const NEW_ACT = /\b(?:reopen|close|set|add|stop|end|resume|rename|undo|delete|remove|mark|bump|raise|lower|scrap|cancel|move|park|schedule|answer|show|list|total)\s+(?!(?:it|that|them|this|those|these|him|her|now|ahead)\b)[a-z0-9]/i;
+
 function agreed(said) {
   const text = String(said ?? '').trim();
   if (!text || text.length > 60) return false;
   if (NOT_PLAIN.test(text)) return false;
+  if (NEW_ACT.test(text)) return false;
   return AGREED.test(text);
 }
 
