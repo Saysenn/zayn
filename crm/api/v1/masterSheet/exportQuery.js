@@ -50,6 +50,9 @@ const PRESETS = {
   admin: { label: 'Admin', filter: (r) => !CLIENT_FACING.test(String(r.role_label ?? '').trim()) },
   // Same rows as expensing; the difference is entirely in the layout.
   breakdown: { label: 'Earnings breakdown', filter: () => true, layout: 'breakdown' },
+  // EVERY ROW: the driver sheet sorts them itself (UK cash, and anything at
+  // a location outside the UK whatever the method). See driverSheet.js.
+  drivers: { label: 'Drivers', filter: () => true },
 };
 
 const PRESET_IDS = Object.keys(PRESETS);
@@ -244,6 +247,32 @@ async function unansweredIn(rows) {
 
 async function previewExport(query) {
   const { rows, stats } = await rowsFor(query);
+  /**
+   * THE DRIVERS SHEET COUNTS WHAT IT WILL HOLD, not every row it was
+   * handed: UK cash and Outside UK, owed this month. Its checks are shown
+   * on its own tab, so no export warnings here. 2026-10-04.
+   */
+  if (query.template === 'drivers') {
+    // eslint-disable-next-line global-require
+    const { sortRows } = require('./driverSheet');
+    // eslint-disable-next-line global-require
+    const peopleRepo = require('../repos/people.repo');
+    const settings = await settingsRepo.get();
+    const sorted = sortRows(rows, await settingsRepo.driverSheet(), {
+      rates: await peopleRepo.rateMap(),
+      cryptoPercent: await settingsRepo.cryptoPercent(),
+      useEndDate: Boolean(settings.color_uses_end_date),
+    });
+    const kept = [...sorted.uk, ...sorted.abroad];
+    return {
+      rows: kept.length,
+      month: null,
+      people: new Set(kept.map((r) => r.person_id ?? r.person_name)).size,
+      groups: new Set(kept.map((r) => r.group_name)).size,
+      currencies: currenciesByGroup(kept),
+      warnings: [],
+    };
+  }
   return {
     rows: rows.length,
     month: stats,

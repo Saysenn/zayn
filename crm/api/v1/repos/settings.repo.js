@@ -83,6 +83,30 @@ function setLocalLocations(list) {
     .then((result) => result.rows[0]?.local_locations ?? []);
 }
 
+/**
+ * THE DRIVER SHEET'S SETUP: its runs, and which location goes on which.
+ * See 071_driver_sheet.sql. Falls back to an empty setup rather than
+ * throwing, so a missing column shows every location as unassigned instead
+ * of breaking the export modal.
+ */
+const EMPTY_DRIVER_SHEET = Object.freeze({ runs: [], places: {} });
+
+function driverSheet() {
+  return pool
+    .query('SELECT driver_sheet FROM tb_settings WHERE id = 1')
+    .then((result) => result.rows[0]?.driver_sheet ?? EMPTY_DRIVER_SHEET)
+    .catch(() => EMPTY_DRIVER_SHEET);
+}
+
+function setDriverSheet(value) {
+  return pool
+    .query(
+      'UPDATE tb_settings SET driver_sheet = $1::jsonb, updated_at = now() WHERE id = 1 RETURNING driver_sheet',
+      [JSON.stringify(value)],
+    )
+    .then((result) => result.rows[0]?.driver_sheet ?? EMPTY_DRIVER_SHEET);
+}
+
 function setDevMode(devMode) {
   return pool
     .query(
@@ -227,6 +251,7 @@ function setDashboardHistoryMonths(months) {
 
 module.exports = {
   get, setDevMode, setWhatbotWrites, localLocations, setLocalLocations, setColorUsesEndDate,
+  driverSheet, setDriverSheet,
   loginBriefing, setLoginBriefing,
   agentAutoConfirm, setAgentAutoConfirm,
   cryptoPercent, setCryptoPercent, CRYPTO_DEFAULT,

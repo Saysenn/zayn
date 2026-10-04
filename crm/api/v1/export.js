@@ -12,6 +12,9 @@ const peopleRepo = require('./repos/people.repo');
 const fxRates = require('./shared/fxRates.helper');
 const { listExportColumns } = require('./masterSheet/buildWorkbook');
 const { listPayoutColumns } = require('./masterSheet/buildPayoutSheet');
+const {
+  setupView, listDriverColumns, placeKey, ABROAD, ABROAD_LABEL, DEFAULT_DRIVER_SHEET,
+} = require('./masterSheet/driverSheet');
 // THE ONE READER of what an export contains. See exportQuery.js: this
 // router and Diane's tool both go through it, so a count and a build can
 // never have run different filters.
@@ -195,6 +198,7 @@ router.get('/export/columns', async (req, res, next) => {
      * to disagree about what exists. Master sheet only, because they are
      * ITS four documents; a payout sheet already IS one of them.
      */
+    if (req.query.template === 'drivers') return res.json({ columns: listDriverColumns(), presets: [] });
     const payout = listPayoutColumns(req.query.template);
     res.json({
       columns: payout ?? listExportColumns({ useEndDate }),
@@ -267,6 +271,8 @@ router.get('/export/xlsx', async (req, res, next) => {
       // without anyone adding it to a list by hand. A typed GBP rate does
       // not stop the other currencies resolving.
       perUsd: fx?.perUsd ?? (await fxRates.usdPerGbp()).perUsd,
+      // Which location goes on which run. Only the Drivers sheet reads it.
+      driverSheet: await settingsRepo.driverSheet(),
     };
 
     // A rolled sheet is named for the month it is FOR, not the day it was
@@ -321,6 +327,13 @@ router.get('/export/xlsx', async (req, res, next) => {
 
     const wb = template.build(rows, opts);
     const name = exportFileName(exportScope(people, groups), label, stamp);
+    // THE DRIVERS SHEET COUNTS WHAT IT HOLDS, not every row it was handed.
+    if (template.id === 'drivers') {
+      const preview = await previewExport({ ...req.query, template: 'drivers' });
+      return sendFile(res, Buffer.from(await wb.xlsx.writeBuffer()), `${name}.xlsx`,
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        { rows: preview.rows, people: preview.people });
+    }
     // Buffered for the same reason: a length is what makes the progress
     // bar honest, and a month sheet is a few hundred KB.
     return sendFile(
@@ -338,6 +351,70 @@ router.get('/export/xlsx', async (req, res, next) => {
 // The rows behind an export, as JSON — what the PDF view renders from, so
 // the printed page and the spreadsheet can never disagree about the
 // figures.
+/**
+ * ===============================
+ * * THE DRIVERS TAB'S SETUP
+ * ===============================
+ * GET: every location with money on it this month, its run, where it is on
+ * the map, the deals behind it, and the checks. PUT: the runs and which
+ * location goes on which, saved for everyone. See driverSheet.js.
+ */
+router.get('/export/drivers', async (req, res, next) => {
+  try {
+    const setup = await settingsRepo.driverSheet();
+    const { rows } = await rowsFor({ ...req.query, preset: 'drivers' });
+    const view = setupView(rows, setup, {
+      rates: await peopleRepo.rateMap(),
+      cryptoPercent: await settingsRepo.cryptoPercent(),
+      useEndDate: Boolean((await settingsRepo.get()).color_uses_end_date),
+    });
+    res.json({ runs: setup.runs ?? [], abroad: { id: ABROAD, label: ABROAD_LABEL }, ...view });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const RUN_ID = /^[a-z0-9-]{1,32}$/;
+const COLOR = /^#[0-9a-f]{6}$/i;
+
+router.put('/export/drivers', async (req, res, next) => {
+  try {
+    const current = await settingsRepo.driverSheet();
+    const body = req.body ?? {};
+    const runs = Array.isArray(body.runs) ? body.runs : current.runs ?? [];
+    for (const r of runs) {
+      if (!RUN_ID.test(String(r?.id ?? '')) || r.id === ABROAD) return next(new AppError(400, `"${r?.id}" is not a run id`));
+      if (!String(r.label ?? '').trim() || String(r.label).length > 40) return next(new AppError(400, 'Every run needs a name, up to 40 letters'));
+      if (r.color && !COLOR.test(r.color)) return next(new AppError(400, `"${r.color}" is not a colour`));
+    }
+    const allowed = new Set([...runs.map((r) => r.id), ABROAD]);
+    const places = {};
+    for (const [key, run] of Object.entries(body.places ?? current.places ?? {})) {
+      const k = placeKey(key);
+      if (!k || k.length > 60) continue;
+      if (run === null || run === undefined) continue;
+      if (!allowed.has(run)) return next(new AppError(400, `"${run}" is not a run`));
+      places[k] = run;
+    }
+    const saved = await settingsRepo.setDriverSheet({
+      runs: runs.map((r) => ({ id: r.id, label: String(r.label).trim(), color: r.color ?? '#555555' })),
+      places,
+    });
+    res.json(saved);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// BACK TO HIS MANUAL FILE'S SPLIT, on request from the Drivers tab.
+router.post('/export/drivers/reset', async (req, res, next) => {
+  try {
+    res.json(await settingsRepo.setDriverSheet(DEFAULT_DRIVER_SHEET));
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/export/rows', async (req, res, next) => {
   try {
     const { rows, stats } = await rowsFor(req.query);

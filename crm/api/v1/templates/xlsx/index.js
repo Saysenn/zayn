@@ -3,6 +3,16 @@ const breakdown = require('./breakdown');
 const monthlySheet = require('./monthlySheet');
 const divisionSheet = require('./divisionSheet');
 const payout = require('./payout');
+const { buildDriverWorkbook } = require('../../masterSheet/driverSheet');
+
+// THE DRIVERS SHEET: the month's money by who delivers it. See driverSheet.js.
+const drivers = {
+  id: 'drivers',
+  label: 'Drivers',
+  fileLabel: 'DRIVERS SHEET',
+  description: 'The month\'s cash by who delivers it: a section per run, UK cash, Outside UK with USD, and people with several deals.',
+  build: (rows, opts = {}) => buildDriverWorkbook(rows, opts),
+};
 
 /**
  * The xlsx templates an admin can pick in the Export modal.
@@ -33,7 +43,7 @@ const payout = require('./payout');
  */
 const TEMPLATES = [
   masterSheet, breakdown, monthlySheet, divisionSheet,
-  payout.expensing, payout.cash, payout.bank, payout.bankDetails,
+  payout.expensing, payout.cash, payout.bank, payout.bankDetails, drivers,
 ];
 
 const BY_ID = new Map(TEMPLATES.map((t) => [t.id, t]));

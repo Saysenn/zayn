@@ -143,6 +143,12 @@ export const apiService = {
     // Both halves of one control, from one request: the designs and the
     // five colours they can be printed in.
     breakdownDesigns: () => api.get(`${apiPath}/export/breakdown-designs`),
+    // THE DRIVERS TAB: every location with money on it this month, its run,
+    // where it is on the map, and the checks. Saving moves a location onto
+    // a run for everyone.
+    drivers: (params = {}) => api.get(`${apiPath}/export/drivers${toQueryString(params)}`),
+    saveDrivers: (setup) => api.put(`${apiPath}/export/drivers`, setup),
+    resetDrivers: () => api.post(`${apiPath}/export/drivers/reset`, {}),
     // A real download, not a fetch — the browser's own save flow, with
     // cookie auth carried the way any same-origin link carries it. Still
     // used for a plain link; the modal uses xlsx() below so it can show

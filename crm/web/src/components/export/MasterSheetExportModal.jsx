@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiService } from '../../configs/api.config';
 import { saveBlob } from '../../helpers/api.helper';
@@ -13,6 +13,7 @@ import Select from '../forms/Select';
 import Toggle from '../forms/Toggle';
 import BreakdownPicker from './BreakdownPicker';
 import ExportWarnings from './ExportWarnings';
+import DriversPanel from './DriversPanel';
 import { SettingRow, Choice, Swatches } from './ExportControls';
 import { useBulkUpdateMasterSheetRows, useMasterSheetCellEdit } from '../../hooks/useMasterSheet';
 import { DownloadIcon } from '../icons';
@@ -205,15 +206,19 @@ const MODES = [
     },
   },
   {
+    // THE DRIVERS SHEET, his call 2026-10-04: the month's money by who
+    // delivers it (North run, To be posted, South run, Outside UK). LAST,
+    // as he asked. Which location goes on which run is set on this tab, on
+    // a map; see DriversPanel and api/v1/masterSheet/driverSheet.js.
     key: 'driver',
-    hidden: true,
-    label: 'Driver',
-    // No row in tb_mastersheet carries a driver role, so this would export
-    // an empty file today. It was SHOWN but not selectable, on the
-    // reasoning that a missing tab reads as forgotten; hidden since
-    // 2026-09-23, so that reasoning is suspended rather than gone.
-    // `comingSoon` stays for the day it comes back.
-    comingSoon: true,
+    label: 'Drivers',
+    preset: 'drivers',
+    template: 'drivers',
+    columnPicker: true,
+    drivers: true,
+    // ONE WORKBOOK, ALWAYS: its four tabs are the document. A file per group
+    // would split one driver's run across files.
+    oneFile: true,
   },
 ];
 
@@ -375,8 +380,29 @@ function SwitchRow({ checked, onChange, name, on, off }) {
   );
 }
 
+/**
+ * ===============================
+ * * REOPENS WHERE YOU LEFT IT
+ * ===============================
+ * His call 2026-10-04: closing the dialog by accident (Esc, a click outside,
+ * a reload) must not lose the work. The Drivers tab's moves are saved on
+ * the server as they are made; this remembers the rest on this browser: the
+ * tab, the groups, and the columns picked per document. Wrapped, because
+ * storage can be blocked, and the dialog works the same without it.
+ */
+const REMEMBER_KEY = 'crm.exportModal.v1';
+function remembered() {
+  try { return JSON.parse(window.localStorage.getItem(REMEMBER_KEY) ?? '{}') ?? {}; } catch { return {}; }
+}
+function remember(state) {
+  try { window.localStorage.setItem(REMEMBER_KEY, JSON.stringify(state)); } catch { /* storage blocked: nothing to keep */ }
+}
+
 export default function MasterSheetExportModal({ group: initialGroup, onClose }) {
-  const [mode, setMode] = useState('current');
+  const [saved] = useState(remembered);
+  const [mode, setMode] = useState(() => (
+    SHOWN_MODES.some((m) => m.key === saved.mode && !m.comingSoon) ? saved.mode : 'current'
+  ));
   // Always this month, never chosen. Held as a value rather than called
   // inline because the tab label, the count request and the download all
   // have to agree on one month, and three separate calls to currentMonth()
@@ -385,7 +411,9 @@ export default function MasterSheetExportModal({ group: initialGroup, onClose })
   // Seeded from the page's own group filter, so "export what I'm looking
   // at" needs no re-picking, and still editable here.
   // A LIST now. Seeded from the page's own group filter when it has one.
-  const [group, setGroup] = useState(() => (initialGroup ? [initialGroup] : []));
+  const [group, setGroup] = useState(() => (
+    initialGroup ? [initialGroup] : (Array.isArray(saved.group) ? saved.group : [])
+  ));
   // WHO, on the payout tabs. Empty is everyone, the same as Groups: a
   // cleared filter is no filter anywhere else in the CRM and a second rule
   // here would be one nobody could predict. It narrows WITH the group rather
@@ -533,7 +561,11 @@ export default function MasterSheetExportModal({ group: initialGroup, onClose })
    * rather than a tab per group, still means "one file per group" and is
    * still forwarded a group at a time.
    */
-  const canMultiFile = group.length === 0 || group.length >= 2;
+  const canMultiFile = !MODE_BY_KEY.get(mode)?.oneFile && (group.length === 0 || group.length >= 2);
+  const showDrivers = Boolean(MODE_BY_KEY.get(mode)?.drivers);
+  // HELD while a location has no run: a person left off the driver sheet
+  // is cash nobody delivers. The panel says which location.
+  const [driversBlocked, setDriversBlocked] = useState(false);
   // Only the master sheet template splits into tabs. Everything else would
   // take the option, ignore it, and hand back one sheet.
   const canGroupTabs = Boolean(MODE_BY_KEY.get(mode)?.groupTabs);
@@ -578,7 +610,18 @@ export default function MasterSheetExportModal({ group: initialGroup, onClose })
   // columns nobody deselected. Back to that tab's own default instead.
   // The filter goes with them, or a Bank narrowing would follow you onto a
   // tab whose rail cannot show it and cannot clear it.
-  useEffect(() => { setPicked(null); setMethod(null); setSheetPreset(null); }, [activeTemplate]);
+  // A document's columns come back as they were last picked for it.
+  const pickedByTemplate = useRef(saved.picked ?? {});
+  useEffect(() => {
+    const back = pickedByTemplate.current[activeTemplate];
+    setPicked(Array.isArray(back) ? back : null);
+    setMethod(null);
+    setSheetPreset(null);
+  }, [activeTemplate]);
+  useEffect(() => {
+    if (activeTemplate) pickedByTemplate.current = { ...pickedByTemplate.current, [activeTemplate]: picked };
+    remember({ mode, group, picked: pickedByTemplate.current });
+  }, [mode, group, picked, activeTemplate]);
 
   // The four that can never go: a file without them cannot be uploaded
   // back, so they are not offered rather than offered and refused.
@@ -907,6 +950,10 @@ export default function MasterSheetExportModal({ group: initialGroup, onClose })
           )}
         </div>
 
+        {showDrivers && (
+          <DriversPanel group={group.length > 0 ? group.join(',') : undefined} onBlockingChange={setDriversBlocked} />
+        )}
+
         {/* EVERY SHAPE SWITCH IN ONE STACK, one name each. Which of them
             appear depends on the tab, so they were three separate blocks
             with three different spacings; grouping them means the gap
@@ -1161,6 +1208,9 @@ export default function MasterSheetExportModal({ group: initialGroup, onClose })
                 : `Downloading ${progress.percent}%`}
             </span>
           )}
+          {showDrivers && driversBlocked && !progress && (
+            <span className="mr-auto text-sm text-danger" role="status">Give every location a run first.</span>
+          )}
           <Button onClick={onClose} disabled={Boolean(progress)}>Cancel</Button>
           {/* NEVER WAITS FOR THE COUNT. It is disabled only when the count
               has come back and said zero, because the route 404s on an empty
@@ -1172,7 +1222,7 @@ export default function MasterSheetExportModal({ group: initialGroup, onClose })
           <Button
             variant="primary"
             onClick={download}
-            disabled={count?.rows === 0 || Boolean(progress)}
+            disabled={count?.rows === 0 || Boolean(progress) || (showDrivers && driversBlocked)}
             phase={progress ? (progress.phase === 'building' ? 'working' : 'progress') : 'idle'}
             percent={progress?.percent ?? 0}
           >
