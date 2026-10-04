@@ -195,6 +195,59 @@ null, and both doors read it. Its own file, like `resolvePerson`, so
 
 ---
 
+## DONE 2026-10-04: a general read, ordering, and arguments fixed in code
+
+Measured, not guessed. Each fresh question set was scored on the old code
+and the new code before anything was fixed against it. On the last one
+(`evalCases6.mjs`) the old code scored 62% and the new code 90%. Suite
+59/59 in Dubai, London and Los Angeles. Unit tests 1443/1443.
+
+**1. `summarize_deals`, the general read.** Average, sum, min, max or count
+of live deals, optionally PER person / company / group / role / currency /
+method, with `atLeast` / `atMost` on the result. "Average monthly in
+BAKER", "people at each company", "how many people have more than one
+deal". Money is never added across currencies. A plain count with no
+`by` is handed to `filter_master_sheet`, so counts read the way they
+always have. HELD until their words ask for it (`ASKS_FOR_HELD`: average,
+per, each, more than N deals), because its schema is about 1,300 tokens a
+turn.
+
+**2. Ordering is built** (it was under "decided against" below). The
+filter takes `sortBy`, `sortOrder` and `limit`, sorted in code in USD and
+with ties named. A sort sent to `total_master_sheet` becomes its `rank`,
+and the rank follows their words: "lowest" is never "owed the most".
+
+**3. Arguments fixed in code before the tool runs** (`invokeToolInner`),
+each one seen going wrong:
+- a group sent as people, a company sent as a group (including companies
+  that are only on deals), possessives on names;
+- options sent inside `set` are moved out;
+- "by 10%" is a raise, never a monthly of 0.1, and never a list of names
+  with no figures;
+- "earns less than 1000" is an amount bound, not payable-versus-monthly;
+- "the first one" inside a sentence is a row of the list on screen;
+- "actually make it 1000" changes the change she just reported.
+
+**4. Wording.** "X should be N" / "needs to be N" is an instruction. "Go
+back to what it was" is an undo, never a "go". "Is Mara in CORVID?" says
+where she is, instead of offering the nearest name as a guess. A new name
+typed in lower case is written as a name.
+
+**5. Two bugs that were also on live.**
+- `endWhen: ['none']` ("deals with no end date") failed every time: an
+  unused query parameter Postgres refused.
+- An export judged "counts this month" by TODAY's month rather than the
+  file's, so a past month's file tinted the wrong amounts. The month now
+  reaches the tint and the totals.
+
+**How to measure again:** `SUITE_SET=eval|eval2|...|eval6 node
+scripts/dianeSuite/run.mjs`, and `node scripts/dianeSuite/metrics.mjs
+<log>` for rounds, tokens and time per turn. A NEW set, written before any
+fix, is the only honest number; a set already fixed against only shows
+nothing went backwards.
+
+---
+
 ## OPEN
 
 ### THE REVIEW IS A PAGE NOW, AND ONE ANSWER TAKES A ROW OFF IT, 2026-09-29
@@ -992,12 +1045,6 @@ rather than dropping the question.
 
 A `compare_totals` returning the finished sentence would close it. It is new
 reach, so it waits for a yes.
-
-### Ordering
-
-"Who has the biggest payable amount", "the top five". `amountMin` exists,
-ordering does not, and the page does not sort either. She reached for
-`audit_master_sheet` and admitted it did not answer.
 
 ## DONE 2026-09-24: a group name may be used to pick a deal
 

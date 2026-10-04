@@ -76,9 +76,13 @@ module.exports = {
    */
   build: (rows, {
     columns, tintEmpty, includeTags, perGroupTabs, rates, cryptoPercent,
-    primaryColor, secondaryColor, showRates,
+    primaryColor, secondaryColor, showRates, month,
   } = {}) => (
     buildMasterSheetWorkbook(rows, {
+      // THE MONTH THE FILE IS FOR, judging which amounts count. Forgotten
+      // here like the options above, so every export judged by today's
+      // month. 2026-10-04.
+      month,
       rates,
       cryptoPercent,
       primaryColor,

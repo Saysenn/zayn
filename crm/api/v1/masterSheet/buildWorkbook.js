@@ -742,10 +742,10 @@ function paymentStartRules(sheet, { firstRow, lastRow }) {
   });
 }
 
-function totalsByCurrency(rows, { includeEnded = false, useEndDate = false } = {}) {
+function totalsByCurrency(rows, { includeEnded = false, useEndDate = false, month } = {}) {
   const out = new Map();
   for (const r of rows) {
-    if (!includeEnded && !countsTowardTotal(r, { useEndDate })) continue;
+    if (!includeEnded && !countsTowardTotal(r, { useEndDate, month })) continue;
     const amount = Number(r.payable_amount);
     if (!Number.isFinite(amount)) continue;
     const currency = r.currency || 'GBP';
@@ -821,7 +821,7 @@ function cellByKey(row, key) {
  *  export modal promises a finished period is "marked in the file", and it
  *  has to stay true with every total switched off. */
 function addDealRow(sheet, r, {
-  useEndDate = false, tintEmpty = false, includeTags = false,
+  useEndDate = false, tintEmpty = false, includeTags = false, month,
 } = {}) {
   // group_name is written only when the tab actually has that column,
   // which is when sheetNameFor had to rename the tab. exceljs matches on
@@ -847,7 +847,9 @@ function addDealRow(sheet, r, {
    * A document that does not show the figure has nothing to say about it,
    * the same answer the payment start tint gives when its column is gone.
    */
-  if (!countsTowardTotal(r, { useEndDate })) {
+  // THE FILE'S MONTH, never today's: a September file built in October
+  // tinted September's rows and left October's plain. 2026-10-04.
+  if (!countsTowardTotal(r, { useEndDate, month })) {
     const amount = cellByKey(added, 'payable_amount');
     if (amount) amount.fill = ENDED_FILL;
   }
@@ -897,13 +899,13 @@ function addDealRow(sheet, r, {
  * the group block is safe, because nothing after it is a deal.
  */
 function writeGroup(sheet, groupName, rows, {
-  companyTotals, groupTotals, useEndDate = false, tintEmpty = false, includeTags = false,
+  companyTotals, groupTotals, useEndDate = false, tintEmpty = false, includeTags = false, month,
 }) {
   for (const deals of byCompany(rows)) {
-    for (const r of deals) addDealRow(sheet, r, { useEndDate, tintEmpty, includeTags });
+    for (const r of deals) addDealRow(sheet, r, { useEndDate, tintEmpty, includeTags, month });
     // The company's name is not repeated on its block. It sits directly
     // under its rows, so the name is already three inches above it.
-    if (companyTotals) writeTotalBlock(sheet, 'Total', deals, { italic: true, useEndDate });
+    if (companyTotals) writeTotalBlock(sheet, 'Total', deals, { italic: true, useEndDate, month });
   }
 
   // An empty group gets no block. A heading with no figure under it says
@@ -912,7 +914,7 @@ function writeGroup(sheet, groupName, rows, {
   // One blank before the group block is safe: everything after it is a
   // total, so the table it starts contains no deals to lose.
   sheet.addRow({});
-  writeTotalBlock(sheet, `Total for ${groupName}`, rows, { bold: true, useEndDate });
+  writeTotalBlock(sheet, `Total for ${groupName}`, rows, { bold: true, useEndDate, month });
 }
 
 /**
@@ -942,8 +944,10 @@ function writeGroup(sheet, groupName, rows, {
  * the amount nobody is being paid. The rows stay above, tinted, with their
  * end date in its own column.
  */
-function writeTotalBlock(sheet, heading, rows, { bold = false, italic = false, useEndDate = false } = {}) {
-  const live = totalsByCurrency(rows, { useEndDate });
+function writeTotalBlock(sheet, heading, rows, {
+  bold = false, italic = false, useEndDate = false, month,
+} = {}) {
+  const live = totalsByCurrency(rows, { useEndDate, month });
   // Nothing live still prints its currencies, at zero. Real figures with no
   // total under them reads as a failed export, where a zero is an answer.
   const lines = live.size > 0
@@ -1509,7 +1513,7 @@ function buildMasterSheetWorkbook(
     // pieces of code came out marked on one and unmarked on the other.
     const groupRows = groups.get(groupName);
     writeGroup(sheet, groupName, groupRows, {
-      companyTotals, groupTotals, useEndDate, tintEmpty, includeTags,
+      companyTotals, groupTotals, useEndDate, tintEmpty, includeTags, month,
     });
 
     // Styled BEFORE the two extra tables. styleNumberColumns walks every

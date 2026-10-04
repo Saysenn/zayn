@@ -274,6 +274,9 @@ router.get('/export/xlsx', async (req, res, next) => {
     // dating them by today would file them as different ones.
     const rolledTo = rows[0]?.rolled_to;
     const stamp = rolledTo ?? new Date().toISOString().slice(0, 10);
+    // AND ITS AMOUNTS ARE JUDGED BY THAT MONTH. The working file is this
+    // month's, which is the default. 2026-10-04.
+    if (rolledTo) opts.month = String(rolledTo).slice(0, 7);
     const groups = String(req.query.group ?? '').split(',').filter(Boolean);
     // THE CHOSEN DOCUMENT IS PART OF THE NAME. Four runs of one sheet
     // must not share a filename. The preset first, because Standard is a

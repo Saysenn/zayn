@@ -114,10 +114,10 @@ test('and they say the same day the arithmetic meant, in any timezone', () => {
   // The exact failure: a Date read with local getters, west of UTC.
   const fields = { assignedOn: D('2026-04-15') };
   recomputePayable(ROW_12(), fields);
-  const asDiaineWouldSay = (v) => {
-    const d = new Date(v);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  };
+  // READ AS A PACIFIC MACHINE WOULD, whatever this one is: local getters on
+  // a Dubai or London machine show no drift, and the example proved nothing
+  // there. 2026-10-04.
+  const asDiaineWouldSay = (v) => new Date(v).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   // A plain string never reaches that formatter as a Date at all, which is
   // the whole point: there is no local/UTC question left to get wrong.
   assert.equal(fields.paymentStartOn, '2026-07-14');

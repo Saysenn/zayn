@@ -203,6 +203,18 @@ Tell Claude: "clean the Diane test data".
 It removes the ZZTEST deals and sets the test people back to 0%.
 
 ======================================================================
+12. THE AUTOMATIC RUN (Claude does this, no typing)
+======================================================================
+
+Invented people on a local database (crm_suite), never live:
+  cd crm/api
+  npm run test:diane:tz                         the suite, 3 timezones
+  SUITE_SET=eval6 node scripts/dianeSuite/run.mjs   one question set
+  node scripts/dianeSuite/metrics.mjs <log>     rounds, tokens, time
+
+SEE: every line "ok", and "59/59 passed" for each timezone.
+
+======================================================================
 IF SOMETHING LOOKS WRONG
 ======================================================================
 

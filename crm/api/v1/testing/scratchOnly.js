@@ -45,7 +45,7 @@ const SCRATCH = 'ZZTEST';
 // stops every deal on it at once, which is the widest write in the CRM.
 const WRITES = [
   'create', 'update', 'updateMany', 'remove', 'removeMany',
-  'stop', 'stopMany', 'stopCompany', 'resume', 'resumeCompany',
+  'stop', 'stopIfLive', 'stopMany', 'stopCompany', 'resume', 'resumeCompany',
   'setReviewMonthlyForCompany', 'setGoingConcernForCompany', 'setDealStatus',
   'clearOrphanFlags',
 ];
@@ -193,6 +193,15 @@ function arm() {
     const group = await groupOf(id);
     if (group !== SCRATCH) refuse(`stop #${id}`, group);
     return real.stop(id, ...rest);
+  };
+
+  // THE PARKED STOP, replayed at the start of a month with nobody watching.
+  // The same write as `stop` through its own door, and that door was open.
+  // 2026-10-04.
+  repo.stopIfLive = async (id, ...rest) => {
+    const group = await groupOf(id);
+    if (group !== SCRATCH) refuse(`stop #${id}`, group);
+    return real.stopIfLive(id, ...rest);
   };
 
   repo.resume = async (id, ...rest) => {
