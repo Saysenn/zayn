@@ -106,6 +106,8 @@ const FORCED_ROUTES = [
   [/^\s*(?:list|show|give)(?: me)?(?: all)?(?: of)?(?: the| our)? groups\s*(?:please|pls)?[.?!]*\s*$|^\s*what groups (?:do we have|are there)\??\s*$/i, 'filter_master_sheet'],
   // "WHO IS IN CORVID" is the people in a group, not its companies. 2026-10-04.
   [/^\s*who(?:'s|s| is| are)\s+in\s+[a-z][\w &'-]{1,30}\s*\??\s*$/i, 'filter_master_sheet'],
+  // "WHAT'S WRONG WITH LIAM'S DATES" is that person's sheet check. 2026-10-04.
+  [/\b(?:what'?s|what is|whats)\s+(?:wrong|up|the (?:issue|problem))\s+with\b|\bwhy (?:is|are)\s+[\w' ]+\s+flagged\b/i, 'audit_master_sheet'],
   // "WHAT'S NATHAN ON" is what they are paid, deal by deal: twice it was
   // answered with their add on and fee rates. 2026-10-04.
   [/^\s*what(?:'s|s| is)\s+(?!the\b|it\b|that\b|this\b)[a-z][\w' -]{1,40}?\s+on\s*\??\s*$/i, 'find_and_show_details'],
@@ -207,6 +209,18 @@ FORCED_ROUTES.unshift([{
     && PARKED_JUST_NOW.test(lastAssistantAnswer(history) ?? '')
     && !/\?\s*$/.test((lastAssistantAnswer(history) ?? '').trim()),
 }, 'cancel_parked_work']);
+/**
+ * AND "MAKE IT 1250 FROM DECEMBER INSTEAD" CHANGES THE SCHEDULED WORK. In the
+ * browser on the clone, 2026-10-04, it was offered as a cancel only: the
+ * new amount and month were lost. A new figure or month said after her
+ * answer about scheduled work is the same change again, re-dated; the park
+ * that follows replaces the old one ("instead").
+ */
+const RESCHEDULE = /\b(?:make it|change it to|instead|move it|push it)\b/i;
+const NEW_FIGURE_OR_MONTH = new RegExp(`\\b\\d[\\d,.]*\\b|\\b${require('../shared/when.helper').MONTH_WORD}\\b|\\bnext month\\b`, 'i');
+const reschedules = (said, history = []) => RESCHEDULE.test(said) && NEW_FIGURE_OR_MONTH.test(said)
+  && PARKED_JUST_NOW.test(lastAssistantAnswer(history) ?? '') && !/\bclose|closure|reopen\b/i.test(said);
+FORCED_ROUTES.unshift([{ test: reschedules }, 'update_master_sheet_row']);
 const {
   drawnAlready, SAY_IT_INSTEAD, signature: listSignature,
 } = require('./notTwice.list');
@@ -2144,6 +2158,15 @@ async function runAgentTurn(history, contextName, onEvent) {
   }, 'diane: turn opened');
 
   const messages = [{ role: 'system', content: context.prompt }, ...trimHistory(history)];
+  if (reschedules(lastSaid(history), history)) {
+    messages.push({
+      role: 'system',
+      content: 'THEY ARE CHANGING THE SCHEDULED CHANGE YOU JUST DESCRIBED, not cancelling it. Call '
+        + 'update_master_sheet_row for the SAME deal with the new value they said and `when` set to the '
+        + 'month they said (or the same month if they named none). The old scheduled one is replaced '
+        + 'automatically. Do not call cancel_parked_work.',
+    });
+  }
   const again = changeAgain(lastSaid(history), history);
   if (again) {
     messages.push({

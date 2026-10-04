@@ -174,9 +174,10 @@ const parkForMonth = {
       act: `park this for ${who}, applied at the start of each month below`,
       count: months.length,
       noun: 'month',
-      keeps: 'NOTHING CHANGES NOW. Each one is applied on the first sign in of its month, and only '
-        + 'if the deal still looks the way it does today. A value set then STAYS from that month on, '
-        + 'so never say "only" about the month.',
+      // WORDED FOR HIM, because she reads it out: it once ended "so never
+      // say only about the month", an instruction to her. 2026-10-04.
+      keeps: 'Nothing changes now. It is applied on the first sign-in of that month, if the deal still '
+        + 'looks the way it does today, and the new value stays from then on.',
       lines,
     });
     if (needs) return needs;

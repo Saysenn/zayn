@@ -112,7 +112,10 @@ function listNames(names) {
 
 function reaches(row, wanted) {
   const name = fold(row.person_name);
-  return name.startsWith(wanted) || wanted.startsWith(name) || within(name, wanted, TYPO_SLACK);
+  // No typo room under four letters (one up to six): "FB" was two letters
+  // from "Gab" and "Abe" in the review's copy of this rule. 2026-10-04.
+  const slack = wanted.length < 4 ? 0 : wanted.length <= 6 ? 1 : TYPO_SLACK;
+  return name.startsWith(wanted) || wanted.startsWith(name) || within(name, wanted, slack);
 }
 
 function narrowToPerson(rows, name, said, tail) {

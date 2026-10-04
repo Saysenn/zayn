@@ -5971,8 +5971,45 @@ const auditRows = {
   name: 'audit_master_sheet',
   description:
     'Scan the whole master sheet for things worth the admin\'s attention: rows flagged during sync as messy, a payable amount of 0 despite a real monthly rate, missing payment start dates, missing company on a role that should have one, missing phone numbers, and possible duplicate rows (same person/company/group/role appearing more than once — this can be legitimate, so present it as "worth checking," not a confirmed error). Use this any time the admin\'s request could only be answered by actually looking at the data, not general spreadsheet-hygiene advice from your own knowledge: "what needs attention", "what should I clean up", "suggest edits/changes we can do", "anything to fix", "how does it look", a plain "audit" or "review", "discrepancies", a payable ABOVE the monthly, or asking for the full details/breakdown/list of names behind a count you already gave them, INCLUDING "the ones you left out" or "the ones not counted" (call this again, the specific rows and the left-out ones with their reasons are in this same result, you do not have them from a prior turn). Never answer a request like this from general knowledge without calling this tool first — there is nothing useful to say about "what needs fixing" that doesn\'t come from the actual rows.',
-  parameters: { type: 'object', properties: {} },
-  async handler() {
+  parameters: {
+    type: 'object',
+    properties: {
+      person: { type: 'string', description: 'ONE person, when they ask what is wrong with them ("what\'s wrong with liam\'s dates"). Omit for the whole sheet.' },
+    },
+  },
+  async handler(args = {}) {
+    /**
+     * ONE PERSON'S FINDINGS. Browser on the clone, 2026-10-04: after the
+     * check listed "Liam Edwards: payment start 2026-12-03, its appointment
+     * gives 2026-11-27", "whats wrong with liam edwards dates" drew his card
+     * and said nothing about the dates. The same check, narrowed to him,
+     * in words.
+     */
+    if (args.person) {
+      const [allRows, companyList] = await Promise.all([
+        repo.findAllRows().catch(() => []),
+        companiesRepo.findAll({ pageSize: 500 }).then((r) => r.rows ?? r).catch(() => []),
+      ]);
+      const month = currentMonth();
+      const words = String(args.person).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+      const isHim = (r) => {
+        const name = String(r.person_name ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+        return words.length > 0 && words.every((w) => name.includes(w));
+      };
+      const theirs = allRows.filter(isHim);
+      if (theirs.length === 0) {
+        return { summary: (await notAPerson(args.person)) ?? `Nobody on the sheet is called "${args.person}". Say so.` };
+      }
+      const check = sheetCheck(allRows, { month, monthName: monthName(month), companies: companyList });
+      const ids = new Set(theirs.map((r) => r.id));
+      const lines = check.sections.flatMap((s) => s.all.filter((f) => ids.has(f.id))
+        .map((f) => `${f.who} (${f.where}): ${s.label.toLowerCase()}, ${f.fault}`));
+      const who = theirs[0].person_name;
+      const reply = lines.length > 0
+        ? `${lines.length === 1 ? 'One thing' : `${lines.length} things`} on the sheet check for ${who}:\n${lines.join('\n')}`
+        : `Nothing on the sheet check for ${who}: their ${theirs.length === 1 ? 'deal looks' : 'deals look'} right.`;
+      return { summary: `${reply}\n\nCOMPUTED from the sheet check. Say it as written.`, reply, computedReply: true };
+    }
     /**
      * ===============================
      * * THE REPORT IS DRAWN, NOT READ OUT

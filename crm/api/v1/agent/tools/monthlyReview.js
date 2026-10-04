@@ -66,7 +66,18 @@ const { money, sumByCurrency, moneyPerCurrency } = require('../../shared/money.h
  */
 function reaches(row, wanted) {
   const name = fold(row.person_name);
-  return name.startsWith(wanted) || wanted.startsWith(name) || within(name, wanted, TYPO_SLACK);
+  return name.startsWith(wanted) || wanted.startsWith(name) || within(name, wanted, slackFor(wanted));
+}
+
+/**
+ * SLACK BY LENGTH, as the note below promises. Browser on the clone,
+ * 2026-10-04: "FB is a no" ("FB" not up for review) was two letters from
+ * "Gab" and from "Abe", so it asked which of THEM he meant. No typo room
+ * under four letters, one up to six, two beyond.
+ */
+function slackFor(wanted) {
+  if (wanted.length < 4) return 0;
+  return wanted.length <= 6 ? 1 : TYPO_SLACK;
 }
 
 // The same rule resolvePerson uses: slack only on a name long enough that
