@@ -38,7 +38,9 @@
  * instruction, and the token check below would refuse it anyway. Kept
  * narrow here too so the two guards do not lean on each other.
  */
-const AGREED = /^(y|ya|yes|yep|yeah|yup|ok|okay|sure|go|go ahead|do it|confirm|confirmed|please do|proceed|correct|right|that's right|thats right|apply|save|send it)\b/i;
+// "GO BACK TO WHAT IT WAS" is an undo, never a "go". It was refused as a yes
+// to nothing and the change stayed. 2026-10-04.
+const AGREED = /^(y|ya|yes|yep|yeah|yup|ok|okay|sure|go(?!\s+back\b)|go ahead|do it|confirm|confirmed|please do|proceed|correct|right|that's right|thats right|apply|save|send it)\b/i;
 
 // A "but" or a question turns agreement into a discussion.
 const NOT_PLAIN = /\b(but|except|although|instead|change|wait|hold|no)\b|\?/i;

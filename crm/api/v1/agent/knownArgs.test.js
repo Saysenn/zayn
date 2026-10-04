@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { unknownArgs, INJECTED } = require('./knownArgs');
-const { masterSheetTools } = require('./tools/masterSheet');
+const { masterSheetTools, ORDERING_KEYS } = require('./tools/masterSheet');
 
 /**
  * ***************************************************
@@ -109,7 +109,9 @@ test('AND A TOTAL NARROWS THE SAME WAY A LIST DOES', () => {
   const listing = Object.keys(filter.parameters.properties);
   const totalling = Object.keys(total.parameters.properties);
 
-  const missing = listing.filter((k) => !totalling.includes(k));
+  // ORDERING IS NOT NARROWING: "lowest", "top 3" order the LIST. A total of
+  // every deal does not change with the order it is added up in. 2026-10-03.
+  const missing = listing.filter((k) => !totalling.includes(k) && !ORDERING_KEYS.includes(k));
   assert.deepEqual(missing, [], `the list can narrow by these and the total cannot: ${missing.join(', ')}`);
 });
 
@@ -132,7 +134,7 @@ test('EVERY FILTER SHE HAS IS ONE THE REPO ACTUALLY READS', () => {
    * inner handler `groups: undefined`. Nothing goes in this set without a
    * test proving the argument cannot reach the repo.
    */
-  const HANDLED_BEFORE_THE_REPO = new Set(['groups']);
+  const HANDLED_BEFORE_THE_REPO = new Set(['groups', ...ORDERING_KEYS]);
 
   for (const key of Object.keys(filter.parameters.properties)) {
     if (HANDLED_BEFORE_THE_REPO.has(key)) continue;
@@ -153,4 +155,30 @@ test('THE SEARCH WORD IS MOVED TO THE TOOL\'S OWN NAME FOR IT, never refused', (
   // A tool that takes q keeps it; a name already given is not overwritten.
   assert.deepEqual(foldSearchWord({ parameters: { properties: { q: {}, name: {} } } }, { q: 'x' }), { q: 'x' });
   assert.deepEqual(foldSearchWord(tool, { q: 'x', name: 'y' }), { q: 'x', name: 'y' });
+});
+
+// THE GUARANTEE BEHIND THE ORDERING EXEMPTION above: the filter sorts and
+// cuts in code, and the repo is never handed sortBy, sortOrder or limit.
+test('ORDERING NEVER REACHES THE REPO, the filter sorts in code', async () => {
+  const repo = require('../repos/masterSheetRows.repo');
+  const real = repo.findAll;
+  const seen = [];
+  repo.findAll = async (args) => {
+    seen.push(args);
+    return {
+      rows: [
+        { id: 1, person_name: 'A', group_name: 'G', assigned_on: '2026-01-05' },
+        { id: 2, person_name: 'B', group_name: 'G', assigned_on: '2026-03-01' },
+      ],
+      total: 2,
+    };
+  };
+  try {
+    const out = await filter.handler({ sortBy: 'assignedOn', sortOrder: 'lowest', limit: 1 });
+    assert.match(out.reply, /\bA\b/);
+    assert.ok(seen.length > 0, 'the repo was read');
+    for (const args of seen) for (const key of ORDERING_KEYS) assert.ok(!(key in args), `${key} reached findAll`);
+  } finally {
+    repo.findAll = real;
+  }
 });

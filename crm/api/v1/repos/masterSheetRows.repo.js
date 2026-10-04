@@ -670,11 +670,22 @@ async function findAll({
    */
   const endWhens = listValues(endWhen, ['soon', 'this-month', 'future', 'past', 'none']);
   if (endWhens?.length) {
-    params.push(thisMonth);
-    const month = `$${params.length}::date`;
+    // THE MONTH ONLY WHEN A CLAUSE READS IT. "no end date" alone pushed a
+    // parameter no SQL used, and Postgres refused it: "could not determine
+    // data type of parameter $1". Every "which deals have no end date" failed.
+    // 2026-10-04.
+    let month = null;
+    const monthParam = () => {
+      if (!month) {
+        params.push(thisMonth);
+        month = `$${params.length}::date`;
+      }
+      return month;
+    };
     let soonHorizon = null;
     const clauses = endWhens.map((value) => {
       if (value === 'none') return 'end_on IS NULL';
+      monthParam();
       if (value === 'soon') {
         if (!soonHorizon) {
           params.push(ENDING_SOON_MONTHS);
@@ -1557,9 +1568,18 @@ async function revertFieldChange(changeId, { via = 'admin', batchId = null } = {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    /**
+     * A STOP IS TWO COLUMNS, and the table requires both or neither. Putting
+     * back only the date ("undo that" after a resume, or after a stop)
+     * broke that pair and the revert failed every time. 2026-10-03.
+     */
+    const pairSql = change.field === 'stoppedOn'
+      ? `, stopped_reason = CASE WHEN $2::text IS NULL THEN NULL
+                               ELSE COALESCE(stopped_reason, '${STOPPED_REASON.BY_HAND}') END`
+      : '';
     const back = await client.query(
       `UPDATE tb_mastersheet
-          SET ${column} = $2::text::${RESTORABLE_TYPE[change.field]}, updated_at = now()
+          SET ${column} = $2::text::${RESTORABLE_TYPE[change.field]}${pairSql}, updated_at = now()
         WHERE id = $1
       RETURNING ${COLUMNS}`,
       [change.row_id, change.old_value ?? null],

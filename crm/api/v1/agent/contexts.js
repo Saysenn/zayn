@@ -103,6 +103,8 @@ const HELD_UNTIL_NEEDED = Object.freeze([
   'delete_master_sheet_row',
   'rename_company',
   'undo_master_sheet_change',
+  // The general read: its schema rode on every turn for a few questions.
+  'summarize_deals',
 ]);
 
 /** The first round's tools: everything that is not held back. */

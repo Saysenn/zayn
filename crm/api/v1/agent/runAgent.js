@@ -50,7 +50,7 @@ const STATUS_ASK = /^\s*(?:so\s+|and\s+|ok\s+)?(?:are\s+)?(?:we\s+(?:all\s+)?goo
  * "which deals have been stopped" read the live sheet and said none had,
  * and "which companies are in baker" drew deals. 2026-09-30.
  */
-const STOPPED_ASK = /\b(?:which|what|who|show|list|any)\b[^.?!]*\b(?:stopped|archived|in the archive)\b/i;
+const STOPPED_ASK = /\b(?:which|what|who|show|list|any(?:one|body)?)\b[^.?!]*\b(?:stopped|archived|in the archive)\b/i;
 const COMPANIES_IN_ASK = /\b(?:which|what|list|show)\b[^.?!]*\bcompanies\b[^.?!]*\b(?:in|on|under)\s+\w/i;
 // "give me the payment breakdown for corvid this month by company" was
 // answered with nothing drawn in one run of three. A breakdown has one tool,
@@ -81,6 +81,14 @@ const FORCED_ROUTES = [
   [COMPANIES_IN_ASK, 'list_companies'],
   [COMPANIES_LIST_ASK, 'list_companies'],
   [BREAKDOWN_ASK, 'breakdown_master_sheet'],
+  // AGGREGATES go to the general read: averages, and counts PER someone.
+  [/\b(?:average|avg|mean|median)\b|\b(?:more than|at least|over)\s+(?:one|two|three|\d+)\s+deals?\b|\b(?:several|multiple)\s+deals\b|\b(?:per|at each|in each|for each|each)\s+(?:person|company|group|role)\b/i, 'summarize_deals'],
+  [{ test: (said, history = []) => Boolean(changeAgain(said, history)) }, 'update_master_sheet_row'],
+  // A RATE ABOUT A CURRENCY is the exchange rate, not an add on or a fee.
+  [/\b(?:exchange|conversion|fx)\b|\brates?\b[^.?!]*\b(?:dirhams?|aed|pounds?|gbp|sterling|euros?|eur|dollars?|usd)\b|\b(?:dirhams?|aed|pounds?|gbp|euros?|eur|dollars?|usd)\b[^.?!]*\brates?\b/i, 'exchange_rate'],
+  // "lowest monthly in corvid", "smallest deal": ordering DEALS. See sortBy.
+  [{ test: (said) => /\b(?:lowest|smallest|cheapest|highest|biggest|largest|earliest|latest)\b/i.test(said)
+    && /\b(?:deals?|monthly|payable)\b/i.test(said) && !/\b(?:owed|earners?|people)\b/i.test(said) }, 'filter_master_sheet'],
   // "actually cancel the gloria one" had no door at all. See cancel_parked_work.
   [/\b(?:cancel|scrap|call off|drop|don'?t do|do not do)\b[^.?!]*\b(?:scheduled|parked|planned|the \w+(?: \w+)? one|for (?:next month|january|february|march|april|may|june|july|august|september|october|november|december))\b/i, 'cancel_parked_work'],
   // A REVIEW ANSWER for a set: "the two at kryptonia are final this month" was
@@ -93,19 +101,43 @@ const FORCED_ROUTES = [
   // "reopen relia pa" listed the company and reopened nothing. 2026-10-03.
   [/^\s*(?:ok\s+|okay\s+|please\s+|can you\s+)?(?:reopen|re-open|unclose)\b/i, 'bulk_close_companies'],
   // A PERSON'S DETAIL is looked up every time, never recalled. 2026-10-03.
-  [/\b(?:what'?s|what is|whats|give me|tell me|send me|do (?:we|you) have)\b[^.?!]*\b(?:phone(?: number)?|mobile|post ?code|sort code|account number|bank details)\b/i, 'find_and_show_details'],
+  [/\b(?:what'?s|what is|whats|give me|tell me|send me|do (?:we|you) have|have (?:we|you) got|is there|got)\b[^.?!]*\b(?:phone(?: number)?|mobile|post ?code|sort code|account number|bank details|(?:a|the|his|her|their) number)\b/i, 'find_and_show_details'],
   // "Who is owed the most" is a ranking: see rankAskedIn. 2026-10-03.
   [{ test: (said) => Boolean(rankAskedIn(said)) }, 'total_master_sheet'],
 ];
 
 // What a held tool is for, in their words: see contexts.js HELD_UNTIL_NEEDED.
-const ASKS_FOR_HELD = /\b(?:delete|deleting|erase|undo|revert|reverse|take (?:that|it) back|rename|close|closing|all|every|everyone|everybody|bulk|whole|each)\b/i;
+const ASKS_FOR_HELD = /\b(?:delete|deleting|erase|undo|revert|reverse|take (?:that|it) back|rename|close|closing|all|every|everyone|everybody|bulk|whole|each|average|avg|mean|median|per|costing|(?:more than|at least|over|several|multiple)\s+(?:\w+\s+)?deals?)\b/i;
 
 // "the second one", "2nd", "the last one": a whole message picking from a list.
 const ORDINALS = Object.freeze({
   first: 0, '1st': 0, second: 1, '2nd': 1, third: 2, '3rd': 2, fourth: 3, '4th': 3, fifth: 4, '5th': 4, last: -1,
 });
 const ORDINAL_REPLY = /^\s*(?:the\s+)?(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|last)(?:\s+(?:one|deal|row))?\s*[.!]?\s*$/i;
+/**
+ * ===============================
+ * * "ACTUALLY MAKE IT 1000": THE CHANGE JUST MADE, CHANGED AGAIN
+ * ===============================
+ * Live 2026-10-04 (held-out wording): after "make silas moor's monthly 950"
+ * was done, "actually make it 1000" looked Silas up and changed nothing. The
+ * change she just reported is in her last answer, in the fixed words the
+ * update tool builds ("X at Y in G updated. Monthly amount 950, ..."), so
+ * "it" is read off that and the same deal and field get the new value.
+ */
+const CHANGE_AGAIN = /^\s*(?:(?:actually|no|nah|sorry|wait|oh|hmm|ok|okay)[,!.\s]+)*(?:make|set|change|put|bump|drop)\s+(?:it|that|this|them)\s+(?:to\s+|at\s+|up to\s+|down to\s+)?(?:£|gbp\s*|aed\s*)?(\d[\d,]*(?:\.\d+)?)\s*(?:instead|then|please)?[.!]*\s*$/i;
+const UPDATED_FIELD = { 'Monthly amount': 'monthlyAmount', 'Payable amount': 'payableAmount', 'Payable days': 'payableDays', 'Fee %': 'feePercent', 'Add on %': 'addonPercent' };
+function changeAgain(said, history) {
+  const m = CHANGE_AGAIN.exec(String(said ?? ''));
+  if (!m) return null;
+  const last = lastAssistantAnswer(history);
+  const w = /^(.+?) at (.+?)(?: in ([^.]+?))? updated\. (Monthly amount|Payable amount|Payable days|Fee %|Add on %)\b/.exec(String(last ?? ''));
+  if (!w) return null;
+  return {
+    targetPerson: w[1], targetCompany: w[2], ...(w[3] ? { targetGroup: w[3] } : {}),
+    field: UPDATED_FIELD[w[4]], value: Number(m[1].replace(/,/g, '')),
+  };
+}
+const ORDINAL_IN_SENTENCE = /\bthe\s+(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|last)\s+(?:one|person|deal|row|guy|lady)\b/i;
 
 // "undo that", "revert it", "take that back": the whole message asks for the undo.
 const UNDO_ASKED = /^\s*(?:ok\s+|please\s+|can you\s+)?(?:undo|revert|reverse|take (?:that|it) back|put (?:that|it) back)\b(?!.*\b(?:and|then)\b)/i;
@@ -1016,6 +1048,134 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
    * group name moves to group before anything is refused. 2026-10-03.
    */
   const props = tool.parameters?.properties ?? {};
+  /**
+   * ===============================
+   * * HER ARGUMENTS, TIDIED THE SAME WAY FOR EVERY TOOL
+   * ===============================
+   * Measured on held-out wording 2026-10-03, each one a whole failed turn:
+   *  - a possessive kept on a name: "felix's" was no one on the sheet;
+   *  - a yes/no sent as a one item list: `paid: [true]` crashed the query
+   *    ("invalid input syntax for type boolean") and she looped on it;
+   *  - "paid in aed" read as the PAID switch, not the currency;
+   *  - a group name sent as the free text search: "total for corvid" was
+   *    "matching corvid is owed nothing".
+   */
+  const NAME_KEYS = ['person', 'name', 'q', 'targetPerson'];
+  for (const key of NAME_KEYS) {
+    if (typeof args[key] === 'string') args[key] = args[key].replace(/['’]s\b/gi, '').trim();
+  }
+  if (Array.isArray(args.people)) args.people = args.people.map((p) => (typeof p === 'string' ? p.replace(/['’]s\b/gi, '').trim() : p));
+  for (const [key, spec] of Object.entries(props)) {
+    if (spec?.type === 'boolean' && Array.isArray(args[key])) args[key] = args[key].length === 1 ? Boolean(args[key][0]) : undefined;
+  }
+  if (args.paid !== undefined && /\bpaid\s+(?:in|by|via|with|through)\b/i.test(lastSaid(history))
+    && !/\b(?:marked|been|already|is|are|was|were|not)\s+paid\b/i.test(lastSaid(history))) {
+    const { paid: _paid, ...rest } = args;
+    args = rest;
+  }
+  // A SORT SENT TO THE TOTAL IS ITS RANK: "lowest paid at ironleaf" came to
+  // total_master_sheet with sortBy/sortOrder, which it does not take, and
+  // was refused. Lowest is a negative rank, the limit its size. 2026-10-04.
+  if (props.rank && !props.sortBy && (args.sortBy !== undefined || args.sortOrder !== undefined)) {
+    const { sortBy: _s, sortOrder, limit, ...rest } = args;
+    const size = Math.abs(Number(rest.rank) || Number(limit) || 1);
+    args = { ...rest, rank: (sortOrder === 'lowest' ? -1 : 1) * size };
+  }
+  // AN OPTION SENT INSIDE `set`: {set: {raiseMonthlyPercent: 10}} was refused
+  // as "not a column" and the raise never ran. A key the tool takes at the
+  // top level is moved there. 2026-10-04.
+  if (args.set && typeof args.set === 'object' && !Array.isArray(args.set)) {
+    const lifted = Object.keys(args.set).filter((k) => props[k] && k !== 'set' && args[k] === undefined);
+    if (lifted.length) {
+      const set = { ...args.set };
+      const top = {};
+      for (const k of lifted) { top[k] = set[k]; delete set[k]; }
+      args = { ...args, ...top, ...(Object.keys(set).length ? { set } : {}) };
+      if (!Object.keys(set).length) delete args.set;
+    }
+  }
+  // "RAISE ... BY 10%" IS NEVER A NEW MONTHLY OF 0.1 OR 10. A percentage
+  // said with "by" and no "to <amount>" turns a monthly SET into the raise
+  // (or the cut). One run wrote Karin's monthly as 0.1. 2026-10-04.
+  // AND A LIST OF NAMES WITH NO FIGURES: perPerson [{person: "Baker Jones"},
+  // ...] and no percentage was refused for "no new amounts".
+  const emptyPerPerson = Array.isArray(args.perPerson) && args.perPerson.length > 0
+    && args.perPerson.every((p) => p && typeof p === 'object' && Object.keys(p).every((k) => ['person', 'name', 'company', 'id'].includes(k)));
+  const setsMonthly = args.set && typeof args.set === 'object' && args.set.monthlyAmount != null;
+  if (props.raiseMonthlyPercent && args.raiseMonthlyPercent == null && (setsMonthly || emptyPerPerson)) {
+    const said = String(lastSaid(history) ?? '');
+    const by = /\bby\s+(\d+(?:\.\d+)?)\s*(?:%|percent|per ?cent)/i.exec(said);
+    const aboutMonthly = !/\b(?:add[- ]?on|fee)\b/i.test(said);
+    if (by && aboutMonthly && !/\bto\s+(?:£|gbp\s*|aed\s*)?\d{2,}/i.test(said)) {
+      const cut = /\b(?:lower|reduce|cut|drop|decrease|knock|take)\b/i.test(said);
+      args = { ...args, raiseMonthlyPercent: (cut ? -1 : 1) * Number(by[1]) };
+      if (setsMonthly) {
+        const { monthlyAmount: _m, ...set } = args.set;
+        if (Object.keys(set).length) args.set = set; else delete args.set;
+      }
+      if (emptyPerPerson) delete args.perPerson;
+    }
+  }
+  // "WHO EARNS LESS THAN 1000" IS AN AMOUNT, not payable-versus-monthly:
+  // the comparison flag came back alone and answered "owed nothing". Only
+  // when the sentence names a figure and never compares to "their monthly".
+  // 2026-10-04.
+  if (props.payableVsMonthly && args.payableVsMonthly) {
+    const said = String(lastSaid(history) ?? '');
+    const bound = /\b(less than|under|below|fewer than|more than|over|above|greater than|at least|at most)\s+(?:£|gbp\s*|aed\s*)?(\d[\d,]*(?:\.\d+)?)\b/i.exec(said);
+    if (bound && !/\btheir monthly\b|\bthan (?:the |their )?monthly\b/i.test(said)) {
+      const n = Number(bound[2].replace(/,/g, ''));
+      const word = bound[1].toLowerCase();
+      const { payableVsMonthly: _pvm, ...rest } = args;
+      const low = /less|under|below|fewer|at most/.test(word);
+      const strict = !/at (?:least|most)/.test(word);
+      args = rest.amountMin != null || rest.amountMax != null ? rest : {
+        ...rest,
+        amountField: rest.amountField ?? 'monthlyAmount',
+        ...(low ? { amountMax: strict ? n - 0.01 : n } : { amountMin: strict ? n + 0.01 : n }),
+      };
+    }
+  }
+  // GROUPS SENT AS PEOPLE: "compare baker and corvid this month" came as
+  // people ["baker","corvid"] and was answered person by person. 2026-10-04.
+  if (Array.isArray(args.people) && args.people.length > 0 && (props.groups || props.group)) {
+    const known = await knownGroupNames();
+    const asGroups = args.people.map((p) => known.find((g) => String(g).toLowerCase() === String(p).trim().toLowerCase()));
+    if (asGroups.every(Boolean)) {
+      const { people: _p, ...rest } = args;
+      args = props.groups && asGroups.length > 1 ? { ...rest, groups: asGroups } : { ...rest, group: asGroups[0] };
+    }
+  }
+  if (props.group && !args.group && typeof args.q === 'string') {
+    const asGroup = (await knownGroupNames()).find((g) => String(g).toLowerCase() === args.q.trim().toLowerCase());
+    if (asGroup) {
+      const { q: _q, ...rest } = args;
+      args = { ...rest, group: asGroup };
+    }
+  }
+  /**
+   * AN AMOUNT SENT AS A RATE. "knock 200 off baker jones's monthly" came as
+   * addonPercentDelta -200 and was refused as a rate nobody named. With no
+   * add on, fee or percent in their words, a delta is on the amount named.
+   */
+  // A ZERO DELTA IS NO CHANGE: sent beside a real add it once overwrote the
+  // -200 with 0 and the "yes" changed nothing. 2026-10-03.
+  for (const key of ['addonPercentDelta', 'feePercentDelta']) {
+    if (args[key] != null && Number(args[key]) === 0) {
+      const { [key]: _z, ...rest } = args;
+      args = rest;
+    }
+  }
+  if (props.add && (args.addonPercentDelta != null || args.feePercentDelta != null)) {
+    const said = lastSaid(history);
+    if (!/\badd[\s-]?ons?\b|\bfees?\b|%|percent/i.test(said)) {
+      const field = /\bpayable\b/i.test(said) ? 'payableAmount' : /\bdays?\b/i.test(said) ? 'payableDays' : 'monthlyAmount';
+      const n = Number(args.addonPercentDelta ?? args.feePercentDelta);
+      const { addonPercentDelta: _a, feePercentDelta: _f, ...rest } = args;
+      // What she already put in `add` stands: this only fills a gap.
+      args = { ...rest, add: { [field]: n, ...(rest.add ?? {}) } };
+    }
+  }
   if (props.group && !args.group) {
     for (const key of ['q', 'company', 'person']) {
       if (typeof args[key] !== 'string' || props[key]) continue;
@@ -1039,8 +1199,17 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
       try {
         // eslint-disable-next-line global-require
         const names = await require('../repos/companies.repo').names();
-        const hit = (names ?? []).map((n) => n?.name ?? n)
-          .find((n) => String(n).trim().toLowerCase() === args.group.trim().toLowerCase());
+        const want = args.group.trim().toLowerCase();
+        let hit = (names ?? []).map((n) => n?.name ?? n)
+          .find((n) => String(n).trim().toLowerCase() === want);
+        // A COMPANY ONLY THE SHEET NAMES: "lowest paid at ironleaf" came as
+        // group IRONLEAF and found nothing, because Ironleaf is on deals but
+        // not in the companies list. 2026-10-04.
+        if (!hit) {
+          // eslint-disable-next-line global-require
+          const rows = (await require('../repos/masterSheetRows.repo').findAll({ q: args.group, pageSize: 50 }))?.rows ?? [];
+          hit = rows.map((r) => r.company).find((c) => String(c ?? '').trim().toLowerCase() === want);
+        }
         if (hit) {
           const { group: _g, ...rest } = args;
           args = { ...rest, company: hit };
@@ -1120,15 +1289,23 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
      * role ("Mid 1") and found nobody. The list she drew is in the history
      * with its ids in order, so the ordinal IS a row id. 2026-09-29.
      */
-    const ordinal = ORDINAL_REPLY.exec(args.said);
-    if (ordinal && tool.parameters?.properties?.id) {
+    // AND INSIDE A SENTENCE: "how much does the first one get?" after a list
+    // of OTTER went looking for a made-up name. 2026-10-04.
+    const ordinal = ORDINAL_REPLY.exec(args.said) ?? ORDINAL_IN_SENTENCE.exec(args.said);
+    const toolProps = tool.parameters?.properties ?? {};
+    if (ordinal && (toolProps.id || toolProps.person || toolProps.name)) {
       const shown = [...history].reverse().find((m) => m.role === 'assistant' && m.list?.rows?.length);
       const rows = shown?.list?.rows ?? [];
       const at = ORDINALS[ordinal[1].toLowerCase()];
       const row = at === -1 ? rows[rows.length - 1] : rows[at];
-      if (row?.id != null) {
+      if (row?.id != null && toolProps.id) {
         args.id = row.id;
         for (const k of ['targetPerson', 'targetGroup', 'targetCompany', 'targetRole']) delete args[k];
+      } else if (row?.name) {
+        const who = String(row.name).split(' · ')[0].trim();
+        if (toolProps.person) args.person = who;
+        else if (toolProps.name) args.name = who;
+        delete args.people;
       }
     }
 
@@ -1784,6 +1961,16 @@ async function runAgentTurn(history, contextName, onEvent) {
   }, 'diane: turn opened');
 
   const messages = [{ role: 'system', content: context.prompt }, ...trimHistory(history)];
+  const again = changeAgain(lastSaid(history), history);
+  if (again) {
+    messages.push({
+      role: 'system',
+      content: `THEY ARE CHANGING THE CHANGE YOU JUST MADE. Call update_master_sheet_row with targetPerson `
+        + `"${again.targetPerson}", targetCompany "${again.targetCompany}"`
+        + `${again.targetGroup ? `, targetGroup "${again.targetGroup}"` : ''} and ${again.field} ${again.value}. `
+        + 'Do not look anybody up first.',
+    });
+  }
   const changedRowIds = new Set();
   const shownCardIds = new Set();
   // Lists drawn THIS turn, so two calls returning the same rows cannot

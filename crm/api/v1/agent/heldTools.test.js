@@ -44,7 +44,11 @@ test('AND EVERY ONE OF THEM IS A BULK ACT OR A DESTRUCTIVE ONE', () => {
   for (const name of HELD_UNTIL_NEEDED) {
     assert.match(
       name,
-      /^bulk_|^delete_|^rename_|^undo_/,
+      // summarize_deals: a READ, held for its size (about 1,300 tokens a
+      // turn) and handed over by its own words (average, per, each, "more
+      // than one deal"); a plain count it would miss is the filter's anyway.
+      // 2026-10-04.
+      /^bulk_|^delete_|^rename_|^undo_|^summarize_deals$/,
       `${name} is neither bulk nor destructive, so holding it back only costs a round`,
     );
   }

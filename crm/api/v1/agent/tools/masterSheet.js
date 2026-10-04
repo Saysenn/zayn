@@ -1041,7 +1041,7 @@ function notableOf(row) {
  * the answer. A question about one field is answered with that field.
  */
 const ASKED_FIELDS = [
-  [/\b(?:phone|mobile|number to call|contact number|phone number)\b/i, 'phone', 'phone number'],
+  [/\b(?:phone|mobile|number to call|contact number|phone number|(?:a|the|his|her|their) number for|(?:his|her|their) number)\b/i, 'phone', 'phone number'],
   [/\bpost ?code\b/i, 'postcode', 'postcode'],
   [/\b(?:location|where (?:is|are|does) \w+ (?:based|live))\b/i, 'location', 'location'],
   [/\b(?:account number|bank account)\b/i, 'account_number', 'account number'],
@@ -1049,6 +1049,11 @@ const ASKED_FIELDS = [
   [/\bbank details\b/i, 'bank_details', 'bank details'],
   [/\bpayment start\b/i, 'payment_start_on', 'payment start'],
   [/\bend date\b/i, 'end_on', 'end date'],
+  // "what group is theo brandt in" was answered "the group name is not
+  // specified" with the row in hand. 2026-10-03.
+  [/\b(?:what|which) groups?\b/i, 'group_name', 'group'],
+  [/\b(?:what|which) company\b|\bwhere does \w+(?: \w+)? work\b/i, 'company', 'company'],
+  [/\b(?:what(?:'s| is)? (?:\w+(?: \w+)?'s )?role|what (?:does|do) \w+(?: \w+)? do|what (?:\w+ ){1,3}does(?! \w+ (?:get|earn|owe|make|cost)))\b/i, 'role_label', 'role'],
 ];
 /**
  * ===============================
@@ -1066,7 +1071,8 @@ const FOLLOW_UP_WORDS = /^\s*(?:and|what about|how about|also)\b/i;
 // In words, when no card is drawn: each deal on one line.
 function dealsInWords(rows) {
   const names = [...new Set(rows.map((r) => displayPersonName(r.person_name)).filter(Boolean))];
-  const line = (r) => `${r.company || 'no company'} in ${r.group_name || 'no group'}: `
+  // THE ROLE TOO: "remind me what karin vole does" got the money and not the job.
+  const line = (r) => `${r.role_label ? `${r.role_label} at ` : ''}${r.company || 'no company'} in ${r.group_name || 'no group'}: `
     + `${r.currency || 'GBP'} ${Number(r.monthly_amount ?? 0).toLocaleString('en-GB')} a month`
     + `${r.stopped_on ? ', stopped' : ''}`;
   const head = names.length === 1
@@ -1190,6 +1196,23 @@ const findAndShow = {
     required: ['name'],
   },
   async handler(args) {
+    /**
+     * "IS MARA QUILL IN CORVID?" IS A YES OR NO. Held-out wording 2026-10-04:
+     * narrowed to CORVID she was not there, and the nearest name IN CORVID
+     * (Silas Moor) was offered as "a close guess". A person who exists, just
+     * not where they asked, is answered with where they are.
+     */
+    const askedGroup = args.groupName ?? args.company;
+    if (args.name && askedGroup) {
+      const exact = ((await repo.findAll({ q: args.name, pageSize: 200 }).catch(() => null))?.rows ?? [])
+        .filter((r) => !r.stopped_on && fold(r.person_name) === fold(args.name));
+      const inside = exact.filter((r) => fold(r.group_name) === fold(askedGroup) || fold(r.company) === fold(askedGroup));
+      if (exact.length > 0 && inside.length === 0) {
+        const where = [...new Set(exact.map((r) => `${r.group_name}${r.company ? ` (${r.company})` : ''}`))].join(', ');
+        const reply = `No, ${exact[0].person_name} is not in ${askedGroup}. ${exact[0].person_name} is in ${where}.`;
+        return { summary: `${reply} Say exactly that.`, reply, computedReply: true, rows: exact.map(summarizeRow) };
+      }
+    }
     // The model may pass only the longest of several names. Resolve the
     // current sentence against the live sheet before accepting that lookup.
     if (/\b(?:and|plus|both)\b|[,&]/i.test(String(args.said ?? ''))) {
@@ -2558,6 +2581,29 @@ const FILTER_PARAMS = {
 // `person` and the rest never reach a filter check meant for rows.
 const FILTER_KEYS = Object.keys(FILTER_PARAMS);
 
+/**
+ * THE SAME FILTERS, SAID ONCE. FILTER_PARAMS is spread into three tools and
+ * its descriptions carry the incident that made each one, about 8.5 KB a
+ * copy, sent on every turn. The filter keeps them in full; the total and
+ * the bulk edit get each description's first sentence, with every enum and
+ * type intact, so what she may send is unchanged. 2026-10-03.
+ */
+const shortDescription = (text) => {
+  const t = String(text ?? '');
+  const first = /^[\s\S]*?[.!?](?=\s|$)/.exec(t)?.[0] ?? t;
+  return first.length > 160 ? `${first.slice(0, 157).trimEnd()}...` : first;
+};
+const shorten = (spec) => {
+  if (!spec || typeof spec !== 'object') return spec;
+  const out = { ...spec };
+  if (out.description) out.description = shortDescription(out.description);
+  if (out.items) out.items = shorten(out.items);
+  if (Array.isArray(out.anyOf)) out.anyOf = out.anyOf.map(shorten);
+  if (Array.isArray(out.oneOf)) out.oneOf = out.oneOf.map(shorten);
+  return out;
+};
+const FILTER_PARAMS_SHORT = Object.fromEntries(Object.entries(FILTER_PARAMS).map(([k, v]) => [k, shorten(v)]));
+
 function filtersIn(args) {
   const out = {};
   for (const k of FILTER_KEYS) if (args?.[k] !== undefined && args[k] !== null) out[k] = args[k];
@@ -2689,6 +2735,124 @@ async function groupOutOfOwnName(args) {
   return rest;
 }
 
+/**
+ * ***************************************************
+ * * ONE GENERAL READ: COUNT, SUM, AVERAGE, MIN, MAX, BY ANYTHING
+ * ***************************************************
+ * Held-out wording, 2026-10-04: "what's the average monthly in baker?" and
+ * "how many people have more than one deal?" had no tool at all, so she
+ * listed rows or ran the sheet check. Patching each phrasing did not carry
+ * to the next one (a fresh set scored the same before and after), so this
+ * is the general door: the same filters, then one measure, optionally per
+ * person / company / group / role / currency / method, with a threshold.
+ *
+ * COMPUTED HERE. Money is never added across currencies: each currency is
+ * its own figure, exactly as every total in this file does it.
+ */
+const SUMMARY_FIELD = { monthlyAmount: 'monthly_amount', payableAmount: 'payable_amount', payableDays: 'payable_days' };
+const SUMMARY_BY = {
+  person: (r) => r.person_name, company: (r) => r.company, group: (r) => r.group_name,
+  role: (r) => r.role_label, currency: (r) => r.currency || 'GBP', paymentMethod: (r) => r.payment_method,
+};
+const summarizeDeals = {
+  name: 'summarize_deals',
+  description:
+    'An AVERAGE, or a figure PER person / company / group / role / currency / method: "average monthly '
+    + 'in X", "how many people have more than one deal" (count by person, atLeast 2), "people at each '
+    + 'company", "what each group costs" (sum by group). NOT for a plain count of deals, a list, or who '
+    + 'is above/below an amount: those are filter_master_sheet. Same filters as filter_master_sheet. '
+    + 'Answers are computed; money is never added across currencies.',
+  parameters: {
+    type: 'object',
+    properties: {
+      group: { type: 'string', description: 'One group to look inside.' },
+      ...FILTER_PARAMS_SHORT,
+      measure: { type: 'string', enum: ['count', 'sum', 'average', 'min', 'max'], description: 'What to compute. count counts deals (or people, with countPeople).' },
+      field: { type: 'string', enum: Object.keys(SUMMARY_FIELD), description: 'The amount measured, for sum/average/min/max. Defaults to monthlyAmount.' },
+      countPeople: { type: 'boolean', description: 'With count: count distinct people instead of deals.' },
+      by: { type: 'string', enum: Object.keys(SUMMARY_BY), description: 'Per what, if anything.' },
+      atLeast: { type: 'number', description: 'Keep only the groups whose result is at least this ("more than one deal" is count by person, atLeast 2).' },
+      atMost: { type: 'number', description: 'Keep only the groups whose result is at most this.' },
+    },
+    required: ['measure'],
+  },
+  async handler(args = {}) {
+    // "MORE THAN ONE DEAL" IS PER PERSON, whatever was sent: it came as a
+    // count of people with no grouping, and was answered "12 people".
+    const perDeals = /\b(?:more than|over|at least|several|multiple)\s+(?:(one|two|three|four|five|\d+)\s+)?deals?\b/i.exec(String(args.said ?? ''));
+    if (perDeals && !args.by) {
+      const words = { one: 1, two: 2, three: 3, four: 4, five: 5 };
+      const n = perDeals[1] ? (words[perDeals[1].toLowerCase()] ?? Number(perDeals[1])) : 1;
+      const exact = /\bat least\b/i.test(perDeals[0]);
+      args = { ...args, measure: 'count', countPeople: false, by: 'person', atLeast: exact ? n : n + 1 };
+    }
+    // A PLAIN COUNT OR A THRESHOLD LIST IS THE FILTER'S, which words it the
+    // way every count reads ("14 deals", "5 deals ... held by 4 people").
+    if (!args.by && (args.measure ?? 'count') === 'count') {
+      const { measure: _m, field: _f, countPeople: _c, by: _b, atLeast: _l, atMost: _u, ...rest } = args;
+      return filterRows.handler(rest);
+    }
+    const measure = args.measure ?? 'count';
+    const field = SUMMARY_FIELD[args.field] ? args.field : 'monthlyAmount';
+    const column = SUMMARY_FIELD[field];
+    const rows = ((await repo.findAll({ ...filtersIn(args), ...(args.group ? { group: args.group } : {}), pageSize: 5000 }).catch(() => null))?.rows ?? [])
+      .filter((r) => !r.stopped_on);
+    const keyOf = SUMMARY_BY[args.by] ?? (() => 'all');
+    const buckets = new Map();
+    for (const r of rows) {
+      const k = keyOf(r) || '(none)';
+      if (!buckets.has(k)) buckets.set(k, []);
+      buckets.get(k).push(r);
+    }
+    const money = (field === 'monthlyAmount' || field === 'payableAmount') && measure !== 'count';
+    const fmt = (n) => Number(Math.round(n * 100) / 100).toLocaleString('en-GB', { maximumFractionDigits: 2 });
+    // One result per bucket: a number for count/days, per currency for money.
+    const resultOf = (list) => {
+      // Per person, "people" is always one: what is counted there is deals.
+      const people = args.countPeople && args.by !== 'person';
+      if (measure === 'count') return { n: people ? new Set(list.map((r) => r.person_id ?? r.person_name)).size : list.length };
+      const byCur = new Map();
+      for (const r of list) {
+        const cur = money ? (r.currency || 'GBP') : '';
+        if (!byCur.has(cur)) byCur.set(cur, []);
+        byCur.get(cur).push(Number(r[column]) || 0);
+      }
+      const per = [...byCur].map(([cur, vals]) => {
+        const v = measure === 'sum' ? vals.reduce((a, b) => a + b, 0)
+          : measure === 'average' ? vals.reduce((a, b) => a + b, 0) / vals.length
+            : measure === 'min' ? Math.min(...vals) : Math.max(...vals);
+        return { cur, v };
+      });
+      return { per, n: per.length === 1 ? per[0].v : null };
+    };
+    let results = [...buckets].map(([k, list]) => ({ k, deals: list.length, ...resultOf(list) }));
+    if (args.atLeast != null) results = results.filter((x) => x.n != null && x.n >= Number(args.atLeast));
+    if (args.atMost != null) results = results.filter((x) => x.n != null && x.n <= Number(args.atMost));
+    results.sort((a, b) => (b.n ?? 0) - (a.n ?? 0));
+    const label = measure === 'count' ? (args.countPeople && args.by !== 'person' ? 'people' : 'deals')
+      : `${measure} ${field === 'monthlyAmount' ? 'monthly' : field === 'payableAmount' ? 'payable' : 'payable days'}`;
+    const shown = (x) => (x.per
+      ? x.per.map(({ cur, v }) => `${cur ? `${cur} ` : ''}${fmt(v)}`).join(' and ')
+      : `${x.n}`);
+    const where = [args.group, ...[].concat(args.company ?? [])].filter(Boolean).join(', ');
+    let reply;
+    if (rows.length === 0) reply = `No live deals${where ? ` in ${where}` : ''} match.`;
+    else if (!args.by && measure === 'count') reply = `${shown(results[0])} ${label}${where ? ` in ${where}` : ''}.`;
+    else if (!args.by) reply = `The ${label}${where ? ` in ${where}` : ''} is ${shown(results[0])}, over ${rows.length} live deals.`;
+    else if (results.length === 0) {
+      const bound = args.atLeast != null ? `at least ${args.atLeast}` : `at most ${args.atMost}`;
+      reply = `No ${args.by}${where ? ` in ${where}` : ''} has ${measure === 'count' ? `${bound} ${label}` : `a ${label} of ${bound}`}.`;
+    }
+    else {
+      const top = results.slice(0, 12).map((x) => `${x.k} ${shown(x)}`).join('; ');
+      const plural = { person: 'people', company: 'companies', group: 'groups', role: 'roles', currency: 'currencies', paymentMethod: 'payment methods' };
+      reply = `${results.length} ${results.length === 1 ? args.by : plural[args.by]}`
+        + `${where ? ` in ${where}` : ''}, ${label}: ${top}${results.length > 12 ? '; and more' : ''}.`;
+    }
+    return { summary: `${reply}\n\nCOMPUTED from the live rows. Say it as written.`, reply, computedReply: true };
+  },
+};
+
 const filterRows = {
   name: 'filter_master_sheet',
   description:
@@ -2705,10 +2869,128 @@ const filterRows = {
     properties: {
       group: { type: 'string', description: 'One group, e.g. ALPHA. Ask for this before searching the whole sheet.' },
       ...FILTER_PARAMS,
+      sortBy: {
+        type: 'string',
+        enum: ['monthlyAmount', 'payableAmount', 'payableDays', 'assignedOn', 'paymentStartOn', 'endOn'],
+        description: 'For "lowest", "highest", "smallest", "biggest", "earliest", "latest" about DEALS: '
+          + 'the field to order the matching deals by. Amounts compare in USD across currencies.',
+      },
+      sortOrder: { type: 'string', enum: ['lowest', 'highest'], description: 'lowest / earliest first, or highest / latest first.' },
+      limit: { type: 'number', description: 'How many to name after sorting: "the lowest" is 1, "top 3" is 3.' },
     },
   },
   async handler(args) {
     args = await groupOutOfOwnName(args);
+    /**
+     * ===============================
+     * * LOWEST, HIGHEST, SMALLEST, BIGGEST: ORDERED IN CODE
+     * ===============================
+     * Held-out wording 2026-10-03: "whats the lowest monthly in corvid" got
+     * "5 deals in CORVID", and "who's got the smallest deal" got the people
+     * owed the MOST. Nothing could order deals. The matching rows are read
+     * whole, put in USD where the field is money, sorted and cut here.
+     */
+    const heardSort = String(args.said ?? '');
+    if (!args.sortBy) {
+      const sup = /\b(lowest|smallest|cheapest|least|minimum|highest|biggest|largest|most expensive|maximum|top|bottom|earliest|latest|newest|oldest)\b/i.exec(heardSort);
+      if (sup && /\b(?:deals?|monthly|payable|amount|salary|pay(?:ing)?|rate|appointed|appointment|start(?:s|ed)?|end(?:s|ing)?)\b/i.test(heardSort)
+        && !/\b(?:owed|earners?|people|persons?)\b/i.test(heardSort)) {
+        const word = sup[1].toLowerCase();
+        args = {
+          ...args,
+          sortBy: /\bpayable\b/i.test(heardSort) ? 'payableAmount'
+            : /\bappoint/i.test(heardSort) || /\b(?:newest|oldest)\b/i.test(word) ? 'assignedOn'
+              : /\bstart/i.test(heardSort) ? 'paymentStartOn' : /\bend/i.test(heardSort) ? 'endOn' : 'monthlyAmount',
+          sortOrder: /lowest|smallest|cheapest|least|minimum|bottom|earliest|oldest/.test(word) ? 'lowest' : 'highest',
+        };
+      }
+    }
+    if (args.sortBy) {
+      const { sortBy, sortOrder = 'highest', limit, ...rest } = args;
+      const n = Math.max(1, Math.min(20, Number(limit) || (/\b(?:top|bottom)\s*(\d+)/i.exec(heardSort)?.[1] ? Number(/\b(?:top|bottom)\s*(\d+)/i.exec(heardSort)[1]) : 1)));
+      const all = ((await repo.findAll({ ...filtersIn(rest), ...(rest.group ? { group: rest.group } : {}), pageSize: 2000 }).catch(() => null))?.rows ?? []).filter((r) => !r.stopped_on);
+      const column = { monthlyAmount: 'monthly_amount', payableAmount: 'payable_amount', payableDays: 'payable_days', assignedOn: 'assigned_on', paymentStartOn: 'payment_start_on', endOn: 'end_on' }[sortBy];
+      const money = sortBy === 'monthlyAmount' || sortBy === 'payableAmount';
+      const fxNow = money ? await fxRates.usdPerGbp() : null;
+      const keyOf = (r) => {
+        const v = r[column];
+        if (v == null || v === '') return null;
+        if (money) return totalInUsd([[r.currency || 'GBP', Number(v)]], fxNow.usdPerGbp, fxNow.perUsd).usd;
+        return sortBy === 'payableDays' ? Number(v) : String(v).slice(0, 10);
+      };
+      const keyed = all.map((r) => ({ r, k: keyOf(r) })).filter((x) => x.k != null);
+      keyed.sort((a, b) => (a.k < b.k ? -1 : a.k > b.k ? 1 : 0) * (sortOrder === 'lowest' ? 1 : -1));
+      let cut = keyed.slice(0, n);
+      // A tie at the cut is named, never dropped.
+      while (cut.length < keyed.length && cut.length < 30 && keyed[cut.length].k === cut[cut.length - 1]?.k) cut = keyed.slice(0, cut.length + 1);
+      const shown = (r) => (money ? `${r.currency || 'GBP'} ${Number(r[column]).toLocaleString('en-GB')}`
+        : sortBy === 'payableDays' ? `${r[column]} days` : dateInWords(r[column]));
+      const label = { monthlyAmount: 'monthly', payableAmount: 'payable this month', payableDays: 'payable days', assignedOn: 'appointment', paymentStartOn: 'payment start', endOn: 'end date' }[sortBy];
+      const where = [rest.group, ...[].concat(rest.company ?? [])].filter(Boolean).join(', ');
+      const reply = cut.length === 0 ? `No deals${where ? ` in ${where}` : ''} have a ${label} to order by.`
+        : `${sortOrder === 'lowest' ? 'Lowest' : 'Highest'} ${label}${where ? ` in ${where}` : ''}: `
+          + `${cut.map(({ r }) => `${r.person_name} (${[r.company, r.group_name].filter(Boolean).join(' in ')}) ${shown(r)}`).join('; ')}.`;
+      return { summary: `${reply}\n\nORDERED in code${money ? ', compared in USD' : ''}. Say it as written.`, reply, computedReply: true, rows: cut.map(({ r }) => summarizeRow(r)) };
+    }
+    /**
+     * ===============================
+     * * COUNTS AND RANKINGS OF THINGS THAT ARE NOT DEALS
+     * ===============================
+     * Held-out wording, 2026-10-03: "how many companies do we deal with?"
+     * and "which company has the most deals?" were both answered "14 deals
+     * across every group". The rows were right; the noun was not. Counted
+     * here off the same live rows, by the noun in their question.
+     */
+    const heardNoun = String(args.said ?? '');
+    const liveRowsFor = async () => ((await repo.findAll({ ...filtersIn(args), ...(args.group ? { group: args.group } : {}), pageSize: 2000 }).catch(() => null))?.rows ?? [])
+      .filter((r) => !r.stopped_on);
+    const NOUN = { compan: 'company', group: 'group_name', people: 'person_name', person: 'person_name' };
+    const rankNoun = /\bwhich\s+(compan(?:y|ies)|groups?|person|people)\b[^.?!]*\b(most|fewest|least|biggest|smallest)\b[^.?!]*\b(deals?|people)\b/i.exec(heardNoun);
+    if (rankNoun) {
+      const by = NOUN[Object.keys(NOUN).find((k) => rankNoun[1].toLowerCase().startsWith(k))];
+      const counting = rankNoun[3].toLowerCase().startsWith('deal') ? 'deals' : 'people';
+      const tally = new Map();
+      for (const r of await liveRowsFor()) {
+        const key = r[by] || '(none)';
+        if (!tally.has(key)) tally.set(key, { deals: 0, people: new Set() });
+        tally.get(key).deals += 1;
+        tally.get(key).people.add(r.person_id ?? r.person_name);
+      }
+      const most = !/fewest|least|smallest/i.test(rankNoun[2]);
+      const ranked = [...tally].map(([k, v]) => [k, counting === 'deals' ? v.deals : v.people.size])
+        .sort((a, b) => (most ? b[1] - a[1] : a[1] - b[1]));
+      const top = ranked.filter((r) => r[1] === ranked[0]?.[1]);
+      const reply = ranked.length === 0 ? 'There are no live deals.'
+        : `${top.map((t) => t[0]).join(' and ')} ${top.length > 1 ? 'have' : 'has'} the ${most ? 'most' : 'fewest'} ${counting}: ${top[0][1]}. `
+          + `Next: ${ranked.slice(top.length, top.length + 3).map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}.`;
+      return { summary: `${reply}\n\nCOUNTED in code over the live rows. Say it as written.`, reply, computedReply: true };
+    }
+    // "list the groups": the groups themselves, with how many live deals each.
+    if (/\b(?:list|show|name|what are|which are)\b[^.?!]*\bgroups\b/i.test(heardNoun) && !/\bin\s+(?:the\s+)?groups?\b/i.test(heardNoun)) {
+      const tally = new Map();
+      for (const r of await liveRowsFor()) if (r.group_name) tally.set(r.group_name, (tally.get(r.group_name) ?? 0) + 1);
+      const reply = tally.size === 0 ? 'There are no groups with live deals.'
+        : `${tally.size} groups: ${[...tally].sort((a, b) => a[0].localeCompare(b[0])).map(([g, n]) => `${g} (${n} ${n === 1 ? 'deal' : 'deals'})`).join(', ')}.`;
+      return { summary: `${reply}\n\nCOUNTED in code. Say it as written.`, reply, computedReply: true };
+    }
+    const countNoun = /\bhow many\s+(?:different\s+)?(compan(?:y|ies)|groups?|people|persons?)\b/i.exec(heardNoun);
+    // "deal WITH" is a verb: "how many companies do we deal with" is still companies.
+    if (countNoun && !/\bdeals\b|\bdeal\b(?!\s+with)/i.test(heardNoun.replace(countNoun[0], ''))) {
+      const by = NOUN[Object.keys(NOUN).find((k) => countNoun[1].toLowerCase().startsWith(k))];
+      const live = await liveRowsFor();
+      const names = new Set(live.map((r) => (by === 'person_name' ? (r.person_id ?? r.person_name) : r[by])).filter(Boolean));
+      const noun = by === 'company' ? 'companies' : by === 'group_name' ? 'groups' : 'people';
+      const scopeWords = [args.group, ...[].concat(args.company ?? []), args.q].filter(Boolean).join(', ');
+      const reply = `${names.size} ${noun} on live deals${scopeWords ? ` (${scopeWords})` : ''}${names.size <= 8 ? `: ${[...names].map((n) => live.find((r) => (r.person_id ?? r.person_name) === n)?.person_name ?? n).join(', ')}` : ''}.`;
+      return { summary: `${reply}\n\nCOUNTED in code. Say it as written.`, reply, computedReply: true };
+    }
+    // "PASSED THEIR END DATE" IS THE DATE ON THE ROW, not the payment period
+    // setting: she sent status ended and found none. 2026-10-03.
+    if (/\bend(?:ed|ing)?\s*dates?\b|\bpast (?:their|the) end\b/i.test(heardNoun) && /\b(?:passed|past|gone|over|expired|before today)\b/i.test(heardNoun)) {
+      const { status: _st, ...restEnd } = args;
+      // eslint-disable-next-line no-param-reassign
+      args = { ...restEnd, endWhen: ['past'] };
+    }
     /**
      * "WHO STARTED THIS MONTH" HAS TWO ANSWERS, and the admin means both:
      * who was APPOINTED this month, and whose PAYMENT STARTS this month.
@@ -3010,6 +3292,13 @@ const filterRows = {
           ? `marked for ${monthName(monthOf(r.preset_on))}` : paymentReason(r, month, { useEndDate })})`).join('; ') : 'none'}.`;
     }
 
+    // ONE PERSON AND ONE DETAIL ASKED: the detail, not a list of their deals.
+    const oneDetail = rows.length > 0 && rows.length >= total
+      && new Set(rows.map((r) => r.person_id ?? r.person_name)).size === 1
+      ? askedFieldReply(rows, args.said, args.saidRecent) : null;
+    if (oneDetail) {
+      return { summary: `${oneDetail} Say exactly that.`, reply: oneDetail, computedReply: true, rows: rows.map(summarizeRow) };
+    }
     if (rows.length <= 1 && rows.length >= total) {
       return {
         summary: `${total === 0 ? 'Nothing' : `${total} deal`}${scope} ${total === 1 ? 'is' : 'are'} ${what}.${nouns}${named} `
@@ -3070,6 +3359,12 @@ const filterRows = {
        */
       ...(!narrowed ? {
         reply: `${total} ${total === 1 ? 'deal' : 'deals'}${scope}, held by ${people} ${people === 1 ? 'person' : 'people'}.`,
+        computedReply: true,
+      } : /\b(?:who|whose|which (?:people|person|ones?)|name them|is (?:any|some)(?:one|body)|are there any|does (?:any|some)(?:one|body)|any(?:one|body))\b/i.test(String(args.said ?? '')) && rows.length > 0 && rows.length <= 10 && rows.length >= total ? {
+        // "WHOSE deals have passed their end date?" was answered "three
+        // deals", correct and not what was asked. Who, when they ask who.
+        reply: `${total} ${total === 1 ? 'deal' : 'deals'}${scope} ${total === 1 ? 'is' : 'are'} ${what}: `
+          + `${rows.map((r) => `${r.person_name} (${[r.company, r.group_name].filter(Boolean).join(' in ')})`).join(', ')}.`,
         computedReply: true,
       } : {}),
     };
@@ -3742,7 +4037,13 @@ async function totalReply(rows, month, args, whoLabel = null, plural = false, {
     summary: `${who}, ${when}. THESE FIGURES ARE COMPUTED, use them exactly and do NOT `
       + `re-add anything:\n\nCounted (${counted.length}):\n${lines.join('\n') || '  none'}\n`
       + `${skipped.length > 0 ? `\nNot counted (${skipped.length}):\n${skipped.join('\n')}\n` : ''}`
-      + `\nTOTAL OWED: ${totals.join(' and ') || '0'}\n${rateBlock}${pctBlock}\n`
+      // SEVERAL PEOPLE, NOT ASKED TOGETHER: no grand total to repeat. "what's
+      // karin vole owed and also mara?" was answered "GBP 2,300" between
+      // them, a figure for a question nobody asked. 2026-10-03.
+      + (plural && !asksCombined(args.said)
+        ? '\nEACH PERSON SEPARATELY, as listed. They did NOT ask for them added together: never give one figure for all of them.\n'
+        : `\nTOTAL OWED: ${totals.join(' and ') || '0'}\n`)
+      + `${rateBlock}${pctBlock}\n`
       + `SAY EXACTLY THIS, changing nothing about the numbers:\n"${sentence}"\n\n`
       + 'You may reword it to sound like yourself, but every figure, every currency and '
       + 'every company name must survive unchanged. Never state a figure that is not above. '
@@ -3913,7 +4214,7 @@ const totalFor = {
        * through the same `repo.findAll`, so what "ended" or "old preset"
        * means is decided in ONE place for the list and the figure.
        */
-      ...FILTER_PARAMS,
+      ...FILTER_PARAMS_SHORT,
     },
   },
   async handler(args) {
@@ -3925,6 +4226,12 @@ const totalFor = {
     if (rankAsked && !Number.isInteger(args.rank) && !args.person && !(args.people ?? []).length) {
       // eslint-disable-next-line no-param-reassign
       args = { ...args, rank: rankAsked };
+    }
+    // THE DIRECTION IS THEIRS: "lowest paid at ironleaf" came as rank 5 and
+    // was answered "Owed the most". 2026-10-04.
+    if (rankAsked && Number.isInteger(args.rank) && args.rank !== 0 && Math.sign(args.rank) !== Math.sign(rankAsked)) {
+      // eslint-disable-next-line no-param-reassign
+      args = { ...args, rank: -args.rank };
     }
     const asksToSee = /\b(?:show|display|view|open|details?|info|information)\b/i.test(currentSaid);
     const asksForMoney = /\b(?:how much|totals?|owed?|owing|amount|pay|paying|income|convert|dollars?|usd)\b|\$/i.test(currentSaid);
@@ -4665,6 +4972,15 @@ const createRow = {
       for (const [field, list] of Object.entries(lists)) {
         const hit = fields[field] && (list ?? []).find((v) => fold(v) === fold(fields[field]));
         if (hit) fields[field] = hit;
+      }
+    }
+    // A NEW NAME TYPED ALL IN LOWER CASE is written as a name: "casey test"
+    // went on the sheet as "casey test" beside "Kiran Vale". Only lower case,
+    // so "McKay" or "ACME Ltd" stay exactly as typed. 2026-10-04.
+    for (const field of ['personName', 'company']) {
+      const v = fields[field];
+      if (typeof v === 'string' && v === v.toLowerCase() && /[a-z]/.test(v)) {
+        fields[field] = v.replace(/(^|[\s'-])([a-z])/g, (m, pre, ch) => pre + ch.toUpperCase());
       }
     }
     // THIS MONTH'S PRESET unless they named one. Without it the deal is the
@@ -6073,7 +6389,9 @@ const NAMED_DEALS_ONLY = {
  * he owed" points at the screen and is not a typo). Two letters of slack,
  * which is what "kirna" for "kiran" is: a swap reads as two edits.
  */
-function typoFor(said, name) {
+function typoFor(rawSaid, name) {
+  // A possessive is the name: "felix's monthly" is Felix, not a typo of him.
+  const said = String(rawSaid ?? '').replace(/['’]s\b/gi, '');
   if (!said || !name || personMentionedIn(said, name)) return null;
   const words = String(said).split(/[^A-Za-z'-]+/).filter((w) => w.length >= 3);
   for (const part of String(name).split(/\s+/).filter((p) => p.length >= 3)) {
@@ -6334,7 +6652,23 @@ const WHOLE_SHEET = /\b(all|every|each)\b(\s+(the|of\s+the|single))?\s+groups?\b
 // What an amount may be ADDED to, and the column the current value is read from.
 const ADDABLE = Object.freeze({
   payableAmount: 'payable_amount', monthlyAmount: 'monthly_amount', payableDays: 'payable_days',
+  // A RATE CAN MOVE BY AN AMOUNT TOO: "give everyone in otter a 2% add on"
+  // came as addonPercentDelta on four people, which the per person path
+  // did not know, and nothing was set. 2026-10-03.
+  addonPercent: 'addon_percent', feePercent: 'fee_percent',
 });
+
+// The one deal tool's relative rate keys, read the same way everywhere.
+const DELTA_KEYS = Object.freeze({ addonPercentDelta: 'addonPercent', feePercentDelta: 'feePercent' });
+function takeDeltas(obj = {}) {
+  const rest = {};
+  const add = {};
+  for (const [k, v] of Object.entries(obj ?? {})) {
+    if (DELTA_KEYS[k]) add[DELTA_KEYS[k]] = v;
+    else rest[k] = v;
+  }
+  return { rest, add };
+}
 const MONEY_FIELDS = new Set(['payableAmount', 'monthlyAmount']);
 
 /** `add` checked: known keys, real numbers. */
@@ -6729,8 +7063,9 @@ async function perPersonUpdate(args) {
     const found = rowsForNames(matched, [entry.person], heard);
     unknown.push(...found.unknown);
     unclear.push(...found.unclear);
-    const fields = normalizeFields(entry.set ?? {});
-    const add = addsOf(entry.add);
+    const split = takeDeltas(entry.set ?? {});
+    const fields = normalizeFields(split.rest);
+    const add = addsOf({ ...(entry.add ?? {}), ...split.add });
     if (add.error) return { summary: `NOTHING HAS BEEN CHANGED. ${add.error}` };
     if (Object.keys(fields).length === 0 && Object.keys(add.values).length === 0) {
       return {
@@ -6916,7 +7251,7 @@ const bulkUpdate = {
        * `group` stays its own, because this tool has its own warning about
        * looping over groups one at a time.
        */
-      ...FILTER_PARAMS,
+      ...FILTER_PARAMS_SHORT,
       /**
        * WHAT TO SET, and it is EVERY column a set of rows can share.
        *
@@ -7009,7 +7344,20 @@ const bulkUpdate = {
     if (Array.isArray(args.perPerson) && args.perPerson.length > 0) {
       return perPersonUpdate(args);
     }
-    if (args.raiseMonthlyPercent != null) return raiseMonthly(args);
+    /**
+     * A PERCENT ON A RATE IS THE RATE. "give everyone in otter a 2% add on"
+     * came as raiseMonthlyPercent 2 and raised four MONTHLY amounts. When
+     * their words name the add on or the fee, the percent moves that rate.
+     */
+    if (args.raiseMonthlyPercent != null) {
+      const heardRate = `${args.said ?? ''}\n${args.saidRecent ?? ''}`;
+      const rateKey = /\badd[\s-]?ons?\b/i.test(heardRate) ? 'addonPercentDelta'
+        : /\bfees?\b/i.test(heardRate) ? 'feePercentDelta' : null;
+      if (!rateKey) return raiseMonthly(args);
+      const { raiseMonthlyPercent: pct, ...restArgs } = args;
+      // eslint-disable-next-line no-param-reassign
+      args = { ...restArgs, set: { ...(restArgs.set ?? {}), [rateKey]: Number(pct) } };
+    }
 
     // A company sent as a group is re-homed, as every read already does.
     const scoped = await resolveDealScope(args);
@@ -7056,14 +7404,17 @@ const bulkUpdate = {
     const derivedSet = derivedFieldAsked(set ?? {});
     if (derivedSet) return { summary: derivedSet };
 
-    const fields = normalizeFields(set ?? {});
+    const groupSplit = takeDeltas(set ?? {});
+    const fields = normalizeFields(groupSplit.rest);
+    const groupAdd = addsOf(groupSplit.add);
+    if (groupAdd.error) return { summary: `NOTHING HAS BEEN CHANGED. ${groupAdd.error}` };
 
     // A GUESSED YEAR ACROSS EVERY ROW. This is where it actually happened:
     // 96 rows set to 2024-09-01 from the word "September". See farOffPreset.
     const offMonth = farOffPreset(fields, said);
     if (offMonth) return { summary: offMonth };
 
-    if (Object.keys(fields).length === 0) {
+    if (Object.keys(fields).length === 0 && Object.keys(groupAdd.values).length === 0) {
       // Everything they asked for was a field this tool does not know at
       // all, which is a different failure from asking for nothing.
       const unknown = asked.filter((k) => !ROW_FIELDS[k]);
@@ -7262,6 +7613,10 @@ const bulkUpdate = {
     const derivedKeys = new Set();
     const changes = rows.map((row) => {
       const patch = { ...fields };
+      // A relative rate lands per deal, on what THAT deal holds now.
+      for (const [key, n] of Object.entries(groupAdd.values)) {
+        patch[key] = round2((Number(row[ADDABLE[key]]) || 0) + n);
+      }
       // The same recompute the page's own bulk edit does, so changing the
       // days or the rate moves the payable amount with it rather than
       // leaving a figure that no longer follows from its own inputs.
@@ -8131,6 +8486,27 @@ const updatePerson = {
     },
   },
   async handler(rawPersonArgs) {
+    /**
+     * "EVERYONE IN OTTER" IS THE OTTER DEALS, never their profiles. Live
+     * 2026-10-03: "give everyone in otter a 2% add on" raised four PROFILES,
+     * which also moved Kiran Vale's BAKER and CORVID deals. A group named
+     * as the scope is a change to that group's deals.
+     */
+    const scopeSaid = String(rawPersonArgs?.said ?? '');
+    const groupScope = /\b(?:everyone|everybody|all|each|every(?: deal| one)?)\b[^.?!]*\b(?:in|on|at)\s+([a-z][\w ]{1,30}?)(?:[.?!,]|\s+(?:a|an|to|by|with)\b|$)/i.exec(scopeSaid);
+    if (groupScope && !/\b(?:profile|across (?:all|every) (?:his|her|their) deals)\b/i.test(scopeSaid)) {
+      const named = groupScope[1].trim().toLowerCase();
+      const groups = (await peopleRepo.filterOptions().catch(() => null))?.groups ?? [];
+      const group = groups.find((g) => String(g).toLowerCase() === named);
+      if (group) {
+        return {
+          summary: `NOTHING HAS BEEN CHANGED. They named the GROUP ${group}, so this is a change to the deals `
+            + `in ${group}, not to anyone's profile (a profile rate reaches their deals in OTHER groups too). `
+            + `Call bulk_update_master_sheet with group ${group} and the same change (addonPercentDelta or `
+            + 'feePercentDelta inside `set` for "add N%").',
+        };
+      }
+    }
     // READ THE REQUEST FIRST, like every other door. "add 5% to zayn
     // milkman" arrives here as one name that is a person AND a group.
     const args = await scopeArgs(rawPersonArgs, peopleRepo);
@@ -8887,6 +9263,8 @@ function rankAskedIn(said) {
   const text = String(said ?? '');
   if (!RANK_WORDS.test(text) || !RANK_SUPERLATIVE.test(text) || !MONEY_WORDS.test(text)) return null;
   if (/\bmost recent\b/i.test(text)) return null;
+  // "the smallest DEAL" orders deals, not people: see sortBy on the filter.
+  if (/\bdeals?\b/i.test(text) && !/\b(?:owed|earners?)\b/i.test(text)) return null;
   const n = Number((/\b(?:top|bottom)\s*(\d+)\b/i.exec(text) ?? /\b(\d+)\s+(?:biggest|highest|largest|smallest|lowest|people|earners)\b/i.exec(text) ?? [])[1]) || 5;
   return /\b(?:least|lowest|smallest|bottom)\b/i.test(text) ? -n : n;
 }
@@ -9731,7 +10109,12 @@ const recentChanges = {
   },
 };
 
+// ORDERING, not filtering: the filter reads these itself and never hands
+// them to the repo. Pinned in knownArgs.test.js.
+const ORDERING_KEYS = Object.freeze(['sortBy', 'sortOrder', 'limit']);
+
 module.exports = {
+  ORDERING_KEYS,
   rankAskedIn,
   masterSheetTools: [
     // FIRST on purpose. It was fourth and the model never once chose it
@@ -9746,6 +10129,7 @@ module.exports = {
     // answerEach.js. Wrapped here rather than inside each handler so the
     // argument and the loop have ONE definition between the six of them.
     perGroup(filterRows),
+    perGroup(summarizeDeals),
     perGroup(activeCompaniesFor),
     // Before totalFor: "what is Gloria on" is a rate question, not a
     // money one, and she reached for the total tool for both.

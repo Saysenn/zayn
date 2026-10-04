@@ -138,8 +138,16 @@ function isSetInstruction(said) {
   // ARITHMETIC IS NOT AN EDIT: "add gloria and zayn together" was taken as a write,
   // her correct total was refused, and she reached for the edit tool. 2026-09-28.
   if (SUMS.test(text) || ASKS_FOR.test(text)) return false;
-  return IMPERATIVE.test(text) || verbSlipped(text);
+  return IMPERATIVE.test(text) || verbSlipped(text) || SHOULD_BE.test(text);
 }
+
+/**
+ * "OTTO'S MONTHLY SHOULD BE 1550" IS AN INSTRUCTION. Held-out wording
+ * 2026-10-04: read as a question, she looked Otto up, and the "yes" that
+ * followed changed nothing. A field said to be a figure, as a statement
+ * (no question mark), is a change.
+ */
+const SHOULD_BE = /\b(?:should|needs? to|ought to|has to|must|is supposed to)\s+be\s+(?:on\s+|at\s+)?(?:£|gbp\s*|aed\s*)?\d[\d,.]*\s*%?\s*[.!]?\s*$/i;
 
 /**
  * ===============================

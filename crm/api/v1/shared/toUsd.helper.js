@@ -12,7 +12,11 @@
  * The sheet writes `EURO` on 6 rows. There is no such code, so every rate
  * source returns nothing for it and those rows converted to blank.
  */
-const CURRENCY_ALIASES = { EURO: 'EUR', EUROS: 'EUR', POUNDS: 'GBP', DOLLARS: 'USD' };
+const CURRENCY_ALIASES = {
+  EURO: 'EUR', EUROS: 'EUR', POUND: 'GBP', POUNDS: 'GBP', STERLING: 'GBP', DOLLAR: 'USD', DOLLARS: 'USD',
+  // "what rate are we using for dirhams?" went to the percentages. 2026-10-03.
+  DIRHAM: 'AED', DIRHAMS: 'AED',
+};
 
 // A PEG, not a rate. Fixed at 3.6725 since 1997, so it does not depend on
 // the fetch succeeding.

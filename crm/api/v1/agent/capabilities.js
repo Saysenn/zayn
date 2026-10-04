@@ -37,7 +37,7 @@ const AREAS = Object.freeze([
     label: 'read the master sheet: find deals, show one in full, total a month, break a total '
       + 'down, compare two months, and audit it for gaps',
     tools: [
-      'filter_master_sheet', 'find_and_show_details', 'get_master_sheet_row_details',
+      'filter_master_sheet', 'summarize_deals', 'find_and_show_details', 'get_master_sheet_row_details',
       'total_master_sheet', 'breakdown_master_sheet', 'compare_months', 'audit_master_sheet',
       'explain_preset_rules',
     ],

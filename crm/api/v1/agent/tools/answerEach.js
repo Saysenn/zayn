@@ -122,7 +122,16 @@ function perGroup(tool) {
       // lazily to keep the generic answerEach helper usable in isolation.
       // eslint-disable-next-line global-require
       const { exactGroupsMentioned } = require('./notAGroup');
-      const saidGroups = await exactGroupsMentioned(args?.said);
+      /**
+       * A GROUP INSIDE THE NAME IS NOT A SCOPE. "baker jones pay?" was read
+       * as group BAKER, Baker Jones is in CORVID, and she said he was owed
+       * nothing. A group word that is part of the person asked about stays
+       * part of their name. 2026-10-03.
+       */
+      const nameAsked = [args?.person, args?.q, args?.name, args?.targetPerson, ...[].concat(args?.people ?? [])]
+        .filter((v) => typeof v === 'string').join(' ').toLowerCase();
+      const saidGroups = (await exactGroupsMentioned(args?.said))
+        .filter((g) => !new RegExp(`(?:^|[^a-z0-9])${String(g).toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[^a-z0-9])`).test(nameAsked));
       const groups = listAsked(saidGroups.length > 0 ? saidGroups : args?.groups);
 
       if (groups.length > 1) {

@@ -449,7 +449,12 @@ const listStoppedDeals = {
 
     // RATED, and PER CURRENCY. It printed the raw wage, and added GBP to AED. 2026-09-28.
     const rated = await ratedRows(selected);
-    const headline = `${rated.length} stopped deal${rated.length === 1 ? '' : 's'}, `
+    // A FEW ARE NAMED in the bubble: "anyone stopped?" got "1 stopped deal"
+    // and not who. 2026-10-03.
+    const fewNames = rated.length <= 5
+      ? ` (${[...new Set(rated.map((r) => r.person_name).filter(Boolean))].join(', ')})`
+      : '';
+    const headline = `${rated.length} stopped deal${rated.length === 1 ? '' : 's'}${fewNames}, `
       + `${moneyPerCurrency(sumByCurrency(rated, 'monthly_amount'))} a month between them.`;
 
     // GROUPED, NOT CUT. The company, the day and the reason are one fact
