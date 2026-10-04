@@ -46,7 +46,7 @@ const AREAS = Object.freeze([
     label: 'change the master sheet: add a new deal, amend one deal or many, undo a change, and say '
       + 'what changed recently',
     tools: [
-      'add_deal', 'new_deal_checklist', 'update_master_sheet_row', 'bulk_update_master_sheet', 'delete_master_sheet_row',
+      'add_deal', 'update_master_sheet_row', 'bulk_update_master_sheet', 'delete_master_sheet_row',
       'undo_master_sheet_change', 'recent_master_sheet_changes',
     ],
   },

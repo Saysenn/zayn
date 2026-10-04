@@ -106,6 +106,25 @@ const FORCED_ROUTES = [
   [/^\s*(?:list|show|give)(?: me)?(?: all)?(?: of)?(?: the| our)? groups\s*(?:please|pls)?[.?!]*\s*$|^\s*what groups (?:do we have|are there)\??\s*$/i, 'filter_master_sheet'],
   // "WHO IS IN CORVID" is the people in a group, not its companies. 2026-10-04.
   [/^\s*who(?:'s|s| is| are)\s+in\s+[a-z][\w &'-]{1,30}\s*\??\s*$/i, 'filter_master_sheet'],
+  // THE ANSWER TO HER "TO ADD X I STILL NEED ..." goes back to add_deal,
+  // however messy it is. 2026-10-04.
+  [{
+    test: (said, history = []) => /^To add .+ I still need\b|is not a group on the sheet\. Which group/.test(lastAssistantAnswer(history) ?? '')
+      && !/\?\s*$/.test(String(said)) && !CALLED_OFF_ADD.test(String(said)),
+  }, 'add_deal'],
+  // AND A SHORT CORRECTION WHILE THE NEW DEAL IS SHOWN for a yes ("actually
+  // make it corvid") is the same add, changed. 2026-10-04.
+  [{
+    test: (said, history = []) => /\bas a new deal\b|\bnew deal\b|\b(?:ready )?to add\b|\bthe deal (?:for|to add)\b/i.test(lastAssistantAnswer(history) ?? '')
+      && /^\s*(?:(?:actually|no|sorry|wait|oh|oops)[\s,]+)*(?:make it|change it to|it'?s|its|should be|put (?:her|him|them) in|not\b)/i.test(said),
+  }, 'add_deal'],
+  // "ADD A DEAL" / "NEW DEAL FOR X" starts it, in words. 2026-10-04.
+  [/^\s*(?:(?:can you|please|pls|ok|okay)\s+)?(?:add|create|put in|set up)\s+(?:a\s+|an\s+)?(?:new\s+)?(?:deal|handler|row|person)\b|\bnew deal for\b/i, 'add_deal'],
+  // "DID JASON'S RAISE GO THROUGH?" is answered from what the runner did. 2026-10-04.
+  [/\b(?:did|has|have)\b[^.?!]*\b(?:go(?:ne)? through|run|ran|appl(?:y|ied)|happen(?:ed)?|kick(?:ed)? in)\b/i, 'list_parked_work'],
+  // "WHO'S PAID IN EUROS" names them: it came back as a total with no
+  // names. The filter lists who; a total can follow. 2026-10-04.
+  [/^\s*who(?:'s|s| is| are| gets?)\s+paid\s+(?:in|by|with|via)\b/i, 'filter_master_sheet'],
   // "WHAT'S WRONG WITH LIAM'S DATES" is that person's sheet check. 2026-10-04.
   [/\b(?:what'?s|what is|whats)\s+(?:wrong|up|the (?:issue|problem))\s+with\b|\bwhy (?:is|are)\s+[\w' ]+\s+flagged\b/i, 'audit_master_sheet'],
   // "WHAT'S NATHAN ON" is what they are paid, deal by deal: twice it was
@@ -146,6 +165,36 @@ const FORCED_ROUTES = [
   [{ test: (said) => Boolean(rankAskedIn(said)) }, 'total_master_sheet'],
 ];
 
+// The read-only narrowing below. Off: see where it is used.
+const NARROW_READ_TURNS = false;
+
+// Words that ask to SEE a deal, which is the only time a card is drawn.
+const CARD_ASKED = /\b(?:show|display|details?|card|cards|open|full|pull (?:up|out)|view|let me see|bring up|look at)\b/i;
+
+// THE READ TOOLS a plain question is handed. Anything else is one call away
+// through MORE_TOOLS. See "A PLAIN QUESTION GETS THE READ TOOLS ONLY".
+const READ_TOOLS = new Set([
+  'filter_master_sheet', 'find_and_show_details', 'get_master_sheet_row_details', 'total_master_sheet',
+  'breakdown_master_sheet', 'compare_months', 'audit_master_sheet', 'explain_preset_rules',
+  'check_rates', 'exchange_rate', 'recent_master_sheet_changes', 'list_stopped_deals',
+  'list_dead_people', 'dead_person_details', 'list_monthly_review', 'list_companies',
+  'active_companies', 'list_parked_work', 'recall_past_conversations', 'show_past_conversation',
+  'say', 'state_claims',
+]);
+const MORE_TOOLS = Object.freeze({
+  type: 'function',
+  function: {
+    name: 'more_tools',
+    description: 'You were handed the READING tools only, because this looked like a question. Call '
+      + 'this first if answering needs anything else: a change, a stop, scheduling, a company action, '
+      + 'adding a deal, a review answer, deleting history, an average or a per-group figure. It hands '
+      + 'you every tool. Never tell them you cannot do something without calling this.',
+    parameters: { type: 'object', properties: {} },
+  },
+});
+// Change wording: a message holding one of these is never narrowed.
+const WRITE_WORDS = /\b(?:add|set|change|update|make|put|give|move|stop|end|resume|close|reopen|delete|remove|undo|revert|cancel|scrap|park|schedule|raise|bump|lower|cut|knock|mark|rename|answer|final|forget|wipe|clean|bring|instead|should be|needs to be|average|per|each|most deals)\b/i;
+
 // What a held tool is for, in their words: see contexts.js HELD_UNTIL_NEEDED.
 const ASKS_FOR_HELD = /\b(?:delete|deleting|erase|undo|revert|reverse|take (?:that|it) back|rename|close|closing|all|every|everyone|everybody|bulk|whole|each|average|avg|mean|median|per|costing|most deals|fewest deals|forget|wipe|purge|clean(?:\s+up)?|(?:more than|at least|over|several|multiple)\s+(?:\w+\s+)?deals?)\b/i;
 
@@ -177,6 +226,9 @@ function changeAgain(said, history) {
     field: UPDATED_FIELD[w[4]], value: Number(m[1].replace(/,/g, '')),
   };
 }
+// "NO FORGET IT" after "To add X I still need ..." calls the add off: it
+// was sent back to add_deal, which answered "it has not moved". 2026-10-04.
+const CALLED_OFF_ADD = /^\s*(?:no|nah|nope|cancel|stop|scrap|forget|never ?mind|leave it|don'?t)\b|\bforget (?:it|about it)\b|\bdon'?t add\b/i;
 const ORDINAL_IN_SENTENCE = /\bthe\s+(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|last)\s+(?:one|person|deal|row|guy|lady)\b/i;
 
 // "undo that", "revert it", "take that back": the whole message asks for the undo.
@@ -1292,6 +1344,27 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
       };
     }
   }
+  // A PAYMENT METHOD NOBODY SAID: "who's paid in aed?" came with method
+  // "bank" and answered "no deals are paid in AED by bank". 2026-10-04.
+  if (props.paymentMethod && args.paymentMethod != null
+    && !/\b(?:cash|bank|banks|banked|crypto|transfer|wire|usdt|btc)\b/i.test(recentSaid(history, 2))) {
+    const { paymentMethod: _pm, ...rest } = args;
+    args = rest;
+  }
+  // "WHO ARE THE DIRECTORS?" IS A ROLE: it came with no filter at all and
+  // was answered with a count of the whole sheet. A word the sheet holds
+  // as a role, said as "the <role>s", narrows to it. 2026-10-04.
+  if (props.roleLabel && args.roleLabel == null) {
+    const roleSaid = /\bwho (?:are|is|'s)\s+(?:the|our|all (?:the|our))\s+([a-z][a-z0-9 ]{1,20}?)s?\s*\??\s*$/i.exec(lastSaid(history) ?? '');
+    if (roleSaid) {
+      try {
+        // eslint-disable-next-line global-require
+        const spellings = await require('../repos/masterSheetRows.repo').knownSpellings?.();
+        const hit = (spellings?.roles ?? []).find((r) => fold(r) === fold(roleSaid[1]));
+        if (hit) args = { ...args, roleLabel: hit };
+      } catch { /* left alone if the roles cannot be read */ }
+    }
+  }
   // GROUPS SENT AS PEOPLE: "compare baker and corvid this month" came as
   // people ["baker","corvid"] and was answered person by person. 2026-10-04.
   if (Array.isArray(args.people) && args.people.length > 0 && (props.groups || props.group)) {
@@ -1440,7 +1513,7 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
     // name: a follow up like "double check" must not drop the conversion
     // they asked for one line earlier. See `recentSaid`.
     args.saidRecent = recentSaid(history);
-    if (['exchange_rate', 'undo_master_sheet_change', 'show_past_conversation', 'delete_past_conversations'].includes(name)) args.priorAnswer = lastAssistantAnswer(history);
+    if (['exchange_rate', 'undo_master_sheet_change', 'show_past_conversation', 'delete_past_conversations', 'add_deal'].includes(name)) args.priorAnswer = lastAssistantAnswer(history);
     // DEALS WHOSE "pay this month anyway?" was already answered on screen, so
     // the next edit does not ask it a second time. 2026-10-03.
     args.specialCaseAnswered = history
@@ -2142,6 +2215,29 @@ async function runAgentTurn(history, contextName, onEvent) {
     roundTools = openAITools;
     widened = true;
   }
+  /**
+   * ===============================
+   * * A PLAIN QUESTION GETS THE READ TOOLS ONLY
+   * ===============================
+   * 2026-10-04. She was handed ~40 tools on every message, and most wrong
+   * picks came from that crowd: an audit for "which company has the most
+   * deals", rates for "what's nathan on". A message that only ASKS (no
+   * change wording, not an answer to her question, nothing waiting on a
+   * yes) gets the reading tools and one more: more_tools, which hands her
+   * the full set the moment the request turns out to need it. Nothing is
+   * ever out of reach; it costs one round only when the guess was wrong.
+   */
+  const asked = lastSaid(history);
+  // OFF, 2026-10-04: measured, it cut tokens 6-17% but she never once called
+  // more_tools, so a read set that was not enough gave a worse answer
+  // instead ("is wren still active" went to the review list). Accuracy
+  // first. Turn on again to try it with a stronger model.
+  const onlyAsks = NARROW_READ_TURNS && !widened && !isSetInstruction(asked) && !WRITE_WORDS.test(asked)
+    && !/\?\s*$/.test((lastAssistantAnswer(history) ?? '').trim())
+    && !somethingHeld() && !openForm(history) && asked.trim().split(/\s+/).length > 1;
+  if (onlyAsks) {
+    roundTools = [...toOpenAITools(offered.filter((t) => READ_TOOLS.has(t.name))), MORE_TOOLS];
+  }
 
   const schemaBytes = JSON.stringify(openAITools).length;
   const openingBytes = JSON.stringify(openingAITools).length;
@@ -2357,6 +2453,9 @@ async function runAgentTurn(history, contextName, onEvent) {
   // "nothing matched" went to recall and claimed deleting by date was not
   // possible, which it is. Both answered here, in plain words. 2026-10-04.
   const bare = lastSaid(history).trim();
+  if (heldCalls.length === 0 && /^To add .+ I still need\b/.test(String(prior ?? '')) && CALLED_OFF_ADD.test(bare)) {
+    return { reply: 'Okay, nothing was added. What next?', changedRowIds: [], context: context.key, claims: [] };
+  }
   if (heldCalls.length === 0 && !somethingHeld() && prior && !String(prior).includes('?')) {
     const reply = /^(?:y|ya|yes|yep|yeah|yup|sure)[.!\s]*$/i.test(bare) ? 'Nothing is waiting on a yes. What next?'
       : /^(?:thanks|thank you|thx|ty|cheers|cool|great|perfect|nice)[.!\s]*$/i.test(bare) ? "You're welcome. What next?"
@@ -2606,6 +2705,23 @@ async function runAgentTurn(history, contextName, onEvent) {
       const writes = (name) => Boolean(context.tools.find((t) => t.name === name)?.writes);
       return [...list.filter((c) => writes(c?.function?.name)), ...list.filter((c) => !writes(c?.function?.name))];
     };
+    // MORE_TOOLS: she asked for the full set. Hand it over and go again.
+    if ((choice.tool_calls ?? []).some((c) => c.function?.name === MORE_TOOLS.function.name)) {
+      roundTools = openAITools;
+      widened = true;
+      logger.info({ context: context.key, round }, 'diane: asked for more tools');
+      messages.push(choice);
+      for (const c of choice.tool_calls) {
+        messages.push({
+          role: 'tool',
+          tool_call_id: c.id,
+          content: c.function?.name === MORE_TOOLS.function.name
+            ? 'Every tool is available now. Carry on with what they asked.'
+            : 'Not run: ask again now that every tool is available.',
+        });
+      }
+      continue;
+    }
     const calls = writesFirst(coalesceBreakdownCalls(choice.tool_calls ?? []));
     if (calls.length === 0) {
       /**
@@ -3807,8 +3923,17 @@ async function runAgentTurn(history, contextName, onEvent) {
        * one more round saying the single thing worth hearing — which is
        * also the only part that gets spoken.
        */
-      for (const card of unseenCards(result.cards, shownCardIds)) {
-        onEvent?.({ type: 'card', card });
+      /**
+       * ONLY WHEN THEY ASKED TO SEE IT. His rule, said twice (2026-10-03 and
+       * 2026-10-04): "add 500 to zayn in milkman" drew Zayn's whole card
+       * under a one-line answer. A change, a total or a lookup of one detail
+       * is answered in words; a card is drawn when the message asks to SEE
+       * a deal (show, details, card, open, full, pull up, view).
+       */
+      if (CARD_ASKED.test(lastSaid(history) ?? '')) {
+        for (const card of unseenCards(result.cards, shownCardIds)) {
+          onEvent?.({ type: 'card', card });
+        }
       }
 
       /**

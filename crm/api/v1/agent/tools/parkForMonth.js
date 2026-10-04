@@ -213,21 +213,39 @@ const parkForMonth = {
 
 const listParked = {
   name: 'list_parked_work',
-  description: 'What is PARKED for a later month and has not run yet. Use for "what is parked", '
-    + '"what happens next month", "what did you schedule". It is a list of INTENTIONS, never '
-    + 'current values: for what a deal is on today, read the row.',
+  description: 'What is PARKED for a later month and has not run yet, AND what already ran this month '
+    + 'and last. Use for "what is parked", "what happens next month", "what did you schedule", and '
+    + '"did the X change go through". The parked part is INTENTIONS, never current values: for what a '
+    + 'deal is on today, read the row.',
   parameters: { type: 'object', properties: {} },
   async handler() {
-    const rows = await queue.upcoming(currentMonth());
+    /**
+     * AND WHAT ALREADY RAN. "Did Jason's raise go through?" had no answer:
+     * this listed only what was waiting, and the outcome of a run lived on
+     * the welcome page alone. This month's and last month's runs, each with
+     * the sentence the runner wrote. 2026-10-04.
+     */
+    const now = currentMonth();
+    const [y, m] = now.split('-').map(Number);
+    const last = `${m === 1 ? y - 1 : y}-${String(m === 1 ? 12 : m - 1).padStart(2, '0')}`;
+    const [rows, ranNow, ranLast] = await Promise.all([
+      queue.upcoming(now), queue.ranIn(now).catch(() => []), queue.ranIn(last).catch(() => []),
+    ]);
+    const ran = [...ranLast, ...ranNow];
+    const RAN_AS = { done: 'applied', skipped: 'skipped', failed: 'failed', expired: 'expired, never ran' };
+    const ranLines = ran.map((r) => `  ${monthLabel(r.due_month)}: ${r.said}: ${RAN_AS[r.status] ?? r.status}`
+      + `${r.outcome && r.status !== 'done' ? ` (${String(r.outcome).replace(/\s+/g, ' ').slice(0, 160)})` : ''}`);
+    const ranBlock = ran.length > 0
+      ? `\n\nALREADY RAN (${ran.length}), use this for "did it go through":\n${ranLines.join('\n')}`
+      : '\n\nNothing parked has run this month or last.';
     if (rows.length === 0) {
-      return { summary: 'Nothing is parked for a later month. Say so in one sentence.' };
+      return { summary: `Nothing is parked for a later month.${ranBlock}\n\nAnswer what they asked in one or two sentences.` };
     }
     const lines = rows.map((r) => `  ${monthLabel(r.due_month)}: ${r.said}`);
     return {
-      summary: `${rows.length} parked, none of it applied yet:\n${lines.join('\n')}\n\n`
-        + 'These are things that WILL happen at the start of their month, not things that are true '
-        + 'now. Do not describe any of it as done, and do not quote a figure from it as a current '
-        + 'value.',
+      summary: `${rows.length} parked, none of it applied yet:\n${lines.join('\n')}${ranBlock}\n\n`
+        + 'The parked ones WILL happen at the start of their month; they are not true now. Do not '
+        + 'describe any of them as done, and do not quote a figure from one as a current value.',
     };
   },
 };

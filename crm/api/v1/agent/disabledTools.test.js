@@ -36,7 +36,9 @@ test('export is off, adding a deal is live (both 2026-09-29)', () => {
   assert.ok(exp, 'still there, so turning it on again is one line');
   assert.match(exp.description, /TURNED OFF/);
   assert.equal(exp.disabledTool, true);
-  for (const name of ['add_deal', 'new_deal_checklist', 'update_master_sheet_row']) {
+  // The add FORM went 2026-10-04: adding a deal is asked in words now.
+  assert.equal(byName('new_deal_checklist'), undefined, 'the add-a-deal form is gone');
+  for (const name of ['add_deal', 'update_master_sheet_row']) {
     const tool = byName(name);
     assert.ok(tool, `${name} is offered`);
     assert.doesNotMatch(tool.description, /TURNED OFF/, `${name} is live`);

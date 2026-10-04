@@ -140,10 +140,15 @@ export const WRITES = [
     }],
   },
   {
-    name: 'adds a deal in the sheet\'s own spelling, then a stray yes does nothing',
+    name: 'adds a deal in the sheet\'s own spelling, shown first, then a stray yes does nothing',
     turns: [
       {
+        // SHOWN FOR A YES since 2026-10-04: nothing is saved until then.
         say: 'put casey test on pinecrest as tech in baker on 900 gbp, appointed 1 june 2026',
+        expect: { reply: /Casey Test/, db: async (db) => ((await deal(db, 'Casey Test', 'Pinecrest')) ? 'saved before the yes' : null) },
+      },
+      {
+        say: 'yes',
         expect: { db: async (db) => { const r = await deal(db, 'Casey Test', 'Pinecrest'); return r && r.role_label === 'Tech' && Number(r.monthly_amount) === 900 ? null : 'deal not added as Casey Test / Pinecrest / Tech / 900'; } },
       },
       { say: 'yes', expect: { reply: /Nothing is waiting on a yes/ } },
@@ -572,8 +577,9 @@ WRITES.push({
       say: 'add zed park as mid 1 in corvid at ironleaf on 900 gbp',
       expect: { reply: /appointment date/i, db: async (db) => ((await one(db, "SELECT 1 FROM tb_mastersheet WHERE lower(person_name) = 'zed park'")) ? 'added with no dates' : null) },
     },
+    { say: 'appointed 1 october 2026' },
     {
-      say: 'appointed 1 october 2026',
+      say: 'yes',
       expect: { db: async (db) => {
         const r = await one(db, "SELECT * FROM tb_mastersheet WHERE lower(person_name) = 'zed park' ORDER BY id DESC LIMIT 1");
         return r && Number(r.payable_amount) === 0 && r.assigned_on ? null : `payable ${r?.payable_amount}`;
@@ -581,6 +587,42 @@ WRITES.push({
     },
   ],
 });
+
+/*
+ * ===============================
+ * * ADDING A DEAL IN WORDS, 2026-10-04
+ * ===============================
+ * No form: she asks for what is missing in one question, reads a messy
+ * answer, takes a correction, and saves only on a yes.
+ */
+WRITES.push(
+  {
+    name: 'a deal added over a few messy messages, corrected, saved on yes',
+    turns: [
+      {
+        say: 'add a new deal for rhea quinn',
+        expect: { reply: /role[\s\S]*group|group[\s\S]*role/i, noReply: /form/i, db: async (db) => ((await one(db, "SELECT 1 FROM tb_mastersheet WHERE person_name = 'Rhea Quinn'")) ? 'added before anything was given' : null) },
+      },
+      { say: 'tech, baker, 900 quid, started 1st june 2026', expect: { reply: /Rhea Quinn/ } },
+      { say: 'actually make it corvid', expect: { reply: /CORVID/ } },
+      {
+        say: 'yes',
+        expect: { db: async (db) => {
+          const r = await one(db, "SELECT * FROM tb_mastersheet WHERE person_name = 'Rhea Quinn' ORDER BY id DESC LIMIT 1");
+          return r && r.group_name === 'CORVID' && r.role_label === 'Tech' && Number(r.monthly_amount) === 900 ? null : `saved as ${r?.group_name} / ${r?.role_label} / ${r?.monthly_amount}`;
+        } },
+      },
+    ],
+  },
+  {
+    name: 'a deal started and then called off saves nothing',
+    turns: [
+      { say: 'new deal for milo vance', expect: { reply: /still need/i } },
+      { say: 'mid 2 otter 1200' },
+      { say: 'no forget it', expect: { db: async (db) => ((await one(db, "SELECT 1 FROM tb_mastersheet WHERE person_name = 'Milo Vance'")) ? 'saved after being called off' : null) } },
+    ],
+  },
+);
 
 READS.push({
   name: '"who started this month" answers appointments and payment starts both',
@@ -668,5 +710,20 @@ WRITES.push({
         return q.n === 1 && q.m > nextMonth() && (await parkedCount(db, 'Harbor Nine')) === 1 ? null : `quarry lane parked ${q.n} (latest ${q.m})`;
       } },
     },
+  ],
+});
+
+// A CHANGE IS ANSWERED IN WORDS, NO CARD. "add 500 to zayn in milkman" drew
+// the whole deal card under a one-line answer (auto mode on). 2026-10-04.
+WRITES.push({
+  name: 'a change in auto mode is answered in words, never a card',
+  auto: true,
+  turns: [
+    {
+      say: "add 100 to otto fenn's monthly",
+      expect: { noDraw: true, db: async (db) => (Number((await deal(db, 'Otto Fenn', 'Ironleaf')).monthly_amount) === 1600 ? null : 'not 1600') },
+    },
+    { say: 'undo that' },
+    { say: 'yes', expect: { db: async (db) => (Number((await deal(db, 'Otto Fenn', 'Ironleaf')).monthly_amount) === 1500 ? null : 'not back to 1500') } },
   ],
 });

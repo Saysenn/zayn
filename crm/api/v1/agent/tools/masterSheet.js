@@ -4847,33 +4847,6 @@ async function formFields(values = {}) {
   });
 }
 
-/**
- * A FORM IN THE CONVERSATION, not a list of field names to type back.
- *
- * This used to return the checklist as prose and ask her to relay it, so
- * adding a deal meant reading twenty labels off a chat bubble and typing
- * the answers into one sentence. The fields are structured data here and
- * always have been — DEAL_CHECKLIST already carries label, required and
- * note — they were being flattened into text at the last moment.
- *
- * Emitted like `say`: runAgent sends it to the browser and it renders as
- * inputs. The summary exists to stop her then listing the same fields
- * underneath it.
- */
-const dealChecklist = {
-  name: 'new_deal_checklist',
-  description:
-    'Put an ADD A DEAL FORM on screen for the admin to fill in. Call this whenever they want to add a deal, a person or a row. It shows every field with the required ones marked, so do NOT list field names yourself and do NOT ask for them two or three at a time. They fill it in and send it back, and then you call add_deal.',
-  parameters: { type: 'object', properties: {} },
-  async handler() {
-    return {
-      summary: 'The ADD A DEAL FORM is now on screen with every field on it. '
-        + 'Do NOT list the fields, do NOT repeat them, and do NOT ask which ones they want. '
-        + 'Say one short line telling them to fill it in and send it back, and nothing else.',
-      form: { kind: 'new-deal', title: 'Add a deal', submitLabel: 'Add this deal', fields: await formFields() },
-    };
-  },
-};
 
 /**
  * The same form, prefilled, for changing a row that already exists.
@@ -4938,6 +4911,9 @@ async function createDeal(fields) {
   }
 }
 
+// The deal being added, between messages. See "THE DEAL BEING BUILT IS KEPT".
+let addDraft = null;
+
 const createRow = {
   name: 'add_deal',
   // IT CHANGES DATA. Read by runAgent: a turn that only LOOKED
@@ -4948,22 +4924,149 @@ const createRow = {
     'Add a brand new row (a "deal") to the master sheet — someone missing from it entirely. '
     + 'personName, roleLabel and groupName are required; every other field is optional and '
     + 'silently defaults (payable 0, cash, GBP).\n\n'
-    + 'ONE SENTENCE IS ENOUGH. When the admin writes the fields out in their own words, take '
-    + 'them and call this straight away: "add a new deal for Casey Example, role is Mid 1, group is '
-    + 'ALPHA, company is Northstar Care, monthly 4000 AED, payable days 30". Do NOT call '
-    + 'new_deal_checklist first and do NOT ask them to fill a form: they have already said it. '
-    + 'The checklist is for when they ask WHAT a deal needs, or when the three required fields '
-    + 'are not all there.\n\n'
+    + 'CALL IT AS SOON AS THEY WANT A DEAL ADDED, with whatever they have said so far, even nothing '
+    + 'but a name. It asks for what is missing in plain words, and shows the whole deal for a yes '
+    + 'before saving. Their answers come back messy and spread over several messages: gather EVERY '
+    + 'field they have given since they asked to add it, and call it again with all of them. Never '
+    + 'invent a value they did not give. There is no form.\n\n'
     // Audit 2026-09-30: "add a handler to Acqua" found no tool, because a
     // handler on a company is not stored anywhere but in a deal.
     + 'A HANDLER ON A COMPANY IS A DEAL ON THAT COMPANY: "add a handler to Northstar Care" or "put Casey on '
     + 'Northstar Care" is this tool, with company set to that company.',
   parameters: {
     type: 'object',
-    properties: ROW_FIELDS,
-    required: ['personName', 'roleLabel', 'groupName'],
+    properties: {
+      ...ROW_FIELDS,
+      confirmed: { type: 'boolean', description: 'Only on the SECOND call, after they said yes to the deal as shown.' },
+    },
   },
-  async handler(rawNewArgs) {
+  async handler(rawNewArgsIn) {
+    /**
+     * ===============================
+     * * THE DEAL BEING BUILT IS KEPT, NOT RE-REMEMBERED
+     * ===============================
+     * Suite 2026-10-04: over a few messy messages she re-called this with
+     * fields dropped (the monthly gone, the group lost), because it was her
+     * job to carry them. Code carries them now: while her last answer was
+     * this tool's question or preview, what they gave before is merged
+     * under what they give now. One slot: the CRM has one admin.
+     */
+    const fieldKeys = Object.keys(ROW_FIELDS);
+    const prior = String(rawNewArgsIn?.priorAnswer ?? '');
+    // Her preview is worded her way ("ready to add", "here is the deal"),
+    // so it is known by what it holds: this person's name and "add".
+    const midAdd = /^To add .+ I still need\b|\bas a new deal\b|\bnew deal\b|is not a group on the sheet/i.test(prior)
+      || Boolean(addDraft?.fields?.personName && Date.now() - addDraft.at < 15 * 60 * 1000
+        && fold(prior).includes(fold(addDraft.fields.personName)) && /\badd/i.test(prior));
+    const given = Object.fromEntries(Object.entries(rawNewArgsIn ?? {})
+      .filter(([k, v]) => fieldKeys.includes(k) && v !== undefined && v !== null && v !== ''));
+    const sameDeal = addDraft && Date.now() - addDraft.at < 15 * 60 * 1000 && midAdd
+      && (!given.personName || fold(given.personName) === fold(addDraft.fields.personName ?? given.personName));
+    // ON THE YES, THE PREVIEW WINS: the yes replays her original arguments
+    // (a role of "baker"), while what he agreed to was the corrected draft.
+    const rawNewArgs = !sameDeal ? { ...rawNewArgsIn }
+      : rawNewArgsIn?.confirmed === true ? { ...rawNewArgsIn, ...given, ...addDraft.fields }
+        : { ...rawNewArgsIn, ...addDraft.fields, ...given };
+    // "TECH, BAKER" AS ONE ROLE: the parts that are a group or company the
+    // sheet has are taken out into their own fields. 2026-10-04.
+    if (typeof rawNewArgs.roleLabel === 'string' && /[,/;]/.test(rawNewArgs.roleLabel)) {
+      const spellings = await Promise.resolve(repo.knownSpellings?.()).catch(() => null);
+      const parts = rawNewArgs.roleLabel.split(/[,/;]/).map((p) => p.trim()).filter(Boolean);
+      const rest = [];
+      for (const part of parts) {
+        const g = (spellings?.groups ?? []).find((x) => fold(x) === fold(part));
+        const c = (spellings?.companies ?? []).find((x) => fold(x) === fold(part));
+        if (g && !rawNewArgs.groupName) rawNewArgs.groupName = g;
+        else if (c && !rawNewArgs.company) rawNewArgs.company = c;
+        else if (!g && !c) rest.push(part);
+      }
+      if (rest.length) rawNewArgs.roleLabel = rest.join(' ');
+    }
+    /**
+     * A GROUP OR COMPANY GLUED ONTO THE ROLE. "put casey test on pinecrest
+     * as tech in baker" came as roleLabel "tech in baker" and was saved that
+     * way. A trailing "in <group>" or "at <company>" naming one the sheet has
+     * is split off into its own field. 2026-10-04.
+     */
+    if (typeof rawNewArgs.roleLabel === 'string' && /\s(?:in|at|for|on)\s/i.test(rawNewArgs.roleLabel)) {
+      const spellings = await Promise.resolve(repo.knownSpellings?.()).catch(() => null);
+      const m = /^(.+?)\s+(?:in|at|for|on)\s+(.+)$/i.exec(rawNewArgs.roleLabel.trim());
+      const tail = m?.[2];
+      const group = (spellings?.groups ?? []).find((g) => fold(g) === fold(tail));
+      const company = (spellings?.companies ?? []).find((c) => fold(c) === fold(tail));
+      if (m && (group || company)) {
+        rawNewArgs.roleLabel = m[1];
+        if (group && !rawNewArgs.groupName) rawNewArgs.groupName = group;
+        if (company && !rawNewArgs.company) rawNewArgs.company = company;
+      }
+    }
+    /**
+     * "MAKE IT CORVID", MID-ADD, IS DECIDED HERE. Three runs of the same
+     * correction came back as the company, as the role, and as nothing.
+     * The word is matched against what the sheet holds: a group sets the
+     * group, a company the company, a role the role; the rest of the draft
+     * stands. 2026-10-04.
+     */
+    const correction = midAdd && /^\s*(?:(?:actually|no|nah|sorry|wait|oh|oops)[\s,]+)*(?:make it|change it to|it'?s|its|should be|put (?:her|him|them) in)\s+(.+?)\s*[.!]?\s*$/i
+      .exec(String(rawNewArgsIn?.said ?? ''));
+    if (correction && sameDeal) {
+      const spellings = await Promise.resolve(repo.knownSpellings?.()).catch(() => null);
+      const word = correction[1];
+      const group = (spellings?.groups ?? []).find((g) => fold(g) === fold(word));
+      const company = (spellings?.companies ?? []).find((c) => fold(c) === fold(word));
+      const role = (spellings?.roles ?? []).find((r) => fold(r) === fold(word));
+      const put = group ? ['groupName', group] : company ? ['company', company] : role ? ['roleLabel', role] : null;
+      if (put) {
+        // The draft's own values back, then only the one they corrected.
+        for (const k of ['groupName', 'company', 'roleLabel']) {
+          if (addDraft.fields[k] !== undefined) rawNewArgs[k] = addDraft.fields[k]; else delete rawNewArgs[k];
+        }
+        rawNewArgs[put[0]] = put[1];
+      }
+    }
+    /**
+     * A GROUP SENT AS THE COMPANY. "actually make it corvid" came as company
+     * "Corvid", and the deal was offered "with Corvid, in BAKER". A name the
+     * sheet holds as a group and never as a company is the group. 2026-10-04.
+     */
+    if (typeof rawNewArgs.company === 'string' && rawNewArgs.company.trim()) {
+      const spellings = await Promise.resolve(repo.knownSpellings?.()).catch(() => null);
+      const asGroup = (spellings?.groups ?? []).find((g) => fold(g) === fold(rawNewArgs.company));
+      const asCompany = (spellings?.companies ?? []).some((c) => fold(c) === fold(rawNewArgs.company));
+      if (asGroup && !asCompany) {
+        rawNewArgs.groupName = asGroup;
+        delete rawNewArgs.company;
+        if (given.company) delete given.company;
+        if (addDraft?.fields?.company && fold(addDraft.fields.company) === fold(asGroup)) delete addDraft.fields.company;
+      }
+    }
+    /**
+     * THE GROUP MUST BE ONE THE SHEET HAS. "tech, baker" came as role
+     * "baker", group "tech", and the preview offered a deal in a group
+     * called TECH. A role that IS a group, beside a group that is not, is
+     * the two swapped; any other unknown group is asked about. 2026-10-04.
+     */
+    if (typeof rawNewArgs.groupName === 'string' && rawNewArgs.groupName.trim()) {
+      const spellings = await Promise.resolve(repo.knownSpellings?.()).catch(() => null);
+      const groups = spellings?.groups ?? [];
+      if (groups.length && !groups.some((g) => fold(g) === fold(rawNewArgs.groupName))) {
+        const roleIsGroup = groups.find((g) => fold(g) === fold(rawNewArgs.roleLabel));
+        if (roleIsGroup) {
+          const wasGroup = rawNewArgs.groupName;
+          rawNewArgs.groupName = roleIsGroup;
+          rawNewArgs.roleLabel = wasGroup;
+        } else {
+          const ask = `${rawNewArgs.groupName} is not a group on the sheet. Which group is it: ${groups.join(', ')}?`;
+          delete rawNewArgs.groupName;
+          addDraft = { at: Date.now(), fields: Object.fromEntries(Object.entries(rawNewArgs).filter(([k, v]) => fieldKeys.includes(k) && v != null && v !== '')) };
+          return { summary: `NOTHING WAS ADDED YET. ${ask} Ask exactly that.`, reply: ask, computedReply: true };
+        }
+      }
+    }
+    addDraft = {
+      at: Date.now(),
+      fields: Object.fromEntries(Object.entries(rawNewArgs).filter(([k, v]) => fieldKeys.includes(k) && v != null && v !== '')),
+    };
     /**
      * NOBODY ASKED FOR A NEW DEAL. "otto fenn 4500 and 30 days" reached
      * this tool for somebody already on the sheet, and she asked for a role
@@ -5010,8 +5113,39 @@ const createRow = {
         return { ...rawNewArgs, personName: read.person, groupName: read.group };
       })();
 
-    if (!args.personName || !args.roleLabel || !args.groupName) {
-      return { summary: 'personName, roleLabel and groupName are all required to add a deal.' };
+    /**
+     * ===============================
+     * * WHAT IS MISSING, ASKED IN WORDS, ONCE
+     * ===============================
+     * His call 2026-10-04: no form. Adding a deal is a conversation: she
+     * asks for what is missing, he answers however he answers, she asks
+     * only for what is still missing. One question listing all of it,
+     * never a field at a time and never a list of every field.
+     */
+    const saidSoFar = `${args.said ?? ''}\n${args.saidRecent ?? ''}`;
+    const datesSettled = args.assignedOn || args.paymentStartOn || args.payableDays != null || args.specialCaseDeal
+      || /\b(?:pay(?:s|ing)? (?:from|in full|this month|now)|ongoing|standing|full month|no dates?)\b/i.test(saidSoFar);
+    const missing = [
+      !args.personName && 'their name',
+      !args.roleLabel && 'the role',
+      !args.groupName && 'the group',
+      (args.monthlyAmount == null || args.monthlyAmount === '') && 'the monthly amount (and currency, if not GBP)',
+      !datesSettled && 'the appointment date (or say "pay from this month" for an ongoing deal)',
+    ].filter(Boolean);
+    if (missing.length > 0) {
+      const who = args.personName ? displayPersonName(args.personName) : 'the new deal';
+      const list = missing.length === 1 ? missing[0]
+        : `${missing.slice(0, -1).join(', ')} and ${missing[missing.length - 1]}`;
+      const optional = /\b(?:company|phone|method|end date|skip)\b/i.test(saidSoFar)
+        || /You can also give/.test(String(args.priorAnswer ?? '')) ? ''
+        : ' You can also give the company, phone, payment method or end date, or leave them out.';
+      const ask = `To add ${who} I still need ${list}.${optional}`;
+      return {
+        summary: `NOTHING WAS ADDED YET. ${ask} Ask exactly that. When they answer, call add_deal again with `
+          + 'EVERY field given since they asked to add it, theirs only.',
+        reply: ask,
+        computedReply: true,
+      };
     }
     /**
      * IN A LIST, EACH PERSON'S GROUP IS IN THEIR OWN PART OF IT. "Ira Lamb,
@@ -5089,22 +5223,31 @@ const createRow = {
      * so it is not refused either way: they are asked, and "pay from this
      * month" says which. Nothing is created until then.
      */
-    const saidAll = `${args.said ?? ''}\n${args.saidRecent ?? ''}`;
-    if (!fields.assignedOn && !fields.paymentStartOn && fields.payableDays == null
-      && !fields.specialCaseDeal && !/\b(?:pay(?:s|ing)? (?:from|in full|this month|now)|ongoing|standing|full month|no dates?)\b/i.test(saidAll)) {
-      const who = fields.personName ?? 'this deal';
-      const ask = `What is ${who}'s appointment date? Payment starts about 12 weeks after it, so I need it `
-        + 'to work out what is owed. If it is an ongoing deal paid in full from now, say "pay from this month".';
-      return {
-        summary: `NOTHING WAS ADDED for ${who}: no appointment or payment start date. ${ask} Ask for it `
-          + 'once, for every deal in their message that has none, then add them with the dates.',
-        reply: ask,
-        computedReply: true,
-      };
-    }
     recomputePayable({}, fields, { onCreate: true });
 
     const { role, seat } = parseRole(fields.roleLabel);
+
+    /**
+     * THE WHOLE DEAL, SHOWN, BEFORE IT IS SAVED. A messy answer read wrong
+     * is caught here, not on the sheet. Not on auto mode's list, so it asks
+     * whatever that switch says. 2026-10-04.
+     */
+    const shown = [
+      displayPersonName(fields.personName), fields.roleLabel, fields.groupName, fields.company || 'no company',
+      `${fields.currency || 'GBP'} ${Number(fields.monthlyAmount ?? 0).toLocaleString('en-GB')} a month`,
+      fields.assignedOn ? `appointed ${isoDay(fields.assignedOn)}` : null,
+      fields.paymentStartOn ? `payment starts ${isoDay(fields.paymentStartOn)}` : null,
+      fields.endOn ? `ends ${isoDay(fields.endOn)}` : null,
+      `paid by ${fields.paymentMethod || 'cash'}`,
+      fields.phone ? `phone ${fields.phone}` : null,
+      fields.location || null,
+    ].filter(Boolean).join(' · ');
+    const pendingAdd = confirmFirst(args.confirmed, {
+      act: `add ${displayPersonName(fields.personName)} as a new deal`,
+      count: 1,
+      lines: [shown],
+    });
+    if (pendingAdd) return pendingAdd;
 
     /**
      * THAT DEAL ALREADY EXISTS is an answer, not a crash.
@@ -10301,7 +10444,6 @@ module.exports = {
     perGroup(showPastConversation),
     perGroup(deletePastConversations),
     rowDetails,
-    dealChecklist,
     editDealForm,
     createRow,
     updateRow,

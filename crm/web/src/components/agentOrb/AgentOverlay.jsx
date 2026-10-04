@@ -165,7 +165,6 @@ const TOOL_PHRASES = {
   total_master_sheet: 'Adding it up…',
   recall_past_conversations: 'Thinking back…',
   get_master_sheet_row_details: 'Reading the row…',
-  new_deal_checklist: 'Bringing up the form…',
   edit_deal_form: 'Bringing up the form…',
   say: null,
   audit_master_sheet: 'Going through the sheet…',
