@@ -42,6 +42,7 @@ const companiesRepo = require('../../repos/companies.repo');
 const { broadcast } = require('../../sockets/index');
 const { SENTINELS } = require('../../masterSheet/canonical');
 const { recallConversations } = require('./recall');
+const { showPastConversation, deletePastConversations } = require('./conversations');
 const { recomputePayable } = require('../../shared/recomputePayable.helper');
 // The month's own arithmetic, so her confirm names the figure the switch
 // will add rather than describing it. Never a second formula here.
@@ -486,7 +487,25 @@ function narrowPersonDeals(rows, args = {}) {
         .filter((v) => word.length >= 3 && v.toLowerCase().split(/[^a-z0-9]+/).includes(word));
       return holders.length === 1 ? [field, holders[0]] : [field, value];
     })
-    .map(([field, value]) => [rehome(rows, field, value), value]);
+    .map(([field, value]) => {
+      const home = rehome(rows, field, value);
+      if (rows.some((row) => fold(row[home]) === fold(value))) return [home, value];
+      /**
+       * A WORD OF A VALUE IN ANOTHER FIELD. Clone 2026-10-04: "the umbrella
+       * one" came as roleLabel "Umbrella", matched no role, and Drew was
+       * told he has no Umbrella deal: his company is Umbrella UK Holdings.
+       * Exactly one of this person's values, in any field, holding it as a
+       * whole word is that value.
+       */
+      const word = String(value ?? '').trim().toLowerCase();
+      const hits = [];
+      for (const other of DEAL_TARGET_FIELDS) {
+        for (const v of new Set(rows.map((row) => String(row[other] ?? '').trim()).filter(Boolean))) {
+          if (word.length >= 3 && v.toLowerCase().split(/[^a-z0-9]+/).includes(word)) hits.push([other, v]);
+        }
+      }
+      return hits.length === 1 ? hits[0] : [home, value];
+    });
   if (targets.length === 0) return { rows, targeted: false, missing: null };
 
   const selected = rows.filter((row) => targets.every(([field, value]) => fold(row[field]) === fold(value)));
@@ -1202,11 +1221,29 @@ const findAndShow = {
      * (Silas Moor) was offered as "a close guess". A person who exists, just
      * not where they asked, is answered with where they are.
      */
-    const askedGroup = args.groupName ?? args.company;
-    if (args.name && askedGroup) {
+    // "IS BYRON IN NEXUS?" with only the name sent: the place is read off
+    // their sentence. 2026-10-04.
+    const placeSaid = /^\s*(?:is|are)\s+.+?\s+(?:in|at|on|with|part of)\s+([a-z][\w &'-]{1,40}?)\s*\?*\s*$/i.exec(String(args.said ?? ''))?.[1];
+    const askedGroup = args.groupName ?? args.company ?? placeSaid;
+    // ONLY A QUESTION GETS A YES OR NO: "the umbrella one" (picking a deal)
+    // was answered "No, Drew is not in Umbrella". And a word of the name
+    // counts: Umbrella is Umbrella UK Holdings. 2026-10-04.
+    const asksIn = /^\s*(?:is|are|does)\b/i.test(String(args.said ?? ''));
+    const within = (value) => {
+      const w = String(askedGroup ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+      const v = String(value ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+      return fold(value) === fold(askedGroup) || (w.length > 0 && w.every((x) => v.includes(x)));
+    };
+    if (args.name && askedGroup && asksIn) {
       const exact = ((await repo.findAll({ q: args.name, pageSize: 200 }).catch(() => null))?.rows ?? [])
         .filter((r) => !r.stopped_on && fold(r.person_name) === fold(args.name));
-      const inside = exact.filter((r) => fold(r.group_name) === fold(askedGroup) || fold(r.company) === fold(askedGroup));
+      const inside = exact.filter((r) => within(r.group_name) || within(r.company));
+      // AND YES IS AN ANSWER TOO: "is mara quill in baker?" drew her card.
+      if (inside.length > 0 && /^\s*(?:is|are|does)\b/i.test(String(args.said ?? ''))) {
+        const where = [...new Set(inside.map((r) => `${r.group_name}${r.company ? ` (${r.company})` : ''}`))].join(', ');
+        const reply = `Yes, ${inside[0].person_name} is in ${where}.`;
+        return { summary: `${reply} Say exactly that.`, reply, computedReply: true, rows: inside.map(summarizeRow) };
+      }
       if (exact.length > 0 && inside.length === 0) {
         const where = [...new Set(exact.map((r) => `${r.group_name}${r.company ? ` (${r.company})` : ''}`))].join(', ');
         const reply = `No, ${exact[0].person_name} is not in ${askedGroup}. ${exact[0].person_name} is in ${where}.`;
@@ -1265,8 +1302,16 @@ const findAndShow = {
        * Test's only deal was stopped, so the lookup offered "did you mean
        * Drew?", and the fee meant for Casey landed on Drew.
        */
-      const archived = ((await repo.findAll({ stopped: true, q: args.name, pageSize: 20 }).catch(() => null))?.rows ?? [])
-        .filter((r) => fold(r.person_name) === fold(args.name));
+      // A FIRST NAME COUNTS: "set theo's monthly" (Theo Brandt, stopped) was
+      // told nobody is close to "theo". Whole words, so "the" is not Theo.
+      // 2026-10-04.
+      const words = (v) => String(v ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+      const sameOrPart = (person) => fold(person) === fold(args.name)
+        || (words(args.name).length > 0 && words(args.name).every((w) => words(person).includes(w)));
+      const archivedAll = ((await repo.findAll({ stopped: true, q: args.name, pageSize: 20 }).catch(() => null))?.rows ?? [])
+        .filter((r) => sameOrPart(r.person_name));
+      // One person only: two stopped Theos is a question, not an answer.
+      const archived = new Set(archivedAll.map((r) => fold(r.person_name))).size === 1 ? archivedAll : [];
       if (archived.length > 0) {
         const where = archived.map((r) => `${r.company || 'no company'} in ${r.group_name}, stopped ${String(r.stopped_on instanceof Date ? r.stopped_on.toISOString() : r.stopped_on).slice(0, 10)}`).join('; ');
         return {
@@ -2785,6 +2830,38 @@ const summarizeDeals = {
       const n = perDeals[1] ? (words[perDeals[1].toLowerCase()] ?? Number(perDeals[1])) : 1;
       const exact = /\bat least\b/i.test(perDeals[0]);
       args = { ...args, measure: 'count', countPeople: false, by: 'person', atLeast: exact ? n : n + 1 };
+    }
+    // "PEOPLE AT EACH COMPANY" IS PER COMPANY, counting people: it came as
+    // by person and listed everyone with a deal count. 2026-10-04.
+    const eachOf = /\b(?:at|in|for|per|by)?\s*(?:each|every|per)\s+(company|group|role|currency)\b/i.exec(String(args.said ?? ''));
+    if (eachOf) {
+      const by = eachOf[1].toLowerCase();
+      const people = /\b(?:people|persons|staff|handlers|workers)\b/i.test(String(args.said ?? ''));
+      args = { ...args, by, ...(people ? { countPeople: true, measure: args.measure && args.measure !== 'count' ? args.measure : 'count' } : {}) };
+    }
+    // "WHO HAS THE MOST DEALS" is a count per person, answered with the
+    // top of it, ties named. It came as a plain count of the sheet. 2026-10-04.
+    const most = /\b(?:who|which (?:person|people|company|group|role))\b[^.?!]*\b(most|fewest|least)\s+deals\b/i.exec(String(args.said ?? ''));
+    if (most) {
+      const byWord = /\bcompany\b/i.test(most[0]) ? 'company' : /\bgroup\b/i.test(most[0]) ? 'group' : /\brole\b/i.test(most[0]) ? 'role' : 'person';
+      const rows = ((await repo.findAll({ ...filtersIn(args), ...(args.group ? { group: args.group } : {}), pageSize: 5000 }).catch(() => null))?.rows ?? [])
+        .filter((r) => !r.stopped_on);
+      const counts = new Map();
+      for (const r of rows) {
+        const k = SUMMARY_BY[byWord](r) || '(none)';
+        counts.set(k, (counts.get(k) ?? 0) + 1);
+      }
+      const sorted = [...counts].sort((a, b) => (most[1].toLowerCase() === 'most' ? b[1] - a[1] : a[1] - b[1]));
+      if (sorted.length === 0) {
+        const reply = 'There are no live deals to count.';
+        return { summary: reply, reply, computedReply: true };
+      }
+      const top = sorted.filter(([, n]) => n === sorted[0][1]);
+      const listed = top.slice(0, 6).map(([k]) => k);
+      const names = top.length > 6 ? `${listed.join(', ')} and ${top.length - 6} more`
+        : listed.length > 1 ? `${listed.slice(0, -1).join(', ')} and ${listed[listed.length - 1]}` : listed[0];
+      const reply = `${names} ${top.length === 1 ? 'has' : 'have'} the ${most[1].toLowerCase()} deals: ${sorted[0][1]}${top.length > 1 ? ' each' : ''}.`;
+      return { summary: `${reply}\n\nCOMPUTED. Say it as written.`, reply, computedReply: true };
     }
     // A PLAIN COUNT OR A THRESHOLD LIST IS THE FILTER'S, which words it the
     // way every count reads ("14 deals", "5 deals ... held by 4 people").
@@ -5460,8 +5537,21 @@ const updateRow = {
          */
         const by = picked.by ?? 'one';
         const all = sorted.length === 2 ? 'both' : 'all of them';
+        /**
+         * THE CHANGE RIDES ON THE QUESTION. Clone 2026-10-04: "drew's monthly
+         * should be 900" asked "Which group, or all of them?", the answer
+         * "the umbrella one" had nothing to attach to, and she looked Drew up
+         * instead. Saying what will change keeps it in the conversation.
+         */
+        const what = Object.entries(fields)
+          .filter(([k, v]) => v !== undefined && v !== null && !/^target|^id$/.test(k))
+          .slice(0, 3)
+          .map(([k, v]) => `${String(FIELD_LABELS[k] ?? k).toLowerCase()} ${formatValue(v)}`)
+          .join(', ');
         const reply = `${displayPersonName(person.rows[0].person_name)} has ${sorted.length} deals. `
-          + (changing ? `Which ${by}, or ${all}?` : `Which ${by}, and what should change?`);
+          + (changing
+            ? `Which ${by} should get ${what || 'the change'}, or ${all}?`
+            : `Which ${by}, and what should change?`);
         return {
           summary: reply,
           list: dealList(sorted, `${displayPersonName(person.rows[0].person_name)}'s deals`),
@@ -9797,6 +9887,32 @@ const undoChange = {
     // change" once fell through and proposed two deals' stop dates instead. 2026-09-28.
     // On a "yes" or an "undo that", the field was named one message back.
     const said = undoSentence(args);
+    /**
+     * SCHEDULED A MOMENT AGO, SO "CANCEL THAT" MEANS THE SCHEDULE. Clone
+     * 2026-10-04: after parking a closure, "dont close it, cancel that"
+     * reached here and offered to revert two review answers from the day
+     * before, which a yes then did. A generic undo while something was just
+     * parked is pointed at cancel_parked_work instead.
+     */
+    if (!args.confirmed && !/\b(?:fee|add[\s-]?on|monthly|payable|preset|end date|payment start|currency|review|stop(?:ped)?|resume)\b/i.test(said)) {
+      // eslint-disable-next-line global-require
+      const parked = await require('../../repos/scheduledActions.repo').upcoming(currentMonth()).catch(() => []);
+      // NEWER THAN THE LAST REAL CHANGE, or "undo that" after a change made
+      // since is that change (the suite caught this: three undos refused).
+      // eslint-disable-next-line global-require
+      const lastChange = (await require('../../../configs/db')
+        .query('SELECT max(changed_at) AS at FROM tb_mastersheet_changes WHERE reverted_at IS NULL')
+        .catch(() => null))?.rows?.[0]?.at;
+      const fresh = parked.filter((p) => Date.now() - new Date(p.parked_at).getTime() < 15 * 60 * 1000
+        && (!lastChange || new Date(p.parked_at) > new Date(lastChange)));
+      if (fresh.length > 0) {
+        return {
+          summary: 'NOTHING HAS BEEN UNDONE. The last thing done was SCHEDULING, not a change: '
+            + `${fresh.map((p) => `"${p.said}" for ${p.due_month}`).join('; ')}. To call that off, `
+            + 'call cancel_parked_work now. Do not offer to undo any other change.',
+        };
+      }
+    }
     if (COMPANY_FIELD.test(said)) {
       const companies = (await peopleRepo.filterOptions().catch(() => null))?.companies ?? [];
       const named = companies.find((c) => String(c).length > 2 && fold(said).includes(fold(c)));
@@ -10145,6 +10261,8 @@ module.exports = {
     // the writes for the same reason findAndShow is: it is the common ask.
     exportSheet,
     perGroup(recallConversations),
+    perGroup(showPastConversation),
+    perGroup(deletePastConversations),
     rowDetails,
     dealChecklist,
     editDealForm,

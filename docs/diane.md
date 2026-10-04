@@ -195,6 +195,61 @@ null, and both doors read it. Its own file, like `resolvePerson`, so
 
 ---
 
+## DONE 2026-10-04 (afternoon): history, scheduling, and human-style testing
+
+Tested on the clone of live (port 3002, real names, 159 real saved
+conversations) and on random conversations (`SUITE_SET=wander SUITE_SEED=n`).
+
+**1. Conversation history, two new tools.**
+- `show_past_conversation`: one earlier conversation word for word
+  (opening 10 and last 30 messages if long). "Show me that conversation"
+  opens the one her last answer named by its date.
+- `delete_past_conversations`: deletes for good, after listing what goes.
+  A yes deletes EXACTLY the listed ones (kept in memory for 10 minutes,
+  one admin), and only right after she asked about deleting. Held until
+  their words ask (delete, forget, wipe, clean up). This replaces the
+  "no pruning" note in 041_conversations.sql: nothing deletes on its own,
+  he deletes what he names.
+- Recall and both tools read "today", "yesterday", "this week", "last week"
+  in code, and a month or date with no year said is the latest one not in
+  the future (the model guessed 2023 and 2024).
+- A first or last name finds a conversation ("kiran" finds Kiran Vale).
+
+**2. Scheduling.**
+- "Cancel that" right after something was parked cancels the PARKED work.
+  It went to undo once, and reverted two review answers from the day before.
+- "End of next month" is the month after next (was read as next month).
+- A company closure replaces only an earlier one for the SAME company, in
+  any month. Before, any two closures in one month replaced each other
+  (company closures have no row ids). A deal change said with "instead"
+  moves the parked one rather than adding a second.
+- Suite: a parked change is applied when the month comes (the runner).
+
+**3. Accuracy guards added (code, not prompt).**
+- A deal is picked by what they SAID: a company / group / role the model
+  added on its own is dropped, and the tool asks which.
+- A name the model completed ("Theo Example", "Kiran Patel") is cut back
+  to the words actually said.
+- A company in her reply that no tool and nothing on screen showed sends
+  her back to look it up. "Northstar Care" (a prompt placeholder) was
+  given as a real company twice.
+- `fill_form` is only offered while a form is open.
+- "Give X a 2% add-on" never becomes +2 on the monthly on a short answer
+  like "the quickearn one".
+- Auto mode still shows a PROFILE rate first when it reaches several deals.
+- "Which group should get monthly amount 900, or all of them?": the
+  question carries the change, and the short answer goes back to it.
+- "no" after a saved change says it is saved and how to undo it; "thanks"
+  and "ok" get plain answers.
+- Routed in code: who has the most deals, is X in Y, what's X on, who is
+  in GROUP, list the groups, stop X's deal, put X back on, people at each
+  company.
+
+**Known:** suite figures grew (13 history and scheduling turns), so the
+per-turn tokens are not comparable with the morning's; see the run notes.
+
+---
+
 ## DONE 2026-10-04: a general read, ordering, and arguments fixed in code
 
 Measured, not guessed. Each fresh question set was scored on the old code

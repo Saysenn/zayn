@@ -155,6 +155,9 @@ test('THE FIELD MAY BE NAMED ONE MESSAGE BACK, the answer to "which deal?"', () 
    * Repinned 2026-09-29.
    */
   assert.match(src, /const all = sorted\.length === 2 \? 'both' : 'all of them';/);
-  assert.match(src, /changing \? `Which \$\{by\}, or \$\{all\}\?`/);
+  // Repinned 2026-10-04: the question now names the change it is for
+  // ("Which group should get monthly amount 900, or all of them?"), so the
+  // answer "the umbrella one" still has it. "both / all of them" is kept.
+  assert.match(src, /`Which \$\{by\} should get \$\{what \|\| 'the change'\}, or \$\{all\}\?`/);
   assert.doesNotMatch(src, /`Which company, or/, 'the shared field is never the question');
 });

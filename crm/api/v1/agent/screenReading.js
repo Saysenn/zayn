@@ -100,13 +100,21 @@ function withoutFiller(reply) {
  * stays, the recital goes.
  */
 function withoutRecital(reply, shown) {
-  const names = shown.flatMap((e) => (e.type === 'list' ? (e.list?.rows ?? []).map((r) => r.name) : []))
-    .filter((n) => n && n.length >= 3);
+  // DISTINCT names: one person's five deals are five rows named "Drew", and
+  // "Drew has 5 deals. Which group should get monthly amount 900?" counted
+  // as reading five names back, so the question was cut off. 2026-10-04.
+  const names = [...new Set(shown.flatMap((e) => (e.type === 'list' ? (e.list?.rows ?? []).map((r) => r.name) : []))
+    .filter((n) => n && n.length >= 3))];
   const text = String(reply ?? '');
   const hits = names.filter((n) => text.toLowerCase().includes(String(n).toLowerCase())).length;
   if (hits < 4) return text;
   const first = /^[\s\S]*?[.!?](?=\s|$)/.exec(text);
   const lead = first ? first[0].trim() : text;
+  // A CLOSING QUESTION that names nobody on the list is the point, not a
+  // recital, and it stays.
+  const lastQ = /([^.!?\n]*\?)\s*$/.exec(text)?.[1]?.trim();
+  const keepQ = lastQ && lastQ !== lead
+    && names.filter((n) => lastQ.toLowerCase().includes(String(n).toLowerCase())).length < 2 ? ` ${lastQ}` : '';
   /**
    * AND WHEN THE COUNT AND THE RECITAL ARE ONE SENTENCE ("MANBAT has 6
    * deals held by 5 people: Gary, Gloria, ..."), it ends where the first
@@ -116,9 +124,9 @@ function withoutRecital(reply, shown) {
   const at = Math.min(...names.map((n) => lower.indexOf(String(n).toLowerCase())).filter((i) => i > 0));
   if (Number.isFinite(at)) {
     const cut = lead.slice(0, at).replace(/[\s:,;-]*(?:including|they are|namely|which are)?[\s:,;-]*$/i, '').trim();
-    if (cut.length > 10) return `${cut}.`;
+    if (cut.length > 10) return `${cut}.${keepQ}`;
   }
-  return lead;
+  return `${lead}${keepQ}`;
 }
 
 /**

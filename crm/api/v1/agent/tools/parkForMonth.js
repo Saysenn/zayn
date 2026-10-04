@@ -1,3 +1,4 @@
+const INSTEAD = /\b(?:instead|change (?:that|it)|move (?:that|it)|push (?:that|it)|actually)\b/i;
 const queue = require('../../repos/scheduledActions.repo');
 const rowsRepo = require('../../repos/masterSheetRows.repo');
 const { currentMonth } = require('../../shared/presetMonth.helper');
@@ -134,7 +135,7 @@ const parkForMonth = {
       for (const month of months) {
         // eslint-disable-next-line no-await-in-loop
         saved.push(await queue.park({
-          dueMonth: month, tool, args, expect: {}, targetIds: [], said: what,
+          dueMonth: month, tool, args, expect: {}, targetIds: [], said: what, companies,
         }));
       }
       return {
@@ -192,6 +193,8 @@ const parkForMonth = {
         expect,
         targetIds: [rowId],
         said,
+        // "MAKE IT DECEMBER INSTEAD" moves it rather than adding a second.
+        anyMonth: months.length === 1 && INSTEAD.test(`${rawArgs.said ?? ''}\n${rawArgs.saidRecent ?? ''}`),
       });
       saved.push(entry);
     }

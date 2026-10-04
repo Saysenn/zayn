@@ -1,4 +1,5 @@
 const repo = require('../../repos/conversations.repo');
+const { currentDay } = require('../../shared/presetMonth.helper');
 const { answerEach, listAsked } = require('./answerEach');
 const { notAGroup } = require('./notAGroup');
 
@@ -57,6 +58,36 @@ function memoryLines(hit) {
     : []));
 }
 
+/** A day as YYYY-MM-DD, `n` days from the business day. */
+const dayFrom = (n) => {
+  const d = new Date(`${currentDay()}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+/**
+ * THE YEAR THEY MEANT. A date or month with no year said is the most recent
+ * one that is not in the future ("before December" may be later this year).
+ * The model guessed 2023 and 2024. 2026-10-04.
+ */
+function settleYear(value, said, { future = false } = {}) {
+  const m = /^(\d{4})-(\d{2})(-\d{2})?$/.exec(String(value ?? ''));
+  if (!m || new RegExp(`\\b${m[1]}\\b`).test(String(said ?? ''))) return value;
+  const today = currentDay();
+  let y = Number(today.slice(0, 4));
+  const at = (yy) => `${yy}-${m[2]}${m[3] ?? ''}`;
+  if (!future && at(y) > today.slice(0, m[3] ? 10 : 7)) y -= 1;
+  return at(y);
+}
+
+function daysSaid(said) {
+  const s = String(said ?? '');
+  if (/\byesterday\b/i.test(s)) return { after: dayFrom(-1), before: dayFrom(0) };
+  if (/\btoday\b|\bthis morning\b/i.test(s)) return { after: dayFrom(0), before: dayFrom(1) };
+  if (/\blast week\b/i.test(s)) return { after: dayFrom(-7), before: dayFrom(1) };
+  if (/\bthis week\b/i.test(s)) return { after: dayFrom(-6), before: dayFrom(1) };
+  return null;
+}
+
 const recallConversations = {
   name: 'recall_past_conversations',
   description:
@@ -86,6 +117,8 @@ const recallConversations = {
       group: { type: 'string', description: 'A group name, same idea.' },
       company: { type: 'string', description: 'A company name. Matches conversations that acted on one of its deals.' },
       month: { type: 'string', description: 'YYYY-MM, when the conversation happened.' },
+      after: { type: 'string', description: 'YYYY-MM-DD: conversations that ended on or after this day.' },
+      before: { type: 'string', description: 'YYYY-MM-DD: conversations that ended before this day.' },
       months: {
         type: 'array',
         items: { type: 'string' },
@@ -113,13 +146,22 @@ const recallConversations = {
     // One name in the plural argument is just the singular question.
     const args = people.length === 1 ? { ...rawArgs, person: people[0] } : rawArgs;
 
+    // THE DAY FROM THEIR WORDS, worked out here: "yesterday" found nothing
+    // because recall only knew months, and a model guessing a date guesses
+    // the year too. 2026-10-04.
+    const days = daysSaid(args.said);
+    // A MONTH WITH NO YEAR SAID is the latest one not in the future: "last
+    // month" came as August 2024. 2026-10-04.
+    const year = (v, future = false) => settleYear(v, args.said, { future });
     const hits = await repo.search({
-      q: args.q,
+      after: days?.after ?? year(args.after),
+      before: days?.before ?? year(args.before, true),
+      month: days ? undefined : year(args.month),
+      months: days ? undefined : (Array.isArray(args.months) ? args.months.map((m) => year(m)) : args.months),
+      q: days && /^(?:yesterday|today|last week|this week)$/i.test(String(args.q ?? '').trim()) ? undefined : args.q,
       person: args.person,
       group: args.group,
       company: args.company,
-      month: args.month,
-      months: args.months,
       limit: MAX_HITS,
     });
 
@@ -164,4 +206,4 @@ const recallConversations = {
   },
 };
 
-module.exports = { recallConversations };
+module.exports = { recallConversations, daysSaid, settleYear };

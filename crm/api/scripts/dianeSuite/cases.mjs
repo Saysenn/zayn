@@ -586,3 +586,87 @@ READS.push({
   name: '"who started this month" answers appointments and payment starts both',
   turns: [{ say: 'who started with us this month?', expect: { reply: /appointed this month/i, noTools: ['audit_master_sheet'] } }],
 });
+
+/*
+ * ===============================
+ * * CONVERSATION HISTORY AND A PARKED CHANGE RUNNING, 2026-10-04
+ * ===============================
+ * Last in WRITES on purpose: they clear the saved conversations and move a
+ * deal's monthly, and nothing after them reads either.
+ */
+const KIRAN_TALK = '1b6f0b52-6f43-4c1e-9d3c-0a1e2b3c4d01';
+const OTTO_TALK = '1b6f0b52-6f43-4c1e-9d3c-0a1e2b3c4d02';
+const saveTalk = (api, id, touchedPeople, messages) => api('POST', '/conversations', {
+  id, startedAt: new Date().toISOString(), touchedPeople, messages,
+});
+const talks = async (db) => (await one(db, 'SELECT count(*)::int n FROM tb_conversations')).n;
+const hasTalk = async (db, id) => Boolean(await one(db, 'SELECT 1 FROM tb_conversations WHERE id = $1', [id]));
+
+WRITES.push(
+  {
+    name: 'an earlier conversation is recalled, shown word for word, and old ones deleted on a yes',
+    turns: [
+      {
+        label: 'two saved conversations, one in August',
+        act: async ({ db, api }) => {
+          await db.query('DELETE FROM tb_conversations');
+          await saveTalk(api, KIRAN_TALK, ['Kiran Vale'], [
+            { role: 'user', content: "leave kiran vale's add-on at zero until january, we agreed that with her" },
+            { role: 'assistant', content: "Noted: Kiran Vale's add-on stays at 0% until January." },
+          ]);
+          await saveTalk(api, OTTO_TALK, ['Otto Fenn'], [
+            { role: 'user', content: 'otto fenn is moving to quarterly reviews' },
+            { role: 'assistant', content: 'Understood, Otto Fenn moves to quarterly reviews.' },
+          ]);
+          await db.query("UPDATE tb_conversations SET ended_at = '2026-08-15 10:00+00' WHERE id = $1", [KIRAN_TALK]);
+        },
+        expect: { db: async (db) => ((await talks(db)) === 2 ? null : 'not saved') },
+      },
+      { say: 'what did we agree about kiran before?', expect: { reply: /january/i, tools: ['recall_past_conversations'] } },
+      { say: 'show me that conversation', expect: { reply: /add-on at zero until january/i, tools: ['show_past_conversation'] } },
+      { say: 'delete my conversations from before september', expect: { db: async (db) => ((await talks(db)) === 2 ? null : 'deleted before the yes') } },
+      { say: 'yes', expect: { db: async (db) => (!(await hasTalk(db, KIRAN_TALK)) && (await hasTalk(db, OTTO_TALK)) ? null : 'wrong ones deleted') } },
+      { say: 'forget everything we said about otto' },
+      { say: 'no, keep it', expect: { db: async (db) => ((await hasTalk(db, OTTO_TALK)) ? null : 'deleted on a no') } },
+    ],
+  },
+  {
+    name: 'a change parked for next month is applied when the month comes',
+    turns: [
+      { say: 'from next month put ines calder on 4200' },
+      { say: 'yes', expect: { db: async (db) => ((await parkedCount(db, 'ines')) === 1 && Number((await deal(db, 'Ines Calder', 'Ironleaf')).monthly_amount) === 4000 ? null : 'not parked, or changed now') } },
+      {
+        label: 'the month turns over and the parked work runs',
+        act: async ({ db, api }) => {
+          await db.query("UPDATE tb_scheduled_actions SET due_month = to_char(now(), 'YYYY-MM') WHERE status = 'parked' AND said ILIKE '%ines%'");
+          await api('POST', '/scheduled-actions/run');
+        },
+        expect: { db: async (db) => (Number((await deal(db, 'Ines Calder', 'Ironleaf')).monthly_amount) === 4200 ? null : 'parked change never applied') },
+      },
+    ],
+  },
+);
+
+const nextMonth = () => { const d = new Date(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() + 1); return d.toISOString().slice(0, 7); };
+
+// TWO COMPANIES CLOSED THE SAME MONTH BOTH STAY PARKED, and "instead" moves
+// one rather than adding a second. Both broke 2026-10-04: a company close has
+// no row ids, so the second replaced the first; "end of next month instead"
+// kept November beside December.
+WRITES.push({
+  name: 'two closures in one month both stay scheduled, and "instead" moves one',
+  turns: [
+    { say: 'close harbor nine at the end of this month' },
+    { say: 'yes' },
+    { say: 'close quarry lane at the end of this month' },
+    { say: 'yes', expect: { db: async (db) => ((await parkedCount(db, 'Harbor Nine')) === 1 && (await parkedCount(db, 'Quarry Lane')) === 1 ? null : 'one closure replaced the other') } },
+    { say: 'actually close quarry lane at the end of next month instead' },
+    {
+      say: 'yes',
+      expect: { db: async (db) => {
+        const q = await one(db, "SELECT count(*)::int n, max(due_month) m FROM tb_scheduled_actions WHERE status = 'parked' AND said ILIKE '%Quarry Lane%'");
+        return q.n === 1 && q.m > nextMonth() && (await parkedCount(db, 'Harbor Nine')) === 1 ? null : `quarry lane parked ${q.n} (latest ${q.m})`;
+      } },
+    },
+  ],
+});

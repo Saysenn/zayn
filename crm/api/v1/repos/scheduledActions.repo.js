@@ -34,6 +34,7 @@ const COLUMNS = `id, due_month, tool, args, expect, target_ids, said,
  */
 async function park({
   dueMonth, tool, args, expect = {}, targetIds = [], said, parkedVia = 'diane',
+  companies = null, anyMonth = false,
 }) {
   const client = await pool.connect();
   try {
@@ -47,17 +48,50 @@ async function park({
     );
     const saved = rows[0];
 
-    await client.query(
-      `UPDATE tb_scheduled_actions
-          SET status = 'superseded', superseded_by = $1,
-              outcome = 'Replaced by a later instruction.'
-        WHERE id <> $1
-          AND status = 'parked'
-          AND due_month = $2
-          AND tool = $3
-          AND target_ids = $4::int[]`,
-      [saved.id, dueMonth, tool, targetIds],
-    );
+    /**
+     * ===============================
+     * * WHAT A NEW PARK REPLACES, 2026-10-04
+     * ===============================
+     * A COMPANY closure has no row ids, so "same tool, same month, same
+     * ids" matched EVERY company closure that month: closing Harbor Nine
+     * and then Quarry Lane for November would have dropped Harbor Nine.
+     * And "close it at the end of next month instead" kept the November one
+     * beside the new December one. So:
+     *   - a company act replaces an earlier one for the SAME companies, in
+     *     any month (a company closes once);
+     *   - a deal change replaces the same deal's in the same month, or in
+     *     any month when they said "instead" (anyMonth);
+     *   - nothing with no ids and no companies replaces anything.
+     */
+    if (Array.isArray(companies) && companies.length > 0) {
+      const key = (list) => [...list].map((c) => String(c).trim().toLowerCase()).sort().join('|');
+      const { rows: same } = await client.query(
+        `SELECT id, args FROM tb_scheduled_actions
+          WHERE id <> $1 AND status = 'parked' AND tool = $2`,
+        [saved.id, tool],
+      );
+      const ids = same.filter((r) => key([].concat(r.args?.companies ?? r.args?.company ?? [])) === key(companies)).map((r) => r.id);
+      if (ids.length) {
+        await client.query(
+          `UPDATE tb_scheduled_actions
+              SET status = 'superseded', superseded_by = $1, outcome = 'Replaced by a later instruction.'
+            WHERE id = ANY($2::bigint[])`,
+          [saved.id, ids],
+        );
+      }
+    } else if (targetIds.length > 0) {
+      await client.query(
+        `UPDATE tb_scheduled_actions
+            SET status = 'superseded', superseded_by = $1,
+                outcome = 'Replaced by a later instruction.'
+          WHERE id <> $1
+            AND status = 'parked'
+            AND ($5 OR due_month = $2)
+            AND tool = $3
+            AND target_ids = $4::int[]`,
+        [saved.id, dueMonth, tool, targetIds, anyMonth],
+      );
+    }
 
     await client.query('COMMIT');
     return saved;

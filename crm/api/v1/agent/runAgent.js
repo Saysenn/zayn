@@ -64,7 +64,8 @@ const SECOND_ASK = /\b(?:and|also|plus|then)\b[^.!?]*\b(?:what'?s?|how (?:much|m
 // "bring casey test's deal back" went to the deal filter twice. 2026-09-30.
 // "actually put pino's nexus deal back" asked a question instead. 2026-10-03.
 // A DEAL put back, so "put it back" stays an undo.
-const RESUME_ASK = /\b(?:resume|reinstate|un-?stop|bring\w* (?:[\w'’-]+ ){0,4}back|put (?:[\w'’-]+ ){0,4}deals? back)\b/i;
+// "PUT JUNO BACK ON" too: once answered with no tool and a claim she was back. 2026-10-04.
+const RESUME_ASK = /\b(?:resume|reinstate|un-?stop|bring\w* (?:[\w'’-]+ ){0,4}back|put (?:[\w'’-]+ ){0,4}deals? back|put (?:[\w'’-]+ ){1,3}back on\b)\b/i;
 // A YES TO HER OWN "shall I resume it?" is a resume. Live 2026-10-03 she
 // answered that yes with "it is back live" and called nothing.
 const BARE_YES = /^\s*(?:y|ya|yes|yep|yeah|yup|ok|okay|sure|go ahead|do it|please do)[.!\s]*$/i;
@@ -75,12 +76,47 @@ const RESUME_OFFERED = /(?:\bresum\w*|\bdeals?\b[^?]*\bback\b)[^?]*\?\s*$/i;
 const DEAL_RATE_SET = /\b(?:set|change|make|put)\b[^.?!]*\b(?:fee|add[\s-]?on)s?\b[^.?!]*\bon\s+(?!top\b)[a-z][^.?!]*\b\d+(?:\.\d+)?\s*(?:%|percent)/i;
 const FORCED_ROUTES = [
   [RESUME_ASK, 'resume_deal'],
+  // "JUNO PARK IS DONE WITH US, STOP HER DEAL" is a stop, said in so many
+  // words: one run in three it went to the monthly review and nothing
+  // stopped. An explicit stop or end of a DEAL is stop_deal. 2026-10-04.
+  [/\b(?:stop|end|terminate)\s+(?:(?:her|his|their|the|that)\s+|[a-z]+(?:\s+[a-z]+)?['’]s\s+)?deals?\b(?!\s+(?:list|review|check))/i, 'stop_deal'],
   [DEAL_RATE_SET, 'update_master_sheet_row'],
   [STATUS_ASK, 'audit_master_sheet'],
   [STOPPED_ASK, 'list_stopped_deals'],
   [COMPANIES_IN_ASK, 'list_companies'],
   [COMPANIES_LIST_ASK, 'list_companies'],
   [BREAKDOWN_ASK, 'breakdown_master_sheet'],
+  // THE ANSWER TO "WHICH ... SHOULD GET <change>?" is the change, on that
+  // deal: "the umbrella one" was a lookup and the 900 was lost. 2026-10-04.
+  [{
+    test: (said, history = []) => /\bhas \d+ deals\. Which \w+ should get\b/.test(lastAssistantAnswer(history) ?? '')
+      && String(said).trim().split(/\s+/).length <= 6 && !/\?\s*$/.test(String(said)),
+  }, 'update_master_sheet_row'],
+  // "THE QUICKEARN ONE" after a PROFILE preview narrows it to that deal:
+  // it was answered with rates and the question asked again. 2026-10-04.
+  [{
+    test: (said, history = []) => /\bPROFILE\b/.test(lastAssistantAnswer(history) ?? '')
+      && /\?\s*$/.test((lastAssistantAnswer(history) ?? '').trim())
+      && /^\s*(?:just |only )?(?:on )?(?:the |his |her |their )?[\w &'-]{2,40}\s+(?:one|deal)\s*(?:only)?[.!]?\s*$/i.test(said),
+  }, 'update_master_sheet_row'],
+  // "WHO HAS THE MOST DEALS" counts deals per person, never money. 2026-10-04.
+  [/\bwho\s+(?:has|holds|have|got)\s+the\s+(?:most|fewest|least)\s+deals\b/i, 'summarize_deals'],
+  // "LIST THE GROUPS" is answered in code by the filter; left to her it was
+  // met with "all groups, or in a specific context?". 2026-10-04.
+  [/^\s*(?:list|show|give)(?: me)?(?: all)?(?: of)?(?: the| our)? groups\s*(?:please|pls)?[.?!]*\s*$|^\s*what groups (?:do we have|are there)\??\s*$/i, 'filter_master_sheet'],
+  // "WHO IS IN CORVID" is the people in a group, not its companies. 2026-10-04.
+  [/^\s*who(?:'s|s| is| are)\s+in\s+[a-z][\w &'-]{1,30}\s*\??\s*$/i, 'filter_master_sheet'],
+  // "WHAT'S NATHAN ON" is what they are paid, deal by deal: twice it was
+  // answered with their add on and fee rates. 2026-10-04.
+  [/^\s*what(?:'s|s| is)\s+(?!the\b|it\b|that\b|this\b)[a-z][\w' -]{1,40}?\s+on\s*\??\s*$/i, 'find_and_show_details'],
+  // "IS BYRON IN NEXUS?" is a yes or no about one person. 2026-10-04.
+  [/^\s*(?:is|are)\s+(?!(?:anyone|anybody|there|it|that|this|everyone|everybody|someone|somebody|he|she|they|we|i)\b)[a-z][\w' -]{1,40}?\s+(?:in|at|on|with|part of)\s+[a-z][\w &'-]{1,40}\?*\s*$/i, 'find_and_show_details'],
+  // "WHICH COMPANY HAS THE MOST DEALS" is a count by name, never the sheet
+  // audit (2 runs in 3 answered "58 things to look at"). 2026-10-04.
+  [/\bwhich\s+(?:company|companies|group|groups|role|person|one)\b[^.?!]*\b(?:most|fewest|least|biggest|smallest)\b[^.?!]*\b(?:deals?|people)\b/i, 'filter_master_sheet'],
+  // CONVERSATION HISTORY: deleting it, and seeing one word for word. 2026-10-04.
+  [/\b(?:delete|remove|erase|forget|wipe|purge|clear|clean(?:\s+up)?)\b[^.?!]*\b(?:conversations?|chats?|chat history|history|transcripts?)\b/i, 'delete_past_conversations'],
+  [/\b(?:show|open|read|give)\b[^.?!]*\b(?:conversation|chat|transcript)\b(?![^.?!]*\b(?:delete|forget|wipe)\b)|\bwhat (?:exactly )?did I (?:say|type|write)\b|\bword for word\b/i, 'show_past_conversation'],
   // AGGREGATES go to the general read: averages, and counts PER someone.
   [/\b(?:average|avg|mean|median)\b|\b(?:more than|at least|over)\s+(?:one|two|three|\d+)\s+deals?\b|\b(?:several|multiple)\s+deals\b|\b(?:per|at each|in each|for each|each)\s+(?:person|company|group|role)\b/i, 'summarize_deals'],
   [{ test: (said, history = []) => Boolean(changeAgain(said, history)) }, 'update_master_sheet_row'],
@@ -97,7 +133,9 @@ const FORCED_ROUTES = [
   [/\b(?:are|is|mark\w*|answer\w*|set)\b[^.?!]*\b(?:final(?: month| this month)?|yes|no)\b[^.?!]*\b(?:review|this month|for (?:october|november|december|january|february|march|april|may|june|july|august|september))\b|\breviews?\b[^.?!]*\b(?:as|to) (?:yes|no|final)\b|\b(?:are|is) final\b/i, 'bulk_answer_monthly_review'],
   // "close brightwell and quarryy lanez" was looked up rather than closed, one
   // run in three. A company close is one door; a DEAL is stop_deal. 2026-10-03.
-  [/^\s*(?:ok\s+|please\s+|can you\s+)?(?:close|shut(?:\s+down)?|dissolve|wind up)\b(?![^.?!]*\bdeals?\b)/i, 'bulk_close_companies'],
+  // "ACTUALLY CLOSE IT AT THE END OF NEXT MONTH INSTEAD" is a close too: with
+  // "actually" in front it was taken as a cancel, and the new date was lost.
+  [/^\s*(?:(?:ok|okay|actually|no|wait|sorry|please|can you|then)[\s,]+)*(?:close|shut(?:\s+down)?|dissolve|wind up)\b(?![^.?!]*\bdeals?\b)/i, 'bulk_close_companies'],
   // "reopen relia pa" listed the company and reopened nothing. 2026-10-03.
   [/^\s*(?:ok\s+|okay\s+|please\s+|can you\s+)?(?:reopen|re-open|unclose)\b/i, 'bulk_close_companies'],
   // A PERSON'S DETAIL is looked up every time, never recalled. 2026-10-03.
@@ -107,7 +145,7 @@ const FORCED_ROUTES = [
 ];
 
 // What a held tool is for, in their words: see contexts.js HELD_UNTIL_NEEDED.
-const ASKS_FOR_HELD = /\b(?:delete|deleting|erase|undo|revert|reverse|take (?:that|it) back|rename|close|closing|all|every|everyone|everybody|bulk|whole|each|average|avg|mean|median|per|costing|(?:more than|at least|over|several|multiple)\s+(?:\w+\s+)?deals?)\b/i;
+const ASKS_FOR_HELD = /\b(?:delete|deleting|erase|undo|revert|reverse|take (?:that|it) back|rename|close|closing|all|every|everyone|everybody|bulk|whole|each|average|avg|mean|median|per|costing|most deals|fewest deals|forget|wipe|purge|clean(?:\s+up)?|(?:more than|at least|over|several|multiple)\s+(?:\w+\s+)?deals?)\b/i;
 
 // "the second one", "2nd", "the last one": a whole message picking from a list.
 const ORDINALS = Object.freeze({
@@ -151,6 +189,24 @@ FORCED_ROUTES.unshift([UNDO_ASKED, 'undo_master_sheet_change']);
 FORCED_ROUTES.unshift([{
   test: (said, history = []) => asksUndoPlainly(said) && !/\?\s*$/.test(lastAssistantAnswer(history).trim()),
 }, 'undo_master_sheet_change']);
+/**
+ * ===============================
+ * * "CANCEL THAT" RIGHT AFTER SCHEDULING IS THE SCHEDULED WORK
+ * ===============================
+ * Clone, 2026-10-04: "close whitestone swan at the end of this month",
+ * yes, then "actually dont close it, cancel that". It went to the UNDO,
+ * which reverted two review answers from 16 hours before, in another
+ * conversation, while the closure stayed parked. Her last answer said
+ * something was parked or scheduled, so "that" is the parked work.
+ * First in line, ahead of both undo routes.
+ */
+const PARKED_JUST_NOW = /\b(?:parked|scheduled|will (?:close|apply|change|stop|go)\b[^.]*\b(?:on|from|in) (?:1 )?(?:january|february|march|april|may|june|july|august|september|october|november|december)|nothing has changed yet)\b/i;
+const CALL_OFF = /\b(?:cancel|scrap|undo|revert|forget|drop|call (?:it|that) off|don'?t (?:close|do|change|apply)|never ?mind|take (?:that|it) back)\b/i;
+FORCED_ROUTES.unshift([{
+  test: (said, history = []) => CALL_OFF.test(said) && !/\binstead\b/i.test(said)
+    && PARKED_JUST_NOW.test(lastAssistantAnswer(history) ?? '')
+    && !/\?\s*$/.test((lastAssistantAnswer(history) ?? '').trim()),
+}, 'cancel_parked_work']);
 const {
   drawnAlready, SAY_IT_INSTEAD, signature: listSignature,
 } = require('./notTwice.list');
@@ -173,6 +229,8 @@ const { checkRateDirection } = require('./checkRateDirection');
 const { checkPointed, DISABLED } = require('./disabledTools');
 const { bypassAttempt, BYPASS_REPLY } = require('./blockBypass');
 const { asksUndoPlainly } = require('./undoIntent');
+const { fold } = require('./tools/resolvePerson');
+const { PROMPT_PLACEHOLDERS } = require('./promptPlaceholders');
 const { rankAskedIn } = require('./tools/masterSheet');
 // A tool's own orders, read out to the admin. See checkLeak.js.
 const { checkLeak } = require('./checkLeak');
@@ -1073,6 +1131,90 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
     const { paid: _paid, ...rest } = args;
     args = rest;
   }
+  /**
+   * ===============================
+   * * A DEAL IS PICKED BY WHAT THEY SAID, NEVER BY A GUESS
+   * ===============================
+   * Random conversation 2026-10-04: "kiran's monthly should be 700" (Kiran
+   * has three deals) came with company "Harbor Nine", which nobody said, and
+   * the preview offered AED 6,000 to 700 on that one. A yes would have cut
+   * the wrong deal. On a write, a company / group / role that picks the deal
+   * must be in their recent words, and a row id for somebody with several
+   * live deals must be one they pointed at: its company or group said, or
+   * the one card on screen. Otherwise it is dropped, and the tool asks which.
+   */
+  if (tool.writes && (props.targetPerson || props.id)) {
+    const heard = fold(recentSaid(history, 3));
+    // Whole, or one whole word of 4+ letters: "on harbor" is Harbor Nine.
+    const heardWords = new Set(recentSaid(history, 3).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4));
+    const said = (v) => typeof v === 'string' && v.trim() && (heard.includes(fold(v))
+      || v.toLowerCase().split(/[^a-z0-9]+/).some((w) => w.length >= 4 && heardWords.has(w)));
+    for (const k of ['targetCompany', 'targetGroup', 'targetRole']) {
+      if (args[k] !== undefined && !said(args[k])) {
+        const { [k]: _dropped, ...rest } = args;
+        args = rest;
+      }
+    }
+    // `company` / `groupName` are VALUES to set; one nobody said that only
+    // repeats the deal's own is a guess at which deal, not a change.
+    for (const k of ['company', 'groupName']) {
+      if (props[k] && args[k] !== undefined && !said(args[k]) && args.targetPerson) {
+        const { [k]: _dropped, ...rest } = args;
+        args = rest;
+      }
+    }
+    if (args.id != null && props.targetPerson && !ORDINAL_REPLY.test(lastSaid(history) ?? '')) {
+      try {
+        // eslint-disable-next-line global-require
+        const rows = require('../repos/masterSheetRows.repo');
+        const row = await rows.findById(Number(args.id));
+        if (row?.person_name) {
+          const theirs = ((await rows.findAll({ q: row.person_name, pageSize: 50 }))?.rows ?? [])
+            .filter((r) => !r.stopped_on && fold(r.person_name) === fold(row.person_name));
+          const onScreen = [...history].reverse().find((m) => m.role === 'assistant' && (m.card || m.list));
+          const pointedAt = onScreen?.card?.id === row.id
+            || said(row.company) || said(row.group_name) || said(row.role_label);
+          if (theirs.length > 1 && !pointedAt) {
+            const { id: _id, ...rest } = args;
+            args = { ...rest, targetPerson: row.person_name };
+          }
+        }
+      } catch { /* a guard that cannot read the rows leaves the call alone */ }
+    }
+  }
+  /**
+   * ===============================
+   * * A NAME IS WHAT WAS SAID, NEVER A SURNAME SHE MADE UP
+   * ===============================
+   * Random conversations 2026-10-04: "set theo's monthly" went to the tool
+   * as "Theo Example" (a placeholder from her own prompt) and "kiran's
+   * monthly" as "Kiran Patel", and both were told nobody is called that. A
+   * person name nobody said is cut back to the words of it that were said,
+   * by them or in her last answers ("and his phone?" after "Jim" is Jim).
+   */
+  {
+    const heardWords = new Set(fold(`${recentSaid(history, 3)}`).length
+      ? `${recentSaid(history, 3)} ${[...history].reverse().filter((m) => m.role === 'assistant').slice(0, 2).map((m) => `${m.content ?? ''} ${JSON.stringify(m.list ?? m.card ?? '')}`).join(' ')}`
+        .toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
+      : []);
+    const trimName = (v) => {
+      if (typeof v !== 'string' || !v.trim()) return v;
+      const words = v.trim().split(/\s+/);
+      if (words.length < 2) return v;
+      const kept = words.filter((w) => heardWords.has(w.toLowerCase().replace(/[^a-z0-9]/g, '')));
+      return kept.length > 0 && kept.length < words.length ? kept.join(' ') : v;
+    };
+    for (const k of ['targetPerson', 'person', 'name']) {
+      if (props[k] && typeof args[k] === 'string') {
+        const trimmed = trimName(args[k]);
+        if (trimmed !== args[k]) args = { ...args, [k]: trimmed };
+      }
+    }
+    if (props.people && Array.isArray(args.people)) {
+      const people = args.people.map(trimName);
+      if (people.some((p, i) => p !== args.people[i])) args = { ...args, people };
+    }
+  }
   // A SORT SENT TO THE TOTAL IS ITS RANK: "lowest paid at ironleaf" came to
   // total_master_sheet with sortBy/sortOrder, which it does not take, and
   // was refused. Lowest is a negative rank, the limit its size. 2026-10-04.
@@ -1167,7 +1309,14 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
     }
   }
   if (props.add && (args.addonPercentDelta != null || args.feePercentDelta != null)) {
-    const said = lastSaid(history);
+    // ON THE YES, THE INSTRUCTION'S WORDS, not "yes please": the replay of
+    // "give theo a 3% add-on" read "yes please", found no percent in it and
+    // added 3 to his monthly instead (700 to 703). 2026-10-04.
+    // AND ON ANY SHORT ANSWER: "the quickearn one", after "give stuart s a
+    // 2% add-on", has no percent in it either, and with auto mode on it put
+    // 2 on his MONTHLY at once (1,000 to 1,002). The instruction is in the
+    // last two things they said, whatever the last one is. 2026-10-04.
+    const said = recentSaid(history, 2);
     if (!/\badd[\s-]?ons?\b|\bfees?\b|%|percent/i.test(said)) {
       const field = /\bpayable\b/i.test(said) ? 'payableAmount' : /\bdays?\b/i.test(said) ? 'payableDays' : 'monthlyAmount';
       const n = Number(args.addonPercentDelta ?? args.feePercentDelta);
@@ -1277,7 +1426,7 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
     // name: a follow up like "double check" must not drop the conversion
     // they asked for one line earlier. See `recentSaid`.
     args.saidRecent = recentSaid(history);
-    if (name === 'exchange_rate' || name === 'undo_master_sheet_change') args.priorAnswer = lastAssistantAnswer(history);
+    if (['exchange_rate', 'undo_master_sheet_change', 'show_past_conversation', 'delete_past_conversations'].includes(name)) args.priorAnswer = lastAssistantAnswer(history);
     // DEALS WHOSE "pay this month anyway?" was already answered on screen, so
     // the next edit does not ask it a second time. 2026-10-03.
     args.specialCaseAnswered = history
@@ -1312,6 +1461,16 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
     // A TOOL THAT IS OFF ANSWERS FOR ITSELF. This gate ran first and said
     // "NO EXPORT CARD WAS OPENED", which implies there are exports to open;
     // she then described a pending one. See disabledTools.js.
+    // NO FORM ON SCREEN, NOTHING TO TYPE INTO. "actually make it 1100" with
+    // no form open was answered "I set the monthly amount to 1100 for the
+    // new deal form", a form that did not exist. 2026-10-04.
+    if (name === 'fill_form' && !openForm(history)) {
+      return {
+        summary: 'NOTHING WAS FILLED IN: no form is open on screen. Do not say you typed anything. '
+          + 'If they gave a value for a deal, that is update_master_sheet_row; otherwise ask what '
+          + 'they meant.',
+      };
+    }
     if (name === 'export_sheet' && !tool.disabledTool && !exportToolAllowed(history)) {
       logger.warn({ said: args.said }, 'diane: blocked an export card without export intent');
       return {
@@ -1521,7 +1680,29 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
      */
     const guessed = verbSlipped(args.said);
     if (guessed) logger.info({ tool: name }, 'diane: reached by a slip, so it asks first');
-    if (!guessed && couldSkip(name, tool) && await autoConfirmOn(turn)) {
+    /**
+     * A PROFILE RATE REACHES EVERY DEAL, so auto mode still shows it first
+     * when that is more than one. Clone 2026-10-04: "give stuart s a 2%
+     * add-on" went onto all three of his deals at once, and "the quickearn
+     * one" that followed (meaning ONLY that one) stacked a second 2% on it.
+     * Auto mode is for a change to the one deal they named.
+     */
+    let reachesMany = false;
+    if (name === 'update_person' && ['addonPercent', 'feePercent', 'addonPercentDelta', 'feePercentDelta'].some((k) => args[k] != null)) {
+      const who = [args.person, ...(Array.isArray(args.people) ? args.people : [])].filter(Boolean);
+      try {
+        // eslint-disable-next-line global-require
+        const rowsRepo = require('../repos/masterSheetRows.repo');
+        for (const p of who) {
+          // eslint-disable-next-line no-await-in-loop
+          const live = ((await rowsRepo.findAll({ q: p, pageSize: 50 }))?.rows ?? [])
+            .filter((r) => !r.stopped_on && fold(r.person_name).includes(fold(p)));
+          if (live.length > 1 || who.length > 1) reachesMany = true;
+        }
+      } catch { reachesMany = true; }
+      if (reachesMany) logger.info({ tool: name }, 'diane: a profile rate on several deals, so it asks first');
+    }
+    if (!guessed && !reachesMany && couldSkip(name, tool) && await autoConfirmOn(turn)) {
       logger.info({ tool: name }, 'diane: auto mode, no confirmation asked');
       args.confirmed = true;
       if (turn) turn.wrote.set('__auto', true);
@@ -1903,7 +2084,9 @@ async function runAgentTurn(history, contextName, onEvent) {
   // a stale tab sending a context we've since renamed should still get a
   // working Diane, not a broken one.
   const context = resolveContext(contextName);
-  const openAITools = toOpenAITools(context.tools);
+  // fill_form only while a form is open: offered without one, it was used.
+  const offered = openForm(history) ? context.tools : context.tools.filter((t) => t.name !== 'fill_form');
+  const openAITools = toOpenAITools(offered);
 
   /**
    * ===============================
@@ -1932,7 +2115,7 @@ async function runAgentTurn(history, contextName, onEvent) {
    * told a held tool does not exist: her capability block is built from
    * ALL of them, and calling one is answered with "it is there now".
    */
-  const openingAITools = toOpenAITools(openingTools(context.tools));
+  const openingAITools = toOpenAITools(openingTools(offered));
   let roundTools = openingAITools;
   let widened = false;
   /**
@@ -1980,6 +2163,7 @@ async function runAgentTurn(history, contextName, onEvent) {
   // was actually computed. See checkFigures.
   const toolResults = [];
   let figureRetry = false;
+  let unseenRetry = false;
   // Its own flag again: answering for a month nothing was computed for is
   // a different mistake from misquoting a figure that was.
   let monthRetry = false;
@@ -2146,9 +2330,23 @@ async function runAgentTurn(history, contextName, onEvent) {
    * ran a filter, a total and a lookup, and ended by asking which deal.
    * Nothing asked, nothing held: it is an acknowledgement. 2026-09-30.
    */
-  if (heldCalls.length === 0 && !somethingHeld() && prior && !String(prior).includes('?')
-    && /^(?:y|ya|yes|yep|yeah|yup|ok|okay|sure|cool|great|thanks|thank you)[.!\s]*$/i.test(lastSaid(history).trim())) {
-    return { reply: 'Nothing is waiting on a yes. What next?', changedRowIds: [], context: context.key, claims: [] };
+  // A THANKS IS NOT A YES, and a NO to nothing is not a question: "no" after
+  // "nothing matched" went to recall and claimed deleting by date was not
+  // possible, which it is. Both answered here, in plain words. 2026-10-04.
+  const bare = lastSaid(history).trim();
+  if (heldCalls.length === 0 && !somethingHeld() && prior && !String(prior).includes('?')) {
+    const reply = /^(?:y|ya|yes|yep|yeah|yup|sure)[.!\s]*$/i.test(bare) ? 'Nothing is waiting on a yes. What next?'
+      : /^(?:thanks|thank you|thx|ty|cheers|cool|great|perfect|nice)[.!\s]*$/i.test(bare) ? "You're welcome. What next?"
+        : /^(?:ok|okay|k|alright|got it)[.!\s]*$/i.test(bare) ? 'Okay. What next?'
+          // A NO AFTER A CHANGE THAT IS ALREADY SAVED is not "nothing changed":
+          // with auto mode on, "the souracore one" applied at once, and the
+          // "no" that followed was told nothing changed. 2026-10-04.
+          : /^(?:no|nope|nah|no thanks|no leave it|leave it)[.!\s]*$/i.test(bare)
+            ? (/\b(?:updated|is now|are now|stopped from|resumed|deleted|done,|raised|set to|has been)\b/i.test(String(prior))
+              ? 'Okay. That change is already saved, so say "undo that" if you want it taken back.'
+              : 'Okay, nothing changed. What next?')
+            : null;
+    if (reply) return { reply, changedRowIds: [], context: context.key, claims: [] };
   }
   const appliedSummaries = [];
   const heldWrites = new WeakSet();
@@ -2387,6 +2585,20 @@ async function runAgentTurn(history, contextName, onEvent) {
     };
     const calls = writesFirst(coalesceBreakdownCalls(choice.tool_calls ?? []));
     if (calls.length === 0) {
+      /**
+       * THE TOOL'S OWN WORDING IS NEVER READ OUT. confirmFirst tells her not
+       * to repeat "NOTHING HAS BEEN CHANGED YET..." or "This would stop this
+       * deal, touching 1 deal. WHAT SURVIVES:", and she still did, under her
+       * own sentence that already said it. Cut in code. 2026-10-04.
+       */
+      if (choice.content) {
+        choice.content = choice.content
+          .replace(/\s*NOTHING HAS BEEN CHANGED YET,? and nothing will be until (?:you|they) say yes\.?/gi, '')
+          .replace(/\s*This would [^.\n]*?, touching \d+ [a-z ]+?\.(?:\s*WHAT SURVIVES:[^\n]*)?(?=\s*(?:\n|$))/g, (m, offset, all) => (
+            // Only when her own words already said it: alone, it IS the preview.
+            all.slice(0, offset).trim().length > 20 ? '' : m))
+          .replace(/\n{3,}/g, '\n\n');
+      }
       const raw = choice.content?.trim();
 
       // The budget ran out. Two ways that shows, and only the first was
@@ -3214,6 +3426,45 @@ async function runAgentTurn(history, contextName, onEvent) {
                 + 'check_rates for that person now and open with the sentence it gives you.'
               : 'THEY ASKED A YES OR NO QUESTION and your answer never says which. Open with '
                 + `exactly this, then add anything useful:\n\n${verdict.missing.join('\n')}`,
+          });
+          continue;
+        }
+      }
+
+      /**
+       * ===============================
+       * * DEALS AND COMPANIES NOBODY LOOKED UP
+       * ===============================
+       * Random conversation 2026-10-04: "wait which one?" was answered with
+       * NO tool call: "Mara Quill has two deals! One at Northstar Care ...
+       * and another at Silverline Services". She has one, at Pinecrest. The
+       * figure guard checks numbers; this checks NAMES. With no tool in the
+       * turn, a company or a deal count she states must already be on
+       * screen in this conversation, or she looks it up first. Once.
+       */
+      // AND WITH TOOLS TOO: after a lookup that returned Byron's two real
+      // deals, she answered "Northstar Care and Relia PA". Northstar Care is
+      // a PLACEHOLDER from her own prompt (promptPlaceholders.js), and so are
+      // the "Example" people; one of those in a reply is never real. A name
+      // is supported if this turn's tools or the conversation showed it.
+      if (raw && !unseenRetry) {
+        const seen = fold(`${history.map((m) => `${m.content ?? ''} ${JSON.stringify(m.list ?? m.card ?? m.check ?? '')}`).join(' ')} ${JSON.stringify(toolResults)}`);
+        const named = [...raw.matchAll(/\b(?:at|with|on|in)\s+([A-Z][\w&'-]+(?:\s+[A-Z][\w&'-]+)*)/g)]
+          // "at Ironleaf's" is Ironleaf: the possessive was a false alarm.
+          .map((m) => m[1].replace(/['’]s$/i, ''))
+          .filter((n) => !/^(?:January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|GBP|USD|AED|EUR|EURO|Euros?|Dollars?|Dirhams?|Pounds?|Sterling|Cash|Crypto|Bank|I|Diane|The|This|That|Archive|Master Sheet|USD\s.*)$/.test(n));
+        const placeholder = [...PROMPT_PLACEHOLDERS.people, ...PROMPT_PLACEHOLDERS.companies]
+          .filter((n) => raw.includes(n) && !seen.includes(fold(n)));
+        const counted = toolResults.length === 0 && /\bha(?:s|ve)\s+(?:\d+|one|two|three|four|five|six|several)\s+deals?\b/i.test(raw);
+        const unseen = [...new Set([...named.filter((n) => !seen.includes(fold(n))), ...placeholder])];
+        if (unseen.length > 0 || (counted && !/\bdeals?\b/i.test(history.map((m) => m.content ?? '').join(' ')))) {
+          unseenRetry = true;
+          logger.warn({ context: context.key, round, unseen }, 'diane: named deals or companies no tool showed, retrying');
+          messages.push(choice);
+          messages.push({
+            role: 'user',
+            content: `STOP. You stated deals or companies that nothing in this conversation showed you${unseen.length ? ` (${unseen.join(', ')})` : ''}. `
+              + 'Look the person up with find_and_show_details and answer ONLY from what it returns.',
           });
           continue;
         }

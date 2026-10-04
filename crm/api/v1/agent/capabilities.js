@@ -96,8 +96,8 @@ const AREAS = Object.freeze([
     tools: ['check_rates', 'exchange_rate'],
   },
   {
-    label: 'what was said in an earlier conversation',
-    tools: ['recall_past_conversations'],
+    label: 'what was said in an earlier conversation: find it, show one in full, and delete old ones',
+    tools: ['recall_past_conversations', 'show_past_conversation', 'delete_past_conversations'],
   },
   {
     label: 'whether the backup ran',

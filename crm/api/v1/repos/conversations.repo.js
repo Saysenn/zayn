@@ -23,6 +23,17 @@ const MAX_CONTENT = 20000;
 // forever, this only bounds what she reads back unprompted.
 const RECALL_MONTHS = 12;
 
+/**
+ * A NAME AS PEOPLE SAY IT. "what did we agree about kiran" found nothing,
+ * because the conversation recorded "Kiran Vale" and this matched whole
+ * names only. A first or last name now matches the whole name it is part
+ * of; letters inside a word still do not ("kir" is nobody). 2026-10-04.
+ */
+const nameMatches = (column, param) => `(lower(${column}) = ${param}
+  OR lower(${column}) LIKE ${param} || ' %'
+  OR lower(${column}) LIKE '% ' || ${param}
+  OR lower(${column}) LIKE '% ' || ${param} || ' %')`;
+
 function clip(text) {
   const s = String(text ?? '');
   return s.length > MAX_CONTENT ? `${s.slice(0, MAX_CONTENT)}\n… (trimmed)` : s;
@@ -147,7 +158,9 @@ function messagesFor(id) {
  * because "what did we say about Gloria" should find the conversations
  * that ACTED on her rows, not the ones that mentioned the word.
  */
-function search({ q, person, group, company, month, months, limit = 5 }) {
+function search({
+  q, person, group, company, month, months, before, after, limit = 5,
+}) {
   const where = ['summary IS NOT NULL'];
   // THE WINDOW, not a delete. Nothing prunes this table and nothing should:
   // a conversation is a record. But a summary from two years ago describes a
@@ -155,7 +168,7 @@ function search({ q, person, group, company, month, months, limit = 5 }) {
   // record stays whole and the LOOKING is bounded. One constant, reversible,
   // and an explicit month is exempt below because asking for a month is
   // asking to look past the window on purpose.
-  if (!month && !(Array.isArray(months) && months.length > 0)) {
+  if (!month && !(Array.isArray(months) && months.length > 0) && !after && !before) {
     where.push(`ended_at > now() - interval '${RECALL_MONTHS} months'`);
   }
   const params = [];
@@ -165,9 +178,9 @@ function search({ q, person, group, company, month, months, limit = 5 }) {
     where.push(`search @@ plainto_tsquery('english', $${params.length})`);
   }
   if (person) {
-    params.push(person.toLowerCase());
+    params.push(person.toLowerCase().trim());
     where.push(`EXISTS (
-      SELECT 1 FROM unnest(touched_people) p WHERE lower(p) = $${params.length}
+      SELECT 1 FROM unnest(touched_people) p WHERE ${nameMatches('p', `$${params.length}`)}
     )`);
   }
   if (group) {
@@ -189,6 +202,17 @@ function search({ q, person, group, company, month, months, limit = 5 }) {
   if (wantedMonths.length > 0) {
     params.push(wantedMonths);
     where.push(`to_char(ended_at AT TIME ZONE 'UTC', 'YYYY-MM') = ANY($${params.length}::text[])`);
+  }
+  // AFTER q, which the ranking reads as $1.
+  // A DAY, from "yesterday" or "last week": recall had months only, and
+  // "what did we talk about yesterday" found nothing. 2026-10-04.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(after ?? ''))) {
+    params.push(after);
+    where.push(`ended_at >= $${params.length}::date`);
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(before ?? ''))) {
+    params.push(before);
+    where.push(`ended_at < $${params.length}::date`);
   }
 
   /**
@@ -224,6 +248,63 @@ function search({ q, person, group, company, month, months, limit = 5 }) {
     .then((r) => r.rows);
 }
 
+/**
+ * ===============================
+ * * FINDING CONVERSATIONS TO SHOW OR DELETE, 2026-10-04
+ * ===============================
+ * His call: history can be cleaned up from the chat. The "no pruning"
+ * decision of 2026-08-27 (041_conversations.sql) was about nothing deleting
+ * AUTOMATICALLY; this deletes only what he names and agrees to.
+ *
+ * Different from search(): no recall window and no summary required, because
+ * "delete everything before September" means every one of them, including a
+ * conversation whose summary never got written.
+ */
+function find({
+  q, person, group, company, month, months, before, after, limit = 500,
+} = {}) {
+  const where = ['true'];
+  const params = [];
+  const add = (value, sql) => { params.push(value); where.push(sql(`$${params.length}`)); };
+  if (q) add(q, (p) => `(search @@ plainto_tsquery('english', ${p}) OR EXISTS (
+      SELECT 1 FROM tb_conversation_messages m WHERE m.conversation_id = tb_conversations.id
+        AND m.content ILIKE '%' || ${p} || '%'))`);
+  if (person) add(String(person).toLowerCase().trim(), (p) => `EXISTS (SELECT 1 FROM unnest(touched_people) x WHERE ${nameMatches('x', p)})`);
+  if (group) add(String(group).toLowerCase(), (p) => `EXISTS (SELECT 1 FROM unnest(touched_groups) x WHERE lower(x) = ${p})`);
+  if (company) add(String(company).toLowerCase(), (p) => `EXISTS (SELECT 1 FROM unnest(touched_companies) x WHERE lower(x) = ${p})`);
+  const wanted = [...new Set([month, ...(Array.isArray(months) ? months : [])]
+    .filter((v) => /^\d{4}-(0[1-9]|1[0-2])$/.test(String(v))))];
+  if (wanted.length) add(wanted, (p) => `to_char(ended_at AT TIME ZONE 'UTC', 'YYYY-MM') = ANY(${p}::text[])`);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(before ?? ''))) add(before, (p) => `ended_at < ${p}::date`);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(after ?? ''))) add(after, (p) => `ended_at >= ${p}::date`);
+  params.push(limit);
+  return pool
+    .query(
+      `SELECT id, started_at, ended_at, message_count, summary,
+              (SELECT content FROM tb_conversation_messages m
+                WHERE m.conversation_id = tb_conversations.id AND m.role = 'user'
+                ORDER BY position ASC LIMIT 1) AS first_said
+         FROM tb_conversations
+        WHERE ${where.join(' AND ')}
+        ORDER BY ended_at DESC
+        LIMIT $${params.length}`,
+      params,
+    )
+    .then((r) => r.rows);
+}
+
+/**
+ * Delete conversations for good, transcripts with them (ON DELETE CASCADE).
+ * By id only: what goes is exactly what was previewed and agreed to.
+ */
+function remove(ids) {
+  const list = (ids ?? []).filter((id) => /^[0-9a-f-]{36}$/i.test(String(id)));
+  if (list.length === 0) return Promise.resolve([]);
+  return pool
+    .query('DELETE FROM tb_conversations WHERE id = ANY($1::uuid[]) RETURNING id', [list])
+    .then((r) => r.rows.map((x) => x.id));
+}
+
 module.exports = {
-  save, needingSummary, setSummary, messagesFor, search, MAX_CONTENT, RECALL_MONTHS,
+  save, needingSummary, setSummary, messagesFor, search, find, remove, MAX_CONTENT, RECALL_MONTHS,
 };

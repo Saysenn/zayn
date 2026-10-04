@@ -103,6 +103,7 @@ const HELD_UNTIL_NEEDED = Object.freeze([
   'delete_master_sheet_row',
   'rename_company',
   'undo_master_sheet_change',
+  'delete_past_conversations',
   // The general read: its schema rode on every turn for a few questions.
   'summarize_deals',
 ]);
