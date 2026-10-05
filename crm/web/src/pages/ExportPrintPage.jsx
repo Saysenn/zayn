@@ -3,6 +3,7 @@ import { useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { apiService } from '../configs/api.config';
+import Button from '../components/buttons/Button';
 
 /**
  * The PDF, as a printable page.
@@ -287,13 +288,9 @@ export default function ExportPrintPage() {
         }
       `}</style>
 
-      <button
-        type="button"
-        className="no-print mb-4 border border-neutral-300 px-3 py-1 text-xs"
-        onClick={() => window.print()}
-      >
+      <Button variant="secondary" size="sm" className="no-print mb-4" onClick={() => window.print()}>
         Print again
-      </button>
+      </Button>
 
       <h1>{title}</h1>
       <p className="meta">

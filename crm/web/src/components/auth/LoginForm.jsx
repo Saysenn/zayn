@@ -3,7 +3,7 @@ import { useLogin, useVerifyCode, LOGIN_TRANSITION_MS } from '../../hooks/useAut
 import DianeEnvironment from '../agentOrb/DianeEnvironment';
 import HoloFrame from '../agentOrb/HoloFrame';
 import { useDianePalette } from '../agentOrb/DianePalette';
-import { ShieldIcon } from '../icons';
+import { ShieldIcon, UserIcon, LockIcon, CheckIcon } from '../icons';
 
 // Its own orb, NOT the CRM's ParticleOrb — user's own call, and the two
 // are meant to stay independent: the login orb is Diane dormant behind the
@@ -12,13 +12,16 @@ import { ShieldIcon } from '../icons';
 // other reason to download.
 const LoginOrb = lazy(() => import('../agentOrb/LoginOrb'));
 
+// The three drawings the shared set has no equivalent for (eye, eye-off,
+// key, the submit arrow). Same stroke and corners as icons/index.jsx's BASE,
+// so they sit beside its UserIcon and LockIcon at one weight.
 const ICON = {
   width: 18,
   height: 18,
   viewBox: '0 0 24 24',
   fill: 'none',
   stroke: 'currentColor',
-  strokeWidth: 1.8,
+  strokeWidth: 2.1,
   strokeLinecap: 'round',
   strokeLinejoin: 'round',
 };
@@ -37,22 +40,8 @@ const EyeOffIcon = () => (
   </svg>
 );
 
-const UserIcon = () => (
-  <svg {...ICON} aria-hidden="true">
-    <circle cx="12" cy="8" r="3.5" />
-    <path d="M5 20a7 7 0 0 1 14 0" />
-  </svg>
-);
-
-const LockIcon = () => (
-  <svg {...ICON} aria-hidden="true">
-    <rect x="4" y="10" width="16" height="11" rx="2" />
-    <path d="M8 10V7a4 4 0 0 1 8 0v3" />
-  </svg>
-);
-
 const ArrowIcon = () => (
-  <svg {...ICON} strokeWidth={2} aria-hidden="true">
+  <svg {...ICON} aria-hidden="true">
     <path d="M5 12h14M13 6l6 6-6 6" />
   </svg>
 );
@@ -322,7 +311,7 @@ export default function LoginForm() {
           </label>
           <div className="relative mb-5">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-diane-signal/70">
-              <UserIcon />
+              <UserIcon width={18} height={18} />
             </span>
             <input
               id="username"
@@ -349,7 +338,7 @@ export default function LoginForm() {
               spacing, which reads as cramped. */}
           <div className={`relative ${SHOW_REMEMBER ? 'mb-4' : 'mb-6'}`}>
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-diane-signal/70">
-              <LockIcon />
+              <LockIcon width={18} height={18} />
             </span>
             <input
               id="password"
@@ -390,9 +379,7 @@ export default function LoginForm() {
               }}
             >
               {remember && (
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M4 12l6 6L20 6" stroke={palette.void} strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
+                <CheckIcon width={11} height={11} strokeWidth={3.5} style={{ color: palette.void }} />
               )}
             </span>
             <input

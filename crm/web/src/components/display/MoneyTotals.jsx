@@ -28,7 +28,7 @@ export default function MoneyTotals({ totals, label = 'Every currency' }) {
       <span className="tabular-nums">{first.text}</span>
       {rest.length > 0 && (
         <>
-          <span className="text-[11px] font-semibold tabular-nums text-text-faint">+{rest.length}</span>
+          <span className="text-xs font-semibold tabular-nums text-text-faint">+{rest.length}</span>
           <CellInfo label={label}>
             <span className="block font-semibold">Paid in {list.length} currencies</span>
             <span className="mt-1 block">

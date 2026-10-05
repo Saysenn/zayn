@@ -146,7 +146,7 @@ export default function CompanyStatusPicker({
           <label
             key={o.value}
             className={`cursor-pointer rounded-md border px-2 py-1 text-xs transition
-              focus-within:ring-2 focus-within:ring-accent
+              focus-within:ring-1 focus-within:ring-accent
               ${value === o.value
                 ? 'border-accent bg-accent-tint font-semibold text-accent-strong'
                 : 'border-border text-text-muted hover:bg-surface-sunken'}
@@ -169,7 +169,7 @@ export default function CompanyStatusPicker({
 
       {/* THE CHOSEN ONE'S CONSEQUENCE, under the row, not in a tooltip: which
           of them still pays is what somebody needs before clicking. */}
-      <p className="text-[11px] leading-4 text-text-faint">
+      <p className="text-xs leading-4 text-text-faint">
         {COMPANY_STATUS_MEANS[value]}
         {note ? ` ${note}` : ''}
       </p>

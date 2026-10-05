@@ -45,4 +45,23 @@ router.patch('/concerns/:id', async (req, res, next) => {
   }
 });
 
+// The bulk bar on Flagged: a row there is a PERSON, so the ticked rows are
+// people and every concern of theirs moves together.
+router.post('/concerns/bulk-status', async (req, res, next) => {
+  try {
+    const { people, status } = req.body || {};
+    if (!['open', 'in_progress', 'resolved'].includes(status)) {
+      return res.status(400).json({ error: 'status must be open, in_progress or resolved' });
+    }
+    const list = (Array.isArray(people) ? people : [])
+      .filter((p) => p && typeof p.group === 'string' && typeof p.personId === 'string');
+    if (!list.length) return res.json({ updated: 0 });
+    const rows = await concernsRepo.updateStatusForPeople(list, status);
+    for (const concern of rows) broadcast(concern.group_name, 'concern:updated', concern);
+    res.json({ updated: rows.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = { router };

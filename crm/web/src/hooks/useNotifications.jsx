@@ -21,7 +21,11 @@ let nextToastId = 1;
 // Success is a confirmation you've already seen happen on screen, so it
 // gets out of the way. An error is the opposite — it reports something you
 // did NOT see, so it stays until acknowledged. User's own call.
-const AUTO_DISMISS_MS = { success: 5000, info: 5000, warning: null, error: null };
+// A warning is read and moved past, so it goes after 8s; only an error
+// waits to be dismissed. A toast carrying Undo stays a little longer, so
+// the button is still there when you reach for it.
+const AUTO_DISMISS_MS = { success: 5000, info: 5000, warning: 8000, error: null };
+const ACTION_DISMISS_MS = 8000;
 
 // Beyond this the stack runs off the screen. Successes are dropped first
 // and errors never automatically, because a lost error is the one thing
@@ -38,9 +42,9 @@ export function NotificationProvider({ children }) {
     setToasts((t) => t.filter((x) => x.id !== id));
   }, []);
 
-  const scheduleDismiss = useCallback((id, level) => {
-    const ms = AUTO_DISMISS_MS[level];
-    if (!ms) return; // errors and warnings wait to be dismissed
+  const scheduleDismiss = useCallback((id, level, hasAction = false) => {
+    const ms = AUTO_DISMISS_MS[level] && (hasAction ? Math.max(ACTION_DISMISS_MS, AUTO_DISMISS_MS[level]) : AUTO_DISMISS_MS[level]);
+    if (!ms) return; // errors wait to be dismissed
     clearTimeout(dismissTimers.current.get(id));
     dismissTimers.current.set(id, setTimeout(() => {
       setToasts((t) => t.filter((x) => x.id !== id));
@@ -58,14 +62,21 @@ export function NotificationProvider({ children }) {
    * @param collapsed (count) => string, for the collapsed wording.
    * @param to        a route, if the toast has somewhere to go. Socket
    *                  toasts do; "Saved" does not.
+   * @param action    { label, onClick }: one button on the strip, e.g. Undo.
    * @param sound     socket toasts beep; a beep per cell edit would be
    *                  unbearable, so it's opt-in rather than automatic.
    */
   const notify = useCallback(({
-    level = 'info', message, detail, key, collapsed, to, icon, sound = false,
+    level = 'info', message, detail, key, collapsed, to, icon, action, sound = false,
   }) => {
     if (sound) beep();
 
+    // THE ID COMES BACK, so an optimistic toast can be corrected
+    // (updateToast) or taken down (dismissToast) once the server answers.
+    // Taken here, not inside the updater: React may run that later (or
+    // twice). A repeat that collapses into an older strip keeps that
+    // strip's id, so the one returned then simply matches nothing.
+    const newId = nextToastId++;
     setToasts((current) => {
       // Errors are never collapsed. Two failed saves are two different
       // fields, and merging them hides which one actually broke.
@@ -80,9 +91,9 @@ export function NotificationProvider({ children }) {
         }
       }
 
-      const id = nextToastId++;
-      scheduleDismiss(id, level);
-      const next = [...current, { id, level, message, detail, key, to, icon, count: 1 }];
+      const id = newId;
+      scheduleDismiss(id, level, Boolean(action));
+      const next = [...current, { id, level, message, detail, key, to, icon, action, count: 1 }];
 
       // Trim from the oldest, but only things that would have expired on
       // their own anyway.
@@ -93,7 +104,16 @@ export function NotificationProvider({ children }) {
       dismissTimers.current.delete(next[droppable].id);
       return next.filter((_, i) => i !== droppable);
     });
+    return newId;
   }, [scheduleDismiss]);
+
+  // Rewrites a strip already on screen: the optimistic "3 deals stopped"
+  // gains the server's "1 already stopped" once it is known. Gone already
+  // (dismissed, expired) is fine, there is nothing to correct then.
+  const updateToast = useCallback((id, patch) => {
+    if (id == null) return;
+    setToasts((t) => t.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+  }, []);
 
   useSocketEvent('concern:new', (concern) => {
     notify({
@@ -127,7 +147,7 @@ export function NotificationProvider({ children }) {
   }, []);
 
   return (
-    <NotificationContext.Provider value={{ toasts, notify, dismissToast }}>
+    <NotificationContext.Provider value={{ toasts, notify, dismissToast, updateToast }}>
       {children}
     </NotificationContext.Provider>
   );

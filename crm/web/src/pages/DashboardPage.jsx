@@ -12,6 +12,8 @@ import { Skeleton } from '../components/display/Skeleton';
 import FloatingField from '../components/forms/FloatingField';
 import Select from '../components/forms/Select';
 import ViewToggle from '../components/layout/ViewToggle';
+import PageHeader from '../components/layout/PageHeader';
+import { ErrorState } from '../components/display/StateBlocks';
 import {
   BriefcaseIcon, BuildingIcon, ChevronIcon, CoinsIcon, DollarIcon, FilterIcon, ReceiptIcon,
   UsersIcon, WalletIcon,
@@ -317,7 +319,7 @@ function NativeTotals({ money, changes }) {
     <div className="grid grid-cols-[auto_1fr_auto] items-baseline gap-x-2.5 gap-y-1">
       {codes.map((code) => (
         <Fragment key={code}>
-          <span className="text-[10px] font-semibold uppercase text-text-muted">{code}</span>
+          <span className="text-xs font-semibold uppercase text-text-muted">{code}</span>
           <span className="text-right tabular-nums">{bareIn(money, code)}</span>
           {/* Empty rather than "No previous comparison": in a column three
               rows tall that sentence is longer than the figures it sits by. */}
@@ -353,20 +355,20 @@ function KpiCard({ icon: Icon, tone, label, value, comparison, detail, note, den
           it. Everything below is the card as it was. */}
       <div className="relative">
         <div className="flex items-start gap-3">
-          <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${KPI_TONES[tone]}`}><Icon width={18} height={18} /></span>
+          <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg ${KPI_TONES[tone]}`}><Icon width={18} height={18} /></span>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-[11px] font-medium text-text-muted">{label}</p>
+            <p className="truncate text-xs font-medium text-text-muted">{label}</p>
             {/* No `title` attribute. The figure is fully visible, so the
                 browser's own tooltip just repeated it under the number.
                 A step down on a phone: "$128,156.82" at 20px does not fit
                 a card that is now the full width of a 375px screen. */}
-            <div className={`mt-0.5 truncate font-bold leading-tight tracking-tight tabular-nums text-text ${dense ? 'text-[13px] sm:text-sm' : 'text-base sm:text-xl'}`}>{value}</div>
+            <div className={`mt-0.5 truncate font-bold leading-tight tracking-tight tabular-nums text-text ${dense ? 'text-sm' : 'text-base sm:text-xl'}`}>{value}</div>
           </div>
         </div>
         <div className="mt-3 flex min-h-7 items-end justify-between gap-2">
           <span className="min-w-0">
-            {comparison ? <TrendText comparison={comparison} /> : <span className="text-[11px] text-text-faint">{detail}</span>}
-            {note && <span className="mt-1 block text-[10px] text-warning">{note}</span>}
+            {comparison ? <TrendText comparison={comparison} /> : <span className="text-xs text-text-faint">{detail}</span>}
+            {note && <span className="mt-1 block text-xs text-warning">{note}</span>}
           </span>
           {/* The whole card has always been clickable and nothing said so.
               Decorative: the card itself is the control. */}
@@ -397,7 +399,7 @@ function Panel({ title, action, children, className = '', bodyClassName = PANEL_
   return (
     <section className={`${DASH_SURFACE} flex min-w-0 flex-col overflow-hidden ${className}`}>
       <div className="flex min-h-11 items-center justify-between gap-3 px-4 py-2.5">
-        <h2 className="truncate text-[13px] font-bold text-text">{title}</h2>
+        <h2 className="truncate text-sm font-bold text-text">{title}</h2>
         {action}
       </div>
       <div className={`flex min-h-0 flex-1 flex-col ${bodyClassName}`}>{children}</div>
@@ -405,7 +407,7 @@ function Panel({ title, action, children, className = '', bodyClassName = PANEL_
   );
 }
 
-const PanelNote = ({ children }) => <span className="shrink-0 text-[10px] text-text-faint">{children}</span>;
+const PanelNote = ({ children }) => <span className="shrink-0 text-xs text-text-faint">{children}</span>;
 
 /**
  * ===============================
@@ -480,18 +482,18 @@ function MonthTooltip({ row, mode, picked }) {
   const unit = mode === CONVERTED ? 'USD' : picked;
   return (
     <div>
-      <div className="flex items-center justify-between gap-3 border-b border-white/15 pb-2">
-        <div><p className="text-xs font-bold">{row.label}</p><p className="text-[10px] text-white/60">Income in {unit}</p></div>
+      <div className="flex items-center justify-between gap-3 border-b border-surface/15 pb-2">
+        <div><p className="text-xs font-bold">{row.label}</p><p className="text-xs text-surface/60">Income in {unit}</p></div>
         <strong className="text-xs tabular-nums text-accent">{textIn(row.total, mode, picked, true)}</strong>
       </div>
       <div className="mt-2 space-y-1">
         {row.groups.map((group) => (
-          <div key={group.name} className="flex items-center justify-between gap-3 text-[11px]">
-            <span className="truncate text-white/70">{group.name || 'No group'}</span>
+          <div key={group.name} className="flex items-center justify-between gap-3 text-xs">
+            <span className="truncate text-surface/70">{group.name || 'No group'}</span>
             <span className="shrink-0 font-semibold tabular-nums">{textIn(group.payable, mode, picked, true)}</span>
           </div>
         ))}
-        <div className="flex items-center justify-between gap-3 border-t border-white/15 pt-1.5 text-[11px] font-bold">
+        <div className="flex items-center justify-between gap-3 border-t border-surface/15 pt-1.5 text-xs font-bold">
           {/* TOTAL, NOT "ALL GROUPS". There is a real group CALLED
               `ALL GROUPS` (the twelve NA roster rows), so a total row of
               that name sat among the group rows it was summing. Same rule
@@ -509,14 +511,14 @@ function MonthTooltip({ row, mode, picked }) {
 function AllMonthsTooltip({ row, currencies }) {
   return (
     <div>
-      <div className="flex items-center justify-between gap-3 border-b border-white/15 pb-2">
+      <div className="flex items-center justify-between gap-3 border-b border-surface/15 pb-2">
         <p className="text-xs font-bold">{row.label}</p>
-        <span className="shrink-0 text-[10px] text-white/60">{row.sourceLabel ?? 'No data'}</span>
+        <span className="shrink-0 text-xs text-surface/60">{row.sourceLabel ?? 'No data'}</span>
       </div>
-      <dl className="mt-2 space-y-1 text-[11px]">
+      <dl className="mt-2 space-y-1 text-xs">
         {currencies.map((code, order) => (
           <div key={code} className="flex items-center justify-between gap-3">
-            <dt className="flex min-w-0 items-center gap-1.5 text-white/70">
+            <dt className="flex min-w-0 items-center gap-1.5 text-surface/70">
               <i className={CHART_SWATCH} style={{ background: seriesInk(order) }} />
               <span className="truncate">{code}</span>
             </dt>
@@ -565,21 +567,21 @@ function CurrencyGroupsTooltip({ row, code, names, ink }) {
   const total = rows.reduce((sum, entry) => sum + entry.value, 0);
   return (
     <div>
-      <div className="flex items-center justify-between gap-3 border-b border-white/15 pb-2">
-        <div><p className="text-xs font-bold">{row.label}</p><p className="text-[10px] text-white/60">{row.sourceLabel ?? 'No data'}</p></div>
-        <span className="flex shrink-0 items-center gap-1.5 text-[11px] font-semibold">
+      <div className="flex items-center justify-between gap-3 border-b border-surface/15 pb-2">
+        <div><p className="text-xs font-bold">{row.label}</p><p className="text-xs text-surface/60">{row.sourceLabel ?? 'No data'}</p></div>
+        <span className="flex shrink-0 items-center gap-1.5 text-xs font-semibold">
           <i className={CHART_SWATCH} style={{ background: ink }} />{code}
         </span>
       </div>
-      <dl className="mt-2 space-y-1 text-[11px]">
-        {rows.length === 0 && <p className="m-0 text-white/50">No groups in this view</p>}
+      <dl className="mt-2 space-y-1 text-xs">
+        {rows.length === 0 && <p className="m-0 text-surface/50">No groups in this view</p>}
         {rows.map((entry) => (
           <div key={entry.name || 'no-group'} className={`flex items-center justify-between gap-3 ${entry.value === 0 ? 'opacity-45' : ''}`}>
-            <dt className="truncate text-white/70">{entry.name || 'No group'}</dt>
+            <dt className="truncate text-surface/70">{entry.name || 'No group'}</dt>
             <dd className="m-0 shrink-0 font-semibold tabular-nums">{formatMoneyWhole(entry.value, code)}</dd>
           </div>
         ))}
-        <div className="flex items-center justify-between gap-3 border-t border-white/15 pt-1.5 font-bold">
+        <div className="flex items-center justify-between gap-3 border-t border-surface/15 pt-1.5 font-bold">
           {/* See MonthTooltip: `ALL GROUPS` is a real group name. */}
           <dt>Total</dt>
           <dd className="m-0 tabular-nums text-accent">{formatMoneyWhole(total, code)}</dd>
@@ -609,7 +611,7 @@ function PaymentOverview({ points, groups, mode, picked, currencies }) {
     <div className="flex min-h-0 flex-1 flex-col justify-center">
       {/* Only a CONVERTED total can be short. Raw never converts, so it
           can never silently drop a currency and the warning would be a lie. */}
-      {mode === CONVERTED && missingFx.length > 0 && <p className="mb-1.5 rounded-md bg-warning-tint px-2.5 py-1.5 text-[10px] text-warning">USD subtotal excludes {missingFx.join(', ')}: no exchange rate is available.</p>}
+      {mode === CONVERTED && missingFx.length > 0 && <p className="mb-1.5 rounded-md bg-warning-tint px-2.5 py-1.5 text-xs text-warning">USD subtotal excludes {missingFx.join(', ')}: no exchange rate is available.</p>}
       <SourceTrendChart
         rows={rows}
         series={series}
@@ -626,9 +628,9 @@ function PaymentOverview({ points, groups, mode, picked, currencies }) {
       />
       {/* A SHARED AXIS IS THE PRICE OF ONE LINE PER CURRENCY. 3,510 beside
           80,850 is a flat line at the bottom, so say where to go instead. */}
-      {everyCurrency && <p className="mt-1 text-[10px] text-text-faint">One line per currency on a shared scale. Pick a currency to read a small one on its own.</p>}
+      {everyCurrency && <p className="mt-1 text-xs text-text-faint">One line per currency on a shared scale. Pick a currency to read a small one on its own.</p>}
       {dropped > 0 && (
-        <p className="mt-1 text-[10px] text-text-faint">
+        <p className="mt-1 text-xs text-text-faint">
           Starts at {drawn[0]?.label ?? 'the first saved month'}: {dropped} earlier {dropped === 1 ? 'month has' : 'months have'} no saved snapshot.
         </p>
       )}
@@ -697,18 +699,18 @@ function GroupTooltip({ bar, unit }) {
   const total = bar.values.reduce((sum, entry) => sum + entry.value, 0);
   return (
     <div>
-      <div className="flex items-center justify-between gap-3 border-b border-white/15 pb-2">
+      <div className="flex items-center justify-between gap-3 border-b border-surface/15 pb-2">
         <p className="truncate text-xs font-bold">{bar.label}</p>
-        <span className="shrink-0 text-[10px] text-white/60">{bar.detail.deals} {bar.detail.deals === 1 ? 'deal' : 'deals'}</span>
+        <span className="shrink-0 text-xs text-surface/60">{bar.detail.deals} {bar.detail.deals === 1 ? 'deal' : 'deals'}</span>
       </div>
-      <dl className="mt-2 space-y-1 text-[11px]">
+      <dl className="mt-2 space-y-1 text-xs">
         {bar.values.map((entry) => (
           <div key={entry.key} className="flex items-center justify-between gap-3">
-            <dt className="truncate text-white/70">{entry.label}</dt>
+            <dt className="truncate text-surface/70">{entry.label}</dt>
             <dd className="shrink-0 font-semibold tabular-nums">{formatMoney(entry.value, unit)}</dd>
           </div>
         ))}
-        <div className="flex items-center justify-between gap-3 border-t border-white/15 pt-1.5 font-bold">
+        <div className="flex items-center justify-between gap-3 border-t border-surface/15 pt-1.5 font-bold">
           <dt>Across the range</dt>
           <dd className="tabular-nums text-accent">{formatMoney(total, unit)}</dd>
         </div>
@@ -741,20 +743,20 @@ function GroupBreakdownTooltip({ bar, currencies }) {
   const hidden = bar.values.length - shown.length;
   return (
     <div>
-      <div className="flex items-center justify-between gap-3 border-b border-white/15 pb-2">
+      <div className="flex items-center justify-between gap-3 border-b border-surface/15 pb-2">
         <p className="truncate text-xs font-bold">{bar.label}</p>
-        <span className="shrink-0 text-[10px] text-white/60">{bar.detail.deals} {bar.detail.deals === 1 ? 'deal' : 'deals'}</span>
+        <span className="shrink-0 text-xs text-surface/60">{bar.detail.deals} {bar.detail.deals === 1 ? 'deal' : 'deals'}</span>
       </div>
-      <dl className="mt-2 space-y-2 text-[11px]">
+      <dl className="mt-2 space-y-2 text-xs">
         {shown.map((entry) => (
           <div key={entry.key}>
-            <dt className="text-[10px] uppercase tracking-wide text-white/50">{entry.label}</dt>
-            {currencies.length === 0 && <dd className="text-white/50">Nothing owed</dd>}
+            <dt className="text-xs uppercase tracking-wide text-surface/50">{entry.label}</dt>
+            {currencies.length === 0 && <dd className="text-surface/50">Nothing owed</dd>}
             {currencies.map((code) => {
               const amount = entry.breakdown?.[code] ?? 0;
               return (
                 <dd key={code} className={`flex items-center justify-between gap-3 ${amount === 0 ? 'opacity-45' : ''}`}>
-                  <span className="truncate text-white/70">{code}</span>
+                  <span className="truncate text-surface/70">{code}</span>
                   <span className="shrink-0 font-semibold tabular-nums">{formatNumber(amount)}</span>
                 </dd>
               );
@@ -762,14 +764,14 @@ function GroupBreakdownTooltip({ bar, currencies }) {
           </div>
         ))}
       </dl>
-      {hidden > 0 && <p className="mt-1.5 text-[10px] text-white/50">and {hidden} more {hidden === 1 ? 'month' : 'months'}, counted below</p>}
-      <div className="mt-2 border-t border-white/15 pt-1.5 text-[11px]">
+      {hidden > 0 && <p className="mt-1.5 text-xs text-surface/50">and {hidden} more {hidden === 1 ? 'month' : 'months'}, counted below</p>}
+      <div className="mt-2 border-t border-surface/15 pt-1.5 text-xs">
         <p className="mb-1 font-bold">Across the range</p>
         {totals.length === 0
-          ? <p className="text-white/50">Nothing owed</p>
+          ? <p className="text-surface/50">Nothing owed</p>
           : totals.map(({ code, total }) => (
             <p key={code} className={`flex items-center justify-between gap-3 ${total === 0 ? 'opacity-45' : ''}`}>
-              <span className="text-white/70">{code}</span>
+              <span className="text-surface/70">{code}</span>
               <span className="font-semibold tabular-nums text-accent">{formatNumber(total)}</span>
             </p>
           ))}
@@ -872,15 +874,15 @@ function MonthOnMonth({ performance, mode, lastMonth, next }) {
       <div className={`flex ${CHART_FILL} flex-col justify-center gap-2`}>
         <dl className="space-y-2 text-xs">
           <div className="flex items-baseline justify-between gap-3 border-b border-border pb-2">
-            <dt className="text-[10px] text-text-faint">{WORD_FOR.thisMonth}</dt>
+            <dt className="text-xs text-text-faint">{WORD_FOR.thisMonth}</dt>
             <dd className="text-right font-bold text-accent-strong"><NormalizedMoney money={performance.actual} display={RAW} compact /></dd>
           </div>
           <div className="flex items-baseline justify-between gap-3 border-b border-border pb-2">
-            <dt className="text-[10px] text-text-faint">{WORD_FOR.saved}</dt>
+            <dt className="text-xs text-text-faint">{WORD_FOR.saved}</dt>
             <dd className="text-right font-semibold text-text-muted"><NormalizedMoney money={performance.forecast} display={RAW} compact /></dd>
           </div>
           <div className="flex items-baseline justify-between gap-3">
-            <dt className="text-[10px] text-text-faint">Difference</dt>
+            <dt className="text-xs text-text-faint">Difference</dt>
             <dd className="space-y-0.5 text-right tabular-nums">
               {deltas.length === 0 && <span className="text-text-faint">Nothing to compare</span>}
               {deltas.map(({ code, delta }) => (
@@ -941,12 +943,12 @@ function MonthOnMonth({ performance, mode, lastMonth, next }) {
         <p className="m-0 mt-1.5 text-xs font-semibold tabular-nums text-text">
           {headline ? `${headline.difference > 0 ? '+' : ''}${formatMoney(headline.difference, CURRENCY)}` : 'Unavailable'}
         </p>
-        <p className="m-0 text-[10px] text-text-faint">vs {lastMonth}</p>
+        <p className="m-0 text-xs text-text-faint">vs {lastMonth}</p>
       </div>
 
       <dl className="w-full space-y-2 border-t border-border pt-3">
         {rows.map((row) => (
-          <div key={row.key} className="grid grid-cols-[8px_1fr_auto] items-center gap-2 text-[11px]">
+          <div key={row.key} className="grid grid-cols-[8px_1fr_auto] items-center gap-2 text-xs">
             <i className={`h-2 w-2 rounded-sm ${SWATCH_FOR[row.tone]}`} />
             <dt className="truncate text-text-muted">{row.label}</dt>
             {/* The change comes through TrendText like every other one on
@@ -997,14 +999,14 @@ function StageDonut({ stages }) {
         size={DONUT_SIZE}
         onSelect={(segment) => { const to = stageLink(segment.key); if (to) navigate(to); }}
       >
-        <div><strong className="block text-lg text-text">{total}</strong><span className="text-[10px] text-text-faint">Total deals</span></div>
+        <div><strong className="block text-lg text-text">{total}</strong><span className="text-xs text-text-faint">Total deals</span></div>
       </Donut>
       <div className="mt-auto w-full space-y-2 border-t border-border pt-3">
         {available.map((stage) => (
           <Link
             key={stage.key}
             to={stageLink(stage.key) ?? '/master-sheet'}
-            className="group grid grid-cols-[8px_1fr_auto] items-center gap-2 rounded text-[11px] no-underline"
+            className="group grid grid-cols-[8px_1fr_auto] items-center gap-2 rounded text-xs no-underline"
           >
             <i className="h-2 w-2 rounded-sm" style={{ background: STAGE_TONES[stage.key] }} />
             <span className="truncate text-text-muted group-hover:underline">{stage.name}</span>
@@ -1039,8 +1041,8 @@ function RecentChanges({ changes }) {
       {changes.rows.slice(0, RECENT_CHANGES_SHOWN).map((change, index) => (
         <Link key={change.id ?? index} to={changeLink(change)} className="flex items-center gap-2.5 rounded-lg px-1.5 py-1.5 no-underline transition hover:bg-surface-sunken">
           <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-lg ${tones[index % tones.length]}`}><ReceiptIcon width={14} height={14} /></span>
-          <span className="min-w-0 flex-1"><span className="block truncate text-[10px] text-text-faint">Deal updated</span><strong className="block truncate text-[11px] text-text">{changeTitle(change)}</strong></span>
-          <span className="shrink-0 text-[10px] text-text-faint">{timestamp(change.changedAt)}</span>
+          <span className="min-w-0 flex-1"><span className="block truncate text-xs text-text-faint">Deal updated</span><strong className="block truncate text-xs text-text">{changeTitle(change)}</strong></span>
+          <span className="shrink-0 text-xs text-text-faint">{timestamp(change.changedAt)}</span>
         </Link>
       ))}
     </div>
@@ -1050,7 +1052,7 @@ function RecentChanges({ changes }) {
 // The company's initial, so a row is found by shape before it is read.
 function InitialChip({ name }) {
   const letter = String(name || '?').trim().charAt(0).toUpperCase() || '?';
-  return <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-accent-tint text-[10px] font-bold text-accent-strong">{letter}</span>;
+  return <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-accent-tint text-xs font-bold text-accent-strong">{letter}</span>;
 }
 
 const STAGE_BADGE = { Paying: 'badge-paying', Ended: 'badge-ended' };
@@ -1058,27 +1060,29 @@ const STAGE_BADGE = { Paying: 'badge-paying', Ended: 'badge-ended' };
 function RecentDeals({ deals, mode }) {
   if (deals.length === 0) return <Empty text="No recent deals match this view." />;
   return (
-    <div className="scroll-slim overflow-x-auto">
-      <table className="w-full min-w-[720px] text-left text-[11px]">
-        <thead className="border-y border-border text-text-faint">
+    // The app's table: .table-wrap, nested because the panel already draws
+    // the card, and the value right-aligned like every money column.
+    <div className="table-wrap is-nested shadow-none">
+      <table className="w-full min-w-[720px] border-collapse text-sm">
+        <thead>
           <tr>
-            <th className="px-3 py-2 font-semibold">Deal name</th>
-            <th className="px-3 py-2 font-semibold">Company</th>
-            <th className="px-3 py-2 font-semibold">Value</th>
-            <th className="px-3 py-2 font-semibold">Stage</th>
-            <th className="px-3 py-2 font-semibold">Group</th>
-            <th className="px-3 py-2 font-semibold">Last activity</th>
+            <th className="th">Deal name</th>
+            <th className="th">Company</th>
+            <th className="th text-right tabular-nums">Value</th>
+            <th className="th">Stage</th>
+            <th className="th">Group</th>
+            <th className="th">Last activity</th>
           </tr>
         </thead>
         <tbody>
           {deals.slice(0, RECENT_DEALS_SHOWN).map((deal, index) => (
-            <tr key={deal.id ?? index} className="border-b border-border last:border-0 hover:bg-surface-sunken">
-              <td className="px-3 py-2 font-semibold text-text"><Link className="text-text no-underline hover:text-accent-strong" to={deal.personId ? `/people/${encodeURIComponent(deal.personId)}` : '/master-sheet'}>{deal.personName || 'Unnamed deal'}</Link></td>
-              <td className="px-3 py-2 text-text-muted"><span className="flex items-center gap-2"><InitialChip name={deal.companyName} /><span className="truncate">{deal.companyName || 'Not set'}</span></span></td>
-              <td className="px-3 py-2 font-semibold tabular-nums text-text"><NormalizedMoney money={deal.payment} display={mode} compact /></td>
-              <td className="px-3 py-2"><span className={`badge ${STAGE_BADGE[deal.stage] ?? 'badge-not_started'}`}>{deal.stage || 'Unknown'}</span></td>
-              <td className="px-3 py-2 text-text-muted">{deal.group || 'Not set'}</td>
-              <td className="px-3 py-2 text-text-faint">{timestamp(deal.changedAt)}</td>
+            <tr key={deal.id ?? index} className="hover:bg-surface-sunken">
+              <td className="td font-medium text-text"><Link className="text-text no-underline hover:text-accent-strong" to={deal.personId ? `/people/${encodeURIComponent(deal.personId)}` : '/master-sheet'}>{deal.personName || 'Unnamed deal'}</Link></td>
+              <td className="td text-text-muted"><span className="flex items-center gap-2"><InitialChip name={deal.companyName} /><span className="truncate">{deal.companyName || 'Not set'}</span></span></td>
+              <td className="td text-right font-semibold tabular-nums text-text"><NormalizedMoney money={deal.payment} display={mode} compact /></td>
+              <td className="td"><span className={`badge ${STAGE_BADGE[deal.stage] ?? 'badge-not_started'}`}>{deal.stage || 'Unknown'}</span></td>
+              <td className="td text-text-muted">{deal.group || 'Not set'}</td>
+              <td className="td text-text-faint">{timestamp(deal.changedAt)}</td>
             </tr>
           ))}
         </tbody>
@@ -1124,7 +1128,7 @@ function historyNote(health) {
 // one thing on the page claiming otherwise.
 function ForecastNote({ points, range }) {
   const forecasting = points.some((point) => point.source === 'projectedForecast');
-  return <p className="text-[11px] text-text-faint">{range}{forecasting ? ' forecast' : ''}</p>;
+  return <p className="text-xs text-text-faint">{range}{forecasting ? ' forecast' : ''}</p>;
 }
 
 // ===============================
@@ -1143,15 +1147,15 @@ function FilterPanel({ filters, options, history, onApply, onCancel }) {
   const isDefault = Object.keys(changedOnly(draft)).length === 0;
 
   return (
-    <div className="absolute right-0 top-[calc(100%+.5rem)] z-30 w-[min(620px,calc(100vw-2rem))] rounded-xl border border-border bg-surface p-4 shadow-xl">
+    <div className="absolute right-0 top-[calc(100%+.5rem)] z-30 w-[min(620px,calc(100vw-2rem))] rounded-lg border border-border bg-surface p-4 shadow-md">
       <div className="mb-3">
         <h3 className="text-sm font-bold text-text">Dashboard filters</h3>
-        <p className="text-[11px] text-text-faint">Nothing changes until you press Apply.</p>
+        <p className="text-xs text-text-faint">Nothing changes until you press Apply.</p>
       </div>
       {/* SAID HERE, NOT AFTER THE FACT. Reaching further back than the saved
           snapshots go draws nothing new, which reads as a broken filter
           unless the control says so where it is being set. */}
-      {history && <p className="mb-3 rounded-md bg-warning-tint px-2.5 py-2 text-[11px] text-warning">{history}</p>}
+      {history && <p className="mb-3 rounded-md bg-warning-tint px-2.5 py-2 text-xs text-warning">{history}</p>}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {/* "Months shown" and "Forecast horizon" both sounded like they set
             the same span. One goes back, one goes forward, and the labels
@@ -1165,7 +1169,7 @@ function FilterPanel({ filters, options, history, onApply, onCancel }) {
         <div>
           <Select label="History" size="detail" hint={FILTER_HINTS.range} options={ranges} value={draft.range} onChange={(value) => onChange('range', value)} />
           {draft.range !== 'custom' && (
-            <p className="mt-1 text-[11px] text-text-faint">{windowLabel(draft.range)}</p>
+            <p className="mt-1 text-xs text-text-faint">{windowLabel(draft.range)}</p>
           )}
         </div>
         {/* FIXED AT ONE and shown anyway, because a value that never moves
@@ -1197,16 +1201,16 @@ function LoadingDashboard() {
   return (
     <div className="space-y-3">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-[104px] rounded-xl" />)}
+        {Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-[104px] rounded-lg" />)}
       </div>
       <div className="grid gap-3 lg:grid-cols-6 xl:grid-cols-12">
-        <Skeleton className="h-72 rounded-xl lg:col-span-6 xl:col-span-7" />
-        <Skeleton className="h-72 rounded-xl lg:col-span-6 xl:col-span-5" />
-        <Skeleton className="h-64 rounded-xl lg:col-span-6 xl:col-span-5" />
-        <Skeleton className="h-64 rounded-xl lg:col-span-3 xl:col-span-4" />
-        <Skeleton className="h-64 rounded-xl lg:col-span-3 xl:col-span-3" />
+        <Skeleton className="h-72 rounded-lg lg:col-span-6 xl:col-span-7" />
+        <Skeleton className="h-72 rounded-lg lg:col-span-6 xl:col-span-5" />
+        <Skeleton className="h-64 rounded-lg lg:col-span-6 xl:col-span-5" />
+        <Skeleton className="h-64 rounded-lg lg:col-span-3 xl:col-span-4" />
+        <Skeleton className="h-64 rounded-lg lg:col-span-3 xl:col-span-3" />
       </div>
-      <Skeleton className="h-56 rounded-xl" />
+      <Skeleton className="h-56 rounded-lg" />
     </div>
   );
 }
@@ -1322,39 +1326,39 @@ export default function DashboardPage() {
 
   return (
     <div className="mx-auto max-w-[1540px] space-y-3">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-lg font-bold tracking-tight text-text sm:text-xl md:text-2xl">Dashboard</h1>
-          <p className="mt-0.5 text-[11px] text-text-muted sm:text-xs">
-            {mode === CONVERTED ? 'Payment performance, converted to USD' : 'Payment performance, in the currencies owed'}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-3">
-          {data && <ForecastNote points={data.trend} range={rangeLabel} />}
-          {/* Beside Filters, never inside it. A filter refetches and waits
-              for Apply; this is a display switch over data already here. */}
-          <ViewToggle label="Amounts" value={mode} onChange={setMode} options={AMOUNT_OPTIONS} />
-          {/* The ref wraps the trigger too, so the button's own click is
-              "inside" and toggles rather than closing and reopening. */}
-          <div className="relative" ref={filterRef}>
-            <Button variant="secondary" size="md" onClick={() => setShowFilters((value) => !value)} aria-expanded={showFilters}>
-              <FilterIcon width={16} height={16} />Filters
-              {activeCount > 0 && <span className="grid h-5 min-w-5 place-items-center rounded-full bg-accent text-[10px] font-bold text-accent-ink">{activeCount}</span>}
-            </Button>
-            {showFilters && (
-              <FilterPanel
-                filters={filters}
-                options={data?.options ?? EMPTY_OPTIONS}
-                history={historyNote(data?.health)}
-                onApply={applyFilters}
-                onCancel={() => setShowFilters(false)}
-              />
-            )}
-          </div>
-        </div>
-      </div>
+      {/* The shared header. The dashboard's own controls ride in `actions`:
+          the span caption, the amounts switch and Filters. */}
+      <PageHeader
+        title="Dashboard"
+        subtitle={mode === CONVERTED ? 'Payment performance, converted to USD' : 'Payment performance, in the currencies owed'}
+        actions={(
+          <>
+            {data && <ForecastNote points={data.trend} range={rangeLabel} />}
+            {/* Beside Filters, never inside it. A filter refetches and waits
+                for Apply; this is a display switch over data already here. */}
+            <ViewToggle label="Amounts" value={mode} onChange={setMode} options={AMOUNT_OPTIONS} />
+            {/* The ref wraps the trigger too, so the button's own click is
+                "inside" and toggles rather than closing and reopening. */}
+            <div className="relative" ref={filterRef}>
+              <Button variant="secondary" size="sm" onClick={() => setShowFilters((value) => !value)} aria-expanded={showFilters}>
+                <FilterIcon width={16} height={16} />Filters
+                {activeCount > 0 && <span className="grid h-5 min-w-5 place-items-center rounded-full bg-accent text-xs font-bold text-accent-ink">{activeCount}</span>}
+              </Button>
+              {showFilters && (
+                <FilterPanel
+                  filters={filters}
+                  options={data?.options ?? EMPTY_OPTIONS}
+                  history={historyNote(data?.health)}
+                  onApply={applyFilters}
+                  onCancel={() => setShowFilters(false)}
+                />
+              )}
+            </div>
+          </>
+        )}
+      />
 
-      {error && <div className="rounded-xl bg-danger-tint p-4 text-sm text-danger"><p>{error.message}</p><Button variant="secondary" className="mt-3" onClick={() => refetch()}>Try again</Button></div>}
+      <ErrorState error={error} title="Couldn't load the dashboard" onRetry={() => refetch()} />
       {isLoading && <LoadingDashboard />}
 
       {/* ===============================
@@ -1370,7 +1374,7 @@ export default function DashboardPage() {
         <div className={isFetching ? 'transition-opacity duration-200 opacity-60' : 'transition-opacity duration-200'}>
           <p className="sr-only" role="status">{isFetching ? 'Updating dashboard' : 'Dashboard up to date'}</p>
           {isFetching && (
-            <span className="pointer-events-none fixed left-1/2 top-4 z-[60] -translate-x-1/2 rounded-full bg-text/90 px-3 py-1 text-[11px] font-semibold text-white shadow-lg" aria-hidden="true">
+            <span className="pointer-events-none fixed left-1/2 top-4 z-[60] -translate-x-1/2 rounded-full bg-text/90 px-3 py-1 text-xs font-semibold text-surface shadow-md" aria-hidden="true">
               Updating
             </span>
           )}
@@ -1414,13 +1418,13 @@ export default function DashboardPage() {
 
           <div className="grid items-stretch gap-3 lg:grid-cols-6 xl:grid-cols-12">
             <Panel title="Payment Overview" className="lg:col-span-6 xl:col-span-7" action={<ChartUnit mode={mode} note={rangeLabel} currencies={currencies} picked={picked} onPick={setCurrency} />}><PaymentOverview points={data.trend} groups={groups} mode={mode} picked={picked} currencies={currencies} /></Panel>
-            <Panel title="Recent Changes" className="lg:col-span-6 xl:col-span-5" action={<Link to="/master-sheet" className="shrink-0 text-[11px] font-semibold text-accent-strong no-underline">View all</Link>}><RecentChanges changes={data.recentChanges} /></Panel>
+            <Panel title="Recent Changes" className="lg:col-span-6 xl:col-span-5" action={<Link to="/master-sheet" className="shrink-0 text-xs font-semibold text-accent-strong no-underline">View all</Link>}><RecentChanges changes={data.recentChanges} /></Panel>
             <Panel title="Group Overview" className="lg:col-span-6 xl:col-span-5" action={<ChartUnit mode={mode} note={rangeLabel} currencies={currencies} picked={barPicked} onPick={setBarCurrency} allowAll={false} />}><PaymentGroupBars points={data.trend} groups={groups} mode={mode} picked={barPicked} currencies={currencies} /></Panel>
             <Panel title="Month on month Overview" className="lg:col-span-3 xl:col-span-4" action={<PanelNote>{monthSpan}</PanelNote>}><MonthOnMonth performance={monthOnMonth} mode={mode} lastMonth={lastMonth} next={nextMonth} /></Panel>
             <Panel title="Deals by Stage" className="lg:col-span-3 xl:col-span-3" action={<PanelNote>{thisMonth}</PanelNote>}><StageDonut stages={data.stages} /></Panel>
           </div>
 
-          <Panel title="Recent Deals" action={<Link to="/master-sheet" className="shrink-0 text-[11px] font-semibold text-accent-strong no-underline">View all deals</Link>} bodyClassName="px-2 pb-2 pt-0"><RecentDeals deals={data.recentDeals} mode={mode} /></Panel>
+          <Panel title="Recent Deals" action={<Link to="/master-sheet" className="shrink-0 text-xs font-semibold text-accent-strong no-underline">View all deals</Link>} bodyClassName="px-2 pb-2 pt-0"><RecentDeals deals={data.recentDeals} mode={mode} /></Panel>
 
           </div>
         </div>

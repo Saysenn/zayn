@@ -1,21 +1,28 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import ConfirmDialog from '../components/modals/ConfirmDialog';
 import HistoryModal from '../components/modals/HistoryModal';
 import Button from '../components/buttons/Button';
 import PageHeader, { Toolbar, SearchInput } from '../components/layout/PageHeader';
 import UnderlineTabs from '../components/layout/UnderlineTabs';
+import BulkBar, { BulkAction } from '../components/layout/BulkBar';
+import SelectAll from '../components/forms/SelectAll';
+import { EmptyState, ErrorState } from '../components/display/StateBlocks';
+import useRowSelection from '../hooks/useRowSelection';
 import {
   CheckIcon, HourglassIcon, RestoreIcon, SearchIcon, StopHandIcon,
 } from '../components/icons';
 import { TableSkeleton } from '../components/display/Skeleton';
-import { useMonthlyReview, useAnswerReview } from '../hooks/useMonthlyReview';
+import { useMonthlyReview } from '../hooks/useMonthlyReview';
+import useBulkActions, { DEAL_TOUCHES, bulkMessage, patchQueries } from '../hooks/useBulkActions';
+import { apiService } from '../configs/api.config';
+import { countOf } from '../helpers/pluralNoun';
 import { formatMoney } from '../helpers/formatMoney';
 import { reviewReason, countByReason, REVIEW_TABS } from '../helpers/reviewReason';
 import { formatDate } from '../helpers/formatDate';
 import { confirm } from '../configs/confirms.config';
 import {
   REVIEW_ANSWER, REVIEW_ANSWER_LABEL, REVIEW_WAITING_LABEL,
-  REVIEW_ANSWER_TONE, REVIEW_WAITING_TONE, REVIEW_ANSWER_LOG_FIELD, monthLabel,
+  REVIEW_ANSWER_TONE, REVIEW_WAITING_TONE, REVIEW_ANSWER_LOG_FIELD, REVIEW_ANSWER_LEAVES_LIST, monthLabel,
 } from '../configs/monthlyReview';
 
 /**
@@ -55,8 +62,8 @@ import {
  */
 function ReviewRow({ row, selected, onToggle }) {
   return (
-    <tr className="border-b border-border last:border-0 hover:bg-surface-sunken">
-      <td className="td">
+    <tr className={`border-b border-border last:border-0 hover:bg-surface-sunken ${selected ? 'row-selected' : ''}`}>
+      <td className="td w-8">
         <input
           type="checkbox"
           checked={selected}
@@ -65,12 +72,12 @@ function ReviewRow({ row, selected, onToggle }) {
         />
       </td>
       <td className="td text-text-muted">{row.group_name}</td>
-      <td className="td font-semibold">{row.person_name ?? '(no handler)'}</td>
+      <td className="td font-medium text-text">{row.person_name ?? '(no handler)'}</td>
       {/* NO REASON BADGE ANY MORE: the TAB is the reason, and saying it
           again on every row of a tab called Liquidation is noise. */}
       <td className="td">{row.company ?? '(no company)'}</td>
       <td className="td text-text-muted">{row.role_label}</td>
-      <td className="td tabular-nums">{formatMoney(row.monthly_amount, row.currency)}</td>
+      <td className="td text-right tabular-nums">{formatMoney(row.monthly_amount, row.currency)}</td>
       <td className="td whitespace-nowrap text-text-muted">{formatDate(row.payment_start_on)}</td>
       {/* HIS WORDS, NOT A DASH, and not a BADGE either. A reviewed monthly
           deal has no end date by definition, so the column printed "—" on
@@ -92,9 +99,8 @@ function ReviewRow({ row, selected, onToggle }) {
 }
 
 export default function ReviewPage() {
-  const { data: rows, period, isLoading } = useMonthlyReview();
-  const answer = useAnswerReview();
-  const [selected, setSelected] = useState(() => new Set());
+  const { data: rows, period, isLoading, error, refetch } = useMonthlyReview();
+  const { run } = useBulkActions();
   const [query, setQuery] = useState('');
   /**
    * ===============================
@@ -114,7 +120,6 @@ export default function ReviewPage() {
   // so a confirm on it is the click that teaches people not to read them.
   const [confirming, setConfirming] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
-  const selectAllRef = useRef(null);
 
   // FILTERED IS THE LIST EVERYTHING ELSE READS, so Select all, the count
   // beside it and the three buttons all act on what is actually on screen.
@@ -135,29 +140,37 @@ export default function ReviewPage() {
   const counts = useMemo(() => countByReason(rows), [rows]);
 
   const waiting = useMemo(() => list.filter((row) => !row.answer), [list]);
-  const chosen = useMemo(() => list.filter((row) => selected.has(row.id)), [list, selected]);
+  // The shared selection, cut back to what is on screen: a search or a tab
+  // change can never leave a hidden row in the batch.
+  const listIds = useMemo(() => list.map((row) => row.id), [list]);
+  const sel = useRowSelection(listIds);
+  const chosen = useMemo(() => list.filter((row) => sel.has(row.id)), [list, sel]);
   const chosenTotal = chosen.reduce((sum, row) => sum + Number(row.monthly_amount ?? 0), 0);
 
-  // A DOM property, not an attribute, so it needs the ref. The third state
-  // is what says "some of them", which two buttons cannot express.
-  const allSelected = list.length > 0 && chosen.length === list.length;
-  if (selectAllRef.current) {
-    selectAllRef.current.indeterminate = chosen.length > 0 && !allSelected;
-  }
-
-  function toggle(id) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  }
-
-  // OPTIMISTIC: the badge moves now and the hook rolls it back on failure,
-  // so the selection and the dialog close without waiting.
+  // OPTIMISTIC: the badge moves now, an answer that ends the deal takes
+  // the row off the list now, and the toast says so at once. A failure
+  // puts every row back and says why. Nothing waits for the server.
   function apply(value) {
-    answer.mutate({ dealIds: chosen.map((row) => row.id), answer: value });
-    setSelected(new Set());
+    const dealIds = chosen.map((row) => row.id);
+    const ids = new Set(dealIds);
+    run({
+      call: () => apiService.monthlyReview.answer(dealIds, value),
+      invalidates: DEAL_TOUCHES,
+      optimistic: (qc) => patchQueries(qc, [['monthly-review']], (old) => {
+        // The pending query has no rows and is left alone.
+        if (!Array.isArray(old?.rows)) return old;
+        return {
+          ...old,
+          rows: old.rows
+            .map((row) => (ids.has(row.id) ? { ...row, answer: value } : row))
+            .filter((row) => !REVIEW_ANSWER_LEAVES_LIST.includes(row.answer)),
+        };
+      }),
+      toast: bulkMessage('answered', dealIds.length, 'deal'),
+      report: (data) => bulkMessage('answered', data?.answered?.length ?? dealIds.length, 'deal'),
+      failure: `Couldn't answer ${countOf(dealIds.length, 'deal')}`,
+    });
+    sel.clear();
     setConfirming(null);
   }
 
@@ -170,7 +183,7 @@ export default function ReviewPage() {
   }
 
   return (
-    <div>
+    <div className="space-y-4">
       {/* ===============================
            * ONE BLOCK OF WORDS, NOT THREE
            * ===============================
@@ -211,7 +224,7 @@ export default function ReviewPage() {
       <UnderlineTabs
         tabs={REVIEW_TABS.map((t) => ({ ...t, count: counts[t.key] }))}
         active={tab}
-        onChange={(key) => { setTab(key); setSelected(new Set()); }}
+        onChange={(key) => { setTab(key); sel.clear(); }}
         action={(
           /* ===============================
              * THE WAY BACK, ON THE TAB ROW
@@ -239,7 +252,7 @@ export default function ReviewPage() {
         )}
       />
 
-      <div className="mt-3">
+      <div className="space-y-3">
         {/* THE PAGE'S OWN TOOLBAR, the one every list page uses. It was a
             hand rolled sticky row because a modal has no toolbar; on a page
             a second idea of where the search goes is the thing `Toolbar`
@@ -252,71 +265,21 @@ export default function ReviewPage() {
           search={(
             <SearchInput
               icon={SearchIcon}
-              placeholder="Search…"
+              placeholder="Search people or companies…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
           )}
-          /**
-           * ===============================
-           * * THE ANSWERS ONLY EXIST ONCE THERE IS SOMETHING TO ANSWER
-           * ===============================
-           * They sat there permanently, three saturated colours side by
-           * side, disabled for as long as nothing was ticked. His call
-           * 2026-09-29, and he is right: a traffic light showing all three
-           * lamps at once is not a signal, it is noise you have to learn to
-           * ignore, on the one screen that must not be ignored.
-           *
-           * Ticking a row is what arms them, so that is when they appear,
-           * and the colour then MEANS something. It also puts the count
-           * they act on next to them, which no disabled button could say.
-           *
-           * NOT THE WAITING COUNT AND NOT THE MONEY (his call 2026-09-17).
-           * This is how many rows the button in front of it will touch; the
-           * waiting count is still the line under the table and the money is
-           * still the confirm's.
-           */
-          actions={chosen.length > 0 ? (
-            <>
-              <span className="whitespace-nowrap text-xs font-semibold tabular-nums text-text-muted">
-                {chosen.length} selected
-              </span>
-              {/* ===============================
-                   * THREE ANSWERS, THREE SHAPES
-                   * ===============================
-                   * Colour alone was carrying the difference, and two of the
-                   * three are a tint apart: at a glance amber and red on the
-                   * same row is one decision made by hue. The shape says it
-                   * before the colour does, the way the master sheet's row
-                   * actions do (a palm is an ending, a bin is a deletion).
-                   *
-                   *   tick       it runs on, nothing happens
-                   *   hourglass  it is paid in full, then time is up
-                   *   palm       it stops, and the same palm the sheet uses
-                   */}
-              <Button variant="primary" onClick={() => press(REVIEW_ANSWER.YES)}>
-                <CheckIcon width={15} height={15} />
-                {REVIEW_ANSWER_LABEL[REVIEW_ANSWER.YES]}
-              </Button>
-              <Button variant="warning" onClick={() => press(REVIEW_ANSWER.FINAL)}>
-                <HourglassIcon width={15} height={15} />
-                {REVIEW_ANSWER_LABEL[REVIEW_ANSWER.FINAL]}
-              </Button>
-              <Button variant="danger" onClick={() => press(REVIEW_ANSWER.NO)}>
-                <StopHandIcon width={15} height={15} />
-                {REVIEW_ANSWER_LABEL[REVIEW_ANSWER.NO]}
-              </Button>
-            </>
-          ) : null}
         />
 
-        {!isLoading && list.length === 0 && (
-          <p className="p-8 text-center text-sm text-text-muted">
-            {query
-              ? 'No deal under review matches that.'
-              : 'Nothing is up for review. A deal joins this list when its end date passes, '
-                + 'or when somebody ticks it.'}
-          </p>
+        <ErrorState error={error} title="Couldn't load the review" onRetry={refetch} />
+
+        {!isLoading && !error && list.length === 0 && (
+          <EmptyState
+            icon={CheckIcon}
+            title={query ? 'No deal under review matches that' : 'Nothing is up for review'}
+            hint={query ? undefined : 'A deal joins this list when its end date passes, or when somebody ticks it.'}
+          />
         )}
 
         {(isLoading || list.length > 0) && (
@@ -333,22 +296,19 @@ export default function ReviewPage() {
                       toolbar with a label, which put it a row away from the
                       boxes it ticks and spent width saying what its position
                       already says. */}
-                  <th className="th w-10">
-                    <input
-                      ref={selectAllRef}
-                      type="checkbox"
-                      checked={allSelected}
-                      onChange={() => setSelected(
-                        allSelected ? new Set() : new Set(list.map((r) => r.id)),
-                      )}
-                      aria-label="Select all deals under review"
+                  <th className="th w-8">
+                    <SelectAll
+                      count={sel.count}
+                      total={sel.total}
+                      onChange={sel.setAll}
+                      ariaLabel="Select all deals under review"
                     />
                   </th>
                   <th className="th">Group</th>
                   <th className="th">Name</th>
                   <th className="th">Company</th>
                   <th className="th">Role</th>
-                  <th className="th">Monthly</th>
+                  <th className="th text-right tabular-nums">Monthly</th>
                   <th className="th">Payment start</th>
                   <th className="th">End date</th>
                   <th className="th">Answer</th>
@@ -360,8 +320,8 @@ export default function ReviewPage() {
                   <ReviewRow
                     key={row.id}
                     row={row}
-                    selected={selected.has(row.id)}
-                    onToggle={toggle}
+                    selected={sel.has(row.id)}
+                    onToggle={sel.toggle}
                   />
                 ))}
               </tbody>
@@ -385,6 +345,30 @@ export default function ReviewPage() {
           onClose={() => setShowHistory(false)}
         />
       )}
+
+      {/* ===============================
+           * THE ANSWERS ONLY EXIST ONCE THERE IS SOMETHING TO ANSWER
+           * ===============================
+           * His call 2026-09-29: three answers always on screen, disabled
+           * until a tick, were a traffic light with every lamp lit. They
+           * live in the bulk bar now, which only rises once a row is
+           * ticked, and it carries the count they act on.
+           *
+           * THREE ANSWERS, THREE SHAPES. A tick runs on, the hourglass is
+           * paid in full and then time is up, the palm stops, the same palm
+           * the master sheet uses, and red like it: No ends somebody's
+           * pay. Final and No still confirm first. */}
+      <BulkBar count={sel.count} noun="deal" onClear={sel.clear}>
+        <BulkAction icon={CheckIcon} onClick={() => press(REVIEW_ANSWER.YES)}>
+          {REVIEW_ANSWER_LABEL[REVIEW_ANSWER.YES]}
+        </BulkAction>
+        <BulkAction icon={HourglassIcon} onClick={() => press(REVIEW_ANSWER.FINAL)}>
+          {REVIEW_ANSWER_LABEL[REVIEW_ANSWER.FINAL]}
+        </BulkAction>
+        <BulkAction icon={StopHandIcon} variant="danger" onClick={() => press(REVIEW_ANSWER.NO)}>
+          {REVIEW_ANSWER_LABEL[REVIEW_ANSWER.NO]}
+        </BulkAction>
+      </BulkBar>
 
       {confirming && (
         <ConfirmDialog

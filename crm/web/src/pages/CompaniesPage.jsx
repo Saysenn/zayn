@@ -1,28 +1,59 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 // Filters survive leaving the page. See useStickyState.
 import { useStickyState, useClearSticky } from '../hooks/useStickyState';
 import { useNavigate } from 'react-router-dom';
-import { useCompanies, useCompanyCellEdit } from '../hooks/useCompanies';
+import { useCompanies } from '../hooks/useCompanies';
 import { usePeopleFilters } from '../hooks/usePeople';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
+import useRowSelection from '../hooks/useRowSelection';
+import useBulkActions, { patchQueries, mapCachedRows, rollbackAll } from '../hooks/useBulkActions';
+import { countOf } from '../helpers/pluralNoun';
+import { apiService } from '../configs/api.config';
 import { countFilters } from '../helpers/filters';
-import Button from '../components/buttons/Button';
 import PageHeader, { Toolbar, SearchInput } from '../components/layout/PageHeader';
 import Pagination from '../components/layout/Pagination';
+import BulkBar, { BulkAction, BulkMenu } from '../components/layout/BulkBar';
+import BulkAddDealsModal from '../components/modals/BulkAddDealsModal';
+import SelectAll from '../components/forms/SelectAll';
+import { EmptyState, ErrorState } from '../components/display/StateBlocks';
 import ViewToggle from '../components/layout/ViewToggle';
 import RecordCard, { CardList } from '../components/display/RecordCard';
 import MoneyTotals from '../components/display/MoneyTotals';
 import { formatTotalsWhole } from '../helpers/formatMoney';
-import ManageCompanyModal from '../components/modals/ManageCompanyModal';
 import Select from '../components/forms/Select';
-import FilterCheckbox from '../components/filters/FilterCheckbox';
 import StatusBadge from '../components/badges/StatusBadge';
-import { COMPANY_STATUS, COMPANY_STATUS_OPTIONS } from '../configs/companyStatus';
+import { COMPANY_STATUS, COMPANY_STATUS_OPTIONS, isTerminalStatus } from '../configs/companyStatus';
 import { CardSkeleton, TableSkeleton } from '../components/display/Skeleton';
-import { BuildingIcon, SearchIcon, UsersIcon } from '../components/icons';
+import { BuildingIcon, SearchIcon, StarIcon, UserIcon } from '../components/icons';
 
 const GRID_PAGE_SIZE = 16;
 const ROW_PAGE_SIZE = 25;
+
+// What a bulk write on companies changes: the lists, the open company, and
+// the deals and people that read their company's tier and status.
+const COMPANY_TOUCHES = [['companies'], ['company'], ['master-sheet'], ['people']];
+
+// The bar only sets a status that keeps the deals running. Closed and
+// dissolved stop every deal, which is one company at a time on purpose.
+const BULK_STATUS_OPTIONS = COMPANY_STATUS_OPTIONS.filter((o) => !isTerminalStatus(o.value));
+
+/**
+ * The bar's tier/status write, put on every cached Companies page and on
+ * each open company before the server answers. A status filter the row no
+ * longer matches drops it. Returns the rollback.
+ */
+function patchCompanies(queryClient, keys, fields) {
+  const want = new Set(keys.map(String));
+  const lists = patchQueries(queryClient, [['companies']], (data, key) => mapCachedRows(data, (row) => {
+    if (!want.has(String(row.ckey))) return row;
+    if (fields.status && key[1]?.status && key[1].status !== fields.status) return null;
+    return { ...row, ...fields };
+  }));
+  const detail = patchQueries(queryClient, [['company']], (data, key) => (
+    want.has(String(key[1])) && data?.company ? { ...data, company: { ...data.company, ...fields } } : data
+  ));
+  return rollbackAll(lists, detail);
+}
 
 /**
  * Companies — the other side of the same act as People.
@@ -46,14 +77,15 @@ const ROW_PAGE_SIZE = 25;
  * a small set of facts you scan for and open, not eleven columns you read
  * across, and the table was six columns of which two were one word each.
  *
- * THE TIER STAYS EDITABLE IN PLACE, which is the whole reason that column
- * exists: setting it on thirty companies is exactly the pass a dialog per
- * row makes unbearable. It sits in `actions` rather than among the facts
- * because that row already stops a click reaching the card behind it, and
- * without that every attempt to open the dropdown would open the company.
+ * THE TIER IS READ HERE, SET FROM THE BAR: tick the thirty companies and
+ * Set tier once. It sits in `actions` beside the tick, the row that stops
+ * a click reaching the card behind it.
  */
-function CompanyCard({ company, tiers, onSaveTier, onOpen, onView }) {
+function CompanyCard({ company, onView, selected, onToggle }) {
   return (
+    // The tint reaches the card itself, the same `.row-selected` look a
+    // ticked table row has.
+    <div className={`h-full ${selected ? '[&>div]:!bg-accent-tint' : ''}`}>
     <RecordCard
       interactive
       icon={BuildingIcon}
@@ -82,34 +114,28 @@ function CompanyCard({ company, tiers, onSaveTier, onOpen, onView }) {
       ]}
       actions={
         <>
-          <Select
-            label="Tier"
-            size="detail"
-            className="min-w-0 flex-1"
-            options={['', ...(tiers ?? [])]}
-            value={company.tier ?? ''}
-            placeholder="Set tier"
-            hint="What kind of company this is. Shown on each group's tab in the export."
-            onChange={(v) => onSaveTier(company, v ?? '')}
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggle}
+            aria-label={`Select ${company.name}`}
           />
-          {/* GREEN. It is the card's one action, and `quiet` is transparent
-              with muted ink: on a card that is already a click target it
-              read as a caption rather than a button. */}
-          <Button variant="primary" size="sm" className="ml-auto" onClick={() => onOpen(company)}>
-            <UsersIcon width={14} height={14} />
-            Manage
-          </Button>
+          {/* The tier as text. Setting it is the bulk bar's Set tier. */}
+          <span className="text-xs text-text-muted">
+            Tier: {company.tier ? <span className="text-text">{company.tier}</span> : <span className="text-text-faint">—</span>}
+          </span>
         </>
       }
     />
+    </div>
   );
 }
 
-function CompanyRow({ company, tiers, onSaveTier, onOpen, onView }) {
+function CompanyRow({ company, onView, selected, onToggle }) {
   const open = () => onView(company.ckey);
   return (
     <tr
-      className="cursor-pointer border-b border-border last:border-0 hover:bg-surface-sunken"
+      className={`cursor-pointer border-b border-border last:border-0 hover:bg-surface-sunken ${selected ? 'row-selected' : ''}`}
       onClick={open}
       onKeyDown={(event) => {
         if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -120,6 +146,9 @@ function CompanyRow({ company, tiers, onSaveTier, onOpen, onView }) {
       role="link"
       aria-label={`Open ${company.name}`}
     >
+      <td className="td w-8" onClick={(event) => event.stopPropagation()}>
+        <input type="checkbox" checked={selected} onChange={onToggle} aria-label={`Select ${company.name}`} />
+      </td>
       <td className="px-3 py-2.5 font-medium text-text">{company.name}</td>
       <td className="px-3 py-2.5 text-text-muted">{(company.groups || []).join(', ') || '—'}</td>
       {/* The column has room, so the table prints every currency. Only the
@@ -135,25 +164,8 @@ function CompanyRow({ company, tiers, onSaveTier, onOpen, onView }) {
       </td>
       <td className="px-3 py-2.5 text-right tabular-nums text-text-muted">{company.handler_count}</td>
       <td className="px-3 py-2.5 text-text-muted">{company.old_group || '—'}</td>
-      <td className="w-44 px-3 py-2" onClick={(event) => event.stopPropagation()}>
-        <Select
-          size="sm"
-          className="w-40"
-          options={['', ...(tiers ?? [])]}
-          value={company.tier ?? ''}
-          placeholder="Set tier"
-          onChange={(value) => onSaveTier(company, value ?? '')}
-        />
-      </td>
-      <td className="px-3 py-2 text-right" onClick={(event) => event.stopPropagation()}>
-        {/* The same action as the card's, so it wears the same colour.
-            One button reading two ways depending on the view toggle is
-            worse than either choice. */}
-        <Button variant="primary" onClick={() => onOpen(company)}>
-          <UsersIcon width={14} height={14} />
-          Manage
-        </Button>
-      </td>
+      {/* Plain text: Set tier on the bulk bar is how it changes. */}
+      <td className="px-3 py-2.5 text-text-muted">{company.tier || <span className="text-text-faint">—</span>}</td>
     </tr>
   );
 }
@@ -166,7 +178,6 @@ export default function CompaniesPage() {
   const forgetFilters = useClearSticky('companies.');
   const [search, setSearch] = useStickyState('companies.search', '');
   const [filters, setFilters] = useStickyState('companies.filters', {});
-  const [open, setOpen] = useState(null);
   const pageSize = view === 'grid' ? GRID_PAGE_SIZE : ROW_PAGE_SIZE;
   const changeView = (nextView) => {
     setView(nextView);
@@ -176,20 +187,32 @@ export default function CompaniesPage() {
   const navigate = useNavigate();
   const query = useDebouncedValue(search, 300);
   const { data: options } = usePeopleFilters();
-  const cellEdit = useCompanyCellEdit();
-  // The toast names the company and the field, the same as every other
-  // inline edit: "Relia PA's tier updated". With optimism the value has
-  // already moved on screen, so a bare "Saved" would leave you hunting for
-  // which row it meant if it were rolled back.
-  const saveTier = (company, tier) => cellEdit.mutate({
-    key: company.ckey, fields: { tier }, name: company.name, label: 'tier',
-  });
-
   const { data: companies, total, tiers, oldGroups, isLoading, error } = useCompanies({
     ...filters, q: query || undefined, page, pageSize,
   });
 
-  const filterActive = Object.keys(filters).length > 0;
+  const visibleKeys = useMemo(() => (companies ?? []).map((c) => c.ckey), [companies]);
+  const sel = useRowSelection(visibleKeys);
+  const [addingHandler, setAddingHandler] = useState(false);
+  const { run } = useBulkActions();
+  // On screen at once: every cached Companies page shows the new tier or
+  // status the moment it is picked. A status filter that no longer holds
+  // the row drops it. The bar is cleared without waiting.
+  const bulkSet = (fields, verb) => {
+    const keys = sel.ids;
+    run({
+      call: () => apiService.companies.bulk(keys, fields),
+      optimistic: (qc) => patchCompanies(qc, keys, fields),
+      invalidates: COMPANY_TOUCHES,
+      toast: { message: `${countOf(keys.length, 'company')} ${verb}` },
+      report: (data) => {
+        const n = data?.updated?.length ?? 0;
+        return { message: n ? `${countOf(n, 'company')} ${verb}` : `No companies ${verb}` };
+      },
+      failure: `Couldn't update ${countOf(keys.length, 'company')}`,
+    });
+    sel.clear();
+  };
 
   return (
     <div className="space-y-4">
@@ -216,22 +239,15 @@ export default function CompaniesPage() {
             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
           />
         }
-        inline={
-          <FilterCheckbox
-            label="Active only"
-            value={filters.status === 'active' ? 'true' : undefined}
-            onChange={(v) => { setFilters((f) => ({ ...f, status: v ? 'active' : undefined })); setPage(1); }}
-          />
-        }
         filtersActive={Boolean(filters.group || filters.oldGroup || filters.status)}
         filtersCount={countFilters(filters)}
         storageKey="companies.panel"
         onClearFilters={() => { setFilters({}); setSearch(''); setPage(1); forgetFilters(); }}
         filters={
           <>
-            {/* FOUR NOW, so "Active only" beside the search cannot answer
-                "which are winding down". That checkbox stays: it is the
-                common case, and it writes the same one field this does. */}
+            {/* THE COMPANY STATUS, Active among them. "Active only" was a
+                switch beside the search, and beside the bulk bar a switch
+                read as an action on the ticked rows; it lives here now. */}
             <Select
               size="sm"
               className="w-48"
@@ -246,7 +262,7 @@ export default function CompaniesPage() {
               value={filters.group ?? ''}
               onChange={(v) => { setFilters((f) => ({ ...f, group: v || undefined })); setPage(1); }}
               options={options?.groups ?? []}
-              placeholder="All"
+              placeholder="All groups"
             />
             {/* HIS OWN EARLIER NAME FOR THE GROUP, off the sheet's Old group
                 column. Never one of ours: the values are Milky, Wallaby 1,
@@ -266,7 +282,7 @@ export default function CompaniesPage() {
         }
       />
 
-      {error && <p className="bg-danger-tint px-4 py-2.5 text-sm text-danger">{error.message}</p>}
+      <ErrorState error={error} title="Couldn't load companies" />
 
       {/* A GRID OF CARDS, at every width. `columns` is what makes CardList
           the list itself rather than a phone's version of a table, so this
@@ -279,10 +295,9 @@ export default function CompaniesPage() {
           <CompanyCard
             key={c.ckey}
             company={c}
-            tiers={tiers}
-            onSaveTier={saveTier}
-            onOpen={setOpen}
             onView={(k) => navigate(`/companies/${encodeURIComponent(k)}`)}
+            selected={sel.has(c.ckey)}
+            onToggle={() => sel.toggle(c.ckey)}
           />
         ))}
       </CardList>
@@ -293,31 +308,28 @@ export default function CompaniesPage() {
           <table className="w-full min-w-[980px] text-sm">
             <thead>
               <tr>
+                <th className="th w-8"><SelectAll count={sel.count} total={sel.total} onChange={sel.setAll} /></th>
                 <th className="th">Name</th>
                 <th className="th">Groups</th>
                 <th className="th text-right">Monthly</th>
-                <th className="th">Company Status</th>
+                <th className="th">Company status</th>
                 <th className="th text-right">Handlers</th>
                 <th className="th">Old group</th>
                 <th className="th">Tier</th>
-                <th className="th" />
               </tr>
             </thead>
             <tbody>
               {isLoading && <TableSkeleton rows={8} columns={8} />}
               {!isLoading && companies?.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="px-3 py-10 text-center text-text-muted">No companies match.</td>
-                </tr>
+                <EmptyState asRow colSpan={8} icon={BuildingIcon} title="No companies match" hint="Try another search or clear the filters." />
               )}
               {!isLoading && companies?.map((company) => (
                 <CompanyRow
                   key={company.ckey}
                   company={company}
-                  tiers={tiers}
-                  onSaveTier={saveTier}
-                  onOpen={setOpen}
                   onView={(companyKey) => navigate(`/companies/${encodeURIComponent(companyKey)}`)}
+                  selected={sel.has(company.ckey)}
+                  onToggle={() => sel.toggle(company.ckey)}
                 />
               ))}
             </tbody>
@@ -326,14 +338,44 @@ export default function CompaniesPage() {
       )}
 
       {view === 'grid' && !isLoading && companies?.length === 0 && (
-        <p className="border border-dashed border-border px-3 py-10 text-center text-sm text-text-muted">
-          No companies match.
-        </p>
+        <EmptyState icon={BuildingIcon} title="No companies match" hint="Try another search or clear the filters." />
       )}
 
       {!isLoading && <Pagination page={page} pageSize={pageSize} total={total} onPageChange={setPage} />}
 
-      {open && <ManageCompanyModal companyKey={open.ckey} onClose={() => setOpen(null)} />}
+      <BulkBar count={sel.count} noun="company" onClear={sel.clear}>
+        <BulkAction icon={UserIcon} onClick={() => setAddingHandler(true)}>
+          Add handlers
+        </BulkAction>
+        <BulkMenu
+          icon={StarIcon}
+          label="Set tier"
+          options={[
+            ...(tiers ?? []).map((t) => ({ label: t, onSelect: () => bulkSet({ tier: t }, `set to ${t}`) })),
+            { label: 'No tier', onSelect: () => bulkSet({ tier: '' }, 'cleared of a tier') },
+          ]}
+        />
+        <BulkMenu
+          icon={BuildingIcon}
+          label="Set status"
+          hint="Closed and dissolved are set one company at a time"
+          options={BULK_STATUS_OPTIONS.map((o) => ({
+            label: o.label,
+            onSelect: () => bulkSet({ status: o.value }, `set to ${o.label.toLowerCase()}`),
+          }))}
+        />
+      </BulkBar>
+
+      {addingHandler && (
+        <BulkAddDealsModal
+          direction="toPerson"
+          subjects={(companies ?? [])
+            .filter((c) => sel.has(c.ckey))
+            .map((c) => ({ id: c.ckey, name: c.name, group: c.groups?.[0] }))}
+          onClose={() => setAddingHandler(false)}
+          onDone={sel.clear}
+        />
+      )}
     </div>
   );
 }

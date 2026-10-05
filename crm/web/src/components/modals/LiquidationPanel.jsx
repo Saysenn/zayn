@@ -137,8 +137,8 @@ export default function LiquidationPanel({ company, deals, busy, onSave, onClose
                 </th>
                 <th className="th">Name</th>
                 <th className="th">Role</th>
-                <th className="th">Now</th>
-                <th className="th">New amount</th>
+                <th className="th text-right tabular-nums">Now</th>
+                <th className="th text-right tabular-nums">New amount</th>
               </tr>
             </thead>
             <tbody>
@@ -147,7 +147,7 @@ export default function LiquidationPanel({ company, deals, busy, onSave, onClose
                 return (
                   <tr
                     key={deal.id}
-                    className={`border-b border-border last:border-0 ${inside ? '' : 'opacity-50'}`}
+                    className={`border-b border-border last:border-0 hover:bg-surface-sunken ${inside ? '' : 'opacity-50'}`}
                   >
                     <td className="td">
                       <input
@@ -160,16 +160,16 @@ export default function LiquidationPanel({ company, deals, busy, onSave, onClose
                           : [...prev, deal.id]))}
                       />
                     </td>
-                    <td className="td font-semibold">{deal.person_name ?? '(no handler)'}</td>
+                    <td className="td font-medium text-text">{deal.person_name ?? '(no handler)'}</td>
                     <td className="td text-text-muted">{deal.role_label}</td>
-                    <td className="td tabular-nums text-text-muted">
+                    <td className="td text-right tabular-nums text-text-muted">
                       {formatMoney(deal.monthly_amount, deal.currency)}
                     </td>
-                    <td className="td">
+                    <td className="td text-right">
                       {/* Disabled, not hidden. An empty cell reads as an
                           amount of nothing; a greyed one says untouched. */}
                       <input
-                        className="input-inline h-7 w-28 text-sm tabular-nums"
+                        className="input-inline h-7 w-28 text-right text-sm tabular-nums"
                         type="number"
                         {...MONEY_INPUT}
                         disabled={!inside || busy}
@@ -216,8 +216,8 @@ export default function LiquidationPanel({ company, deals, busy, onSave, onClose
             </span>
           )}
           <span className="ml-auto flex gap-2">
-            <Button variant="quiet" onClick={onClose}>Cancel</Button>
-            <Button variant="primary" disabled={busy} onClick={save}>
+            <Button size="md" variant="secondary" onClick={onClose}>Cancel</Button>
+            <Button size="md" variant="primary" disabled={busy} phase={busy ? 'working' : 'idle'} onClick={save}>
               {busy ? 'Saving…' : `Save ${changed.length || 'settlement'}`}
             </Button>
           </span>

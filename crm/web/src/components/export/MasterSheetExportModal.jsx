@@ -8,6 +8,7 @@ import { popup } from '../../configs/popups.config';
 import { usePeopleFilters } from '../../hooks/usePeople';
 import { useNotifications } from '../../hooks/useNotifications';
 import Modal from '../modals/Modal';
+import UnderlineTabs from '../layout/UnderlineTabs';
 import Button from '../buttons/Button';
 import Select from '../forms/Select';
 import Toggle from '../forms/Toggle';
@@ -216,6 +217,10 @@ const MODES = [
     template: 'drivers',
     columnPicker: true,
     drivers: true,
+    // HEADER AND TINTS, like the other tabs: the file's header rows and
+    // bands take the picked colours. Each run's own section heading keeps
+    // the run's colour, which is what tells the runs apart in the file.
+    headerColor: true,
     // ONE WORKBOOK, ALWAYS: its four tabs are the document. A file per group
     // would split one driver's run across files.
     oneFile: true,
@@ -816,34 +821,16 @@ export default function MasterSheetExportModal({ group: initialGroup, onClose })
   return (
     <Modal wide title="Export master sheet" onClose={onClose}>
       <div className="space-y-5">
-        {/* Three across. At two columns the tiles ran out of width and the
-            labels collided with each other. */}
-        <div className="grid gap-2 sm:grid-cols-3">
-          {SHOWN_MODES.map((m) => (
-            <button
-              key={m.key}
-              type="button"
-              disabled={m.comingSoon}
-              onClick={() => setMode(m.key)}
-              className={`min-h-0 border px-3 py-2.5 text-center disabled:cursor-not-allowed disabled:opacity-50 ${
-                mode === m.key
-                  ? 'border-accent bg-accent-tint'
-                  : 'border-border enabled:hover:bg-surface-sunken'
-              }`}
-            >
-              {/* Name only. The hints ran into each other at three across —
-                  "One sheet, like the working file" collided with the tile
-                  beside it — and a tile whose job is to be picked does not
-                  need explaining. */}
-              <span className="block text-sm font-semibold text-text">
-                {typeof m.label === 'function' ? m.label(month) : m.label}
-              </span>
-              {m.comingSoon && (
-                <span className="block text-xs text-text-muted">Coming soon</span>
-              )}
-            </button>
-          ))}
-        </div>
+        {/* THE SHARED TABS, like every other page. The boxed tiles were the
+            one tab row in the CRM that looked like a set of big buttons. */}
+        <UnderlineTabs
+          tabs={SHOWN_MODES.filter((m) => !m.comingSoon).map((m) => ({
+            key: m.key,
+            label: typeof m.label === 'function' ? m.label(month) : m.label,
+          }))}
+          active={mode}
+          onChange={setMode}
+        />
 
         {/* WHICH ROWS. The month is not here any more: it is always this
             one and the tab above says which. See currentMonth. */}

@@ -1,6 +1,10 @@
 import { useState } from 'react';
 import Select from '../forms/Select';
 import CellInfo from '../display/CellInfo';
+import Button from '../buttons/Button';
+import SelectAll from '../forms/SelectAll';
+import { EmptyState } from '../display/StateBlocks';
+import { ChevronIcon } from '../icons';
 
 /**
  * ***************************************************
@@ -92,7 +96,7 @@ function CompanyPicker({ row, value, onChange, allNames }) {
 function Field({ label, value, options, onChange, placeholder }) {
   return (
     <label className="flex min-w-0 flex-col gap-1">
-      <span className="text-[10px] uppercase tracking-wide text-text-faint">{label}</span>
+      <span className="text-xs uppercase tracking-wide text-text-faint">{label}</span>
       <Select
         size="form"
         className="w-40"
@@ -148,6 +152,27 @@ export default function CompanyTiersTab({ diff, value, onChange }) {
 
   const actionable = rows.filter((r) => r.state !== 'unchanged');
 
+  // A flagged row is a QUESTION, so it is never bulk-accepted: the whole
+  // reason it is flagged is that nobody has answered it. Select all covers
+  // the changed and the new, and leaves every other row's answer alone.
+  const bulkable = rows.filter((r) => r.state === 'changed' || r.state === 'new');
+  const bulkKeys = new Set(bulkable.map((r) => r.company));
+  const bulkTicked = bulkable.filter((r) => byKey.has(r.company)).length;
+  function setAllBulk(on) {
+    const others = value.filter((v) => !bulkKeys.has(v.key));
+    if (!on) { onChange(others); return; }
+    onChange([
+      ...others,
+      ...bulkable.map((r) => byKey.get(r.company) ?? {
+        key: r.company,
+        company: r.matchedName ?? r.company,
+        tier: r.tier,
+        oldGroup: r.oldGroup ?? '',
+        accepted: true,
+      }),
+    ]);
+  }
+
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
@@ -155,30 +180,23 @@ export default function CompanyTiersTab({ diff, value, onChange }) {
           <span className="font-semibold tabular-nums">{value.length}</span>
           {` of ${rows.length} accepted`}
         </p>
-        <button
-          type="button"
-          className="btn-quiet min-h-0 px-2 py-1 text-xs"
-          // A flagged row is a QUESTION, so it is never bulk-accepted: the
-          // whole reason it is flagged is that nobody has answered it.
-          onClick={() => onChange(
-            rows.filter((r) => r.state === 'changed' || r.state === 'new').map((r) => ({
-              key: r.company,
-              company: r.matchedName ?? r.company,
-              tier: r.tier,
-              oldGroup: r.oldGroup ?? '',
-              accepted: true,
-            })),
-          )}
-        >
-          Accept all that are not flagged
-        </button>
+        {bulkable.length > 0 && (
+          <span className="text-text-muted">
+            <SelectAll
+              count={bulkTicked}
+              total={bulkable.length}
+              onChange={setAllBulk}
+              label="Accept all that are not flagged"
+            />
+          </span>
+        )}
       </div>
 
       {/* THE OLD GROUPS THIS FILE MENTIONS. His own earlier naming (Milky,
           Wallaby 1, V3), never one of our groups, so it is stated rather
           than matched against anything. */}
       {oldGroups.length > 0 && (
-        <p className="border-b border-border px-3 py-1.5 text-[11px] text-text-muted">
+        <p className="border-b border-border px-3 py-1.5 text-xs text-text-muted">
           {`Old groups in this file: ${oldGroups.join(', ')}`}
         </p>
       )}
@@ -189,13 +207,15 @@ export default function CompanyTiersTab({ diff, value, onChange }) {
         const shut = collapsed.has(state);
         return (
           <div key={state} className="border-b border-border last:border-b-0">
-            <button
-              type="button"
-              className={`btn-quiet min-h-0 w-full justify-start px-3 py-2 text-[11px] font-semibold uppercase tracking-wide ${tone ?? 'text-text-faint'}`}
+            <Button
+              size="sm"
+              className={`w-full justify-start rounded-none text-xs font-semibold uppercase tracking-wide ${tone ?? 'text-text-faint'}`}
+              aria-expanded={!shut}
               onClick={() => toggleSection(state)}
             >
+              <ChevronIcon width={14} height={14} className={`transition-transform ${shut ? '' : 'rotate-90'}`} />
               {title} <span className="tabular-nums">({section.length})</span>
-            </button>
+            </Button>
 
             {!shut && section.map((row) => {
               const picked = byKey.get(row.company);
@@ -214,7 +234,7 @@ export default function CompanyTiersTab({ diff, value, onChange }) {
                   />
 
                   <div className="min-w-56 flex-1">
-                    <span className="mb-1 block text-[10px] uppercase tracking-wide text-text-faint">
+                    <span className="mb-1 block text-xs uppercase tracking-wide text-text-faint">
                       Company
                     </span>
                     {/* THE REASON IS AN ICON, NEVER INLINE TEXT. Under the
@@ -257,7 +277,7 @@ export default function CompanyTiersTab({ diff, value, onChange }) {
                   />
 
                   {row.currentTier && row.currentTier !== row.tier && (
-                    <span className="mb-2.5 text-[11px] text-text-muted">
+                    <span className="mb-2.5 text-xs text-text-muted">
                       {`was ${row.currentTier}`}
                     </span>
                   )}
@@ -269,9 +289,7 @@ export default function CompanyTiersTab({ diff, value, onChange }) {
       })}
 
       {rows.length === 0 && (
-        <p className="px-3 py-6 text-center text-sm text-text-muted">
-          This file carries no Active company list.
-        </p>
+        <EmptyState title="This file carries no Active company list" />
       )}
       {rows.length > 0 && actionable.length === 0 && (
         <p className="px-3 py-4 text-center text-sm text-text-muted">

@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiService } from '../../configs/api.config';
-import { useOptimisticUpdate } from '../../hooks/useOptimisticUpdate';
 import { REVIEW_KEY } from '../../hooks/useMonthlyReview';
-import Button from '../buttons/Button';
+import useRowSelection from '../../hooks/useRowSelection';
+import useBulkActions, { bulkMessage, patchQueries } from '../../hooks/useBulkActions';
 import Pagination from '../layout/Pagination';
+import BulkBar, { BulkAction } from '../layout/BulkBar';
+import SelectAll from '../forms/SelectAll';
 import RecordCard from '../display/RecordCard';
 import { Skeleton } from '../display/Skeleton';
-import { RestoreIcon } from '../icons';
+import { EmptyState, ErrorState } from '../display/StateBlocks';
+import { RestoreIcon, UndoIcon } from '../icons';
 import { REVIEW_ANSWER_LABEL, REVIEW_ANSWER_LOG_FIELD } from '../../configs/monthlyReview';
 
 /**
@@ -18,7 +21,7 @@ import { REVIEW_ANSWER_LABEL, REVIEW_ANSWER_LOG_FIELD } from '../../configs/mont
  * Every cell in this CRM is editable in place, which is fast and is also
  * one keystroke away from a wrong figure on a payout sheet. This is the
  * safety net: the field, the value before, the value now, who did it, and
- * an Undo per entry.
+ * Undo on the bulk bar for whatever you tick.
  *
  * UNDO IS ITSELF AN EDIT, not a deletion. Reverting writes the old value
  * back through the normal update path, which logs a fresh entry, so "who
@@ -61,7 +64,8 @@ export const FIELD_LABELS = {
   postcode: 'postcode', acceptingPostals: 'accepting postals', bankDetails: 'bank',
   accountNumber: 'account number', sortCode: 'sort code', label: 'label',
   shouldBePaid: 'should be paid', paid: 'paid', notes: 'notes', status: 'status',
-  needsReview: 'needs review', paymentOutcome: 'payday outcome',
+  needsReview: 'needs review', paymentOutcome: 'payday outcome', specialCaseDeal: 'special case',
+  stoppedOn: 'stopped on',
   overrideShouldBePaid: 'should be paid (override)', overridePaid: 'paid (override)',
   // Set on the PERSON and logged on every deal it reaches, so the label
   // has to say which level. Undo puts the PROFILE back, on every deal.
@@ -88,17 +92,29 @@ const WINDOW_HOURS = 168;
 // the modal is a scroll box, a page is the whole audit trail.
 const PAGE_SIZE = 25;
 
-// The undo, painted before the server answers: the entry greys out, and a
-// review answer goes back on the review page's row too.
-function paintRevert(old, change) {
+// Only a change Undo could actually put back can be ticked: an undone one,
+// one whose deal is gone, or a field no form writes would only come back
+// in the toast as "failed".
+const canUndo = (c) => !c.reverted_at && c.row_exists && c.revertible;
+
+// What a bulk undo leaves stale: the deal it changed, everywhere it shows.
+const UNDO_TOUCHES = [
+  ['history'], ['master-sheet'], ['people'], ['companies'], ['company'], ['person'], ['monthly-review'],
+];
+
+// The undo, painted before the server answers: the entries grey out and
+// say Undone, and a review answer goes back on the review page's row too.
+function paintRevert(old, changes) {
+  const byId = new Map(changes.map((c) => [c.id, c]));
   if (old?.changes) {
     const at = new Date().toISOString();
-    return { ...old, changes: old.changes.map((c) => (c.id === change.id ? { ...c, reverted_at: at } : c)) };
+    return { ...old, changes: old.changes.map((c) => (byId.has(c.id) ? { ...c, reverted_at: at } : c)) };
   }
-  if (old?.rows && change.field === REVIEW_ANSWER_LOG_FIELD) {
+  const answers = new Map(changes.filter((c) => c.field === REVIEW_ANSWER_LOG_FIELD).map((c) => [c.row_id, c]));
+  if (old?.rows && answers.size) {
     return {
       ...old,
-      rows: old.rows.map((row) => (row.id === change.row_id ? { ...row, answer: change.old_value ?? null } : row)),
+      rows: old.rows.map((row) => (answers.has(row.id) ? { ...row, answer: answers.get(row.id).old_value ?? null } : row)),
     };
   }
   return old;
@@ -121,21 +137,16 @@ function Value({ children }) {
   );
 }
 
-// Honest about why the button is not there, rather than offering one that
-// would fail. A field no form writes came back 409 every time.
-function UndoCell({ change, onUndo }) {
-  if (change.reverted_at) return <span className="text-xs text-text-faint">Undone</span>;
-  if (!change.row_exists) return <span className="text-xs text-text-faint">Deal deleted</span>;
-  if (!change.revertible) return <span className="text-xs text-text-faint">Not hand editable</span>;
-  return (
-    <Button
-      onClick={() => onUndo(change)}
-      aria-label={`Undo change to ${FIELD_LABELS[change.field] ?? change.field}`}
-    >
-      <RestoreIcon width={14} height={14} />
-      Undo
-    </Button>
-  );
+// Why a change cannot be ticked, said beside its value rather than left
+// as a mystery disabled checkbox. Undone is the common one: the entry
+// stays in the trail, faint, marked as put back.
+function UndoNote({ change }) {
+  let text = null;
+  if (change.reverted_at) text = 'Undone';
+  else if (!change.row_exists) text = 'Deal deleted';
+  else if (!change.revertible) text = 'Not hand editable';
+  if (!text) return null;
+  return <span className="badge badge-sm ml-1.5 whitespace-nowrap bg-surface-sunken text-text-faint">{text}</span>;
 }
 
 /**
@@ -151,7 +162,7 @@ export default function HistoryList({
   // on page four of a wider one and reads as empty.
   useEffect(() => setPage(1), [rowId, personId, company, field]);
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['history', {
       rowId: rowId ?? null, personId: personId ?? null, company: company ?? null, field: field ?? null,
       page,
@@ -164,23 +175,31 @@ export default function HistoryList({
     placeholderData: (prev) => prev,
   });
 
-  // OPTIMISTIC: the whole change goes in, so the field is known before the server answers.
-  const revert = useOptimisticUpdate({
-    queryKey: [['history'], REVIEW_KEY],
-    mutationFn: (change) => apiService.history.revert(change.id),
-    applyToCache: paintRevert,
-    describe: (change) => FIELD_LABELS[change.field] ?? change.field,
-    verb: () => 'put back',
-    failVerb: () => 'undo',
-    successIcon: 'restore',
-    // The undo changed a deal, so every view of that deal is stale.
-    alsoInvalidate: [['master-sheet'], ['people'], ['person'], ['companies'], ['company']],
-    successKey: 'history-revert',
-  });
-
   const changes = data?.changes ?? [];
   const total = data?.total ?? 0;
-  const undo = (change) => revert.mutate(change);
+
+  // One row is one change id, so the ticked ids ARE the change ids.
+  const sel = useRowSelection(changes.filter(canUndo).map((c) => c.id));
+  const { run } = useBulkActions();
+
+  // Greyed and marked Undone at once; back as they were if it fails.
+  function undoSelected() {
+    const ticked = changes.filter((c) => sel.has(c.id));
+    const n = ticked.length;
+    run({
+      call: () => apiService.history.revertMany({ ids: ticked.map((c) => c.id) }),
+      invalidates: UNDO_TOUCHES,
+      optimistic: (qc) => patchQueries(qc, [['history'], REVIEW_KEY], (old) => paintRevert(old, ticked)),
+      icon: 'undo',
+      toast: bulkMessage('undone', n, 'change'),
+      failure: `Couldn't undo ${n} ${n === 1 ? 'change' : 'changes'}`,
+      report: (res) => {
+        const failed = Array.isArray(res?.failed) ? res.failed.length : Number(res?.failed) || 0;
+        return bulkMessage('undone', res?.reverted ?? 0, 'change', [[failed, 'could not be put back']]);
+      },
+    });
+    sel.clear();
+  }
 
   return (
     <div className="space-y-3">
@@ -189,27 +208,19 @@ export default function HistoryList({
           list is the same lie the 200 row cap used to tell. */}
       <p className="text-sm text-text-muted">
         {total > 0 && <span className="font-semibold text-text">{total} </span>}
-        {total === 1 ? 'edit' : 'edits'} from the last 7 days. Undo puts the old value back and
+        {total === 1 ? 'edit' : 'edits'} from the last 7 days. Tick one and Undo puts the old value back and
         records that it happened, nothing is erased from the history.
       </p>
 
       {isLoading && <Skeleton className="h-40 w-full" />}
-      {error && (
-        <p className="bg-danger-tint px-3 py-2 text-sm text-danger">
-          {error.message}
-        </p>
-      )}
+      <ErrorState error={error} title="Couldn't load the history" onRetry={refetch} />
 
-      {!isLoading && changes.length === 0 && (
-        <p className="border border-border bg-surface-sunken px-3 py-6 text-center text-sm text-text-muted">
-          Nothing has been changed in the last 7 days.
-        </p>
+      {!isLoading && !error && changes.length === 0 && (
+        <EmptyState icon={RestoreIcon} title="Nothing has been changed in the last 7 days" />
       )}
 
       {/* On a phone each change is a card. Six columns of "was" and "now"
-          inside a dialog is the narrowest thing in the app, and Undo is the
-          point of the whole list, so it has to be reachable rather than
-          scrolled to sideways. */}
+          inside a dialog is the narrowest thing in the app. */}
       {changes.length > 0 && (
         <div className={`flex flex-col gap-2 overflow-y-auto md:hidden ${maxHeight}`}>
           {changes.map((c) => (
@@ -217,16 +228,18 @@ export default function HistoryList({
               key={`${c.id}-card`}
               title={c.person_name}
               subtitle={[c.company, FIELD_LABELS[c.field] ?? c.field].filter(Boolean).join(' · ')}
+              selected={sel.has(c.id)}
+              onSelect={canUndo(c) ? () => sel.toggle(c.id) : undefined}
+              selectLabel="Select change"
               facts={[
                 { label: 'Was', value: <Value>{shown(c.field, c.old_value)}</Value> },
-                { label: 'Now', value: <Value>{shown(c.field, c.new_value)}</Value> },
+                { label: 'Now', value: <><Value>{shown(c.field, c.new_value)}</Value><UndoNote change={c} /></> },
                 {
                   label: 'When',
                   value: `${when(c.changed_at)} · ${VIA_LABELS[c.changed_via] ?? c.changed_via}`,
                   wide: true,
                 },
               ]}
-              actions={<UndoCell change={c} onUndo={undo} />}
             />
           ))}
         </div>
@@ -236,34 +249,48 @@ export default function HistoryList({
         // overflow-x as well as y, like every other table in the app. A
         // long old value (a note, a joined company list) pushed this one
         // wider than its frame with nothing to scroll it.
-        <div className={`hidden overflow-auto rounded-lg border border-border md:block ${maxHeight}`}>
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-surface-sunken">
-              <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-text-faint">
-                <th className="px-3 py-2 font-semibold">When</th>
-                <th className="px-3 py-2 font-semibold">Who</th>
-                <th className="px-3 py-2 font-semibold">Field</th>
-                <th className="px-3 py-2 font-semibold">Was</th>
-                <th className="px-3 py-2 font-semibold">Now</th>
-                <th className="px-3 py-2" />
+        <div className={`table-wrap hidden overflow-auto md:block ${maxHeight}`}>
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr>
+                <th className="th w-8"><SelectAll count={sel.count} total={sel.total} onChange={sel.setAll} /></th>
+                <th className="th">When</th>
+                <th className="th">Who</th>
+                <th className="th">Field</th>
+                <th className="th">Was</th>
+                <th className="th">Now</th>
               </tr>
             </thead>
             <tbody>
               {changes.map((c) => (
-                <tr key={c.id} className={`border-b border-border last:border-0 ${c.reverted_at ? 'opacity-50' : ''}`}>
-                  <td className="px-3 py-2 whitespace-nowrap text-text-muted" title={new Date(c.changed_at).toLocaleString('en-GB')}>
+                <tr
+                  key={c.id}
+                  className={`hover:bg-surface-sunken ${sel.has(c.id) ? 'row-selected' : ''} ${c.reverted_at ? 'opacity-50' : ''}`}
+                >
+                  <td className="td w-8">
+                    <input
+                      type="checkbox"
+                      checked={sel.has(c.id)}
+                      disabled={!canUndo(c)}
+                      onChange={() => sel.toggle(c.id)}
+                      aria-label={`Select change to ${FIELD_LABELS[c.field] ?? c.field}`}
+                    />
+                  </td>
+                  <td className="td whitespace-nowrap text-text-muted" title={new Date(c.changed_at).toLocaleString('en-GB')}>
                     {when(c.changed_at)}
                   </td>
-                  <td className="px-3 py-2 text-text-muted">{VIA_LABELS[c.changed_via] ?? c.changed_via}</td>
-                  <td className="px-3 py-2">
-                    <span className="font-medium">{c.person_name}</span>
+                  <td className="td text-text-muted">{VIA_LABELS[c.changed_via] ?? c.changed_via}</td>
+                  <td className="td whitespace-normal">
+                    <span className="font-medium text-text">{c.person_name}</span>
                     {c.company && <span className="text-text-muted"> · {c.company}</span>}
                     <br />
                     <span className="text-xs text-text-muted">{FIELD_LABELS[c.field] ?? c.field}</span>
                   </td>
-                  <td className="px-3 py-2"><Value>{shown(c.field, c.old_value)}</Value></td>
-                  <td className="px-3 py-2"><Value>{shown(c.field, c.new_value)}</Value></td>
-                  <td className="px-3 py-2 text-right"><UndoCell change={c} onUndo={undo} /></td>
+                  <td className="td whitespace-normal"><Value>{shown(c.field, c.old_value)}</Value></td>
+                  <td className="td whitespace-normal">
+                    <Value>{shown(c.field, c.new_value)}</Value>
+                    <UndoNote change={c} />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -274,6 +301,10 @@ export default function HistoryList({
       {/* Hides itself on a single page, so a person with four edits sees
           no furniture. The sentence above still carries the count. */}
       <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
+
+      <BulkBar count={sel.count} noun="change" onClear={sel.clear}>
+        <BulkAction icon={UndoIcon} onClick={undoSelected}>Undo</BulkAction>
+      </BulkBar>
     </div>
   );
 }

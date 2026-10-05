@@ -29,7 +29,7 @@ import Select from '../forms/Select';
  *   caller stores one thing and a cleared filter is one comparison.
  */
 export default function NumberRangeFilter({
-  fields, value, onChange, placeholder = 'Any amount',
+  fields, value, onChange, placeholder = 'All amounts',
 }) {
   const { field = '', min = '', max = '' } = value ?? {};
 

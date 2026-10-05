@@ -1,22 +1,37 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 // Filters survive leaving the page. See useStickyState.
 import { useStickyState, useClearSticky } from '../hooks/useStickyState';
 import { Link } from 'react-router-dom';
 import { useConcerns, useConcernsForPerson, useUpdateConcernStatus } from '../hooks/useConcerns';
 import { useGroups } from '../hooks/useChat';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
+import useRowSelection from '../hooks/useRowSelection';
+import useBulkActions, { patchQueries } from '../hooks/useBulkActions';
+import { apiService } from '../configs/api.config';
 import Modal from '../components/modals/Modal';
 import StatusBadge from '../components/badges/StatusBadge';
 import Select from '../components/forms/Select';
 import PageHeader, { Toolbar, SearchInput } from '../components/layout/PageHeader';
 import DateRangeFilter, { toDateInput, firstOfThisMonth } from '../components/filters/DateRangeFilter';
 import Pagination from '../components/layout/Pagination';
+import BulkBar, { BulkAction } from '../components/layout/BulkBar';
+import SelectAll from '../components/forms/SelectAll';
+import { LinkButton } from '../components/buttons/Button';
+import { EmptyState, ErrorState } from '../components/display/StateBlocks';
 import ViewToggle from '../components/layout/ViewToggle';
-import { CardSkeleton, TableSkeleton } from '../components/display/Skeleton';
+import { CardSkeleton, Skeleton, TableSkeleton } from '../components/display/Skeleton';
 import RecordCard, { CardList, ClampedText } from '../components/display/RecordCard';
-import { ChatIcon, FlagIcon, SearchIcon } from '../components/icons';
+import { ChatIcon, CheckCircleIcon, FlagIcon, HourglassIcon, SearchIcon } from '../components/icons';
 
 const STATUSES = ['open', 'in_progress', 'resolved'];
+// Sentence case, the way every status reads: "In progress", not "in progress".
+const statusLabel = (s) => s.charAt(0).toUpperCase() + s.slice(1).replace('_', ' ');
+const STATUS_OPTIONS = STATUSES.map((s) => ({ value: s, label: statusLabel(s) }));
+
+// A Flagged row is a person in a group, with no id of its own. The pair is
+// the key, packed so it can go back out as { group, personId }.
+const rowKey = (row) => JSON.stringify([row.group_name, row.person_id]);
+const fromKey = (key) => { const [group, personId] = JSON.parse(key); return { group, personId }; };
 const GRID_PAGE_SIZE = 16;
 const ROW_PAGE_SIZE = 20;
 
@@ -34,6 +49,8 @@ function categoryLabel(c) {
   return CATEGORY_LABELS[c] ?? c;
 }
 
+// With the time, which helpers/formatDate leaves out on purpose: a flag is
+// an event in a day, not a date column, so these two stay local.
 function formatTime(iso) {
   return new Date(iso).toLocaleString('en-GB', {
     day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
@@ -61,7 +78,7 @@ function statusDateLabel(status) {
 
 function ConcernEntry({ concern, onStatusChange }) {
   return (
-    <div className="border border-border p-3 flex flex-col gap-2">
+    <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-3">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <span className="text-xs text-text-muted">
           {categoryLabel(concern.category)} · {formatFull(concern.created_at)}
@@ -85,7 +102,7 @@ function ConcernEntry({ concern, onStatusChange }) {
           size="sm" className="w-36"
           value={concern.status}
           onChange={(v) => onStatusChange(concern.id, v)}
-          options={STATUSES.map((s) => ({ value: s, label: s.replace('_', ' ') }))}
+          options={STATUS_OPTIONS}
         />
       </div>
       <p className="text-sm whitespace-pre-wrap">{concern.message}</p>
@@ -102,7 +119,12 @@ function PersonModal({ row, onClose }) {
       <div className="flex flex-col gap-3">
         <p className="text-sm text-text-muted">{row.group_name}</p>
 
-        {isLoading && <p className="text-sm text-text-faint">Loading…</p>}
+        {isLoading && (
+          <div className="flex flex-col gap-2" aria-label="Loading">
+            <Skeleton className="h-20 !rounded-lg" />
+            <Skeleton className="h-20 !rounded-lg" />
+          </div>
+        )}
         <div className="flex flex-col gap-2 max-h-96 overflow-y-auto">
           {concerns?.map((c) => (
             <ConcernEntry
@@ -113,27 +135,28 @@ function PersonModal({ row, onClose }) {
           ))}
         </div>
 
-        <Link
+        {/* LinkButton as a router Link: the button's look, without a full
+            page reload. */}
+        <LinkButton
+          as={Link}
+          size="md"
+          variant="primary"
+          className="mt-2"
           to={`/chat?group=${encodeURIComponent(row.group_name)}&personId=${encodeURIComponent(row.person_id)}`}
-          // A router <Link>, so the base `button {}` rule does not apply
-          // and btn-primary alone rendered it as an unpadded sliver of
-          // green. Not LinkButton, which is a plain <a> and would trigger
-          // a full page navigation.
-          className="btn-primary flex items-center justify-center gap-2 no-underline mt-2 border border-accent px-4 py-2 min-h-10"
         >
-          <ChatIcon /> Message {displayName(row)} in Chat
-        </Link>
+          <ChatIcon width={16} height={16} /> Message {displayName(row)} in Chat
+        </LinkButton>
       </div>
     </Modal>
   );
 }
 
-function FlaggedRow({ row, onOpen }) {
+function FlaggedRow({ row, onOpen, selected, onToggle }) {
   const open = () => onOpen(row);
 
   return (
     <tr
-      className="cursor-pointer border-b border-border last:border-0 hover:bg-surface-sunken"
+      className={`cursor-pointer border-b border-border last:border-0 hover:bg-surface-sunken ${selected ? 'row-selected' : ''}`}
       onClick={open}
       onKeyDown={(event) => {
         if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -144,6 +167,15 @@ function FlaggedRow({ row, onOpen }) {
       role="link"
       aria-label={`Open flags for ${displayName(row)}`}
     >
+      <td className="td w-8" onClick={(event) => event.stopPropagation()}>
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggle}
+          onKeyDown={(event) => event.stopPropagation()}
+          aria-label={`Select ${displayName(row)}`}
+        />
+      </td>
       <td className="px-3 py-2.5 font-medium text-text">{displayName(row)}</td>
       <td className="px-3 py-2.5 text-text-muted">{row.group_name}</td>
       <td className="max-w-sm px-3 py-2.5">
@@ -197,6 +229,45 @@ export default function FlaggedPage() {
     pageSize,
   });
 
+  const visibleKeys = useMemo(() => (rows ?? []).map(rowKey), [rows]);
+  const sel = useRowSelection(visibleKeys);
+  const { run } = useBulkActions();
+  /**
+   * On screen at once. A bulk status sets EVERY flag the ticked people
+   * have, so the card's derived status is simply the new one. A list
+   * filtered to another status loses those cards, the same as a refetch
+   * would show; the person modal's own flags move too.
+   */
+  const bulkStatus = (status, verb) => {
+    const keys = sel.ids;
+    const n = keys.length;
+    const people = `${n} ${n === 1 ? 'person' : 'people'}`;
+    const ticked = new Set(keys);
+    const now = new Date().toISOString();
+    run({
+      call: () => apiService.concerns.bulkStatus(keys.map(fromKey), status),
+      invalidates: [['concerns']],
+      optimistic: (qc) => patchQueries(qc, [['concerns']], (data, key) => {
+        if (!Array.isArray(data?.concerns)) return data;
+        const filter = key[1];
+        const hides = filter && filter !== 'all' && filter !== 'person' && filter !== status;
+        let gone = 0;
+        const concerns = [];
+        for (const c of data.concerns) {
+          if (!ticked.has(rowKey(c))) { concerns.push(c); continue; }
+          if (hides) { gone += 1; continue; }
+          concerns.push(c.status === status ? c : { ...c, status, status_changed_at: now });
+        }
+        return { ...data, concerns, total: typeof data.total === 'number' ? Math.max(0, data.total - gone) : data.total };
+      }),
+      // The count is PEOPLE, what was ticked. The server answers in flags,
+      // and one person can carry several.
+      toast: { message: `${people} ${verb}` },
+      failure: `Couldn't update ${people}`,
+    });
+    sel.clear();
+  };
+
   const thisMonthActive =
     filterByDate && from === toDateInput(firstOfThisMonth()) && to === toDateInput(new Date());
 
@@ -214,7 +285,7 @@ export default function FlaggedPage() {
   }
 
   return (
-    <div>
+    <div className="space-y-4">
       <PageHeader
         title="Flagged"
         subtitle={`${total} ${total === 1 ? 'person' : 'people'}`}
@@ -267,14 +338,14 @@ export default function FlaggedPage() {
           <Select
             size="sm" className="w-44"
             value={statusFilter} onChange={(v) => setStatusFilter(v ?? '')}
-            options={STATUSES.map((x) => ({ value: x, label: x.replace('_', ' ') }))}
+            options={STATUS_OPTIONS}
             placeholder="All statuses"
           />
           <Select
             size="sm" className="w-44"
             value={group} onChange={(v) => setGroup(v ?? '')}
             options={groups ?? []}
-            placeholder="All"
+            placeholder="All groups"
           />
           <DateRangeFilter
             from={from}
@@ -288,12 +359,14 @@ export default function FlaggedPage() {
         }
       />
 
-      {error && <div className="p-8 text-center text-text-muted text-sm">{error.message}</div>}
+      <ErrorState error={error} title="Couldn't load flags" />
 
       {!isLoading && rows && rows.length === 0 && (
-        <div className="p-8 text-center text-text-muted text-sm">
-          {query ? 'No one matches that search.' : 'Nothing flagged.'}
-        </div>
+        <EmptyState
+          icon={FlagIcon}
+          title={query ? 'No one matches that search' : 'Nothing flagged'}
+          hint={query ? undefined : 'People Diane flags in Chat show up here.'}
+        />
       )}
 
       {view === 'grid' && (isLoading || (rows && rows.length > 0)) && (
@@ -301,8 +374,9 @@ export default function FlaggedPage() {
           {isLoading
             ? Array.from({ length: 4 }, (_, index) => <CardSkeleton key={index} />)
             : rows.map((r) => (
+              // The tint reaches the card, the same look a ticked row has.
+              <div key={`${r.group_name}-${r.person_id}`} className={`h-full ${sel.has(rowKey(r)) ? '[&>div]:!bg-accent-tint' : ''}`}>
               <RecordCard
-                key={`${r.group_name}-${r.person_id}`}
                 interactive
                 icon={FlagIcon}
                 title={displayName(r)}
@@ -318,7 +392,7 @@ export default function FlaggedPage() {
                 }
                 body={
                   <div>
-                    <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-text-faint">
+                    <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-faint">
                       Latest message
                     </p>
                     <ClampedText
@@ -338,7 +412,14 @@ export default function FlaggedPage() {
                     value: formatTime(r.status_changed_at),
                   },
                 ]}
+                actions={
+                  <label className="flex items-center gap-2 text-xs text-text-muted">
+                    <input type="checkbox" checked={sel.has(rowKey(r))} onChange={() => sel.toggle(rowKey(r))} />
+                    Select
+                  </label>
+                }
               />
+              </div>
             ))}
         </CardList>
       )}
@@ -348,6 +429,7 @@ export default function FlaggedPage() {
           <table className="w-full min-w-[1100px] text-sm">
             <thead>
               <tr>
+                <th className="th w-8"><SelectAll count={sel.count} total={sel.total} onChange={sel.setAll} /></th>
                 <th className="th">Name</th>
                 <th className="th">Group</th>
                 <th className="th">Latest message</th>
@@ -358,12 +440,14 @@ export default function FlaggedPage() {
               </tr>
             </thead>
             <tbody>
-              {isLoading && <TableSkeleton rows={8} columns={7} />}
+              {isLoading && <TableSkeleton rows={8} columns={8} />}
               {!isLoading && rows.map((row) => (
                 <FlaggedRow
                   key={`${row.group_name}-${row.person_id}`}
                   row={row}
                   onOpen={setViewing}
+                  selected={sel.has(rowKey(row))}
+                  onToggle={() => sel.toggle(rowKey(row))}
                 />
               ))}
             </tbody>
@@ -374,6 +458,15 @@ export default function FlaggedPage() {
       {!isLoading && <Pagination page={page} pageSize={pageSize} total={total} onPageChange={setPage} />}
 
       {viewing && <PersonModal row={viewing} onClose={() => setViewing(null)} />}
+
+      <BulkBar count={sel.count} noun="person" onClear={sel.clear}>
+        <BulkAction icon={HourglassIcon} onClick={() => bulkStatus('in_progress', 'marked in progress')}>
+          Mark in progress
+        </BulkAction>
+        <BulkAction icon={CheckCircleIcon} onClick={() => bulkStatus('resolved', 'resolved')}>
+          Resolve
+        </BulkAction>
+      </BulkBar>
     </div>
   );
 }

@@ -2,7 +2,13 @@ import { useEffect, useState } from 'react';
 import Button from '../buttons/Button';
 import CellInfo from '../display/CellInfo';
 import { Skeleton } from '../display/Skeleton';
-import { useClearFxRate, useFxRates, useSetFxRate } from '../../hooks/useSettings';
+import ConfirmDialog from '../modals/ConfirmDialog';
+import BulkBar, { BulkAction } from '../layout/BulkBar';
+import { TrashIcon } from '../icons';
+import { useFxRates, useSetFxRate } from '../../hooks/useSettings';
+import useRowSelection from '../../hooks/useRowSelection';
+import useBulkActions, { bulkMessage, patchQueries } from '../../hooks/useBulkActions';
+import { apiService } from '../../configs/api.config';
 import { formatNumber } from '../../helpers/formatMoney';
 import { NUMBER_INPUT, nonNegative } from '../../helpers/numberInput';
 
@@ -71,7 +77,10 @@ const SOURCE_NOTE = {
 
 // One grid, so every row's boxes and buttons line up instead of each row
 // wrapping to its own shape.
-const ROW = 'grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 border-b border-border py-2 last:border-0 sm:grid-cols-[15rem_1fr_auto]';
+// The first column is the bulk bar's tick, empty on a row with nothing saved.
+const ROW = 'grid grid-cols-[1rem_1fr_auto] items-center gap-x-3 gap-y-1 border-b border-border py-2 last:border-0 sm:grid-cols-[1rem_15rem_1fr_auto]';
+// The note under the box on a phone, beside it from sm up.
+const NOTE = 'col-span-2 col-start-2 text-xs text-text-faint sm:col-span-1 sm:col-start-auto';
 
 /**
  * ===============================
@@ -115,7 +124,7 @@ const numberOnly = NUMBER_INPUT;
  */
 const flip = (n) => 1 / n;
 
-function RateRow({ code, saved, onSave, onClear, saving }) {
+function RateRow({ code, saved, onSave, saving, checked, onToggle }) {
   const [value, setValue] = useState('');
   // What the box holds for the saved rate. The column's own value, with no
   // conversion, so it is exactly what somebody typed. Named, because
@@ -139,7 +148,11 @@ function RateRow({ code, saved, onSave, onClear, saving }) {
   const save = () => { if (changed) onSave(code, typed); };
 
   return (
-    <div className={ROW}>
+    <div className={`${ROW} ${checked ? 'row-selected' : ''}`}>
+      {/* Only a saved rate can be cleared, so only it can be ticked. */}
+      {saved
+        ? <input type="checkbox" checked={checked} onChange={() => onToggle(code)} aria-label={`Select the ${code} rate`} />
+        : <span aria-hidden="true" />}
       <div className={GROUP}>
         <span className={CODE}>{code}</span>
         <input
@@ -159,7 +172,7 @@ function RateRow({ code, saved, onSave, onClear, saving }) {
       {/* The note lives HERE, in its own cell. Beside the field it was an
           icon sitting on top of this text: the group is elastic and the
           column is not. */}
-      <p className="col-span-2 flex items-center gap-1.5 text-[11px] text-text-faint sm:col-span-1 sm:text-xs">
+      <p className={`${NOTE} flex items-center gap-1.5`}>
         <span>
           {/* ===============================
               * THE ROW READS ONE WAY, END TO END
@@ -193,14 +206,10 @@ function RateRow({ code, saved, onSave, onClear, saving }) {
         />
       </p>
 
-      <div className="flex items-center gap-1.5">
-        <Button variant="primary" size="form" disabled={!changed || saving} onClick={save}>
-          Save
-        </Button>
-        {saved && (
-          <Button variant="danger" size="form" disabled={saving} onClick={() => onClear(code)}>Clear</Button>
-        )}
-      </div>
+      {/* Clearing a saved rate is the bulk bar's: tick it, then Clear. */}
+      <Button variant="primary" size="form" disabled={!changed || saving} onClick={save}>
+        Save
+      </Button>
     </div>
   );
 }
@@ -225,6 +234,7 @@ function AddCurrency({ existing, onAdd, saving }) {
 
   return (
     <div className={`${ROW} mt-1 border-0`}>
+      <span aria-hidden="true" />
       {/* The same shape, with the code panel typed into rather than fixed. */}
       <div className={GROUP}>
         <input
@@ -245,7 +255,7 @@ function AddCurrency({ existing, onAdd, saving }) {
         />
       </div>
 
-      <p className="col-span-2 text-[11px] text-text-faint sm:col-span-1 sm:text-xs">
+      <p className={NOTE}>
         {known ? `${wanted} already has a row above.` : 'A currency not on the sheet yet, a coin included.'}
       </p>
 
@@ -262,13 +272,36 @@ function AddCurrency({ existing, onAdd, saving }) {
 export default function ConversionRates() {
   const { data, isLoading } = useFxRates();
   const setRate = useSetFxRate();
-  const clearRate = useClearFxRate();
+  const { run } = useBulkActions();
+  // The ticked codes waiting on the confirm.
+  const [confirming, setConfirming] = useState(null);
+
+  const saved = new Map((data?.rates ?? []).map((rate) => [rate.code, rate]));
+  const sel = useRowSelection([...saved.keys()].sort());
 
   if (isLoading) return <Skeleton className="h-40 rounded-lg" />;
 
-  const saved = new Map((data?.rates ?? []).map((rate) => [rate.code, rate]));
   const inUse = data?.inUse ?? 'fallback';
-  const busy = setRate.isPending || clearRate.isPending;
+  const busy = setRate.isPending;
+
+  // Gone from the list as you confirm. Loops the per-rate DELETE: there is
+  // no bulk route for four rows. Back as they were if any of them fails.
+  function clearConfirmed() {
+    const list = confirming;
+    const gone = new Set(list);
+    run({
+      call: () => Promise.all(list.map((code) => apiService.settings.clearRate(code))),
+      invalidates: [['fx-rates'], ['dashboard']],
+      optimistic: (qc) => patchQueries(qc, [['fx-rates']], (old) => (
+        Array.isArray(old?.rates) ? { ...old, rates: old.rates.filter((r) => !gone.has(r.code)) } : old
+      )),
+      icon: 'trash',
+      toast: bulkMessage('cleared', list.length, 'rate'),
+      failure: `Couldn't clear ${list.length} ${list.length === 1 ? 'rate' : 'rates'}`,
+    });
+    sel.clear();
+    setConfirming(null);
+  }
   // What the sheet needs, then anything already saved that the sheet no
   // longer uses, so an obsolete rate can still be cleared.
   const codes = [...new Set([...(data?.needed ?? []), ...saved.keys()])].sort();
@@ -276,7 +309,7 @@ export default function ConversionRates() {
 
   return (
     <div>
-      <p className={`mb-2 rounded-md px-2.5 py-1.5 text-[11px] ${inUse === 'saved' ? 'bg-accent-tint text-accent-strong' : 'bg-surface-sunken text-text-muted'}`}>
+      <p className={`mb-2 rounded-md px-2.5 py-1.5 text-xs ${inUse === 'saved' ? 'bg-accent-tint text-accent-strong' : 'bg-surface-sunken text-text-muted'}`}>
         {SOURCE_NOTE[inUse] ?? SOURCE_NOTE.fallback}
         {/* A saved rate can be in use even while the feed answers, for a
             currency the feed does not quote. Without this the banner above
@@ -299,16 +332,34 @@ export default function ConversionRates() {
           code={code}
           saved={saved.get(code)}
           saving={busy}
+          checked={sel.has(code)}
+          onToggle={sel.toggle}
           onSave={(next, perUsd) => setRate.mutate({ code: next, perUsd })}
-          onClear={(next) => clearRate.mutate(next)}
         />
       ))}
 
       <AddCurrency existing={codes} saving={busy} onAdd={(code, perUsd) => setRate.mutate({ code, perUsd })} />
 
-      <p className="mt-2 text-[11px] text-text-faint">
+      <p className="mt-2 text-xs text-text-faint">
         A change applies to this month onward. A saved month keeps the rates it was taken with.
       </p>
+
+      {confirming && (
+        <ConfirmDialog
+          title={confirming.length === 1 ? `Clear the ${confirming[0]} rate?` : `Clear ${confirming.length} rates?`}
+          subject={confirming.join(', ')}
+          detail="Conversions fall back to the live feed, or the built in rate where there is one. A saved month keeps the rates it was taken with."
+          confirmLabel="Clear"
+          onCancel={() => setConfirming(null)}
+          onConfirm={clearConfirmed}
+        />
+      )}
+
+      <BulkBar count={sel.count} noun="rate" onClear={sel.clear}>
+        <BulkAction icon={TrashIcon} variant="danger" onClick={() => setConfirming(sel.ids)}>
+          Clear
+        </BulkAction>
+      </BulkBar>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useMasterSheet, useResumeMasterSheetRow } from '../hooks/useMasterSheet';
+import { useMasterSheet } from '../hooks/useMasterSheet';
 import { useDeadPeople } from '../hooks/useDeadPeople';
 import UnderlineTabs from '../components/layout/UnderlineTabs';
 import { useGroups } from '../hooks/useChat';
@@ -12,15 +12,19 @@ import Select from '../components/forms/Select';
 import PageHeader, { Toolbar, SearchInput } from '../components/layout/PageHeader';
 import DateRangeFilter, { toDateInput, firstOfThisMonth } from '../components/filters/DateRangeFilter';
 import Pagination from '../components/layout/Pagination';
-import ConfirmDialog from '../components/modals/ConfirmDialog';
 import CellInfo from '../components/display/CellInfo';
 import { TableSkeleton } from '../components/display/Skeleton';
-import { confirm } from '../configs/confirms.config';
 import { formatMoney, NO_VALUE } from '../helpers/formatMoney';
 import { formatDate } from '../helpers/formatDate';
 import { STOPPED_REASON_LABEL, REOPEN_THE_COMPANY } from '../configs/stoppedReason';
-import { RestoreIcon, SearchIcon, BuildingIcon } from '../components/icons';
-import Button, { LinkButton } from '../components/buttons/Button';
+import { ResumeIcon, SearchIcon, ArchiveIcon, UsersIcon } from '../components/icons';
+import { EmptyState, ErrorState } from '../components/display/StateBlocks';
+import SelectAll from '../components/forms/SelectAll';
+import BulkBar, { BulkAction } from '../components/layout/BulkBar';
+import useRowSelection from '../hooks/useRowSelection';
+import useBulkActions, { DEAL_TOUCHES, bulkMessage, patchRows } from '../hooks/useBulkActions';
+import { apiService } from '../configs/api.config';
+import { countOf } from '../helpers/pluralNoun';
 
 /**
  * ***************************************************
@@ -31,7 +35,7 @@ import Button, { LinkButton } from '../components/buttons/Button';
  * flipped (`stopped: true`), so a deal is one row with one history rather
  * than a live copy and an archived copy that disagree from the first edit.
  *
- * READ ONLY BY DESIGN, with RESUME as the only write. Every editable cell
+ * READ ONLY BY DESIGN, with RESUME (the bulk bar's) as the only write. Every editable cell
  * the master sheet has is deliberately absent: a finished deal's figures
  * are what was actually paid, and the point of moving it here is that
  * nobody edits it by accident while working through the live sheet.
@@ -39,28 +43,50 @@ import Button, { LinkButton } from '../components/buttons/Button';
 
 const PAGE_SIZE = 25;
 
+/**
+ * One toast for every Resume from here, one deal or a whole person's.
+ * A deal its company's closure stopped is REFUSED, not skipped: the way
+ * back is reopening the company, so the toast names them.
+ */
+function resumeReport(data) {
+  const report = bulkMessage('resumed', data.resumed.length, 'deal', [[data.skipped, 'already live']]);
+  if (!data.refused?.length) return report;
+  const refused = `Closed with their company: ${data.refused.join(', ')}. Reopen the company to bring them back.`;
+  return { ...report, detail: report.detail ? `${report.detail} · ${refused}` : refused };
+}
+
 // Two readings of the same stopped deals: one deal at a time, or one person
 // whose every deal is here. Not under 'archive.', so Clear keeps the tab.
 const ARCHIVE_TAB = Object.freeze({ deals: 'deals', dead: 'dead' });
 const TABS = [
   { key: ARCHIVE_TAB.deals, label: 'Deals' },
-  { key: ARCHIVE_TAB.dead, label: 'Dead persons' },
+  { key: ARCHIVE_TAB.dead, label: 'Dead people' },
 ];
 
 export default function ArchivePage() {
-  const [tab, setTab] = useStickyState('archiveView.tab', ARCHIVE_TAB.deals);
+  // `?tab=dead` is how a dead person's breadcrumb lands back on their list.
+  // useStickyState reads it once and strips it from the address bar.
+  const [tab, setTab] = useStickyState('archiveView.tab', ARCHIVE_TAB.deals, 'tab');
+
+  // Each tab reports its own count; the header says the one on screen.
+  const [counts, setCounts] = useState({ deals: 0, dead: 0 });
+  const onTotal = (key) => (n) => setCounts((c) => (c[key] === n ? c : { ...c, [key]: n }));
+  const subtitle = tab === ARCHIVE_TAB.dead
+    ? `${counts.dead} ${counts.dead === 1 ? 'person has' : 'people have'} no live deal left`
+    : `${counts.deals} ${counts.deals === 1 ? 'deal' : 'deals'} ended`;
+
   return (
-    <div>
-      <PageHeader title="Archive" />
+    <div className="space-y-4">
+      <PageHeader title="Archive" subtitle={subtitle} />
       <UnderlineTabs tabs={TABS} active={tab} onChange={setTab} />
-      <div className="mt-3">
-        {tab === ARCHIVE_TAB.dead ? <DeadPersonsTab /> : <ArchiveDeals />}
-      </div>
+      {tab === ARCHIVE_TAB.dead
+        ? <DeadPeopleTab onTotal={onTotal('dead')} />
+        : <ArchiveDeals onTotal={onTotal('deals')} />}
     </div>
   );
 }
 
-function ArchiveDeals() {
+function ArchiveDeals({ onTotal }) {
   const [group, setGroup] = useStickyState('archive.group', '');
   const [company, setCompany] = useStickyState('archive.company', '');
   const [reason, setReason] = useStickyState('archive.reason', '');
@@ -68,17 +94,15 @@ function ArchiveDeals() {
   const [from, setFrom] = useStickyState('archive.from', '');
   const [to, setTo] = useStickyState('archive.to', '');
   const [page, setPage] = useState(1);
-  const [resuming, setResuming] = useState(null);
   const forgetFilters = useClearSticky('archive.');
 
   const { data: groups } = useGroups();
   const { data: filterOptions } = usePeopleFilters();
   const debouncedQuery = useDebouncedValue(query);
-  const resume = useResumeMasterSheetRow();
 
   useEffect(() => setPage(1), [group, company, reason, from, to, debouncedQuery]);
 
-  const { data: rows, total, isLoading, error } = useMasterSheet({
+  const { data: rows, total, isLoading, error, refetch } = useMasterSheet({
     stopped: true,
     group: group || undefined,
     company: company || undefined,
@@ -90,7 +114,35 @@ function ArchiveDeals() {
     pageSize: PAGE_SIZE,
   });
 
+  // `onTotal` is a fresh function each parent render; the count is what matters.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => onTotal(total), [total]);
+
   const filtersCount = [group, company, reason, from || to ? 'date' : ''].filter(Boolean).length;
+
+  const sel = useRowSelection((rows ?? []).map((r) => r.id));
+  const { run } = useBulkActions();
+
+  /**
+   * GONE FROM THE ARCHIVE THE MOMENT YOU CLICK. A deal its company's
+   * closure stopped stays put: the server refuses it, and the toast says
+   * to reopen the company instead.
+   */
+  function resumeSelected() {
+    const ids = sel.ids;
+    const picked = (rows ?? []).filter((r) => sel.has(r.id));
+    const willResume = picked.filter((r) => r.stopped_reason !== REOPEN_THE_COMPANY).map((r) => r.id);
+    run({
+      call: () => apiService.masterSheet.bulkResume(ids),
+      invalidates: DEAL_TOUCHES,
+      optimistic: (qc) => patchRows(qc, [['master-sheet']], willResume, (r) => (r.stopped ? null : r)),
+      toast: bulkMessage('resumed', willResume.length, 'deal'),
+      report: resumeReport,
+      undoBatch: (data) => data.batchId,
+      failure: `Couldn't resume ${countOf(ids.length, 'deal')}`,
+    });
+    sel.clear();
+  }
 
   // A TOGGLE, not a one way switch, the same shape Flagged uses: pressing
   // an obviously-on button again has to turn it off.
@@ -105,9 +157,7 @@ function ArchiveDeals() {
   }
 
   return (
-    <div>
-      <p className="mb-2 text-sm text-text-muted">{`${total} ${total === 1 ? 'deal' : 'deals'} ended`}</p>
-
+    <div className="space-y-4">
       <Toolbar
         filtersActive={filtersCount > 0}
         filtersCount={filtersCount}
@@ -163,14 +213,15 @@ function ArchiveDeals() {
         }
       />
 
-      {error && <div className="p-8 text-center text-text-muted text-sm">{error.message}</div>}
+      <ErrorState error={error} title="Couldn't load the archive" onRetry={refetch} />
 
-      {!isLoading && rows && rows.length === 0 && (
-        <div className="p-8 text-center text-text-muted text-sm">
-          {filtersCount > 0 || query
-            ? 'No ended deals match that.'
-            : 'Nothing has been stopped yet. Stopping a deal on the master sheet moves it here.'}
-        </div>
+      {!error && !isLoading && rows && rows.length === 0 && (
+        <EmptyState
+          icon={ArchiveIcon}
+          {...(filtersCount > 0 || query
+            ? { title: 'No ended deals match that', hint: 'Clear a filter or the search to see more.' }
+            : { title: 'Nothing has been stopped yet', hint: 'Stopping a deal on the master sheet moves it here.' })}
+        />
       )}
 
       {(isLoading || (rows && rows.length > 0)) && (
@@ -178,20 +229,25 @@ function ArchiveDeals() {
           <table className="w-full min-w-[1000px] text-sm">
             <thead>
               <tr>
+                <th className="th w-8">
+                  <SelectAll count={sel.count} total={sel.total} onChange={sel.setAll} />
+                </th>
                 <th className="th">Name</th>
                 <th className="th">Group</th>
                 <th className="th">Role</th>
                 <th className="th">Company</th>
-                <th className="th">Monthly</th>
+                <th className="th text-right tabular-nums">Monthly</th>
                 <th className="th">Stopped on</th>
                 <th className="th">Why</th>
-                <th className="th">Actions</th>
               </tr>
             </thead>
             <tbody>
               {isLoading && <TableSkeleton rows={8} columns={8} />}
               {!isLoading && rows.map((row) => (
-                <ArchiveRow key={row.id} row={row} onResume={setResuming} />
+                <ArchiveRow
+                  key={row.id} row={row}
+                  selected={sel.has(row.id)} onSelect={() => sel.toggle(row.id)}
+                />
               ))}
             </tbody>
           </table>
@@ -200,76 +256,50 @@ function ArchiveDeals() {
 
       {!isLoading && <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />}
 
-      {resuming && (
-        <ConfirmDialog
-          {...confirm.resumeRow({
-            personName: resuming.person_name,
-            company: resuming.company,
-            groupName: resuming.group_name,
-            stoppedOn: formatDate(resuming.stopped_on),
-          })}
-          icon={<RestoreIcon width={15} height={15} />}
-          onCancel={() => setResuming(null)}
-          onConfirm={() => {
-            resume.mutate({
-              id: resuming.id,
-              subject: resuming.person_name,
-              group: resuming.group_name,
-            });
-            setResuming(null);
-          }}
-        />
-      )}
+      {/* No Delete: deleting a deal is the Master Sheet's alone. */}
+      <BulkBar count={sel.count} noun="deal" onClear={sel.clear}>
+        <BulkAction icon={ResumeIcon} variant="accent" onClick={resumeSelected}>
+          Resume
+        </BulkAction>
+      </BulkBar>
     </div>
   );
 }
 
-function ArchiveRow({ row, onResume }) {
+function ArchiveRow({ row, selected, onSelect }) {
   // A company closure stopped this one, so resuming it alone would put the
-  // deal back on a company that is gone. The button says where to go.
+  // deal back on a company that is gone. The reason itself is the way there.
   const closedWithCompany = row.stopped_reason === REOPEN_THE_COMPANY;
+  const reason = STOPPED_REASON_LABEL[row.stopped_reason] ?? row.stopped_reason;
 
   return (
-    <tr className="border-b border-border last:border-0 hover:bg-surface-sunken">
-      <td className="td font-semibold">{row.person_name ?? '(no handler)'}</td>
+    <tr className={`border-b border-border last:border-0 hover:bg-surface-sunken ${selected ? 'row-selected' : ''}`}>
+      <td className="td w-8">
+        <input type="checkbox" checked={selected} onChange={onSelect} aria-label={`Select ${row.person_name ?? 'this deal'}`} />
+      </td>
+      <td className="td font-medium text-text">{row.person_name ?? '(no handler)'}</td>
       <td className="td text-text-muted">{row.group_name}</td>
       <td className="td text-text-muted">{row.role_label}</td>
       <td className="td">{row.company ?? '(no company)'}</td>
-      <td className="td tabular-nums">{formatMoney(row.monthly_amount, row.currency)}</td>
+      <td className="td text-right tabular-nums">{formatMoney(row.monthly_amount, row.currency)}</td>
       <td className="td whitespace-nowrap">{formatDate(row.stopped_on)}</td>
       <td className="td text-text-muted">
-        {STOPPED_REASON_LABEL[row.stopped_reason] ?? row.stopped_reason}
-      </td>
-      <td className="td">
-        {closedWithCompany ? (
-          // Not a disabled button with a tooltip: the useful thing is the
-          // way to actually do it, which is one click from here. Same tone
-          // as Resume — both are this row's one action, and a grey one
-          // beside a coloured one reads as disabled rather than different.
+        {closedWithCompany && row.company ? (
+          // A LINK, not a button: reopening the company is how this comes
+          // back, and it is one click from the words that say so.
           <span className="inline-flex items-center gap-1">
-            <LinkButton
-              as={Link}
-              to={`/companies/${encodeURIComponent(row.company ?? '')}`}
-              variant="accent"
-              size="xs"
+            <Link
+              to={`/companies/${encodeURIComponent(row.company)}`}
+              className="text-accent hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent rounded"
             >
-              <BuildingIcon width={14} height={14} />
-              Open company
-            </LinkButton>
+              {reason}
+            </Link>
             <CellInfo label="Why this cannot resume here">
               The company is closed. Reopening it brings back every deal its
               closure stopped, together.
             </CellInfo>
           </span>
-        ) : (
-          // `accent`, not `primary`: a solid green on every row of a table
-          // claims to be the main act on the screen eight times over. The
-          // soft accent is the app's own "this is the action here".
-          <Button variant="accent" size="xs" onClick={() => onResume(row)}>
-            <RestoreIcon width={14} height={14} />
-            Resume
-          </Button>
-        )}
+        ) : reason}
       </td>
     </tr>
   );
@@ -277,12 +307,12 @@ function ArchiveRow({ row, onResume }) {
 
 /**
  * ***************************************************
- * * DEAD PERSONS: everyone whose every deal is stopped
+ * * DEAD PEOPLE: everyone whose every deal is stopped
  * ***************************************************
  * Worked out on the server from the same rows, so a deal added back takes
  * them off at once. A row opens their journey, company by company.
  */
-function DeadPersonsTab() {
+function DeadPeopleTab({ onTotal }) {
   const [group, setGroup] = useStickyState('archiveDead.group', '');
   const [query, setQuery] = useStickyState('archiveDead.query', '');
   const [page, setPage] = useState(1);
@@ -293,15 +323,45 @@ function DeadPersonsTab() {
 
   useEffect(() => setPage(1), [group, debouncedQuery]);
 
-  const { data: rows, total, isLoading, error } = useDeadPeople({
+  const { data: rows, total, isLoading, error, refetch } = useDeadPeople({
     group: group || undefined, q: debouncedQuery || undefined, page, pageSize: PAGE_SIZE,
   });
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => onTotal(total), [total]);
+
+  const sel = useRowSelection((rows ?? []).map((p) => p.person_id));
+  const { run } = useBulkActions();
+  const open = (personId) => navigate(`/archive/people/${encodeURIComponent(personId)}`);
+
+  /**
+   * RESTORE IS RESUME, for every deal they hold. The list row is a person;
+   * only their own record lists the deals, so one read each, then one
+   * bulk write. A deal closed with its company is refused and named.
+   */
+  function restoreSelected() {
+    const personIds = sel.ids;
+    // Off the dead list at once; the reads and the write follow behind.
+    run({
+      call: async () => {
+        const answers = await Promise.all(personIds.map((id) => apiService.deadPeople.get(id)));
+        const ids = answers.flatMap((a) => (a?.person?.companies ?? []).flatMap((c) => c.deals.map((d) => d.id)));
+        return ids.length
+          ? apiService.masterSheet.bulkResume(ids)
+          : { resumed: [], skipped: 0, refused: [], batchId: null };
+      },
+      invalidates: DEAL_TOUCHES,
+      optimistic: (qc) => patchRows(qc, [['dead-people']], personIds, () => null, (p) => p.person_id),
+      toast: bulkMessage('restored', personIds.length, 'person'),
+      report: resumeReport,
+      undoBatch: (data) => data.batchId,
+        failure: `Couldn't restore ${countOf(personIds.length, 'person')}`,
+    });
+    sel.clear();
+  }
+
   return (
-    <div>
-      <p className="mb-2 text-sm text-text-muted">
-        {`${total} ${total === 1 ? 'person has' : 'people have'} no live deal left`}
-      </p>
+    <div className="space-y-4">
       <Toolbar
         filtersActive={Boolean(group)}
         filtersCount={group ? 1 : 0}
@@ -325,14 +385,15 @@ function DeadPersonsTab() {
         )}
       />
 
-      {error && <div className="p-8 text-center text-text-muted text-sm">{error.message}</div>}
+      <ErrorState error={error} title="Couldn't load dead people" onRetry={refetch} />
 
-      {!isLoading && rows && rows.length === 0 && (
-        <div className="p-8 text-center text-text-muted text-sm">
-          {group || query
-            ? 'Nobody on the dead list matches that.'
-            : 'Nobody yet. A person lands here when every one of their deals is stopped.'}
-        </div>
+      {!error && !isLoading && rows && rows.length === 0 && (
+        <EmptyState
+          icon={UsersIcon}
+          {...(group || query
+            ? { title: 'Nobody on the dead list matches that', hint: 'Clear a filter or the search to see more.' }
+            : { title: 'Nobody yet', hint: 'A person lands here when every one of their deals is stopped.' })}
+        />
       )}
 
       {(isLoading || (rows && rows.length > 0)) && (
@@ -340,10 +401,13 @@ function DeadPersonsTab() {
           <table className="w-full min-w-[1000px] text-sm">
             <thead>
               <tr>
+                <th className="th w-8">
+                  <SelectAll count={sel.count} total={sel.total} onChange={sel.setAll} />
+                </th>
                 <th className="th">Name</th>
                 <th className="th">Groups</th>
-                <th className="th">Deals</th>
-                <th className="th">Companies</th>
+                <th className="th text-right tabular-nums">Deals</th>
+                <th className="th text-right tabular-nums">Companies</th>
                 <th className="th">Phone</th>
                 <th className="th">Bank</th>
                 <th className="th">First started</th>
@@ -351,17 +415,31 @@ function DeadPersonsTab() {
               </tr>
             </thead>
             <tbody>
-              {isLoading && <TableSkeleton rows={8} columns={8} />}
+              {isLoading && <TableSkeleton rows={8} columns={9} />}
               {!isLoading && rows.map((p) => (
                 <tr
                   key={p.person_id}
-                  onClick={() => navigate(`/archive/people/${encodeURIComponent(p.person_id)}`)}
-                  className="cursor-pointer border-b border-border last:border-0 hover:bg-surface-sunken"
+                  tabIndex={0}
+                  role="link"
+                  aria-label={`Open ${p.display_name}`}
+                  onClick={() => open(p.person_id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); open(p.person_id); }
+                  }}
+                  className={`cursor-pointer border-b border-border last:border-0 hover:bg-surface-sunken ${
+                    sel.has(p.person_id) ? 'row-selected' : ''
+                  }`}
                 >
-                  <td className="td font-semibold">{p.display_name}</td>
+                  <td className="td w-8" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox" checked={sel.has(p.person_id)} onChange={() => sel.toggle(p.person_id)}
+                      aria-label={`Select ${p.display_name}`}
+                    />
+                  </td>
+                  <td className="td font-medium text-text">{p.display_name}</td>
                   <td className="td text-text-muted">{(p.groups ?? []).join(', ')}</td>
-                  <td className="td tabular-nums">{p.deal_count}</td>
-                  <td className="td tabular-nums">{p.company_count}</td>
+                  <td className="td text-right tabular-nums">{p.deal_count}</td>
+                  <td className="td text-right tabular-nums">{p.company_count}</td>
                   <td className="td">{(p.phones ?? []).join(', ') || NO_VALUE}</td>
                   <td className="td">{(p.bank_details ?? []).join(', ') || NO_VALUE}</td>
                   <td className="td whitespace-nowrap">{formatDate(p.first_started)}</td>
@@ -374,6 +452,12 @@ function DeadPersonsTab() {
       )}
 
       {!isLoading && <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />}
+
+      <BulkBar count={sel.count} noun="person" onClear={sel.clear}>
+        <BulkAction icon={ResumeIcon} variant="accent" onClick={restoreSelected}>
+          Restore
+        </BulkAction>
+      </BulkBar>
     </div>
   );
 }

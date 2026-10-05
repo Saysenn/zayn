@@ -50,7 +50,19 @@ test('STOP WRITES BOTH COLUMNS, never one of them', async () => {
   await repo.stop(7, { on: '2026-08-31', reason: repo.STOPPED_REASON.BY_HAND });
   assert.match(ran[0].sql, /SET stopped_on = \$2, stopped_reason = \$3/);
   // The fourth is who stopped it, for the change log the stop now writes.
-  assert.deepEqual(ran[0].params, [7, '2026-08-31', 'stopped_by_hand', 'admin']);
+  // The fifth is the bulk bar's shared batch: null on a single stop, so the
+  // SQL falls back to a fresh one per row.
+  assert.deepEqual(ran[0].params, [7, '2026-08-31', 'stopped_by_hand', 'admin', null]);
+});
+
+test('A BULK STOP SHARES ONE BATCH, so one Undo puts every row back', async () => {
+  const { repo, ran } = load();
+  const batchId = '0b7a3c1e-1111-4222-8333-944445555666';
+  await repo.stop(7, { on: '2026-08-31', reason: repo.STOPPED_REASON.BY_HAND, batchId });
+  await repo.resume(8, { batchId });
+  assert.equal(ran[0].params[4], batchId);
+  assert.equal(ran[1].params[3], batchId);
+  assert.match(ran[0].sql, /COALESCE\(\$5::uuid, gen_random_uuid\(\)\)/);
 });
 
 test('STOP IS AN UPDATE, NEVER A DELETE. The row is payroll', async () => {

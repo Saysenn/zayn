@@ -183,8 +183,11 @@ test('A DUPLICATE STARTS UNTICKED, and nothing is written until Import', () => {
 });
 
 test('the select all is a CHECKBOX with an indeterminate third state', () => {
-  assert.match(diff, /type="checkbox"/);
-  assert.match(diff, /el\.indeterminate = /);
+  // Through the shared SelectAll, which owns the three-state checkbox.
+  const box = codeOf(read('..', 'components', 'forms', 'SelectAll.jsx'));
+  assert.match(diff, /<SelectAll\b/);
+  assert.match(box, /type="checkbox"/);
+  assert.match(box, /\.indeterminate = count > 0 && count < total/);
   assert.doesNotMatch(diff, /Select all<\/Button>/, 'never a pair of buttons');
 });
 

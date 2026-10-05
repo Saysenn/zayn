@@ -2,6 +2,9 @@ import { useMemo, useState } from 'react';
 import Modal from '../modals/Modal';
 import Button from '../buttons/Button';
 import CellInfo from '../display/CellInfo';
+import UnderlineTabs from '../layout/UnderlineTabs';
+import SelectAll from '../forms/SelectAll';
+import { EmptyState } from '../display/StateBlocks';
 import { formatMoney, formatNumber, NO_VALUE } from '../../helpers/formatMoney';
 import { formatDate } from '../../helpers/formatDate';
 import { aedAmount } from '../../helpers/expenseAed';
@@ -112,43 +115,27 @@ export default function ExpensesDiffModal({ preview, busy, onConfirm, onCancel }
           {month ? ` · importing into ${month}` : ''}
         </p>
 
-        <div className="flex flex-wrap gap-1 border-b border-border">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setTab(t.key)}
-              // An underline tab, the one place a thick edge is allowed.
-              className={`-mb-px border-b-2 px-3 py-1.5 text-xs font-semibold ${
-                tab === t.key
-                  ? 'border-accent-strong text-text'
-                  : 'border-transparent text-text-faint hover:text-text-muted'
-              }`}
-            >
-              {t.label}
-              <span className="ml-1.5 tabular-nums text-text-faint">{counts[t.key] ?? 0}</span>
-            </button>
-          ))}
-        </div>
+        <UnderlineTabs
+          tabs={TABS.map((t) => ({ key: t.key, label: t.label, count: counts[t.key] ?? 0 }))}
+          active={tab}
+          onChange={setTab}
+        />
 
-        <p className="text-[11px] text-text-muted">{TABS.find((t) => t.key === tab)?.blurb}</p>
+        <p className="text-xs text-text-muted">{TABS.find((t) => t.key === tab)?.blurb}</p>
 
         {rows.length === 0 ? (
-          <p className="py-8 text-center text-xs text-text-faint">Nothing on this tab.</p>
+          <EmptyState title="Nothing on this tab" />
         ) : (
           <>
             {/* A SELECT ALL IS A CHECKBOX, never a pair of buttons. */}
-            <label className="flex items-center gap-2 text-xs text-text-muted">
-              <input
-                type="checkbox"
-                checked={allTicked}
-                ref={(el) => {
-                  if (el) el.indeterminate = tabTicked > 0 && !allTicked;
-                }}
+            <div className="text-text-muted">
+              <SelectAll
+                count={tabTicked}
+                total={rows.length}
                 onChange={toggleTab}
+                label={`${tabTicked} of ${rows.length} ticked on this tab`}
               />
-              {tabTicked} of {rows.length} ticked on this tab
-            </label>
+            </div>
 
             <div className="max-h-[46vh] overflow-y-auto rounded-lg border border-border">
               {rows.map((row) => {
@@ -215,17 +202,19 @@ export default function ExpensesDiffModal({ preview, busy, onConfirm, onCancel }
             {' '}of {preview.total} ticked
             {acceptedAed > 0 ? `, ${formatMoney(acceptedAed, AED)}` : ''}
           </span>
-          <Button variant="quiet" disabled={busy} onClick={onCancel}>Cancel</Button>
+          <Button size="md" variant="secondary" disabled={busy} onClick={onCancel}>Cancel</Button>
           <Button
+            size="md"
             variant="primary"
             disabled={busy || accepted.length === 0}
+            phase={busy ? 'working' : 'idle'}
             onClick={() => onConfirm(accepted)}
           >
             {busy ? 'Importing…' : `Import ${accepted.length}`}
           </Button>
         </div>
 
-        <p className="text-[11px] text-text-faint">
+        <p className="text-xs text-text-faint">
           <CellInfo label="About importing">
             Nothing is written until you press Import, and only ticked rows are written. Importing
             never overwrites a row that is already here: an expense is a transaction, so a second

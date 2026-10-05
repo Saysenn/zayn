@@ -39,4 +39,15 @@ router.delete('/logs', async (req, res, next) => {
   }
 });
 
+// The bulk bar's Delete: only the ticked rows, never "everything matching".
+router.post('/logs/delete', async (req, res, next) => {
+  try {
+    const ids = (Array.isArray(req.body?.ids) ? req.body.ids : [])
+      .map(Number).filter((id) => Number.isInteger(id) && id > 0);
+    res.json({ deleted: ids.length ? await logsRepo.deleteIds(ids) : 0 });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = { router };

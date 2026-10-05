@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { formatDate as date } from '../helpers/formatDate';
 import { formatMoney as money, formatTotals as totals, totalsOf } from '../helpers/formatMoney';
 import { useParams } from 'react-router-dom';
@@ -8,11 +8,19 @@ import { useSettings } from '../hooks/useSettings';
 // THE RATES ARE ON THE MONTHLY AMOUNT, so a handler row must show the same
 // figure the master sheet and the export do. Mirror of the API's helper.
 import { withRates } from '../helpers/rates';
-import { useMasterSheetCellEdit, useDeleteMasterSheetRow } from '../hooks/useMasterSheet';
+import { useMasterSheetCellEdit } from '../hooks/useMasterSheet';
+import useRowSelection from '../hooks/useRowSelection';
+import useBulkActions, { DEAL_TOUCHES, bulkMessage, patchQueries } from '../hooks/useBulkActions';
+import { countOf } from '../helpers/pluralNoun';
+import { apiService } from '../configs/api.config';
 import { popup } from '../configs/popups.config';
 import { confirm } from '../configs/confirms.config';
 import Button from '../components/buttons/Button';
 import Breadcrumb from '../components/layout/Breadcrumb';
+import BulkBar, { BulkAction } from '../components/layout/BulkBar';
+import SelectAll from '../components/forms/SelectAll';
+import Modal from '../components/modals/Modal';
+import { EmptyState, ErrorState } from '../components/display/StateBlocks';
 import PageHeader from '../components/layout/PageHeader';
 import { DetailGrid, DetailCard, Stat } from '../components/layout/DetailLayout';
 import EditableCell from '../components/forms/EditableCell';
@@ -36,7 +44,7 @@ import Select from '../components/forms/Select';
 import FloatingField from '../components/forms/FloatingField';
 import { Skeleton } from '../components/display/Skeleton';
 import RecordCard, { CardList } from '../components/display/RecordCard';
-import { RestoreIcon, EditIcon, TrashIcon } from '../components/icons';
+import { RestoreIcon, EditIcon, StopHandIcon, BuildingIcon, UsersIcon } from '../components/icons';
 
 /**
  * One company, and everyone paid through it.
@@ -55,17 +63,76 @@ import { RestoreIcon, EditIcon, TrashIcon } from '../components/icons';
 
 
 
+/**
+ * Patches the ticked deals on this company's cached page. Returns the rollback.
+ */
+function patchCompanyDeals(queryClient, companyKey, ids, fn) {
+  const want = new Set(ids.map(String));
+  return patchQueries(queryClient, [['company', companyKey]], (data) => (
+    data?.company?.deals
+      ? { ...data, company: { ...data.company, deals: data.company.deals.map((d) => (want.has(String(d.id)) ? fn(d) : d)) } }
+      : data
+  ));
+}
+
 export default function CompanyDetailPage() {
   const { key } = useParams();
   const { data: company, tiers, oldGroups, isLoading, error } = useCompany(key);
   const { data: options } = usePeopleFilters();
   const updateCompany = useUpdateCompany();
   const cellEdit = useMasterSheetCellEdit();
-  const removeDeal = useDeleteMasterSheetRow();
   const [showHistory, setShowHistory] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
-  // One row, not the whole company. See the Remove button in the table.
-  const [removing, setRemoving] = useState(null);
+  /**
+   * TICKED HANDLERS, for the bulk bar. Above the early returns: a hook
+   * after them would be skipped while loading and React counts hooks.
+   *
+   * NO DELETE HERE. A deal is deleted on the Master Sheet and nowhere
+   * else; this page stops them, which Resume on the Archive undoes.
+   */
+  const dealIds = useMemo(() => (company?.deals ?? []).map((d) => d.id), [company]);
+  const sel = useRowSelection(dealIds);
+  const { run } = useBulkActions();
+  const [bulkEditing, setBulkEditing] = useState(false);
+  const [bulkStopping, setBulkStopping] = useState(false);
+
+  // NEITHER WAITS. The ticked deals change on this page the moment the
+  // dialog is confirmed, the dialog and the ticks go, and the toast (with
+  // Undo) is already up. A failure puts the deals back. See useBulkActions.
+  function editSelected(fields, label) {
+    const ids = sel.ids;
+    const cached = Object.fromEntries(Object.entries(fields).map(([k, v]) => [k.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`), v]));
+    run({
+      call: () => apiService.masterSheet.bulkUpdate(ids, fields),
+      optimistic: (qc) => patchCompanyDeals(qc, key, ids, (d) => ({ ...d, ...cached })),
+      invalidates: DEAL_TOUCHES,
+      toast: bulkMessage(`given a new ${label}`, ids.length, 'deal'),
+      report: (data) => bulkMessage(`given a new ${label}`, data.updated.length, 'deal', [
+        [data.skipped?.same ?? 0, 'already set'], [data.skipped?.gone ?? 0, 'gone'],
+      ]),
+      undoBatch: (data) => data.batchId,
+      failure: `Couldn't change the ${label} on ${countOf(ids.length, 'deal')}`,
+    });
+    setBulkEditing(false);
+    sel.clear();
+  }
+
+  function stopSelected() {
+    const ids = sel.ids;
+    const today = new Date().toISOString().slice(0, 10);
+    run({
+      call: () => apiService.masterSheet.bulkStop(ids),
+      optimistic: (qc) => patchCompanyDeals(qc, key, ids, (d) => (d.stopped_on ? d : { ...d, stopped_on: today })),
+      invalidates: DEAL_TOUCHES,
+      toast: bulkMessage('stopped', ids.length, 'deal'),
+      report: (data) => bulkMessage('stopped', data.stopped.length, 'deal', [[data.skipped, 'already stopped']]),
+      undoBatch: (data) => data.batchId,
+      failure: `Couldn't stop ${countOf(ids.length, 'deal')}`,
+      icon: 'stop',
+    });
+    setBulkStopping(false);
+    sel.clear();
+  }
   const [liquidating, setLiquidating] = useState(false);
   // Closing and dissolving stop every deal on the company, so they are the
   // only two status changes that go through a dialog.
@@ -111,11 +178,11 @@ export default function CompanyDetailPage() {
 
   if (error || !company) {
     return (
-      <div className="space-y-3">
+      <div className="space-y-4">
         <Breadcrumb items={[{ label: 'Companies', to: '/companies' }, { label: 'Not found' }]} />
-        <p className="bg-danger-tint px-4 py-2.5 text-sm text-danger">
-          {error?.message || 'That company was not found.'}
-        </p>
+        {error
+          ? <ErrorState error={error} title="Couldn't load this company" />
+          : <EmptyState icon={BuildingIcon} title="That company was not found" hint="It may have been renamed. Search for it on Companies." />}
       </div>
     );
   }
@@ -245,15 +312,11 @@ export default function CompanyDetailPage() {
               disabled={updateCompany.isPending}
             />
             {company.status === COMPANY_STATUS.LIQUIDATION && (
-              <button
-                type="button"
-                className="btn-quiet min-h-0 self-start px-2 py-1 text-xs"
-                onClick={() => setLiquidating(true)}
-              >
+              <Button size="xs" variant="secondary" className="self-start" onClick={() => setLiquidating(true)}>
                 {company.liquidation_total == null
                   ? 'Set the amounts'
                   : `Settlement ${money(company.liquidation_total, deals[0]?.currency)}`}
-              </button>
+              </Button>
             )}
           </div>
           {/* TIER, and it is not a second Status. Status is active/closed,
@@ -295,7 +358,7 @@ export default function CompanyDetailPage() {
               placeholder="Not set"
             />
           <div className="sm:col-span-2">
-            <NameField label="Notes" value={company.notes}
+            <NameField label="Notes" multiline value={company.notes}
               onSave={(v) => saveCompany({ notes: v }, 'Notes')} />
           </div>
         </div>
@@ -306,10 +369,9 @@ export default function CompanyDetailPage() {
               <div className="p-3 md:p-0">
                 <CompanyHandlers
                   deals={deals}
-                  company={company}
                   options={options}
                   cellEdit={cellEdit}
-                  onRemove={setRemoving}
+                  sel={sel}
                 />
               </div>
             </DetailCard>
@@ -335,29 +397,6 @@ export default function CompanyDetailPage() {
           title={`Recent changes · ${company.name}`}
           company={company.name}
           onClose={() => setShowHistory(false)}
-        />
-      )}
-
-      {removing && (
-        <ConfirmDialog
-          {...confirm.removeHandlerFromCompany({
-            personName: removing.person_name,
-            roleLabel: removing.role_label,
-            companyName: company.name,
-            money: money(removing.monthly_amount, removing.currency),
-          })}
-          icon={<TrashIcon width={15} height={15} />}
-          busy={removeDeal.isPending}
-          onCancel={() => setRemoving(null)}
-          onConfirm={() =>
-            removeDeal.mutate(
-              {
-                id: removing.id,
-                subject: `${removing.person_name ?? 'That row'} from ${company.name}`,
-              },
-              { onSuccess: () => setRemoving(null) },
-            )
-          }
         />
       )}
 
@@ -454,7 +493,81 @@ export default function CompanyDetailPage() {
           />
         </ConfirmDialog>
       )}
+      {bulkEditing && (
+        <BulkEditDeals
+          count={sel.count}
+          groups={options?.groups ?? []}
+          onClose={() => setBulkEditing(false)}
+          onApply={editSelected}
+        />
+      )}
+
+      {bulkStopping && (
+        <ConfirmDialog
+          {...confirm.bulkStopRows(sel.count)}
+          icon={<StopHandIcon width={15} height={15} />}
+          confirmVariant="danger"
+          onCancel={() => setBulkStopping(false)}
+          onConfirm={stopSelected}
+        />
+      )}
+
+      <BulkBar count={sel.count} noun="deal" onClear={sel.clear}>
+        <BulkAction icon={EditIcon} onClick={() => setBulkEditing(true)}>Edit</BulkAction>
+        <BulkAction icon={StopHandIcon} variant="danger" onClick={() => setBulkStopping(true)}>Stop</BulkAction>
+      </BulkBar>
     </div>
+  );
+}
+
+/**
+ * ONE FIELD ONTO EVERY TICKED DEAL. Payment method, group or preset date:
+ * the three a company's handlers are most often set to together. One
+ * field per apply, so the toast and History each say exactly what moved.
+ */
+const BULK_FIELDS = [
+  { value: 'paymentMethod', label: 'Payment method' },
+  { value: 'groupName', label: 'Group' },
+  { value: 'presetOn', label: 'Preset date' },
+];
+const METHODS = [{ value: 'cash', label: 'Cash' }, { value: 'bank', label: 'Bank' }, { value: 'crypto', label: 'Crypto' }];
+
+function BulkEditDeals({ count, groups, onApply, onClose }) {
+  const [field, setField] = useState('paymentMethod');
+  const [value, setValue] = useState('');
+  const pick = (next) => { setField(next ?? 'paymentMethod'); setValue(''); };
+  const label = BULK_FIELDS.find((f) => f.value === field)?.label.toLowerCase();
+
+  return (
+    <Modal title={`Edit ${count} ${count === 1 ? 'deal' : 'deals'}`} onClose={onClose}>
+      <div className="space-y-3">
+        <Select label="Field" size="form" value={field} onChange={pick} options={BULK_FIELDS} />
+        {field === 'paymentMethod' && (
+          <Select label="Payment method" size="form" value={value} onChange={(v) => setValue(v ?? '')}
+            options={METHODS} placeholder="Pick a method" />
+        )}
+        {field === 'groupName' && (
+          <Select label="Group" size="form" searchable value={value} onChange={(v) => setValue(v ?? '')}
+            options={groups.map((g) => (typeof g === 'string' ? { value: g, label: g } : g))} placeholder="Pick a group" />
+        )}
+        {field === 'presetOn' && (
+          <FloatingField label="Preset date" filled>
+            <input type="date" className="form-control" value={value} onChange={(e) => setValue(e.target.value)} />
+          </FloatingField>
+        )}
+        <div className="flex justify-end gap-2 pt-1">
+          <Button size="md" variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button
+            size="md"
+            variant="primary"
+            disabled={!value}
+            onClick={() => onApply({ [field]: value }, label)}
+          >
+            Apply
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -465,7 +578,7 @@ export default function CompanyDetailPage() {
  * Every cell is the same EditableCell the Master Sheet page uses, writing
  * to the same row, so an edit here IS an edit to the master sheet.
  */
-function CompanyHandlers({ deals, company, options, cellEdit, onRemove }) {
+function CompanyHandlers({ deals, options, cellEdit, sel }) {
   // The rail charge, one number for the whole system, so a card shows the
   // same figure the master sheet and the export do.
   const { data: settings } = useSettings();
@@ -474,9 +587,13 @@ function CompanyHandlers({ deals, company, options, cellEdit, onRemove }) {
   return (
     <>
         <CardList>
+          {deals.length === 0 && (
+            <EmptyState icon={UsersIcon} title="Nobody is paid through this company yet" />
+          )}
           {deals.map((d) => (
+            // The tint reaches the card, the same look a ticked row has.
+            <div key={d.id} className={sel.has(d.id) ? '[&>div]:!bg-accent-tint' : ''}>
             <RecordCard
-              key={d.id}
               title={d.person_name ?? '(no handler)'}
               subtitle={[d.group_name, d.role_label].filter(Boolean).join(' · ')}
               lead={money(withRates(d, { cryptoPercent }).payable_amount, d.currency)}
@@ -494,19 +611,21 @@ function CompanyHandlers({ deals, company, options, cellEdit, onRemove }) {
                 { label: 'Preset', value: date(d.preset_on) },
               ]}
               actions={
-                <Button variant="danger" onClick={() => onRemove(d)}>
-                  <TrashIcon width={14} height={14} />
-                  Remove
-                </Button>
+                <label className="flex items-center gap-2 text-xs text-text-muted">
+                  <input type="checkbox" checked={sel.has(d.id)} onChange={() => sel.toggle(d.id)} />
+                  Select
+                </label>
               }
             />
+            </div>
           ))}
         </CardList>
 
         <div className="table-wrap is-nested hidden md:block">
           <table className="detail-table w-full min-w-[900px] text-xs">
             <thead>
-              <tr >
+              <tr>
+                <th className="th w-8"><SelectAll count={sel.count} total={sel.total} onChange={sel.setAll} /></th>
                 <th className="th">Name</th>
                 <th className="th">Role</th>
                 <th className="th">Group</th>
@@ -517,19 +636,22 @@ function CompanyHandlers({ deals, company, options, cellEdit, onRemove }) {
                 <th className="th">Preset</th>
                 <th className="th">Payment period</th>
                 <th className="th">Payday</th>
-                <th className="th" />
               </tr>
             </thead>
             <tbody>
               {deals.length === 0 && (
-                <tr>
-                  <td colSpan={11} className="px-3 py-10 text-center text-text-muted">
-                    Nobody is paid through this company yet.
-                  </td>
-                </tr>
+                <EmptyState asRow colSpan={11} icon={UsersIcon} title="Nobody is paid through this company yet" />
               )}
               {deals.map((d) => (
-                <tr key={d.id} className="border-b border-border last:border-0">
+                <tr key={d.id} className={`border-b border-border last:border-0 hover:bg-surface-sunken ${sel.has(d.id) ? 'row-selected' : ''}`}>
+                  <td className="td w-8">
+                    <input
+                      type="checkbox"
+                      checked={sel.has(d.id)}
+                      onChange={() => sel.toggle(d.id)}
+                      aria-label={`Select ${d.person_name ?? 'this handler'}`}
+                    />
+                  </td>
                   {/* ===============================
                       * EditableCell IS THE <td>. It must not be wrapped.
                       * ===============================
@@ -538,42 +660,42 @@ function CompanyHandlers({ deals, company, options, cellEdit, onRemove }) {
                       twice per render in the console. Seen in the browser
                       2026-09-22, on this page.
 
-                      The wrapper's padding and alignment move ONTO the
-                      cell, which takes a className for exactly this. */}
-                  <EditableCell value={d.person_name} className="px-3 py-2"
+                      Alignment moves ONTO the cell, which takes a className
+                      for exactly this. Padding is the detail table's own. */}
+                  <EditableCell value={d.person_name} className="font-medium text-text"
                     onSave={(v) => cellEdit({ id: d.id, fields: { personName: v }, subject: d.person_name, label: 'name' })} />
                   <EditableCell value={d.role_label} type="combo" suggestions={options?.roles ?? []}
-                    className="px-3 py-2 text-text-muted"
+                    className="text-text-muted"
                     onSave={(v) => cellEdit({ id: d.id, fields: { roleLabel: v }, subject: d.person_name, label: 'role' })} />
                   <EditableCell value={d.group_name} type="combo" suggestions={options?.groups ?? []}
-                    className="px-3 py-2 text-text-muted"
+                    className="text-text-muted"
                     onSave={(v) => cellEdit({ id: d.id, fields: { groupName: v }, subject: d.person_name, label: 'group' })} />
                   {/* VALUE is the wage, DISPLAY is the rated figure. Open the
                       cell and you edit 4,700; closed it reads 4,935. */}
                   <EditableCell value={d.monthly_amount} type="number"
                     display={money(withRates(d, { cryptoPercent }).monthly_amount, d.currency)}
-                    className="px-3 py-2 text-right tabular-nums"
+                    className="text-right tabular-nums"
                     onSave={(v) => cellEdit({ id: d.id, fields: { monthlyAmount: v }, subject: d.person_name, label: 'monthly amount' })} />
                   <EditableCell value={d.payable_days} type="number"
-                    className="px-3 py-2 text-right tabular-nums"
+                    className="text-right tabular-nums"
                     onSave={(v) => cellEdit({ id: d.id, fields: { payableDays: v }, subject: d.person_name, label: 'payable days' })} />
                   <EditableCell value={d.payable_amount} type="number"
                     display={money(withRates(d, { cryptoPercent }).payable_amount, d.currency)}
-                    className="px-3 py-2 text-right tabular-nums"
+                    className="text-right tabular-nums"
                     onSave={(v) => cellEdit({ id: d.id, fields: { payableAmount: v }, subject: d.person_name, label: 'payable amount' })} />
                   <EditableCell value={d.payment_method} type="select"
                     options={[{ value: 'cash', label: 'Cash' }, { value: 'bank', label: 'Bank' }, { value: 'crypto', label: 'Crypto' }]}
-                    className="px-3 py-2 text-text-muted"
+                    className="text-text-muted"
                     onSave={(v) => cellEdit({ id: d.id, fields: { paymentMethod: v }, subject: d.person_name, label: 'payment method' })} />
                   <EditableCell value={d.preset_on} type="date" display={date(d.preset_on)}
-                    className="px-3 py-2 text-text-muted"
+                    className="text-text-muted"
                     onSave={(v) => cellEdit({ id: d.id, fields: { presetOn: v }, subject: d.person_name, label: 'preset date' })} />
                   {/* READ ONLY, 2026-09-09. The period is worked out from
                       the payment start, the preset and the end date, so it
                       is those you change. A stored value used to win over
                       the formula and left the badge disagreeing with the
                       tint beside it. See docs/state.md. */}
-                  <td className="px-3 py-2">
+                  <td className="td">
                     <PaymentPeriod
                       period={d.payment_period}
                       endOn={d.end_on}
@@ -581,21 +703,10 @@ function CompanyHandlers({ deals, company, options, cellEdit, onRemove }) {
                       paymentStartOn={d.payment_start_on}
                     />
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="td">
                     {d.payment_outcome
                       ? <PaydayIndicator outcome={d.payment_outcome} />
                       : <span className="text-xs text-text-faint">Not checked</span>}
-                  </td>
-                  {/* Remove ends this one pairing, so the row goes. The person keeps their other companies. */}
-                  <td className="px-3 py-2 text-right">
-                    <Button
-                      size="icon"
-                      variant="danger"
-                      aria-label={`Remove ${d.person_name ?? 'this handler'} from ${company.name}`}
-                      onClick={() => onRemove(d)}
-                    >
-                      <TrashIcon width={14} height={14} />
-                    </Button>
                   </td>
                 </tr>
               ))}
@@ -608,18 +719,23 @@ function CompanyHandlers({ deals, company, options, cellEdit, onRemove }) {
 
 // Commits on blur and on Enter, reverts on Escape, never fires when
 // nothing changed.
-function NameField({ label, hint, value, onSave }) {
+//
+// `multiline` is Notes: a small textarea, where Enter is a new line and
+// leaving the field is what saves.
+function NameField({ label, hint, value, onSave, multiline = false }) {
   const [draft, setDraft] = useState(value ?? '');
+  const Field = multiline ? 'textarea' : 'input';
   return (
-    <FloatingField label={label} hint={hint} filled={Boolean(draft)}>
-      <input
-        className="w-full text-xs"
+    <FloatingField label={label} hint={hint} filled={Boolean(draft)} textarea={multiline}>
+      <Field
+        className={multiline ? 'form-textarea' : 'w-full text-xs'}
+        rows={multiline ? 3 : undefined}
         aria-label={label}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => { if ((draft ?? '') !== (value ?? '')) onSave(draft); }}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') e.currentTarget.blur();
+          if (e.key === 'Enter' && !multiline) e.currentTarget.blur();
           if (e.key === 'Escape') { setDraft(value ?? ''); e.currentTarget.blur(); }
         }}
       />

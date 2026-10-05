@@ -1,10 +1,14 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import PageHeader, { Toolbar, SearchInput } from '../components/layout/PageHeader';
 import Button, { FileButton } from '../components/buttons/Button';
 import Select from '../components/forms/Select';
 import EditableCell from '../components/forms/EditableCell';
 import CellInfo from '../components/display/CellInfo';
 import Pagination from '../components/layout/Pagination';
+import BulkBar, { BulkAction } from '../components/layout/BulkBar';
+import SelectAll from '../components/forms/SelectAll';
+import Modal from '../components/modals/Modal';
+import { EmptyState, ErrorState } from '../components/display/StateBlocks';
 import ConfirmDialog from '../components/modals/ConfirmDialog';
 import AddExpense from '../components/modals/AddExpense';
 import ExpensesDiffModal from '../components/import/ExpensesDiffModal';
@@ -16,10 +20,14 @@ import {
 } from '../components/icons';
 import {
   useExpenses, useExpenseOptions, useCreateExpense, useExpenseCellEdit,
-  useDeleteExpense, useImportExpenses, useExportExpenses, useExpenseExportOptions,
+  useImportExpenses, useExportExpenses, useExpenseExportOptions,
 } from '../hooks/useExpenses';
 import { useStickyState, useClearSticky } from '../hooks/useStickyState';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
+import useRowSelection from '../hooks/useRowSelection';
+import useBulkActions, { bulkMessage, patchQueries } from '../hooks/useBulkActions';
+import { countOf } from '../helpers/pluralNoun';
+import { apiService } from '../configs/api.config';
 import { unionOptions } from '../helpers/optionList';
 import { formatMoney, formatNumber, NO_VALUE } from '../helpers/formatMoney';
 import { formatDate } from '../helpers/formatDate';
@@ -50,7 +58,6 @@ export default function ExpensesPage() {
   const [adding, setAdding] = useState(false);
   const [editingRow, setEditingRow] = useState(null);
   const [exporting, setExporting] = useState(false);
-  const [confirming, setConfirming] = useState(null);
 
   const [q, setQ] = useStickyState(`${STICKY}.q`, '');
   const [searchField, setSearchField] = useStickyState(`${STICKY}.searchField`, SEARCH_ANY);
@@ -76,12 +83,11 @@ export default function ExpensesPage() {
   };
 
   const {
-    data: rows, total, aedTotal, missingRate, month, isLoading,
+    data: rows, total, aedTotal, missingRate, month, isLoading, error, refetch,
   } = useExpenses(filters);
   const options = useExpenseOptions();
   const create = useCreateExpense();
   const cellEdit = useExpenseCellEdit();
-  const removeExpense = useDeleteExpense();
   const importer = useImportExpenses();
   const exporter = useExportExpenses();
   // Only fetched once the modal is open: nobody needs the palette list to
@@ -114,8 +120,91 @@ export default function ExpensesPage() {
 
   const currencyOptions = unionOptions(options.currencies, SEED_CURRENCIES);
 
+  // Ticked rows for the bulk bar. Only real rows: an optimistic one still
+  // has a `pending-` id the server has never heard of.
+  const visibleIds = useMemo(
+    () => (rows ?? []).map((r) => r.id).filter((id) => !String(id).startsWith('pending-')),
+    [rows],
+  );
+  const sel = useRowSelection(visibleIds);
+  const { run } = useBulkActions();
+  const [bulkEditing, setBulkEditing] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  // A ledger, not deals: nothing else reads an expense, so only its own
+  // two caches move.
+  const EXPENSE_KEYS = [['expenses'], ['expense-options']];
+
+  /**
+   * THE BAR NEVER WAITS. Both acts land on every cached page at once, the
+   * toast says so straight away, and a failure puts the rows back.
+   * `change(row)` returns the new row, or null to drop it; the page's
+   * count and AED total follow whatever moved.
+   */
+  const patchExpenses = (ids, change) => (qc) => {
+    const want = new Set(ids.map(String));
+    const aedOf = (r) => Number(r?.aed_amount ?? 0) || 0;
+    return patchQueries(qc, [['expenses']], (old) => {
+      if (!Array.isArray(old?.rows)) return old;
+      let gone = 0;
+      let delta = 0;
+      const rows = [];
+      for (const r of old.rows) {
+        if (!want.has(String(r.id))) { rows.push(r); continue; }
+        const next = change(r);
+        delta += aedOf(next) - aedOf(r);
+        if (next) rows.push(next); else gone += 1;
+      }
+      return {
+        ...old,
+        rows,
+        total: Math.max(0, Number(old.total ?? 0) - gone),
+        aedTotal: Number(old.aedTotal ?? 0) + delta,
+      };
+    });
+  };
+
+  // The bulk fields, camelCase, onto the cached row's snake_case columns.
+  const BULK_COLUMN = { groupName: 'group_name', spentBy: 'spent_by', currency: 'currency' };
+
+  function bulkEdit(fields, label) {
+    const ids = sel.ids;
+    const cols = Object.fromEntries(Object.entries(fields).map(([k, v]) => [BULK_COLUMN[k] ?? k, v]));
+    run({
+      call: () => apiService.expenses.bulkUpdate(ids, fields),
+      invalidates: EXPENSE_KEYS,
+      optimistic: patchExpenses(ids, (r) => ({ ...r, ...cols })),
+      toast: bulkMessage(`given a new ${label}`, ids.length, 'expense'),
+      report: (data) => bulkMessage(`given a new ${label}`, data.updated.length, 'expense'),
+      failure: `Couldn't update ${countOf(ids.length, 'expense')}`,
+    });
+    setBulkEditing(false);
+    sel.clear();
+  }
+
+  function bulkDelete() {
+    const ids = sel.ids;
+    run({
+      call: () => apiService.expenses.bulkDelete(ids),
+      invalidates: EXPENSE_KEYS,
+      optimistic: patchExpenses(ids, () => null),
+      toast: bulkMessage('deleted', ids.length, 'expense'),
+      report: (data) => bulkMessage('deleted', data.deleted.length, 'expense'),
+      icon: 'trash',
+      failure: `Couldn't delete ${countOf(ids.length, 'expense')}`,
+    });
+    setBulkDeleting(false);
+    sel.clear();
+  }
+
+  // A ROW OPENS THE WHOLE FORM, the same one Add uses. The cells still
+  // edit in place for a one word fix: they stop their own click. A row
+  // still saving (`pending-`) has nothing on the server to edit yet.
+  const openRow = (row) => {
+    if (!String(row.id).startsWith('pending-')) setEditingRow(row);
+  };
+
   return (
-    <div>
+    <div className="space-y-4">
       <PageHeader
         title="Expenses"
         // NAMED, never "this month". A month the reader has to work out is a
@@ -184,7 +273,7 @@ export default function ExpensesPage() {
               value={groups}
               onChange={onFilter(setGroups)}
               options={asList(options.groups)}
-              placeholder="Any group"
+              placeholder="All groups"
             />
             <Select
               size="sm"
@@ -193,7 +282,7 @@ export default function ExpensesPage() {
               value={currencies}
               onChange={onFilter(setCurrencies)}
               options={asList(currencyOptions)}
-              placeholder="Any currency"
+              placeholder="All currencies"
             />
             <NumberRangeFilter
               fields={AMOUNT_FIELDS}
@@ -207,7 +296,9 @@ export default function ExpensesPage() {
 
       {/* The total is of the LIVE, FILTERED set and says so, because a
           figure that ignores the filters above it reads as a bug. */}
-      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-text-muted">
+      <ErrorState error={error} title="Couldn't load expenses" onRetry={refetch} />
+
+      <div className="flex flex-wrap items-center gap-2 text-xs text-text-muted">
         <span className="font-semibold text-text">
           {formatMoney(aedTotal, AED)}
         </span>
@@ -223,75 +314,88 @@ export default function ExpensesPage() {
         )}
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-surface">
-        <table className="w-full min-w-[900px] text-xs">
-          <thead className="bg-surface-sunken text-left text-text-muted">
+      <div className="table-wrap">
+        <table className="w-full min-w-[900px] text-sm">
+          <thead>
             <tr>
-              <th className="px-3 py-2 font-semibold">Date</th>
-              <th className="px-3 py-2 font-semibold">Description</th>
-              <th className="px-3 py-2 font-semibold">Payee</th>
-              <th className="px-3 py-2 font-semibold">Currency</th>
-              <th className="px-3 py-2 text-right font-semibold">Raw amount</th>
-              <th className="px-3 py-2 text-right font-semibold">Rate</th>
-              <th className="px-3 py-2 text-right font-semibold">AED amount</th>
-              <th className="px-3 py-2 font-semibold">Group</th>
-              <th className="px-3 py-2 font-semibold">Spent by</th>
-              <th className="px-3 py-2 font-semibold">Last updated</th>
-              <th className="px-3 py-2" />
+              <th className="th w-8"><SelectAll count={sel.count} total={sel.total} onChange={sel.setAll} /></th>
+              <th className="th">Date</th>
+              <th className="th">Description</th>
+              <th className="th">Payee</th>
+              <th className="th">Currency</th>
+              <th className="th text-right tabular-nums">Raw amount</th>
+              <th className="th text-right tabular-nums">Rate</th>
+              <th className="th text-right tabular-nums">AED amount</th>
+              <th className="th">Group</th>
+              <th className="th">Spent by</th>
+              <th className="th">Last updated</th>
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
               <TableSkeleton columns={11} />
             ) : rows?.length ? rows.map((row) => (
-              <tr key={row.id} className="border-t border-border">
-                <td className="px-3 py-2">
-                  <EditableCell
-                    as="div"
-                    type="date"
-                    value={row.spent_on}
-                    display={formatDate(row.spent_on)}
-                    onSave={(v) => saveCell(row, 'spentOn', v)}
+              <tr
+                key={row.id}
+                tabIndex={0}
+                role="link"
+                aria-label={`Edit ${labelFor(row)}`}
+                onClick={() => openRow(row)}
+                onKeyDown={(e) => {
+                  // The row's own Enter only: a cell's Enter starts its
+                  // inline edit, and must not throw the form over it.
+                  if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); openRow(row); }
+                }}
+                className={`cursor-pointer hover:bg-surface-sunken ${sel.has(row.id) ? 'row-selected' : ''}`}
+              >
+                <td className="td w-8" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={sel.has(row.id)}
+                    onChange={() => sel.toggle(row.id)}
+                    disabled={String(row.id).startsWith('pending-')}
+                    aria-label={`Select ${labelFor(row)}`}
                   />
                 </td>
-                <td className="px-3 py-2">
-                  <EditableCell
-                    as="div"
-                    value={row.description}
-                    onSave={(v) => saveCell(row, 'description', v)}
-                  />
-                </td>
-                <td className="px-3 py-2">
-                  <EditableCell
-                    as="div"
-                    type="suggest"
-                    suggestions={options.payees}
-                    value={row.payee}
-                    onSave={(v) => saveCell(row, 'payee', v)}
-                  />
-                </td>
-                <td className="px-3 py-2">
-                  <EditableCell
-                    as="div"
-                    type="suggest"
-                    suggestions={currencyOptions}
-                    value={row.currency}
-                    onSave={(v) => saveCell(row, 'currency', v)}
-                  />
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums">
-                  <EditableCell
-                    as="div"
-                    type="number"
-                    value={row.raw_amount}
-                    display={formatMoney(row.raw_amount, row.currency)}
-                    onSave={(v) => saveCell(row, 'rawAmount', v)}
-                  />
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums">
+                {/* EditableCell IS the <td>, so it takes the table's own
+                    `.td` padding instead of sitting inside a second one. */}
+                <EditableCell
+                  type="date"
+                  value={row.spent_on}
+                  display={formatDate(row.spent_on)}
+                  onSave={(v) => saveCell(row, 'spentOn', v)}
+                />
+                <EditableCell
+                  className="font-medium text-text"
+                  value={row.description}
+                  onSave={(v) => saveCell(row, 'description', v)}
+                />
+                <EditableCell
+                  type="suggest"
+                  suggestions={options.payees}
+                  value={row.payee}
+                  onSave={(v) => saveCell(row, 'payee', v)}
+                />
+                <EditableCell
+                  type="suggest"
+                  suggestions={currencyOptions}
+                  value={row.currency}
+                  onSave={(v) => saveCell(row, 'currency', v)}
+                />
+                <EditableCell
+                  className="text-right tabular-nums"
+                  type="number"
+                  value={row.raw_amount}
+                  display={formatMoney(row.raw_amount, row.currency)}
+                  onSave={(v) => saveCell(row, 'rawAmount', v)}
+                />
+                <td className="td text-right tabular-nums">
                   <span className="inline-flex items-center gap-1">
+                    {/* A div inside the td here, for the info icon beside
+                        it, so its own `.td` padding and rule are dropped. */}
                     <EditableCell
                       as="div"
+                      className="!border-0 !p-0"
                       type="number"
                       value={row.exchange_rate}
                       display={row.exchange_rate == null ? NO_VALUE : formatNumber(row.exchange_rate, 4)}
@@ -305,7 +409,7 @@ export default function ExpensesPage() {
                 </td>
                 {/* NEVER EDITABLE. The database generates it from the two
                     cells to the left. */}
-                <td className="px-3 py-2 text-right font-semibold tabular-nums">
+                <td className="td text-right font-semibold tabular-nums">
                   <span className="inline-flex items-center gap-1">
                     {row.aed_amount == null ? NO_VALUE : formatMoney(row.aed_amount, AED)}
                     <CellInfo
@@ -318,63 +422,28 @@ export default function ExpensesPage() {
                     </CellInfo>
                   </span>
                 </td>
-                <td className="px-3 py-2">
-                  <EditableCell
-                    as="div"
-                    type="suggest"
-                    suggestions={options.groups}
-                    value={row.group_name}
-                    onSave={(v) => saveCell(row, 'groupName', v)}
-                  />
-                </td>
-                <td className="px-3 py-2">
-                  <EditableCell
-                    as="div"
-                    type="suggest"
-                    suggestions={options.spentBy}
-                    value={row.spent_by}
-                    onSave={(v) => saveCell(row, 'spentBy', v)}
-                  />
-                </td>
-                <td className="px-3 py-2 text-text-faint">{formatDate(row.updated_at)}</td>
-                <td className="px-3 py-2">
-                  <div className="flex justify-end gap-1">
-                    {/* The cells edit in place for a one word fix; this
-                        opens the lot at once, which is what you want when
-                        several are wrong. Same form as Add. */}
-                    <Button
-                      size="icon"
-                      variant="quiet"
-                      aria-label={`Edit ${labelFor(row)}`}
-                      onClick={() => setEditingRow(row)}
-                    >
-                      <EditIcon width={14} height={14} />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="danger"
-                      aria-label={`Delete ${labelFor(row)}`}
-                      onClick={() => setConfirming(row)}
-                    >
-                      <TrashIcon width={14} height={14} />
-                    </Button>
-                  </div>
-                </td>
+                <EditableCell
+                  type="suggest"
+                  suggestions={options.groups}
+                  value={row.group_name}
+                  onSave={(v) => saveCell(row, 'groupName', v)}
+                />
+                <EditableCell
+                  type="suggest"
+                  suggestions={options.spentBy}
+                  value={row.spent_by}
+                  onSave={(v) => saveCell(row, 'spentBy', v)}
+                />
+                <td className="td text-text-faint">{formatDate(row.updated_at)}</td>
               </tr>
-            )) : (
-              <tr>
-                <td colSpan={11} className="px-3 py-10 text-center">
-                  <span className="mx-auto mb-2 grid h-10 w-10 place-items-center rounded-xl bg-accent-tint text-accent-strong">
-                    <ReceiptIcon width={18} height={18} />
-                  </span>
-                  <p className="text-sm font-bold text-text">Nothing here yet</p>
-                  <p className="mt-0.5 text-xs text-text-muted">
-                    {filterCount > 0 || q
-                      ? 'No expense matches these filters.'
-                      : `Nothing recorded for ${when ?? 'this month'} yet.`}
-                  </p>
-                </td>
-              </tr>
+            )) : !error && (
+              <EmptyState
+                asRow
+                colSpan={11}
+                icon={ReceiptIcon}
+                title={filterCount > 0 || q ? 'No expense matches these filters' : 'Nothing here yet'}
+                hint={filterCount > 0 || q ? undefined : `Nothing recorded for ${when ?? 'this month'} yet.`}
+              />
             )}
           </tbody>
         </table>
@@ -427,22 +496,86 @@ export default function ExpensesPage() {
         />
       )}
 
-      {confirming && (
-        <ConfirmDialog
-          title={`Delete ${labelFor(confirming)}?`}
-          subject={`${formatMoney(confirming.raw_amount, confirming.currency)} on ${formatDate(confirming.spent_on)}`}
-          detail={['The row goes for good, and nothing here brings it back.']}
-          confirmLabel="Delete"
-          busyLabel="Deleting…"
-          icon={<TrashIcon width={15} height={15} />}
-          busy={removeExpense.isPending}
-          onCancel={() => setConfirming(null)}
-          onConfirm={() => {
-            removeExpense.mutate({ id: confirming.id, label: labelFor(confirming) });
-            setConfirming(null);
-          }}
+      {bulkEditing && (
+        <BulkEditExpenses
+          count={sel.count}
+          options={{ groups: options.groups, spentBy: options.spentBy, currencies: currencyOptions }}
+          onClose={() => setBulkEditing(false)}
+          onApply={bulkEdit}
         />
       )}
+
+      {bulkDeleting && (
+        <ConfirmDialog
+          title={`Delete ${sel.count} ${sel.count === 1 ? 'expense' : 'expenses'}?`}
+          subject={`${sel.count} selected on this page.`}
+          detail={['The rows go for good, and nothing here brings them back.']}
+          confirmLabel={`Delete ${sel.count}`}
+          busyLabel="Deleting…"
+          icon={<TrashIcon width={15} height={15} />}
+          onCancel={() => setBulkDeleting(false)}
+          onConfirm={bulkDelete}
+        />
+      )}
+
+      <BulkBar count={sel.count} noun="expense" onClear={sel.clear}>
+        <BulkAction icon={EditIcon} onClick={() => setBulkEditing(true)}>Edit</BulkAction>
+        <BulkAction icon={TrashIcon} variant="danger" onClick={() => setBulkDeleting(true)}>
+          Delete
+        </BulkAction>
+      </BulkBar>
     </div>
+  );
+}
+
+/**
+ * ONE FIELD ONTO EVERY TICKED EXPENSE: group, who spent it, or the
+ * currency. Any value is allowed, the same as the cell itself, so the
+ * dropdowns offer what exists and take what you type.
+ */
+const BULK_FIELDS = [
+  { value: 'groupName', label: 'Group', from: 'groups' },
+  { value: 'spentBy', label: 'Spent by', from: 'spentBy' },
+  { value: 'currency', label: 'Currency', from: 'currencies' },
+];
+
+function BulkEditExpenses({ count, options, onApply, onClose }) {
+  const [field, setField] = useState('groupName');
+  const [value, setValue] = useState('');
+  const spec = BULK_FIELDS.find((f) => f.value === field) ?? BULK_FIELDS[0];
+
+  return (
+    <Modal title={`Edit ${count} ${count === 1 ? 'expense' : 'expenses'}`} onClose={onClose}>
+      <div className="space-y-3">
+        <Select
+          label="Field"
+          size="form"
+          value={field}
+          onChange={(v) => { setField(v ?? 'groupName'); setValue(''); }}
+          options={BULK_FIELDS.map(({ value: v, label }) => ({ value: v, label }))}
+        />
+        <Select
+          key={field}
+          label={spec.label}
+          size="form"
+          allowCustom
+          value={value}
+          onChange={(v) => setValue(v ?? '')}
+          options={asList(options[spec.from] ?? [])}
+          placeholder={`Pick or type a ${spec.label.toLowerCase()}`}
+        />
+        <div className="flex justify-end gap-2 pt-1">
+          <Button size="md" variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button
+            size="md"
+            variant="primary"
+            disabled={!value}
+            onClick={() => onApply({ [field]: value }, spec.label.toLowerCase())}
+          >
+            Apply
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }

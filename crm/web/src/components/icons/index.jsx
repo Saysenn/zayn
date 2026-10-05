@@ -27,7 +27,7 @@ const BASE = {
 
 export const BuildingIcon = (props) => (
   <svg {...BASE} aria-hidden="true" {...props}>
-    <rect x="4" y="3" width="16" height="18" />
+    <rect x="4" y="3" width="16" height="18" rx="2" />
     <path d="M9 8h1M14 8h1M9 12h1M14 12h1M9 16h1M14 16h1" />
     <path d="M10 21v-4h4v4" />
   </svg>
@@ -35,10 +35,10 @@ export const BuildingIcon = (props) => (
 
 export const DashboardIcon = (props) => (
   <svg {...BASE} aria-hidden="true" {...props}>
-    <rect x="3" y="3" width="7" height="7" />
-    <rect x="14" y="3" width="7" height="4" />
-    <rect x="14" y="11" width="7" height="10" />
-    <rect x="3" y="14" width="7" height="7" />
+    <rect x="3" y="3" width="7" height="7" rx="1.5" />
+    <rect x="14" y="3" width="7" height="4" rx="1.5" />
+    <rect x="14" y="11" width="7" height="10" rx="1.5" />
+    <rect x="3" y="14" width="7" height="7" rx="1.5" />
   </svg>
 );
 
@@ -112,7 +112,7 @@ export const SendIcon = (props) => (
 
 export const SpreadsheetIcon = (props) => (
   <svg {...BASE} aria-hidden="true" {...props}>
-    <rect x="3" y="3" width="18" height="18" />
+    <rect x="3" y="3" width="18" height="18" rx="2.5" />
     <path d="M3 9h18M3 15h18M9 3v18M15 3v18" />
   </svg>
 );
@@ -485,7 +485,7 @@ export const CloseIcon = (props) => (
 // A bare tick, no circle around it. CheckCircleIcon is the payday
 // indicator and carries its own meaning; this is just "ticked".
 export const CheckIcon = (props) => (
-  <svg {...BASE} strokeWidth={2.8} aria-hidden="true" {...props}>
+  <svg {...BASE} strokeWidth={2.4} aria-hidden="true" {...props}>
     <path d="M5 12.5l4.5 4.5L19 7" />
   </svg>
 );
@@ -575,5 +575,63 @@ export const PaletteIcon = (props) => (
 export const StarIcon = (props) => (
   <svg {...BASE} aria-hidden="true" {...props}>
     <path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9L12 3.5z" />
+  </svg>
+);
+
+// ***************************************************
+// * Bulk bar actions
+// ***************************************************
+
+// Undo: an arrow curling back. The toast's action and History's bulk undo.
+export const UndoIcon = (props) => (
+  <svg {...BASE} aria-hidden="true" {...props}>
+    <path d="M9 14L4 9l5-5" />
+    <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+  </svg>
+);
+
+// Paid: a coin with a tick. The money has gone out.
+export const PaidIcon = (props) => (
+  <svg {...BASE} aria-hidden="true" {...props}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M8.5 12.25l2.4 2.4 4.6-4.9" />
+  </svg>
+);
+
+// Should be paid: a calendar with a tick. Owed for this period.
+export const ShouldBePaidIcon = (props) => (
+  <svg {...BASE} aria-hidden="true" {...props}>
+    <rect x="3.5" y="5" width="17" height="15.5" rx="2" />
+    <path d="M3.5 9.5h17M8 3v4M16 3v4" />
+    <path d="M9 14.75l2 2 4-4" />
+  </svg>
+);
+
+// Resume: play. A stopped deal running again.
+export const ResumeIcon = (props) => (
+  <svg {...BASE} aria-hidden="true" {...props}>
+    <path d="M7.5 5.5v13l11-6.5z" />
+  </svg>
+);
+
+// Mark read: an open envelope.
+export const MailOpenIcon = (props) => (
+  <svg {...BASE} aria-hidden="true" {...props}>
+    <path d="M3.5 10l8.5-6 8.5 6v9a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19z" />
+    <path d="M3.5 10l8.5 5.5 8.5-5.5" />
+  </svg>
+);
+
+// Map controls: zoom out, and fit the whole map back in view.
+export const MinusIcon = (props) => (
+  <svg {...BASE} aria-hidden="true" {...props}>
+    <path d="M5 12h14" />
+  </svg>
+);
+
+export const FitIcon = (props) => (
+  <svg {...BASE} aria-hidden="true" {...props}>
+    <path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15" />
+    <circle cx="12" cy="12" r="2.5" />
   </svg>
 );

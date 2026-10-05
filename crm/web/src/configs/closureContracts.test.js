@@ -389,5 +389,6 @@ test('THE END DATE CELL SHOWS A DATE, and Deal Status shows the word', () => {
 
 test('AND THE COMPANIES PAGE SAYS COMPANY STATUS', () => {
   const page = readSrc('../pages/CompaniesPage.jsx');
-  assert.match(page, /<th className="th">Company Status<\/th>/);
+  // Sentence case like every other header; it still names WHICH status.
+  assert.match(page, /<th className="th">Company status<\/th>/);
 });

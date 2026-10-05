@@ -61,6 +61,22 @@ export const confirm = {
     ],
     confirmLabel: 'Stop deal',
     busyLabel: 'Stopping…',
+    // RED, like Delete (his call, reversing the quiet Stop): it ends
+    // somebody's pay, so it reads as an act that counts. The palm icon,
+    // not the colour, tells it apart from the bin.
+    confirmVariant: 'danger',
+  }),
+
+  bulkStopRows: (count) => ({
+    title: `Stop ${count} ${count === 1 ? 'deal' : 'deals'}?`,
+    detail: [
+      'They move to the Archive, out of the master sheet and out of every month from today onward.',
+      'Months already paid are untouched. Undo, or Resume on the Archive, puts them back.',
+    ],
+    confirmLabel: `Stop ${count === 1 ? 'deal' : 'deals'}`,
+    busyLabel: 'Stopping…',
+    // Red, the same as one row's Stop above.
+    confirmVariant: 'danger',
   }),
 
   resumeRow: ({ personName, company, groupName, stoppedOn }) => ({

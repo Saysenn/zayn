@@ -15,7 +15,7 @@ const INKS = {
 // `lg` is for a card that leads with the CHANGE rather than with a figure,
 // where this is the biggest thing on it. Same reading, same rounding, same
 // two colours: only the type grows.
-const SIZES = { sm: 'text-[11px]', lg: 'text-4xl leading-none tracking-tight' };
+const SIZES = { sm: 'text-xs', lg: 'text-4xl leading-none tracking-tight' };
 
 // ===============================
 // * IT NAMES THE MONTH IT ACTUALLY USED
@@ -41,7 +41,7 @@ function saidAgainst(against, comparison) {
 export default function TrendText({ comparison, against, size = 'sm' }) {
   const direction = trendDirection(comparison);
   if (!comparison || direction === 'unavailable') {
-    return <span className="text-[11px] text-text-faint">No previous comparison</span>;
+    return <span className="text-xs text-text-faint">No previous comparison</span>;
   }
   const percent = trendPercentText(comparison);
   const said = saidAgainst(against, comparison);
@@ -51,7 +51,7 @@ export default function TrendText({ comparison, against, size = 'sm' }) {
         {ARROWS[direction] && `${ARROWS[direction]} `}
         {percent ?? direction}
       </strong>
-      {said && <span className="text-[11px] text-text-faint">{said}</span>}
+      {said && <span className="text-xs text-text-faint">{said}</span>}
     </span>
   );
 }

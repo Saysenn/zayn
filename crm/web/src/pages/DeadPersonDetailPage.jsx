@@ -7,6 +7,7 @@ import { Skeleton } from '../components/display/Skeleton';
 import { formatMoney, formatTotals, NO_VALUE } from '../helpers/formatMoney';
 import { formatDate } from '../helpers/formatDate';
 import { STOPPED_REASON_LABEL } from '../configs/stoppedReason';
+import { ErrorState } from '../components/display/StateBlocks';
 
 // ***************************************************
 // * One dead person: who they are, and their journey company by company
@@ -14,7 +15,9 @@ import { STOPPED_REASON_LABEL } from '../configs/stoppedReason';
 // Read only. Every figure comes from the server (deadPersonJourney.helper):
 // "owed a month" is rated, "recorded" is what the kept months held.
 
-const ARCHIVE_CRUMBS = [{ label: 'Archive', to: '/archive' }, { label: 'Dead persons', to: '/archive' }];
+// `?tab=dead` so the crumb lands on the dead people tab, not whichever tab
+// the Archive last remembered.
+const ARCHIVE_CRUMBS = [{ label: 'Archive', to: '/archive' }, { label: 'Dead people', to: '/archive?tab=dead' }];
 
 // A set that legitimately differs between their deals: one value, or all of them.
 const listed = (values) => ((values ?? []).length > 0 ? values.join(', ') : NO_VALUE);
@@ -48,11 +51,12 @@ export default function DeadPersonDetailPage() {
 
   if (error || !person) {
     return (
-      <div className="space-y-3">
+      <div className="space-y-4">
         <Breadcrumb items={[...ARCHIVE_CRUMBS, { label: 'Not found' }]} />
-        <p className="bg-danger-tint px-4 py-2.5 text-sm text-danger">
-          {error?.message || 'Not on the dead list. They may hold a live deal again.'}
-        </p>
+        <ErrorState
+          title="Couldn't open this person"
+          error={error ?? { message: 'Not on the dead list. They may hold a live deal again.' }}
+        />
       </div>
     );
   }
@@ -118,20 +122,20 @@ export default function DeadPersonDetailPage() {
                     <th className="th">Appointed</th>
                     <th className="th">Started</th>
                     <th className="th">Stopped</th>
-                    <th className="th">Months</th>
-                    <th className="th">Owed a month</th>
+                    <th className="th text-right tabular-nums">Months</th>
+                    <th className="th text-right tabular-nums">Owed a month</th>
                     <th className="th">Why it ended</th>
                   </tr>
                 </thead>
                 <tbody>
                   {c.deals.map((d) => (
-                    <tr key={d.id} className="border-b border-border last:border-0">
-                      <td className="td font-semibold">{d.role || NO_VALUE}</td>
+                    <tr key={d.id} className="border-b border-border last:border-0 hover:bg-surface-sunken">
+                      <td className="td font-medium text-text">{d.role || NO_VALUE}</td>
                       <td className="td whitespace-nowrap">{formatDate(d.appointedOn)}</td>
                       <td className="td whitespace-nowrap">{formatDate(d.startedOn)}</td>
                       <td className="td whitespace-nowrap">{formatDate(d.stoppedOn)}</td>
-                      <td className="td tabular-nums">{d.monthsActive}</td>
-                      <td className="td tabular-nums">{formatMoney(d.owedMonthly, d.currency)}</td>
+                      <td className="td text-right tabular-nums">{d.monthsActive}</td>
+                      <td className="td text-right tabular-nums">{formatMoney(d.owedMonthly, d.currency)}</td>
                       <td className="td text-text-muted">{STOPPED_REASON_LABEL[d.stoppedReason] ?? d.stoppedReason}</td>
                     </tr>
                   ))}

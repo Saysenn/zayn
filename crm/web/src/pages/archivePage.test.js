@@ -23,6 +23,12 @@ const archive = read('./ArchivePage.jsx');
 const sheet = read('./MasterSheetPage.jsx');
 const company = read('./CompanyDetailPage.jsx');
 
+// The attributes of the bulk bar button labelled `label`, '' when there is
+// none. Lazy, and never across a second <BulkAction, so it is that button's.
+const barAction = (src, label) => src.match(
+  new RegExp(`<BulkAction\\b((?:(?!<BulkAction\\b)[\\s\\S])*?)>\\s*${label}\\s*</BulkAction>`),
+)?.[1] ?? '';
+
 // ===============================
 // * The Archive
 // ===============================
@@ -47,11 +53,14 @@ test('IT DELETES NOTHING EITHER', () => {
 });
 
 test('RESUME IS THE ONLY WRITE', () => {
-  assert.match(archive, /useResumeMasterSheetRow/);
+  // The bulk bar's, for one deal or many: the row button is gone.
+  assert.match(archive, /masterSheet\.bulkResume\(/);
   // LAZY. Greedy `\w*` swallows the verb and the alternation never fires,
   // so the guard found nothing and passed on an empty list.
   const writes = archive.match(/\buse\w*?(?:Update|Delete|Create|Stop|Resume|Answer)\w*/g) ?? [];
-  assert.deepEqual([...new Set(writes)], ['useResumeMasterSheetRow']);
+  assert.deepEqual([...new Set(writes)], [], 'no write hook besides the bulk bar');
+  const calls = archive.match(/apiService\.masterSheet\.\w+/g) ?? [];
+  assert.deepEqual([...new Set(calls)], ['apiService.masterSheet.bulkResume']);
 });
 
 test('IT SAYS WHY EACH ROW IS THERE', () => {
@@ -62,7 +71,8 @@ test('IT SAYS WHY EACH ROW IS THERE', () => {
 
 test('A COMPANY CLOSURE OFFERS THE COMPANY, not a dead Resume button', () => {
   assert.match(archive, /REOPEN_THE_COMPANY/);
-  assert.match(archive, /Open company/);
+  // The reason itself links there, rather than a second button per row.
+  assert.match(archive, /<Link\s+to=\{`\/companies\/\$\{encodeURIComponent\(row\.company\)\}`\}/);
 });
 
 test('ITS FILTERS SURVIVE THE PAGE, and Clear FORGETS', () => {
@@ -81,9 +91,10 @@ test('THE DATE RANGE IS ON THE STOP, not the end date', () => {
 // * Stop, beside Delete, on the master sheet
 // ===============================
 
-test('THE ROW HAS BOTH, and they are different acts', () => {
-  assert.match(sheet, /onStop\(row\)/);
-  assert.match(sheet, /onDelete\(row\)/);
+test('THE BAR HAS BOTH, and they are different acts', () => {
+  // The row's own Stop / Delete icons went when the bulk bar took them over.
+  assert.ok(barAction(sheet, 'Stop'), 'the bar has a Stop');
+  assert.ok(barAction(sheet, 'Delete'), 'the bar has a Delete');
 });
 
 test('STOP AND DELETE ARE TOLD APART BY SHAPE, not by colour', () => {
@@ -97,19 +108,27 @@ test('STOP AND DELETE ARE TOLD APART BY SHAPE, not by colour', () => {
    * says "this one counts", and the SHAPE says which it is. That is how
    * CellSuggestion's three marks already work.
    *
+   * (A UI pass in 2026-10 made Stop quiet; he reversed that the same
+   * month. Both red again, the palm and the bin tell them apart.)
+   *
    * What still must not happen is the two becoming interchangeable, so
    * this pins that they are different icons and that Edit is neither.
    */
-  assert.match(sheet, /label="Stop" danger[\s\S]{0,80}?Icon=\{StopHandIcon\}/);
-  assert.match(sheet, /label="Delete" danger[\s\S]{0,80}?Icon=\{TrashIcon\}/);
-  assert.doesNotMatch(sheet, /label="Edit" danger/);
+  const stop = barAction(sheet, 'Stop');
+  const del = barAction(sheet, 'Delete');
+  assert.match(stop, /icon=\{StopHandIcon\}/);
+  assert.match(stop, /variant="danger"/, 'Stop is red');
+  assert.match(del, /icon=\{TrashIcon\}/);
+  assert.match(del, /variant="danger"/, 'Delete is red');
+  assert.doesNotMatch(stop, /TrashIcon/);
+  assert.doesNotMatch(sheet, /<BulkMenu\s+icon=\{EditIcon\}[^>]*variant="danger"/, 'Edit is neither');
 });
 
 test('STOP AND DELETE HAVE SEPARATE STATE, so neither confirm can show the other\'s words', () => {
-  assert.match(sheet, /setStopping/);
-  assert.match(sheet, /setDeleting/);
-  assert.match(sheet, /confirm\.stopRow/);
-  assert.match(sheet, /confirm\.deleteRow/);
+  assert.match(sheet, /setConfirmingBulkStop/);
+  assert.match(sheet, /setConfirmingBulkDelete/);
+  assert.match(sheet, /confirm\.bulkStopRows/);
+  assert.match(sheet, /confirm\.bulkDeleteRows/);
 });
 
 test('THE REVIEW BUTTON ONLY APPEARS WHEN THERE IS SOMETHING TO ANSWER', () => {

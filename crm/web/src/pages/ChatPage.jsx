@@ -9,8 +9,30 @@ import {
   useUnreadChat,
   useMarkThreadRead,
 } from '../hooks/useChat';
-import { SearchIcon, SendIcon, ChevronIcon } from '../components/icons';
+import useRowSelection from '../hooks/useRowSelection';
+import useBulkActions, { bulkMessage, patchQueries } from '../hooks/useBulkActions';
+import { apiService } from '../configs/api.config';
+import Button from '../components/buttons/Button';
+import PageHeader from '../components/layout/PageHeader';
+import UnderlineTabs from '../components/layout/UnderlineTabs';
+import BulkBar, { BulkAction } from '../components/layout/BulkBar';
+import { EmptyState, ErrorState } from '../components/display/StateBlocks';
+import { SearchIcon, SendIcon, ChevronIcon, MailOpenIcon, ChatIcon } from '../components/icons';
 import { ListSkeleton, ChatSkeleton } from '../components/display/Skeleton';
+
+// One key per thread: a person can be in two groups, and those are two chats.
+const threadKey = (group, personId) => `${group}|${personId}`;
+
+// The sidebar's NavBadge, same pill and colours, so an unread count looks
+// the same in the nav and on the page it leads to.
+function UnreadBadge({ count }) {
+  if (!count) return null;
+  return (
+    <span className="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-danger px-1.5 text-xs font-bold leading-none tabular-nums text-surface">
+      {count > 9 ? '9+' : count}
+    </span>
+  );
+}
 
 function formatTime(iso) {
   return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
@@ -21,7 +43,7 @@ const Bubble = memo(function Bubble({ message }) {
   return (
     <div className={`chat-bubble ${message.direction} ${failed ? 'failed' : ''}`}>
       {message.body}
-      <span className="block mt-0.5 text-[0.6875rem] opacity-75">
+      <span className="block mt-0.5 text-xs opacity-75">
         {formatTime(message.created_at)}
         {message.direction === 'outbound' && ` · ${failed ? 'failed to send' : message.status}`}
       </span>
@@ -29,30 +51,33 @@ const Bubble = memo(function Bubble({ message }) {
   );
 });
 
-function PersonListItem({ person, active, onSelect, groupLabel, unread }) {
+// A row, not one big button: the tick needs its own click, and a checkbox
+// inside a <button> is not something a browser will let you press.
+function PersonListItem({ person, active, onSelect, groupLabel, unread, checked, onToggle }) {
   return (
-    <button
-      type="button"
-      className={`flex items-center justify-between gap-2 w-full text-left border-0 border-b border-border min-h-0 px-3 py-2.5 ${
-        active ? 'bg-accent-tint' : 'bg-surface hover:bg-surface-sunken'
+    <div
+      className={`flex items-center gap-2 border-b border-border px-3 ${
+        checked ? 'row-selected' : active ? 'bg-accent-tint' : 'bg-surface hover:bg-surface-sunken'
       }`}
-      onClick={onSelect}
     >
-      <span className="flex flex-col gap-0.5 min-w-0">
-        <span className="font-semibold text-sm">{person.person_name}</span>
-        {groupLabel && <span className="text-xs text-text-muted truncate">{groupLabel}</span>}
-      </span>
-      {unread > 0 && (
-        <span className="shrink-0 min-w-4 h-4 px-1 bg-danger text-white text-[0.625rem] font-bold flex items-center justify-center leading-none">
-          {unread > 9 ? '9+' : unread}
+      <input type="checkbox" checked={checked} onChange={onToggle} aria-label={`Select the thread with ${person.person_name}`} />
+      <button
+        type="button"
+        className="flex min-h-0 min-w-0 flex-1 items-center justify-between gap-2 border-0 bg-transparent px-0 py-2.5 text-left"
+        onClick={onSelect}
+      >
+        <span className="flex flex-col gap-0.5 min-w-0">
+          <span className="font-semibold text-sm">{person.person_name}</span>
+          {groupLabel && <span className="text-xs text-text-muted truncate">{groupLabel}</span>}
         </span>
-      )}
-    </button>
+        <UnreadBadge count={unread} />
+      </button>
+    </div>
   );
 }
 
 function Thread({ group, person, onBack }) {
-  const { data: messages, isLoading } = useThread(group, person.person_id);
+  const { data: messages, isLoading, error, refetch } = useThread(group, person.person_id);
   const { mutate: send, isPending } = useSendMessage();
   const [draft, setDraft] = useState('');
   const scrollRef = useRef(null);
@@ -74,19 +99,15 @@ function Thread({ group, person, onBack }) {
       <div className="flex items-center gap-2 px-3 py-3 border-b border-border font-semibold text-sm">
         {/* The way back to the list on a phone, where the list is not on
             screen beside it. */}
-        <button
-          type="button"
-          className="md:hidden min-h-0 shrink-0 border-0 bg-transparent p-0 text-text-muted"
-          onClick={onBack}
-          aria-label="Back to everyone"
-        >
-          <ChevronIcon width={18} height={18} className="rotate-180" />
-        </button>
+        <Button size="icon" className="md:hidden shrink-0" onClick={onBack} aria-label="Back to everyone">
+          <ChevronIcon width={16} height={16} className="rotate-180" />
+        </Button>
         <span className="truncate">{person.person_name} · {group}</span>
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2" ref={scrollRef}>
         {isLoading && <ChatSkeleton />}
+        <ErrorState error={error} title="Couldn't load this conversation" onRetry={refetch} />
         {messages && messages.length === 0 && (
           <div className="p-8 text-center text-text-muted text-sm">No messages with {person.person_name} yet.</div>
         )}
@@ -106,9 +127,10 @@ function Thread({ group, person, onBack }) {
             }
           }}
         />
-        <button type="submit" className="btn-primary" disabled={isPending || !draft.trim()} aria-label="Send">
-          <SendIcon />
-        </button>
+        <Button type="submit" variant="primary" size="form" disabled={isPending || !draft.trim()} aria-label="Send">
+          <SendIcon width={16} height={16} />
+          Send
+        </Button>
       </form>
     </div>
   );
@@ -133,8 +155,12 @@ export default function ChatPage() {
     if (!activeGroup && groups?.length) setActiveGroup(groups[0]);
   }, [groups, activeGroup]);
 
-  const { data: peopleInGroup, isLoading: loadingPeople } = usePeopleInGroup(query ? undefined : activeGroup);
-  const { data: searchResults, isLoading: loadingSearch } = useSearchPeople(query);
+  const {
+    data: peopleInGroup, isLoading: loadingPeople, error: peopleError, refetch: refetchPeople,
+  } = usePeopleInGroup(query ? undefined : activeGroup);
+  const {
+    data: searchResults, isLoading: loadingSearch, error: searchError, refetch: refetchSearch,
+  } = useSearchPeople(query);
 
   // Fills in the real name once the roster loads, and marks the deep-linked
   // thread read the same way clicking it in the list would. Runs once the
@@ -157,43 +183,64 @@ export default function ChatPage() {
 
   const listing = query ? searchResults : peopleInGroup;
   const listingLoading = query ? loadingSearch : loadingPeople;
+  const listingError = query ? searchError : peopleError;
+  const groupOf = (p) => (query ? p.group_name : activeGroup);
 
-  const groupTabs = useMemo(() => groups ?? [], [groups]);
+  // The group selector is the page's tab row: one group's people at a
+  // time. Searching spans every group, so no tab is on while it does.
+  const groupTabs = useMemo(() => (groups ?? []).map((g) => ({
+    key: g,
+    label: (
+      <span className="inline-flex items-center gap-1.5">
+        {g}
+        <UnreadBadge count={chatCountForGroup(g)} />
+      </span>
+    ),
+  })), [groups, chatCountForGroup]);
+
+  const sel = useRowSelection((listing ?? []).map((p) => threadKey(groupOf(p), p.person_id)));
+  const { run } = useBulkActions();
+
+  // No bulk route: the same per-thread mark-read the list uses, in parallel.
+  // The badges drop to zero at once (sidebar too, it reads the same cache).
+  function markSelectedRead() {
+    const keys = sel.ids;
+    const threads = keys.map((k) => {
+      const at = k.indexOf('|');
+      return { group: k.slice(0, at), personId: k.slice(at + 1) };
+    });
+    const ticked = new Set(keys);
+    run({
+      call: () => Promise.all(threads.map((t) => apiService.messages.markRead(t.group, t.personId))),
+      invalidates: [['unread-chat'], ['threads']],
+      optimistic: (qc) => patchQueries(qc, [['unread-chat']], (data) => (
+        Array.isArray(data?.unread)
+          ? {
+            ...data,
+            unread: data.unread.map((r) => (
+              r.unread && ticked.has(threadKey(r.group_name, r.person_id)) ? { ...r, unread: 0 } : r
+            )),
+          }
+          : data
+      )),
+      icon: 'check',
+      toast: bulkMessage('marked read', threads.length, 'thread'),
+      failure: `Couldn't mark ${threads.length} ${threads.length === 1 ? 'thread' : 'threads'} read`,
+    });
+    sel.clear();
+  }
 
   return (
-    <div>
-      <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
-        <h1 className="text-lg font-bold tracking-tight sm:text-xl">Chat</h1>
-      </div>
+    <div className="space-y-4">
+      <PageHeader title="Chat" />
 
-      <div className="flex flex-col border border-border bg-surface h-[calc(100dvh-theme(spacing.header)-theme(spacing.bottomnav)-theme(spacing.safebottom)-2rem)] md:h-[calc(100vh-8rem)] min-h-96">
-        <div className="flex gap-1 overflow-x-auto border-b border-border bg-surface-sunken p-1">
-          {groupTabs.map((g) => {
-            const isActive = !query && activeGroup === g;
-            const unread = chatCountForGroup(g);
-            return (
-              <button
-                key={g}
-                type="button"
-                className={`flex items-center gap-1.5 rounded-md border-0 min-h-0 px-3 py-1.5 text-sm font-semibold whitespace-nowrap transition-colors ${
-                  isActive
-                    ? 'bg-accent-tint-strong text-accent-strong'
-                    : 'bg-transparent text-text-muted hover:bg-surface hover:text-text'
-                }`}
-                onClick={() => {
-                  setQuery('');
-                  setActiveGroup(g);
-                }}
-              >
-                {g}
-                {unread > 0 && (
-                  <span className="min-w-4 h-4 px-1 bg-danger text-white text-[0.625rem] font-bold flex items-center justify-center leading-none">
-                    {unread > 9 ? '9+' : unread}
-                  </span>
-                )}
-              </button>
-            );
-          })}
+      <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-surface h-[calc(100dvh-theme(spacing.header)-theme(spacing.bottomnav)-theme(spacing.safebottom)-2rem)] md:h-[calc(100vh-8rem)] min-h-96">
+        <div className="overflow-x-auto px-2">
+          <UnderlineTabs
+            tabs={groupTabs}
+            active={query ? null : activeGroup}
+            onChange={(g) => { setQuery(''); setActiveGroup(g); }}
+          />
         </div>
 
         <div className="flex flex-1 min-h-0">
@@ -219,13 +266,15 @@ export default function ChatPage() {
             </div>
 
             {listingLoading && <ListSkeleton />}
-            {!listingLoading && listing && listing.length === 0 && (
-              <div className="p-8 text-center text-text-muted text-sm">
-                {query ? 'No one matches.' : 'No one in this group.'}
-              </div>
+            <div className="px-2 pt-2 empty:hidden">
+              <ErrorState error={listingError} title="Couldn't load people" onRetry={query ? refetchSearch : refetchPeople} />
+            </div>
+            {!listingLoading && !listingError && listing && listing.length === 0 && (
+              <EmptyState icon={ChatIcon} title={query ? 'No one matches' : 'No one in this group'} />
             )}
             {listing?.map((p) => {
-              const personGroup = query ? p.group_name : activeGroup;
+              const personGroup = groupOf(p);
+              const key = threadKey(personGroup, p.person_id);
               const isActive = selected?.person_id === p.person_id && selected?.group === personGroup;
               return (
                 <PersonListItem
@@ -234,6 +283,8 @@ export default function ChatPage() {
                   groupLabel={query ? p.group_name : null}
                   active={isActive}
                   unread={chatCountForPerson(personGroup, p.person_id)}
+                  checked={sel.has(key)}
+                  onToggle={() => sel.toggle(key)}
                   onSelect={() => {
                     setSelected({ person_id: p.person_id, person_name: p.person_name, group: personGroup });
                     markThreadRead({ group: personGroup, personId: p.person_id });
@@ -255,6 +306,10 @@ export default function ChatPage() {
           )}
         </div>
       </div>
+
+      <BulkBar count={sel.count} noun="thread" onClear={sel.clear}>
+        <BulkAction icon={MailOpenIcon} onClick={markSelectedRead}>Mark read</BulkAction>
+      </BulkBar>
     </div>
   );
 }

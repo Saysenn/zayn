@@ -28,7 +28,7 @@ export default function DealPreview({ rows, existing = false }) {
   return (
     <div className="mt-4 border border-border">
       <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border bg-surface-sunken px-3 py-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-text-faint">
+        <span className="text-xs font-semibold uppercase tracking-wide text-text-faint">
           What this will write
         </span>
         <span className="text-xs tabular-nums text-text-muted">
@@ -46,7 +46,7 @@ export default function DealPreview({ rows, existing = false }) {
             className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-3 py-2 text-xs"
           >
             {existing && (
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-text-faint">
+              <span className="text-xs font-semibold uppercase tracking-wide text-text-faint">
                 {i === 0 ? 'edit' : 'new'}
               </span>
             )}

@@ -8,8 +8,8 @@ import { usePeople, usePeopleFilters } from '../hooks/usePeople';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import Button from '../components/buttons/Button';
 import PageHeader, { Toolbar, SearchInput } from '../components/layout/PageHeader';
+import BulkAddDealsModal from '../components/modals/BulkAddDealsModal';
 import Select from '../components/forms/Select';
-import FilterCheckbox from '../components/filters/FilterCheckbox';
 import Pagination from '../components/layout/Pagination';
 import ViewToggle from '../components/layout/ViewToggle';
 import { CardSkeleton, TableSkeleton } from '../components/display/Skeleton';
@@ -19,9 +19,17 @@ import MoneyTotals from '../components/display/MoneyTotals';
 import { formatTotalsWhole } from '../helpers/formatMoney';
 import CellInfo from '../components/display/CellInfo';
 import { popup } from '../configs/popups.config';
-import ManagePersonModal from '../components/modals/ManagePersonModal';
-import { SearchIcon, DownloadIcon, UsersIcon, BuildingIcon } from '../components/icons';
+import { BuildingIcon, SearchIcon, DownloadIcon, UsersIcon, StopHandIcon, EditIcon } from '../components/icons';
 import { countFilters } from '../helpers/filters';
+import { EmptyState, ErrorState } from '../components/display/StateBlocks';
+import SelectAll from '../components/forms/SelectAll';
+import BulkBar, { BulkAction, BulkMenu } from '../components/layout/BulkBar';
+import ConfirmDialog from '../components/modals/ConfirmDialog';
+import BulkFieldModal from '../components/modals/BulkFieldModal';
+import useRowSelection from '../hooks/useRowSelection';
+import useBulkActions, { DEAL_TOUCHES, bulkMessage, patchQueries, mapCachedRows, rollbackAll } from '../hooks/useBulkActions';
+import { countOf } from '../helpers/pluralNoun';
+import { apiService } from '../configs/api.config';
 
 const GRID_PAGE_SIZE = 16;
 const ROW_PAGE_SIZE = 25;
@@ -50,6 +58,44 @@ const SHOW_EXPORT = false;
 // the formatting, identical, and `formatMoney` held a third spelling of it.
 // See totalsList.
 
+// The API validates the method against this closed set.
+const PAYMENT_METHODS = ['cash', 'bank', 'crypto'];
+
+/**
+ * THE BAR WORKS ON DEALS, the list shows people. A person row is a sum of
+ * deals, so "stop these people" means "stop every live deal they hold",
+ * and only the person's own record knows which deals those are. One read
+ * per ticked person, then one bulk write: a page is at most 25 people.
+ */
+async function liveDealIdsOf(personIds) {
+  const answers = await Promise.all(personIds.map((id) => apiService.people.get(id)));
+  return answers.flatMap((a) => (a?.person?.deals ?? []).filter((d) => !d.stopped_on).map((d) => d.id));
+}
+
+// Snake-case deal column for each Edit field the bar offers.
+const DEAL_COLUMN = { groupName: 'group_name', location: 'location', paymentMethod: 'payment_method' };
+
+/**
+ * ON SCREEN BEFORE THE SERVER ANSWERS. The People list and every cached
+ * person page are patched the moment Stop or Edit is confirmed; the ids of
+ * the deals behind them are only fetched afterwards, in the background.
+ * Returns the rollback.
+ *
+ * `onRow(row, key)` → patched person row, or null to drop it from that list.
+ * `onDeal(deal)` → patched deal on a cached person page (live deals only).
+ */
+function patchPeople(queryClient, personIds, onRow, onDeal) {
+  const want = new Set(personIds.map(String));
+  const list = patchQueries(queryClient, [['people']], (data, key) => mapCachedRows(data, (row) => (
+    want.has(String(row.person_id)) ? onRow(row, key) : row
+  )));
+  const detail = patchQueries(queryClient, [['person']], (data, key) => {
+    if (!want.has(String(key[1])) || !data?.person?.deals) return data;
+    return { ...data, person: { ...data.person, deals: data.person.deals.map((d) => (d.stopped_on ? d : onDeal(d))) } };
+  });
+  return rollbackAll(list, detail);
+}
+
 // "Indigo, Milkman" up to two, then "+2" — a person on five groups would
 // otherwise push every other column off the row.
 function summarizeList(items, max = 2) {
@@ -69,10 +115,10 @@ function summarizeList(items, max = 2) {
  * Still a real keyboard target: tabbable, and Enter opens it, so this
  * doesn't become a mouse-only page.
  */
-function PersonRow({ person, onOpen, onManage }) {
+function PersonRow({ person, onOpen, selected, onSelect }) {
   return (
     <tr
-      className="border-b border-border last:border-0 hover:bg-surface-sunken cursor-pointer"
+      className={`border-b border-border last:border-0 hover:bg-surface-sunken cursor-pointer ${selected ? 'row-selected' : ''}`}
       onClick={() => onOpen(person.person_id)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -84,7 +130,10 @@ function PersonRow({ person, onOpen, onManage }) {
       role="link"
       aria-label={`Open ${person.display_name}`}
     >
-      <td className="px-3 py-2.5 sticky-col sticky-edge">
+      <td className="td sticky-col w-8" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+        <input type="checkbox" checked={selected} onChange={onSelect} aria-label={`Select ${person.display_name}`} />
+      </td>
+      <td className="td sticky-col sticky-edge">
         <span className="font-medium text-text">{person.display_name}</span>
         {/* An icon, not a "REVIEW" chip. A chip is a word with no
             explanation behind it, and it changes the column's width row by
@@ -113,8 +162,8 @@ function PersonRow({ person, onOpen, onManage }) {
           </span>
         )}
       </td>
-      <td className="px-3 py-2.5 text-text-muted">{summarizeList(person.roles)}</td>
-      <td className="px-3 py-2.5 text-text-muted">{summarizeList(person.groups)}</td>
+      <td className="td text-text-muted">{summarizeList(person.roles)}</td>
+      <td className="td text-text-muted">{summarizeList(person.groups)}</td>
       {/* DEALS, so it counts deals. `active_count` / `deal_count`, not the
           company counts beside them: a company in a group is one company
           however many roles a person holds on it, and this column no
@@ -123,7 +172,7 @@ function PersonRow({ person, onOpen, onManage }) {
           One column, not two. "COMPANIES 1" beside "ACTIVE 0/1" made the
           reader work out that the 1 and the 1 were the same thing and the
           0 was something else. This says it outright. */}
-      <td className="px-3 py-2.5 text-right tabular-nums text-text-muted">
+      <td className="td text-right tabular-nums text-text-muted">
         {person.active_count === person.deal_count
           ? person.deal_count
           : `${person.active_count} of ${person.deal_count}`}
@@ -132,21 +181,7 @@ function PersonRow({ person, onOpen, onManage }) {
           badge restated the number immediately to its left. */}
       {/* The column has room, so the table prints every currency. Only the
           card hides them behind an icon. */}
-      <td className="px-3 py-2.5 text-right tabular-nums">{formatTotalsWhole(person.monthly_totals)}</td>
-      {/* Companies, roles and groups without leaving the list. Opening
-          the person first, changing one company and coming back is three
-          navigations for one edit, and this list is where an admin
-          notices the problem. stopPropagation because the row itself is
-          a link to the person. */}
-      <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
-        {/* The same action as the card's, so it wears the same colour.
-            One button reading two ways depending on the view toggle is
-            worse than either choice. */}
-        <Button variant="primary" onClick={() => onManage(person.person_id)}>
-          <BuildingIcon width={15} height={15} />
-          Manage
-        </Button>
-      </td>
+      <td className="td text-right tabular-nums">{formatTotalsWhole(person.monthly_totals)}</td>
     </tr>
   );
 }
@@ -159,10 +194,13 @@ function PersonRow({ person, onOpen, onManage }) {
  * check second, and the company count is what tells you whether the number
  * covers one arrangement or six.
  */
-function PersonCard({ person, onOpen, onManage }) {
+function PersonCard({ person, onOpen, selected, onSelect }) {
   return (
     <RecordCard
       interactive
+      selected={selected}
+      onSelect={onSelect}
+      selectLabel={`Select ${person.display_name}`}
       icon={UsersIcon}
       title={person.display_name}
       subtitle={summarizeList(person.roles)}
@@ -190,20 +228,6 @@ function PersonCard({ person, onOpen, onManage }) {
             : `${person.active_count} of ${person.deal_count} active`,
         },
       ]}
-      actions={
-        // GREEN. It is the card's one action, and `quiet` is transparent
-        // with muted ink: on a card that is already a click target it read
-        // as a caption rather than a button.
-        // MANAGE, AND A BUILDING. It opens ManagePersonModal, and on screen
-        // a person has COMPANIES: "Assign" is also the dead word from the
-        // dropped assignments table. The company card's Manage carries
-        // UsersIcon because a company has HANDLERS, so the two say which
-        // way round they are rather than being one icon twice.
-        <Button variant="primary" onClick={() => onManage(person.person_id)}>
-          <BuildingIcon width={15} height={15} />
-          Manage
-        </Button>
-      }
     />
   );
 }
@@ -216,8 +240,6 @@ export default function PeoplePage() {
   const [search, setSearch] = useStickyState('people.search', '');
   const [filters, setFilters] = useStickyState('people.filters', {});
   const [showExport, setShowExport] = useState(false);
-  // A person_id, when the Assign modal is open on that row.
-  const [managing, setManaging] = useState(null);
 
   const navigate = useNavigate();
   const query = useDebouncedValue(search, 300);
@@ -226,7 +248,8 @@ export default function PeoplePage() {
   // take the name with it. Re-measures whenever the rows change. Declared
   // after `query`, not beside the other state: reading it above its own
   // const is a temporal-dead-zone crash, not a lint warning.
-  const tableRef = useStickyColumns(1, [page, filters, query]);
+  // Two: the tick and the name travel together.
+  const tableRef = useStickyColumns(2, [page, filters, query]);
   const openPerson = (personId) => navigate(`/people/${encodeURIComponent(personId)}`);
   const { data: filterOptions } = usePeopleFilters();
 
@@ -237,7 +260,78 @@ export default function PeoplePage() {
     () => ({ ...filters, q: query || undefined, page, pageSize }),
     [pageSize, page, filters, query],
   );
-  const { data: people, total, isLoading, error } = usePeople(params);
+  const { data: people, total, isLoading, error, refetch } = usePeople(params);
+
+  // The bulk bar. Ticks are cut back to what is on screen, so a page turn
+  // or a filter can never leave someone ticked you cannot see.
+  const sel = useRowSelection((people ?? []).map((p) => p.person_id));
+  const [addingTo, setAddingTo] = useState(false);
+  const { run } = useBulkActions();
+  const [confirmStop, setConfirmStop] = useState(false);
+  // The deal field the Edit menu picked, while its value modal is open.
+  const [editField, setEditField] = useState(null);
+
+  // Neither waits. The bar is cleared and the rows change on the click;
+  // the deal ids are fetched and written behind it. See patchPeople.
+  function stopAll() {
+    const ids = sel.ids;
+    const today = new Date().toISOString().slice(0, 10);
+    run({
+      call: async () => {
+        const dealIds = await liveDealIdsOf(ids);
+        return dealIds.length ? apiService.masterSheet.bulkStop(dealIds) : { stopped: [], skipped: 0, batchId: null };
+      },
+      optimistic: (qc) => patchPeople(
+        qc, ids,
+        // "Active only" no longer holds them; elsewhere they stay, at zero.
+        (row, key) => (key[1]?.status === 'active' ? null : { ...row, active_count: 0, monthly_totals: {} }),
+        (d) => ({ ...d, stopped_on: today }),
+      ),
+      invalidates: DEAL_TOUCHES,
+      toast: { message: `Every live deal of ${countOf(ids.length, 'person')} stopped` },
+      report: (data) => bulkMessage('stopped', data.stopped.length, 'deal', [[data.skipped, 'already stopped']]),
+      undoBatch: (data) => data.batchId,
+      failure: `Couldn't stop the deals of ${countOf(ids.length, 'person')}`,
+      icon: 'stop',
+    });
+    sel.clear();
+    setConfirmStop(false);
+  }
+
+  function editAll(value) {
+    const ids = sel.ids;
+    const field = editField;
+    const column = DEAL_COLUMN[field.key];
+    run({
+      call: async () => {
+        const dealIds = await liveDealIdsOf(ids);
+        return dealIds.length
+          ? apiService.masterSheet.bulkUpdate(dealIds, { [field.key]: value })
+          : { updated: [], skipped: {}, batchId: null };
+      },
+      optimistic: (qc) => patchPeople(
+        qc, ids,
+        // Only Group shows on the row; the rest live on the deals.
+        (row) => (field.key === 'groupName' ? { ...row, groups: [value] } : row),
+        (d) => ({ ...d, [column]: value }),
+      ),
+      invalidates: DEAL_TOUCHES,
+      toast: { message: `${field.label} set to ${value} for ${countOf(ids.length, 'person')}` },
+      report: (data) => bulkMessage(`set to ${value}`, data.updated.length, 'deal', [
+        [data.skipped?.same ?? 0, 'already set'], [data.skipped?.gone ?? 0, 'gone'],
+      ]),
+      undoBatch: (data) => data.batchId,
+      failure: `Couldn't change ${field.label.toLowerCase()} for ${countOf(ids.length, 'person')}`,
+    });
+    sel.clear();
+    setEditField(null);
+  }
+
+  const editFields = [
+    { key: 'groupName', label: 'Group', options: filterOptions?.groups ?? [], allowCustom: true },
+    { key: 'location', label: 'Location', options: filterOptions?.locations ?? [], allowCustom: true },
+    { key: 'paymentMethod', label: 'Payment method', options: PAYMENT_METHODS, allowCustom: false },
+  ];
 
   function setFilter(key, value) {
     setFilters((f) => {
@@ -250,10 +344,14 @@ export default function PeoplePage() {
   }
 
   const filterActive = Object.keys(filters).length > 0;
+  // One wording for both views, so the grid and the table cannot disagree.
+  const empty = filterActive || query
+    ? { title: 'No people match those filters', hint: 'Clear a filter or the search to see more.' }
+    : { title: 'No people yet', hint: 'Import a master sheet to get started.' };
   // Only the dropdown filters decide whether the panel springs open. A
   // ticked checkbox is already visible, so opening the panel for it would
   // reveal controls nobody asked about.
-  const panelActive = ['role', 'group', 'company', 'method', 'currency'].some((k) => filters[k]);
+  const panelActive = ['role', 'group', 'company', 'method', 'currency', 'status', 'needsReview'].some((k) => filters[k]);
 
   return (
     <div className="space-y-4">
@@ -309,22 +407,6 @@ export default function PeoplePage() {
             }}
           />
         }
-        inline={
-          /* One click each with no menu behind them, so they sit beside
-             the search rather than under a disclosure icon. */
-          <>
-            <FilterCheckbox
-              label="Active only"
-              value={filters.status === 'active' ? 'true' : undefined}
-              onChange={(v) => setFilter('status', v ? 'active' : undefined)}
-            />
-            <FilterCheckbox
-              label="Flagged only"
-              value={filters.needsReview}
-              onChange={(v) => setFilter('needsReview', v)}
-            />
-          </>
-        }
         filtersActive={panelActive}
         filtersCount={countFilters(filters)}
         storageKey="people.panel"
@@ -333,6 +415,14 @@ export default function PeoplePage() {
           <>
             {/* Every option comes from the uploaded document. A role the
                 boss invents next month shows up here on its own. */}
+            {/* ACTIVE AND FLAGGED, IN THE PANEL. Two switches beside the search
+                read as actions on the ticked rows once the bulk bar arrived. */}
+            <Select size="sm" className="w-40"
+              value={filters.status ?? ''} onChange={(v) => setFilter('status', v || undefined)}
+              options={[{ value: 'active', label: 'Active only' }]} placeholder="Active or not" />
+            <Select size="sm" className="w-40"
+              value={filters.needsReview ?? ''} onChange={(v) => setFilter('needsReview', v || undefined)}
+              options={[{ value: 'true', label: 'Flagged only' }]} placeholder="Flagged or not" />
             <Select size="sm" className="w-44" searchable={filterOptions?.roles?.length > 12}
               value={filters.role ?? ''} onChange={(v) => setFilter('role', v)}
               options={filterOptions?.roles ?? []} placeholder="All roles" />
@@ -352,26 +442,19 @@ export default function PeoplePage() {
         }
       />
 
-      {error && (
-        <p className="rounded-md border border-danger/30 bg-danger-tint px-4 py-2.5 text-sm text-danger">
-          {error.message}
-        </p>
-      )}
+      <ErrorState error={error} title="Couldn't load people" onRetry={refetch} />
 
       {/* CARDS ON A PHONE, the table from md up. Not a narrower table:
           five columns at 375px is unreadable however they are trimmed. */}
-      {view === 'grid' && (
+      {view === 'grid' && !isLoading && people?.length === 0 && <EmptyState icon={UsersIcon} {...empty} />}
+      {view === 'grid' && (isLoading || people?.length > 0) && (
       <CardList columns>
         {isLoading && Array.from({ length: 4 }, (_, index) => <CardSkeleton key={index} />)}
-        {!isLoading && people?.length === 0 && (
-          <p className="border border-dashed border-border px-3 py-8 text-center text-sm text-text-muted">
-            {filterActive || query
-              ? 'No people match those filters.'
-              : 'No people yet. Import a master sheet to get started.'}
-          </p>
-        )}
         {!isLoading && people?.map((p) => (
-          <PersonCard key={p.person_id} person={p} onOpen={openPerson} onManage={setManaging} />
+          <PersonCard
+            key={p.person_id} person={p} onOpen={openPerson}
+            selected={sel.has(p.person_id)} onSelect={() => sel.toggle(p.person_id)}
+          />
         ))}
       </CardList>
       )}
@@ -380,28 +463,27 @@ export default function PeoplePage() {
       <div className="table-wrap">
         <table ref={tableRef} className="w-full min-w-[760px] text-sm">
           <thead>
-            <tr >
+            <tr>
+              <th className="th sticky-col w-8">
+                <SelectAll count={sel.count} total={sel.total} onChange={sel.setAll} />
+              </th>
               <th className="th sticky-col sticky-edge">Name</th>
               <th className="th">Roles</th>
               <th className="th">Groups</th>
               <th className="th text-right">Active deals</th>
               <th className="th text-right">Monthly</th>
-              <th className="th" />
             </tr>
           </thead>
           <tbody>
-            {isLoading && <TableSkeleton rows={8} columns={7} />}
+            {isLoading && <TableSkeleton rows={8} columns={6} />}
             {!isLoading && people?.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-3 py-10 text-center text-text-muted">
-                  {filterActive || query
-                    ? 'No people match those filters.'
-                    : 'No people yet. Import a master sheet to get started.'}
-                </td>
-              </tr>
+              <EmptyState asRow colSpan={6} icon={UsersIcon} {...empty} />
             )}
             {!isLoading && people?.map((p) => (
-              <PersonRow key={p.person_id} person={p} onOpen={openPerson} onManage={setManaging} />
+              <PersonRow
+                key={p.person_id} person={p} onOpen={openPerson}
+                selected={sel.has(p.person_id)} onSelect={() => sel.toggle(p.person_id)}
+              />
             ))}
           </tbody>
         </table>
@@ -419,7 +501,59 @@ export default function PeoplePage() {
           onClose={() => setShowExport(false)}
         />
       )}
-      {managing && <ManagePersonModal personId={managing} onClose={() => setManaging(null)} />}
+
+      {confirmStop && (
+        <ConfirmDialog
+          title={`Stop every live deal of ${sel.count} ${sel.count === 1 ? 'person' : 'people'}?`}
+          detail={[
+            'Each of their live deals moves to the Archive, out of the master sheet and out of every month from today onward.',
+            'Months already paid are untouched. Undo, or Resume on the Archive, puts them back.',
+          ]}
+          confirmLabel="Stop all deals"
+          confirmVariant="danger"
+          icon={<StopHandIcon width={15} height={15} />}
+          onCancel={() => setConfirmStop(false)}
+          onConfirm={stopAll}
+        />
+      )}
+      {editField && (
+        <BulkFieldModal
+          title={`Set ${editField.label.toLowerCase()} on every live deal`}
+          label={editField.label}
+          options={editField.options}
+          allowCustom={editField.allowCustom}
+          onApply={editAll}
+          onClose={() => setEditField(null)}
+        />
+      )}
+
+      {/* No Export here: the page's own export is switched off
+          (SHOW_EXPORT), and it exports by filter, not by tick. */}
+      <BulkBar count={sel.count} noun="person" onClear={sel.clear}>
+        <BulkAction icon={StopHandIcon} variant="danger" onClick={() => setConfirmStop(true)}>
+          Stop all deals
+        </BulkAction>
+        <BulkAction icon={BuildingIcon} onClick={() => setAddingTo(true)}>
+          Add companies
+        </BulkAction>
+        <BulkMenu
+          icon={EditIcon}
+          label="Edit"
+          hint="Sets it on every live deal they hold"
+          options={editFields.map((f) => ({ label: f.label, onSelect: () => setEditField(f) }))}
+        />
+      </BulkBar>
+
+      {addingTo && (
+        <BulkAddDealsModal
+          direction="toCompany"
+          subjects={(people ?? [])
+            .filter((p) => sel.has(p.person_id))
+            .map((p) => ({ id: p.person_id, name: p.display_name, group: p.groups?.[0] }))}
+          onClose={() => setAddingTo(false)}
+          onDone={sel.clear}
+        />
+      )}
     </div>
   );
 }

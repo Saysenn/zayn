@@ -33,6 +33,8 @@ export const apiService = {
     update: (key, fields) => api.patch(`${apiPath}/companies/${encodeURIComponent(key)}`, fields),
     addHandlers: (key, handlers) =>
       api.post(`${apiPath}/companies/${encodeURIComponent(key)}/handlers`, { handlers }),
+    // The bulk bar: a tier or a (non closing) status onto many companies.
+    bulk: (keys, fields) => api.post(`${apiPath}/companies/bulk`, { keys, ...fields }),
   },
   // ===============================
   // * THE MONTHLY REVIEW. NO MONTH PARAM, ANYWHERE.
@@ -58,6 +60,8 @@ export const apiService = {
     forPerson: (group, personId) =>
       api.get(`${apiPath}/concerns/person${toQueryString({ group, personId })}`),
     updateStatus: (id, status) => api.patch(`${apiPath}/concerns/${id}`, { status }),
+    // people: [{ group, personId }]. A Flagged row is a person.
+    bulkStatus: (people, status) => api.post(`${apiPath}/concerns/bulk-status`, { people, status }),
   },
   expenses: {
     list: (params = {}) => api.get(`${apiPath}/expenses${toQueryString(params)}`),
@@ -67,6 +71,8 @@ export const apiService = {
     create: (fields) => api.post(`${apiPath}/expenses`, fields),
     update: (id, fields) => api.patch(`${apiPath}/expenses/${id}`, fields),
     remove: (id) => api.delete(`${apiPath}/expenses/${id}`),
+    bulkUpdate: (ids, fields) => api.post(`${apiPath}/expenses/bulk-update`, { ids, fields }),
+    bulkDelete: (ids) => api.post(`${apiPath}/expenses/bulk-delete`, { ids }),
     // The month as a sheet, fetched with progress rather than navigating
     // away. Resolves { blob, filename }.
     download: (params = {}, onProgress) => (
@@ -121,6 +127,9 @@ export const apiService = {
   history: {
     list: (params = {}) => api.get(`${apiPath}/master-sheet/changes${toQueryString(params)}`),
     revert: (id) => api.post(`${apiPath}/master-sheet/changes/${id}/revert`),
+    // Many at once: the ticked History rows by id, or one bulk act by its
+    // batch (the toast's Undo).
+    revertMany: ({ ids, batchId }) => api.post(`${apiPath}/master-sheet/changes/revert-many`, { ids, batchId }),
   },
   exports: {
     // The eight xlsx SHAPES. Served since the route was written and unused
@@ -180,6 +189,7 @@ export const apiService = {
     count: ({ source, level } = {}) => api.get(`${apiPath}/logs/count${toQueryString({ source, level })}`),
     // Deletes one batch per call — see useLogs.js's clear(), which loops this.
     clearBatch: ({ source, level } = {}) => api.delete(`${apiPath}/logs${toQueryString({ source, level })}`),
+    deleteIds: (ids) => api.post(`${apiPath}/logs/delete`, { ids }),
   },
   // The CRM's own master sheet — the final, admin-polished version whatbot
   // pulls every 5 minutes and answers from. Nothing to do with `calculator`
@@ -222,7 +232,12 @@ export const apiService = {
     // delete tabs. History shows the difference.
     bulkDelete: ({ ids, via }) => api.post(`${apiPath}/master-sheet/bulk-delete`, { ids, via }),
     // One value onto many rows, from the export modal's warnings panel.
-    bulkUpdate: (ids, fields) => api.post(`${apiPath}/master-sheet/bulk-update`, { ids, fields }),
+    bulkUpdate: (ids, fields, { skipStopped = false } = {}) =>
+      api.post(`${apiPath}/master-sheet/bulk-update`, { ids, fields, skipStopped }),
+    // The bulk bar's Stop and the Archive's Resume. One batch each, so one
+    // Undo puts the lot back.
+    bulkStop: (ids) => api.post(`${apiPath}/master-sheet/bulk-stop`, { ids }),
+    bulkResume: (ids) => api.post(`${apiPath}/master-sheet/bulk-resume`, { ids }),
     // Deals still on last month's preset; the boot screen rolls each one.
     presetRollCheck: () => api.get(`${apiPath}/master-sheet/preset-roll`),
     // Work parked for a later month. Safe to call on every sign in: the

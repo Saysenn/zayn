@@ -9,40 +9,25 @@ test('company cards expose identity, money, tier and handler action in scan orde
   const card = read('../components/display/RecordCard.jsx');
 
   assert.match(page, /icon=\{BuildingIcon\}/);
-  assert.match(page, /label="Tier"/);
   assert.match(page, /leadLabel="Monthly"/);
   assert.match(card, /body/);
   assert.match(card, /bg-surface-sunken/);
-  assert.match(page, />\s*Manage\s*</);
-  assert.doesNotMatch(page, /Manage handlers/);
   // ===============================
-  // * A CARD'S ONE ACTION IS GREEN
+  // * NO PER-ROW MANAGE ANY MORE: THE BULK BAR COVERS IT
   // ===============================
-  // `quiet` is transparent with muted ink, so on a card that is already a
-  // click target the button read as a caption. And the card and the table
-  // row are the same action, so they wear the same colour: one button
-  // reading two ways depending on the view toggle is worse than either.
+  // Set tier / status live on the bulk bar, and a person's companies are
+  // edited on their own page. The rows and cards keep no Manage button.
   const people = read('./PeoplePage.jsx');
-  assert.equal(
-    (page.match(/<Button variant="primary"[^>]*onClick=\{\(\) => onOpen\(company\)\}/g) ?? []).length,
-    2, 'both Manage buttons are green, the card and the row',
-  );
-  assert.equal(
-    (people.match(/<Button variant="primary" onClick=\{\(\) => onManage\(person\.person_id\)\}/g) ?? []).length,
-    2, 'both Manage buttons are green, the card and the row',
-  );
-  // ===============================
-  // * MANAGE, AND THE ICON SAYS WHICH WAY ROUND
-  // ===============================
-  // It opens ManagePersonModal, and on screen a person has COMPANIES.
-  // "Assign" was also the dead word from the dropped assignments table.
-  // The company's Manage keeps UsersIcon, because a company has HANDLERS.
-  assert.equal((people.match(/<BuildingIcon width=\{15\} height=\{15\} \/>\s*Manage/g) ?? []).length, 2);
-  assert.doesNotMatch(people, />\s*Assign\s*</, 'the button is Manage on the card and on the row');
-  assert.equal((page.match(/<UsersIcon width=\{14\} height=\{14\} \/>\s*Manage/g) ?? []).length, 2);
+  assert.doesNotMatch(page, />\s*Manage\s*</);
+  assert.doesNotMatch(page, /Manage handlers/);
+  assert.doesNotMatch(people, />\s*Manage\s*</);
+  assert.doesNotMatch(people, />\s*Assign\s*</);
+  // The tier is plain text (Set tier is on the bar), a faint dash when unset.
+  assert.doesNotMatch(page, /<Select[\s\S]*?label="Tier"/);
+  assert.match(page, /label="Set tier"/);
+  assert.match(page, /company\.tier \|\| <span className="text-text-faint">—<\/span>/);
   assert.match(card, /text-sm font-semibold leading-5/);
   assert.match(card, /text-xs text-text/);
-  assert.match(page, /<Select[\s\S]*?label="Tier"[\s\S]*?size="detail"/);
   assert.doesNotMatch(page, /function CardActionField/);
   // ANY status that is not active, not just closed. There are four now
   // (migration 058), and the rule this pins is that a card badges a company
@@ -98,9 +83,10 @@ test('both sidebars use the same tinted active state', () => {
 test('settings actions use the shared button size and meaningful icons', () => {
   const page = read('./SettingsPage.jsx');
 
-  assert.match(page, /<LinkButton[^>]*size="md"[^>]*>[\s\S]*?<LogsIcon/);
+  // `sm`, the toolbar size: `md` is kept for a modal's main actions.
+  assert.match(page, /<LinkButton[^>]*size="sm"[^>]*>[\s\S]*?<LogsIcon/);
   assert.match(page, /icon=\{TrashIcon\}/);
-  assert.match(page, /<Button variant="danger" size="md"/);
+  assert.match(page, /<Button variant="danger" size="sm"/);
 });
 
 test('pagination uses visible secondary buttons instead of transparent quiet actions', () => {
@@ -109,7 +95,9 @@ test('pagination uses visible secondary buttons instead of transparent quiet act
 
   assert.match(pagination, /<Button variant="secondary"/);
   assert.doesNotMatch(pagination, /<Button variant="quiet"/);
-  assert.match(button, /secondary:\s*'bg-surface[^']*border-border-strong[^']*shadow-sm/);
+  // Still visibly a button (a surface and a border), just a thin one now.
+  assert.match(button, /secondary:\s*'bg-surface[^']*border-border[ '][^']*'/);
+  assert.match(button, /secondary:\s*'(?![^']*bg-transparent)/);
 });
 
 test('companies show sixteen cards or twenty five rows and pagination exposes the current destination', () => {

@@ -258,7 +258,7 @@ export default function EditableCell({
             )}
           </>
         )}
-        {error && <p className="text-[0.65rem] text-danger m-0 mt-0.5 leading-tight">{error}</p>}
+        {error && <p className="text-xs text-danger m-0 mt-0.5 leading-tight">{error}</p>}
       </Cell>
     );
   }

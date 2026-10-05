@@ -14,7 +14,7 @@
 export default function UnderlineTabs({ tabs, active, onChange, action }) {
   return (
     <div className="flex items-end justify-between gap-3 border-b border-border">
-      <div className="flex gap-1" role="tablist">
+      <div className="scroll-slim flex min-w-0 gap-1 overflow-x-auto" role="tablist">
         {tabs.map((t) => (
           <button
             key={t.key}
@@ -22,7 +22,7 @@ export default function UnderlineTabs({ tabs, active, onChange, action }) {
             role="tab"
             aria-selected={active === t.key}
             onClick={() => onChange(t.key)}
-            className={`-mb-px rounded-none border-0 border-b-2 bg-transparent px-3 py-2 text-sm transition-colors ${
+            className={`-mb-px shrink-0 whitespace-nowrap rounded-none border-0 border-b-2 bg-transparent px-3 py-2 text-sm transition-colors ${
               active === t.key
                 ? 'border-accent-strong font-semibold text-text'
                 : 'border-transparent text-text-muted hover:text-text'

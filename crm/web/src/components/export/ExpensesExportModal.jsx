@@ -103,12 +103,12 @@ export default function ExpensesExportModal({
               ]}
             />
             {!canSplit && (
-              <span className="text-[11px] text-text-faint">
+              <span className="text-xs text-text-faint">
                 One group, so there is nothing to split.
               </span>
             )}
             {perGroup && canSplit && (
-              <span className="text-[11px] text-text-faint">
+              <span className="text-xs text-text-faint">
                 {groupsInPlay} files. A row with no group gets its own rather than being left out.
               </span>
             )}
@@ -119,10 +119,12 @@ export default function ExpensesExportModal({
           </SettingRow>
 
           <div className="flex justify-end gap-2 border-t border-border pt-3">
-            <Button variant="quiet" disabled={busy} onClick={onClose}>Cancel</Button>
+            <Button size="md" variant="secondary" disabled={busy} onClick={onClose}>Cancel</Button>
             <Button
+              size="md"
               variant="primary"
               disabled={busy}
+              phase={busy ? 'working' : 'idle'}
               onClick={() => onExport({
                 columns: chosen,
                 groups: chosenGroups,

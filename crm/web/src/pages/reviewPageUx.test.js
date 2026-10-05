@@ -27,6 +27,14 @@ const sheet = read('./MasterSheetPage.jsx');
 const toolbar = page.slice(page.indexOf('<Toolbar'), page.indexOf('list.length === 0'));
 // And the page header, which holds the title, the words and History.
 const header = page.slice(page.indexOf('<PageHeader'), page.indexOf('<UnderlineTabs'));
+// The bulk bar, which only rises once a row is ticked: the answers live here.
+const bulk = page.slice(page.indexOf('<BulkBar'), page.indexOf('</BulkBar>'));
+
+// The attributes of the bulk bar button labelled `label`, '' when there is
+// none. Lazy, and never across a second <BulkAction, so it is that button's.
+const barAction = (src, label) => src.match(
+  new RegExp(`<BulkAction\\b((?:(?!<BulkAction\\b)[\\s\\S])*?)>\\s*${label}\\s*</BulkAction>`),
+)?.[1] ?? '';
 
 test('SELECTION IS A CHECKBOX, never the red-when-off Toggle', () => {
   // forms/Toggle is red when OFF by design: it is a yes/no FACT about a
@@ -76,7 +84,10 @@ test('IT HAS A SEARCH, and the buttons follow it', () => {
   // buttons read `list`/`chosen` off it. A search that narrows the table
   // but not the button is a bulk act over rows you cannot see.
   assert.match(page, /const list = useMemo/);
-  assert.match(page, /new Set\(list\.map\(\(r\) => r\.id\)\)/);
+  // The selection is cut back to `list`, and the answers act on `chosen`.
+  assert.match(page, /const listIds = useMemo\(\(\) => list\.map\(\(row\) => row\.id\), \[list\]\)/);
+  assert.match(page, /useRowSelection\(listIds\)/);
+  assert.match(page, /const chosen = useMemo\(\(\) => list\.filter\(\(row\) => sel\.has\(row\.id\)\)/);
 });
 
 /**
@@ -122,28 +133,33 @@ test('AND THE SIDEBAR ACTUALLY GOES THERE', () => {
   assert.match(app, /<Route path="review" element=\{<ReviewPage \/>\}/);
 });
 
-test('THE ACTIONS COLUMN IS ICONS, and the SHAPE carries the difference', () => {
-  // His call 2026-09-17. Three words across twenty six columns was the
-  // widest thing on the row for the least said.
+test('STOP AND DELETE ARE BOTH RED, and the SHAPE carries the difference', () => {
+  // His call 2026-09-17: icons, both red. Both consequences are real and
+  // the red says "this one counts"; what separates them is the shape, the
+  // way it does on CellSuggestion's three marks. A raised palm is an ending
+  // you can undo from the Archive, a bin is a row that goes.
   //
-  // THIS REPLACES the earlier rule that Stop must not be tinted like
-  // Delete. Both consequences are real and the red says "this one counts";
-  // what separates them is the shape, the way it does on CellSuggestion's
-  // three marks. A raised palm is an ending you can undo from the Archive,
-  // a bin is a row that goes.
-  assert.match(sheet, /<RowAction label="Edit"[^/]*Icon=\{EditIcon\}/);
-  assert.match(sheet, /<RowAction label="Stop" danger[^/]*Icon=\{StopHandIcon\}/);
-  assert.match(sheet, /<RowAction label="Delete" danger[^/]*Icon=\{TrashIcon\}/);
-  // Edit decides nothing, so it is the quiet one.
-  assert.doesNotMatch(sheet, /<RowAction label="Edit" danger/);
+  // A UI pass in 2026-10 made Stop quiet; he reversed it, so both are red
+  // again. They live in the master sheet's bulk bar now: the row's own
+  // icon column went when the bar took its acts over.
+  const stop = barAction(sheet, 'Stop');
+  const del = barAction(sheet, 'Delete');
+  assert.match(stop, /icon=\{StopHandIcon\}/);
+  assert.match(stop, /variant="danger"/, 'Stop is red');
+  assert.match(del, /icon=\{TrashIcon\}/);
+  assert.match(del, /variant="danger"/, 'Delete is red');
+  // Same colour, never the same shape.
+  assert.doesNotMatch(stop, /TrashIcon/);
+  assert.doesNotMatch(del, /StopHandIcon/);
 });
 
 test('AN ICON ONLY CONTROL STILL SAYS ITS NAME', () => {
-  // One for the eye, one for a screen reader. An icon with neither is a
-  // guess about what a button does to somebody's pay.
-  const action = sheet.slice(sheet.indexOf('function RowAction'));
-  assert.match(action.slice(0, 600), /title=\{label\}/);
-  assert.match(action.slice(0, 600), /aria-label=\{label\}/);
+  // One for the eye, one for a screen reader. The bar's Clear drops to
+  // its icon on a phone, and an icon with neither is a guess.
+  const bar = read('../components/layout/BulkBar.jsx');
+  const clear = bar.slice(bar.indexOf('onClick={onClear}'));
+  assert.match(clear.slice(0, 200), /aria-label="Clear selection"/);
+  assert.match(clear.slice(0, 200), /title="Clear selection/);
 });
 
 test('THE STOP ICON IS NOT ANOTHER BIN SHAPE', () => {
@@ -182,15 +198,25 @@ test('AND THE EXPLANATION IS STILL THERE, stacked inside it', () => {
  * the one screen that must not be ignored.
  */
 test('THE THREE ANSWERS ARE CONTEXTUAL, not three permanent colours', () => {
+  // They live in the BULK BAR now (UI pass, 2026-10), not the toolbar.
   for (const label of ['REVIEW_ANSWER.YES', 'REVIEW_ANSWER.FINAL', 'REVIEW_ANSWER.NO']) {
-    assert.ok(toolbar.includes(label), `${label} is not in the toolbar`);
+    assert.ok(bulk.includes(label), `${label} is not in the bulk bar`);
+    assert.ok(!toolbar.includes(label), `${label} is still in the toolbar`);
   }
   // Rendered behind the selection, never disabled in place. A disabled
   // button is a colour you have to look past; an absent one is not there.
-  assert.match(toolbar, /actions=\{chosen\.length > 0 \?/);
-  assert.doesNotMatch(toolbar, /disabled=\{chosen\.length === 0\}/);
+  const bar = read('../components/layout/BulkBar.jsx');
+  assert.match(page, /<BulkBar count=\{sel\.count\}/);
+  assert.match(bar, /const open = count > 0;/);
+  assert.match(bar, /if \(!open\) return null;/);
+  assert.doesNotMatch(bulk, /disabled=/);
   // And the bar says how many rows the button in front of it will touch.
-  assert.match(toolbar, /\{chosen\.length\} selected/);
+  assert.match(bar, /\{countOf\(count, noun\)\} selected/);
+  // No colour per answer, the shape carries it. The one exception is the
+  // answer that STOPS a deal: red, like every other Stop.
+  assert.equal((bulk.match(/variant=/g) ?? []).length, 1, 'only one answer is coloured');
+  const no = bulk.slice(bulk.indexOf('icon={StopHandIcon}') - 40, bulk.indexOf('REVIEW_ANSWER.NO]'));
+  assert.match(no, /variant="danger"/, 'and it is the one that stops');
 });
 
 test('AND HISTORY IS NOT ONE OF THEM. It rides the tab rule', () => {
@@ -229,13 +255,13 @@ test('EACH ANSWER CARRIES ITS OWN SHAPE, not just its own colour', () => {
     ['HourglassIcon', 'FINAL'],
     ['StopHandIcon', 'NO'],
   ]) {
-    const at = toolbar.indexOf(`<${icon}`);
+    const at = bulk.indexOf(`icon={${icon}}`);
     assert.ok(at > -1, `${icon} is not on a button`);
-    const label = toolbar.indexOf(`REVIEW_ANSWER.${answer}]`, at);
+    const label = bulk.indexOf(`REVIEW_ANSWER.${answer}]`, at);
     assert.ok(label > at && label - at < 120, `${icon} is not on the ${answer} button`);
   }
   // The same palm the sheet's Stop wears, because it is the same act.
-  assert.match(read('./MasterSheetPage.jsx'), /Icon=\{StopHandIcon\}/);
+  assert.match(read('./MasterSheetPage.jsx'), /[iI]con=\{StopHandIcon\}/);
 });
 
 test('THE END NOTE IS HIS WORDS, and not an eleventh amber pill', () => {
@@ -252,13 +278,14 @@ test('SELECT ALL IS IN THE TABLE HEADER, over the column it ticks', () => {
   // a row away from the boxes it acts on and spent width on a label that
   // its position already gives it.
   const head = page.slice(page.indexOf('<thead'), page.indexOf('</thead>'));
-  assert.match(head, /ref=\{selectAllRef\}/, 'the select all is in the header');
-  assert.match(head, /aria-label="Select all deals under review"/, 'and still says so');
+  assert.match(head, /<SelectAll\b/, 'the select all is in the header');
+  assert.match(head, /ariaLabel="Select all deals under review"/, 'and still says so');
+  assert.match(read('../components/forms/SelectAll.jsx'), /aria-label=\{label \? undefined : \(ariaLabel/);
   // THE HEADER IS STICKY, or the control scrolls out of reach on row 12.
   assert.match(head, /sticky top-0 z-20/);
   // EXACTLY ONE of it. Two select-alls is two answers to "is everything
   // ticked", and they would disagree the moment the search narrows.
-  assert.equal((page.match(/ref=\{selectAllRef\}/g) ?? []).length, 1);
+  assert.equal((page.match(/<SelectAll\b/g) ?? []).length, 1);
   assert.doesNotMatch(page, />\s*Select all\s*</, 'no second one in the toolbar');
 });
 

@@ -73,9 +73,12 @@ test('breakdown cards use the shared highlighted surface', () => {
   const company = read('./CompanyDetailPage.jsx');
 
   assert.match(layout, /highlighted/);
-  assert.match(layout, /border border-border bg-surface shadow-md/);
-  assert.match(layout, /highlighted \? 'border-accent-deep bg-accent'/);
-  assert.doesNotMatch(layout, /bg-accent-tint/);
+  // UI pass, 2026-10: a thin card at most shadow-sm, and `highlighted` is a
+  // TINTED header with accent ink, never a solid accent fill.
+  assert.match(layout, /border border-border bg-surface shadow-sm/);
+  assert.match(layout, /highlighted \? 'border-border bg-accent-tint\/50'/);
+  assert.match(layout, /highlighted \? 'text-accent-strong'/);
+  assert.doesNotMatch(layout, /bg-accent['\s]/, 'no solid accent header');
   assert.match(person, /<DetailCard title="Breakdown" highlighted>/);
   assert.match(company, /<DetailCard title="Breakdown" highlighted>/);
 });

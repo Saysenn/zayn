@@ -1,9 +1,19 @@
 import { useState } from 'react';
 import { formatDate as date } from '../helpers/formatDate';
 import { formatMoney as money, formatTotals as totals } from '../helpers/formatMoney';
+
+// The API validates the method against this closed set.
+const PAYMENT_METHODS = ['cash', 'bank', 'crypto'];
+
+// Raw buttons that edit in place still need a visible keyboard focus.
+const FOCUS = 'focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-accent';
 import { Link, useParams } from 'react-router-dom';
 import { usePerson, useUpdatePerson, usePeopleFilters } from '../hooks/usePeople';
-import { useMasterSheetCellEdit, useUpdateMasterSheetRow, useDeleteMasterSheetRow } from '../hooks/useMasterSheet';
+import { useMasterSheetCellEdit, useUpdateMasterSheetRow } from '../hooks/useMasterSheet';
+import useRowSelection from '../hooks/useRowSelection';
+import useBulkActions, { DEAL_TOUCHES, bulkMessage, patchQueries } from '../hooks/useBulkActions';
+import { countOf } from '../helpers/pluralNoun';
+import { apiService } from '../configs/api.config';
 import { useNotifications } from '../hooks/useNotifications';
 import { useSettings } from '../hooks/useSettings';
 // THE RATES ARE ON THE MONTHLY AMOUNT, so a deal card must show the same
@@ -24,10 +34,14 @@ import ManagePersonModal from '../components/modals/ManagePersonModal';
 import ConfirmDialog from '../components/modals/ConfirmDialog';
 import { confirm } from '../configs/confirms.config';
 import HistoryModal from '../components/modals/HistoryModal';
-import Select, { Field } from '../components/forms/Select';
+import Select from '../components/forms/Select';
 import { Skeleton } from '../components/display/Skeleton';
 import RecordCard, { CardList } from '../components/display/RecordCard';
-import { RestoreIcon, TrashIcon, EditIcon } from '../components/icons';
+import { EmptyState, ErrorState } from '../components/display/StateBlocks';
+import SelectAll from '../components/forms/SelectAll';
+import BulkBar, { BulkAction, BulkMenu } from '../components/layout/BulkBar';
+import BulkFieldModal from '../components/modals/BulkFieldModal';
+import { RestoreIcon, EditIcon, StopHandIcon, BuildingIcon } from '../components/icons';
 import { INTERNAL, NEVER_BANK, IN_PERSON } from '../configs/sheetValues';
 
 /**
@@ -78,7 +92,7 @@ function Facts({ label, values, options, searchable, allowCustom, quickFill, onS
   return (
     <div>
       {!editing && (
-        <dt className="text-[11px] font-semibold uppercase tracking-wide text-text-faint">{label}</dt>
+        <dt className="text-xs font-semibold uppercase tracking-wide text-text-faint">{label}</dt>
       )}
       <dd className={editing ? '' : 'mt-0.5 text-xs'}>
         {editing ? (
@@ -125,7 +139,7 @@ function Facts({ label, values, options, searchable, allowCustom, quickFill, onS
                     key={q}
                     type="button"
                     onMouseDown={(e) => { e.preventDefault(); commit(q); }}
-                    className="mt-1 min-h-0 border-0 bg-transparent p-0 text-[11px] text-text-muted underline hover:text-text"
+                    className={`mt-1 min-h-0 border-0 bg-transparent p-0 text-xs text-text-muted underline hover:text-text ${FOCUS}`}
                   >
                     {q}
                   </button>
@@ -133,7 +147,7 @@ function Facts({ label, values, options, searchable, allowCustom, quickFill, onS
               </>
             )}
             {list.length > 1 && (
-              <span className="mt-1 block text-[11px] text-warning">
+              <span className="mt-1 block text-xs text-warning">
                 {list.length} different values across their companies. Saving replaces all of them.
               </span>
             )}
@@ -143,7 +157,7 @@ function Facts({ label, values, options, searchable, allowCustom, quickFill, onS
             type="button"
             title={'Click to change ' + label.toLowerCase() + ' on every company'}
             onClick={() => { setDraft(list.length === 1 ? list[0] : ''); setEditing(true); }}
-            className="min-h-0 w-full justify-start border-0 border-b border-dashed border-border bg-transparent p-0 text-left text-xs hover:border-accent"
+            className={`min-h-0 w-full justify-start border-0 border-b border-dashed border-border bg-transparent p-0 text-left text-xs hover:border-accent ${FOCUS}`}
           >
             {list.length === 0 ? <span className="text-text-faint">—</span> : list.join(', ')}
           </button>
@@ -159,10 +173,23 @@ function Facts({ label, values, options, searchable, allowCustom, quickFill, onS
 function Read({ label, value }) {
   return (
     <div>
-      <dt className="text-[11px] font-semibold uppercase tracking-wide text-text-faint">{label}</dt>
+      <dt className="text-xs font-semibold uppercase tracking-wide text-text-faint">{label}</dt>
       <dd className="mt-0.5 text-sm">{value || <span className="text-text-faint">—</span>}</dd>
     </div>
   );
+}
+
+/**
+ * Patches the ticked deals on this person's cached page, the instant a
+ * bulk action is confirmed. Returns the rollback.
+ */
+function patchPersonDeals(queryClient, personId, ids, fn) {
+  const want = new Set(ids.map(String));
+  return patchQueries(queryClient, [['person', personId]], (data) => (
+    data?.person?.deals
+      ? { ...data, person: { ...data.person, deals: data.person.deals.map((d) => (want.has(String(d.id)) ? fn(d) : d)) } }
+      : data
+  ));
 }
 
 export default function PersonDetailPage() {
@@ -170,16 +197,62 @@ export default function PersonDetailPage() {
   const { data: person, isLoading, error } = usePerson(personId);
   const { data: options } = usePeopleFilters();
   const updatePerson = useUpdatePerson();
-  const removeDeal = useDeleteMasterSheetRow();
   const cellEdit = useMasterSheetCellEdit();
   // Silent: saveAcrossDeals writes one field to every company this person
   // handles and reports the batch once. See useUpdateMasterSheetRow.
   const updateDeal = useUpdateMasterSheetRow({ silent: true });
   const { notify } = useNotifications();
-  // One row, not the whole person. See the Remove button in the table.
-  const [removing, setRemoving] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
+
+  // The bulk bar over their deals. Declared above the early returns: a hook
+  // after one is a different number of hooks on the loading render.
+  // NO REMOVE in the bar or on a row: deleting a deal is the Master Sheet's
+  // alone. Stop is how a deal ends here.
+  const sel = useRowSelection((person?.deals ?? []).map((d) => d.id));
+  const { run } = useBulkActions();
+  const [confirmStop, setConfirmStop] = useState(false);
+  const [editField, setEditField] = useState(null);
+
+  // Neither waits for the server: the deals change on screen, the bar is
+  // cleared and the toast (with Undo) is up on the click. See useBulkActions.
+  function stopSelected() {
+    const ids = sel.ids;
+    const today = new Date().toISOString().slice(0, 10);
+    run({
+      call: () => apiService.masterSheet.bulkStop(ids),
+      optimistic: (qc) => patchPersonDeals(qc, personId, ids, (d) => (d.stopped_on ? d : { ...d, stopped_on: today })),
+      invalidates: DEAL_TOUCHES,
+      toast: bulkMessage('stopped', ids.length, 'deal'),
+      report: (data) => bulkMessage('stopped', data.stopped.length, 'deal', [[data.skipped, 'already stopped']]),
+      undoBatch: (data) => data.batchId,
+      failure: `Couldn't stop ${countOf(ids.length, 'deal')}`,
+      icon: 'stop',
+    });
+    sel.clear();
+    setConfirmStop(false);
+  }
+
+  function editSelected(value) {
+    const ids = sel.ids;
+    const field = editField;
+    const column = field.key.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`);
+    // A month picker answers "2026-10"; the cached column is a date.
+    const cached = field.type === 'month' && /^\d{4}-\d{2}$/.test(value) ? `${value}-01` : value;
+    run({
+      call: () => apiService.masterSheet.bulkUpdate(ids, { [field.key]: value }),
+      optimistic: (qc) => patchPersonDeals(qc, personId, ids, (d) => ({ ...d, [column]: cached })),
+      invalidates: DEAL_TOUCHES,
+      toast: bulkMessage(`${field.label.toLowerCase()} changed`, ids.length, 'deal'),
+      report: (data) => bulkMessage(`${field.label.toLowerCase()} changed`, data.updated.length, 'deal', [
+        [data.skipped?.same ?? 0, 'already set'], [data.skipped?.gone ?? 0, 'gone'],
+      ]),
+      undoBatch: (data) => data.batchId,
+      failure: `Couldn't change ${field.label.toLowerCase()} on ${countOf(ids.length, 'deal')}`,
+    });
+    sel.clear();
+    setEditField(null);
+  }
 
   if (isLoading) {
     return (
@@ -193,25 +266,31 @@ export default function PersonDetailPage() {
           <div className="flex gap-2">
             <Skeleton className="h-8 w-20" />
             <Skeleton className="h-8 w-20" />
-            <Skeleton className="h-8 w-20" />
           </div>
         </div>
-        <div className="grid gap-4 lg:grid-cols-3">
-          <Skeleton className="h-64 !rounded-lg lg:col-span-2" />
+        {/* DetailGrid's own shape, so nothing jumps when it lands:
+            overview beside summary, two supporting cards, then the deals. */}
+        <div className="grid items-start gap-3 xl:grid-cols-4">
+          <Skeleton className="h-64 !rounded-lg xl:col-span-3" />
           <Skeleton className="h-64 !rounded-lg" />
+          <div className="grid gap-3 md:grid-cols-2 xl:col-span-4">
+            <Skeleton className="h-48 !rounded-lg" />
+            <Skeleton className="h-48 !rounded-lg" />
+          </div>
+          <Skeleton className="h-64 !rounded-lg xl:col-span-4" />
         </div>
-        <Skeleton className="h-64 !rounded-lg" />
       </div>
     );
   }
 
   if (error || !person) {
     return (
-      <div className="space-y-3">
+      <div className="space-y-4">
         <Breadcrumb items={[{ label: 'People', to: '/people' }, { label: 'Not found' }]} />
-        <p className="bg-danger-tint px-4 py-2.5 text-sm text-danger">
-          {error?.message || 'That person was not found.'}
-        </p>
+        <ErrorState
+          title="Couldn't open this person"
+          error={error ?? { message: 'That person was not found.' }}
+        />
       </div>
     );
   }
@@ -333,7 +412,7 @@ export default function PersonDetailPage() {
                 <Read label="Roles" value={(person.roles || []).join(', ')} />
                 <Read label="Groups" value={(person.groups || []).join(', ')} />
                 <div className="sm:col-span-2">
-                  <dt className="text-[11px] font-semibold uppercase tracking-wide text-text-faint">Identifier</dt>
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-text-faint">Identifier</dt>
                   <dd className="mt-0.5 font-mono text-xs text-text-faint">{person.person_id}</dd>
                 </div>
               </div>
@@ -347,16 +426,15 @@ export default function PersonDetailPage() {
 
                   Read only here, deliberately: correcting a figure is what
                   the Master Sheet page is for, and an inline editor inside a
-                  card at 375px is a worse version of it. Remove stays,
-                  because taking somebody off a company is a decision you
-                  make while looking at this list. */}
+                  card at 375px is a worse version of it. Ending a deal
+                  here is Stop, from the bulk bar; deleting one is the
+                  Master Sheet's alone. */}
               <div className="p-3 md:p-0">
                 <PersonDeals
                   deals={deals}
-                  person={person}
                   options={options}
                   cellEdit={cellEdit}
-                  onRemove={setRemoving}
+                  sel={sel}
                 />
               </div>
             </DetailCard>
@@ -418,7 +496,7 @@ export default function PersonDetailPage() {
                   options={['Yes', 'No', INTERNAL]}
                   onSave={(v) => saveAcrossDeals('acceptingPostals', 'Accepting postals', v)} />
               </dl>
-              <p className="mt-3 border-t border-border pt-2 text-[11px] text-text-faint">
+              <p className="mt-3 border-t border-border pt-2 text-xs text-text-faint">
                 Changing one of these updates it on every company they handle.
               </p>
             </DetailCard>
@@ -450,29 +528,41 @@ export default function PersonDetailPage() {
         />
       )}
 
-      {removing && (
+      {confirmStop && (
         <ConfirmDialog
-          {...confirm.removeCompanyFromPerson({
-            personName: person.display_name,
-            company: removing.company,
-            groupName: removing.group_name,
-            roleLabel: removing.role_label,
-            money: money(removing.monthly_amount, removing.currency),
-          })}
-          icon={<TrashIcon width={15} height={15} />}
-          busy={removeDeal.isPending}
-          onCancel={() => setRemoving(null)}
-          onConfirm={() =>
-            removeDeal.mutate(
-              {
-                id: removing.id,
-                subject: `${person.display_name} from ${removing.company ?? removing.group_name}`,
-              },
-              { onSuccess: () => setRemoving(null) },
-            )
-          }
+          {...confirm.bulkStopRows(sel.count)}
+          icon={<StopHandIcon width={15} height={15} />}
+          confirmVariant="danger"
+          onCancel={() => setConfirmStop(false)}
+          onConfirm={stopSelected}
         />
       )}
+      {editField && (
+        <BulkFieldModal
+          title={`Set ${editField.label.toLowerCase()} on ${sel.count} ${sel.count === 1 ? 'deal' : 'deals'}`}
+          label={editField.label}
+          type={editField.type}
+          options={editField.options}
+          allowCustom={editField.allowCustom}
+          onApply={editSelected}
+          onClose={() => setEditField(null)}
+        />
+      )}
+
+      <BulkBar count={sel.count} noun="deal" onClear={sel.clear}>
+        <BulkMenu
+          icon={EditIcon}
+          label="Edit"
+          options={[
+            { label: 'Payment method', onSelect: () => setEditField({ key: 'paymentMethod', label: 'Payment method', options: PAYMENT_METHODS }) },
+            { label: 'Group', onSelect: () => setEditField({ key: 'groupName', label: 'Group', options: options?.groups ?? [], allowCustom: true }) },
+            { label: 'Preset month', onSelect: () => setEditField({ key: 'presetOn', label: 'Preset month', type: 'month' }) },
+          ]}
+        />
+        <BulkAction icon={StopHandIcon} variant="danger" onClick={() => setConfirmStop(true)}>
+          Stop
+        </BulkAction>
+      </BulkBar>
     </div>
   );
 }
@@ -485,7 +575,7 @@ export default function PersonDetailPage() {
  * row, so a correction here is a correction there and it claims the column
  * against the next uploaded sheet.
  */
-function PersonDeals({ deals, person, options, cellEdit, onRemove }) {
+function PersonDeals({ deals, options, cellEdit, sel }) {
   // The rail charge, one number for the whole system, so a card shows the
   // same figure the master sheet and the export do.
   const { data: settings } = useSettings();
@@ -493,10 +583,18 @@ function PersonDeals({ deals, person, options, cellEdit, onRemove }) {
 
   return (
     <>
+        {deals.length === 0 && (
+          <div className="md:hidden">
+            <EmptyState icon={BuildingIcon} title="Not on any company yet" hint="Open Edit to add one." />
+          </div>
+        )}
         <CardList>
           {deals.map((d) => (
             <RecordCard
               key={d.id}
+              selected={sel.has(d.id)}
+              onSelect={() => sel.toggle(d.id)}
+              selectLabel={`Select ${d.company ?? d.group_name}`}
               title={d.company ?? d.group_name}
               subtitle={[d.group_name, d.role_label].filter(Boolean).join(' · ')}
               lead={money(withRates(d, { cryptoPercent }).payable_amount, d.currency)}
@@ -513,12 +611,6 @@ function PersonDeals({ deals, person, options, cellEdit, onRemove }) {
                 { label: 'Method', value: d.payment_method },
                 { label: 'Preset', value: date(d.preset_on) },
               ]}
-              actions={
-                <Button variant="danger" onClick={() => onRemove(d)}>
-                  <TrashIcon width={14} height={14} />
-                  Remove
-                </Button>
-              }
             />
           ))}
         </CardList>
@@ -526,7 +618,10 @@ function PersonDeals({ deals, person, options, cellEdit, onRemove }) {
         <div className="table-wrap is-nested hidden md:block">
           <table className="detail-table w-full min-w-[900px] text-xs">
             <thead>
-              <tr >
+              <tr>
+                <th className="th w-8">
+                  <SelectAll count={sel.count} total={sel.total} onChange={sel.setAll} />
+                </th>
                 <th className="th">Group</th>
                 <th className="th">Company</th>
                 <th className="th">Role</th>
@@ -537,16 +632,11 @@ function PersonDeals({ deals, person, options, cellEdit, onRemove }) {
                 <th className="th">Preset</th>
                 <th className="th">Payment period</th>
                 <th className="th">Payday</th>
-                <th className="th" />
               </tr>
             </thead>
             <tbody>
               {deals.length === 0 && (
-                <tr>
-                  <td colSpan={11} className="px-3 py-10 text-center text-text-muted">
-                    Not on any company yet. Open Edit to add one.
-                  </td>
-                </tr>
+                <EmptyState asRow colSpan={11} icon={BuildingIcon} title="Not on any company yet" hint="Open Edit to add one." />
               )}
               {deals.map((d) => {
                 // THE FIGURE SHOWN IS RATED, THE VALUE EDITED IS THE WAGE.
@@ -555,44 +645,48 @@ function PersonDeals({ deals, person, options, cellEdit, onRemove }) {
                 // rated one: a person's 5% was missing here alone.
                 const rated = withRates(d, { cryptoPercent });
                 return (
-                <tr key={d.id} className="border-b border-border last:border-0">
+                <tr key={d.id} className={`border-b border-border last:border-0 hover:bg-surface-sunken ${sel.has(d.id) ? 'row-selected' : ''}`}>
+                  <td className="td w-8">
+                    <input type="checkbox" checked={sel.has(d.id)} onChange={() => sel.toggle(d.id)}
+                      aria-label={`Select ${d.company ?? d.group_name}`} />
+                  </td>
                   {/* Every cell is the same EditableCell the Master Sheet
                       page uses, writing to the same row. A correction here
                       is a correction there, and it claims the column
                       against the next uploaded sheet. */}
-                  <td className="px-3 py-2">
+                  <td className="td">
                     <EditableCell value={d.group_name} type="combo" suggestions={options?.groups ?? []}
                       onSave={(v) => cellEdit({ id: d.id, fields: { groupName: v }, subject: d.person_name, label: 'group' })} />
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="td">
                     <EditableCell value={d.company} type="combo" suggestions={options?.companies ?? []}
                       display={d.company || '—'}
                       onSave={(v) => cellEdit({ id: d.id, fields: { company: v }, subject: d.person_name, label: 'company' })} />
                   </td>
-                  <td className="px-3 py-2 text-text-muted">
+                  <td className="td text-text-muted">
                     <EditableCell value={d.role_label} type="combo" suggestions={options?.roles ?? []}
                       onSave={(v) => cellEdit({ id: d.id, fields: { roleLabel: v }, subject: d.person_name, label: 'role' })} />
                   </td>
-                  <td className="px-3 py-2 text-right">
+                  <td className="td text-right">
                     <EditableCell value={d.monthly_amount} type="number"
                       display={money(rated.monthly_amount, d.currency)} className="text-right tabular-nums"
                       onSave={(v) => cellEdit({ id: d.id, fields: { monthlyAmount: v }, subject: d.person_name, label: 'monthly amount' })} />
                   </td>
-                  <td className="px-3 py-2 text-right">
+                  <td className="td text-right">
                     <EditableCell value={d.payable_days} type="number" className="text-right tabular-nums"
                       onSave={(v) => cellEdit({ id: d.id, fields: { payableDays: v }, subject: d.person_name, label: 'payable days' })} />
                   </td>
-                  <td className="px-3 py-2 text-right">
+                  <td className="td text-right">
                     <EditableCell value={d.payable_amount} type="number"
                       display={money(rated.payable_amount, d.currency)} className="text-right tabular-nums"
                       onSave={(v) => cellEdit({ id: d.id, fields: { payableAmount: v }, subject: d.person_name, label: 'payable amount' })} />
                   </td>
-                  <td className="px-3 py-2 text-text-muted">
+                  <td className="td text-text-muted">
                     <EditableCell value={d.payment_method} type="select"
                       options={[{ value: 'cash', label: 'Cash' }, { value: 'bank', label: 'Bank' }, { value: 'crypto', label: 'Crypto' }]}
                       onSave={(v) => cellEdit({ id: d.id, fields: { paymentMethod: v }, subject: d.person_name, label: 'payment method' })} />
                   </td>
-                  <td className="px-3 py-2 text-text-muted">
+                  <td className="td text-text-muted">
                     <EditableCell value={d.preset_on} type="date" display={date(d.preset_on)}
                       onSave={(v) => cellEdit({ id: d.id, fields: { presetOn: v }, subject: d.person_name, label: 'preset date' })} />
                   </td>
@@ -604,7 +698,7 @@ function PersonDeals({ deals, person, options, cellEdit, onRemove }) {
                       total. The period is worked out from the payment
                       start, the preset and the end date, so those are what
                       you change. See docs/state.md. */}
-                  <td className="px-3 py-2">
+                  <td className="td">
                     <PaymentPeriod
                       period={d.payment_period}
                       endOn={d.end_on}
@@ -612,21 +706,10 @@ function PersonDeals({ deals, person, options, cellEdit, onRemove }) {
                       paymentStartOn={d.payment_start_on}
                     />
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="td">
                     {d.payment_outcome
                       ? <PaydayIndicator outcome={d.payment_outcome} />
                       : <span className="text-xs text-text-faint">Not checked</span>}
-                  </td>
-                  {/* Remove ends this one pairing, so the row goes. The company keeps its other handlers. */}
-                  <td className="px-3 py-2 text-right">
-                    <Button
-                      size="icon"
-                      variant="danger"
-                      aria-label={`Remove ${person.display_name} from ${d.company ?? d.group_name}`}
-                      onClick={() => onRemove(d)}
-                    >
-                      <TrashIcon width={14} height={14} />
-                    </Button>
                   </td>
                 </tr>
                 );
@@ -654,11 +737,11 @@ function CryptoRates({ deals }) {
 
   return (
     <div>
-      <span className="text-[11px] font-semibold uppercase tracking-wide text-text-faint">
+      <span className="text-xs font-semibold uppercase tracking-wide text-text-faint">
         Crypto charge
       </span>
       <p className="mt-1 text-xs tabular-nums">{`${percent}%`}</p>
-      <span className="mt-1 block text-[11px] text-text-muted">
+      <span className="mt-1 block text-xs text-text-muted">
         {`Added to ${crypto.length === 1 ? 'their crypto deal' : `their ${crypto.length} crypto deals`}, for the gas. Set in `}
         <Link to="/settings" className="underline">Settings, Global rates</Link>
         .

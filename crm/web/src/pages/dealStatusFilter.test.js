@@ -40,7 +40,9 @@ test('changing it goes back to page 1 and drops the selection', () => {
   // had changed. What has to hold is that it is IN the list.
   const resets = SRC.match(/paymentMethod, dealStatus[,\]]/g) ?? [];
   assert.ok(resets.length >= 2, `only ${resets.length} of the reset effects list it`);
-  assert.match(SRC, /setSelectedIds\(new Set\(\)\), \[[^\]]*dealStatus[^\]]*, page\]/);
+  // The selection lives in useRowSelection now; the page still clears it
+  // on every filter change, not just prunes it.
+  assert.match(SRC, /clearSelection\(\); \}, \[[^\]]*dealStatus[^\]]*, page\]/);
 });
 
 test('CLEAR undoes it, and the count knows about it', () => {
@@ -70,8 +72,9 @@ test('the options come from the config, never typed into the page', () => {
 test('the two status filters SAY WHICH ONE THEY ARE', () => {
   assert.match(SRC, /label: `Company: \$\{o\.label\.toLowerCase\(\)\}`/);
   assert.match(SRC, /label: `Deal: \$\{o\.label\.toLowerCase\(\)\}`/);
-  assert.match(SRC, /placeholder="Any deal status"/);
-  assert.match(SRC, /placeholder="Any company status"/);
+  // "All <thing>" like every other filter placeholder, still naming WHICH.
+  assert.match(SRC, /placeholder="All deal statuses"/);
+  assert.match(SRC, /placeholder="All company statuses"/);
 });
 
 /**

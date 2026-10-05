@@ -15,7 +15,7 @@
 
 const VARIANTS = {
   primary: 'btn-primary',
-  secondary: 'bg-surface text-text-muted border-border-strong shadow-sm hover:bg-surface-sunken hover:text-text',
+  secondary: 'bg-surface text-text-muted border-border hover:bg-surface-sunken hover:text-text',
   quiet: 'btn-quiet',
   danger: 'bg-danger-tint text-danger border-transparent font-semibold hover:bg-danger hover:text-white',
   // For "something is on, this turns it off" — clearing filters, mostly.
@@ -79,7 +79,7 @@ export default function Button({
     <button
       type={type}
       className={`${VARIANTS[variant] ?? VARIANTS.quiet} ${SIZES[size] ?? SIZES.sm} ${className}
-        transition duration-150 hover:scale-[1.01] hover:shadow-md motion-reduce:transform-none motion-reduce:transition-none
+        transition-colors duration-150 motion-reduce:transition-none
         ${busy ? 'relative overflow-hidden' : ''}`}
       {...props}
     >
@@ -114,8 +114,8 @@ export function LinkButton({
   return (
     <As
       className={`${VARIANTS[variant] ?? VARIANTS.primary} ${SIZES[size] ?? SIZES.sm} ${className}
-        transition duration-150 hover:scale-[1.01] hover:shadow-md motion-reduce:transform-none motion-reduce:transition-none
-        inline-flex items-center justify-center gap-1.5 whitespace-nowrap border no-underline`}
+        transition-colors duration-150 motion-reduce:transition-none
+        inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded border no-underline`}
       {...props}
     />
   );
@@ -157,8 +157,8 @@ export function FileButton({
     <label
       className={`${VARIANTS[variant] ?? VARIANTS.quiet} ${SIZES[size] ?? SIZES.sm} ${className}
         relative overflow-hidden inline-flex items-center justify-center gap-1.5 whitespace-nowrap
-        border cursor-pointer transition duration-150 hover:scale-[1.01] hover:shadow-md
-        motion-reduce:transform-none motion-reduce:transition-none ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
+        rounded border cursor-pointer transition-colors duration-150
+        motion-reduce:transition-none ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
     >
       {phase === 'uploading' && (
         <span className="btn-fill" style={{ width: `${Math.min(100, Math.max(0, percent))}%` }} />

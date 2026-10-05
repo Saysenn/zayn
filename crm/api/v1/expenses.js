@@ -267,4 +267,43 @@ router.delete('/expenses/:id', async (req, res, next) => {
   }
 });
 
+// The bulk bar. Row by row through the same update and remove a single
+// edit uses, so the sync key and the allow list cannot be skipped.
+function bulkIds(body) {
+  return (Array.isArray(body?.ids) ? body.ids : []).map(Number).filter((id) => Number.isInteger(id) && id > 0);
+}
+
+router.post('/expenses/bulk-update', async (req, res, next) => {
+  try {
+    const ids = bulkIds(req.body);
+    const fields = req.body?.fields || {};
+    const updated = [];
+    for (const id of ids) {
+      // eslint-disable-next-line no-await-in-loop
+      const expense = await expensesRepo.update(id, fields);
+      if (expense) updated.push(expense.id);
+    }
+    broadcast(null, EVENT, { action: 'bulk-updated', ids: updated });
+    res.json({ updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/expenses/bulk-delete', async (req, res, next) => {
+  try {
+    const ids = bulkIds(req.body);
+    const deleted = [];
+    for (const id of ids) {
+      // eslint-disable-next-line no-await-in-loop
+      const removed = await expensesRepo.remove(id);
+      if (removed) deleted.push(removed.id);
+    }
+    broadcast(null, EVENT, { action: 'bulk-deleted', ids: deleted });
+    res.json({ deleted });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = { router };

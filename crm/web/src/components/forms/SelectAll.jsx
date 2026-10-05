@@ -18,6 +18,9 @@ export default function SelectAll({
   total,
   onChange,
   label,
+  // The checkbox's own name when there is no visible label: a header box
+  // with no words still has to say what it ticks to a screen reader.
+  ariaLabel,
   disabled = false,
 }) {
   const ref = useRef(null);
@@ -38,6 +41,7 @@ export default function SelectAll({
         // for none.
         onChange={() => onChange(!all)}
         disabled={disabled || total === 0}
+        aria-label={label ? undefined : (ariaLabel ?? 'Select all')}
       />
       {label && <span className="text-xs font-semibold">{label}</span>}
     </label>

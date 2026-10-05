@@ -77,7 +77,7 @@ const TONE_FILL = {
 function NavBadge({ count, tone = 'alarm' }) {
   if (!count) return null;
   return (
-    <span className={`inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full px-1.5 text-[10px] font-bold leading-none tabular-nums text-white shadow-sm ${TONE_FILL[tone]}`}>
+    <span className={`inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-xs font-bold leading-none tabular-nums text-surface ${TONE_FILL[tone]}`}>
       {badgeText(count)}
     </span>
   );
@@ -140,7 +140,7 @@ function SidebarNav() {
         <div key={group.key} className="mt-4 flex flex-col gap-1 first:mt-0">
           {/* The heading is a LABEL, not a control: nothing collapses and
               nothing is clickable, so it takes no hover and no focus. */}
-          <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-text-faint">
+          <p className="px-3 pb-1 text-xs font-semibold uppercase tracking-wider text-text-faint">
             {group.label}
           </p>
           {group.items.map((item) => <NavRow key={item.to} item={item} counts={counts} />)}
@@ -285,7 +285,7 @@ function LayoutInner() {
         </header>
 
         {/* sm:p-4 reset the bottom padding while the bar still showed (640 to 767px), so it sat on the last card. */}
-        <main className="px-3 pt-3 pb-[calc(theme(spacing.bottomnav)+theme(spacing.safebottom)+1rem)] sm:px-4 sm:pt-4 md:p-6 md:pb-8 xl:p-8">
+        <main className="px-3 pt-3 pb-[calc(theme(spacing.bottomnav)+theme(spacing.safebottom)+1rem+var(--bulkbar-h,0px))] sm:px-4 sm:pt-4 md:p-6 md:pb-[calc(2rem+var(--bulkbar-h,0px))] xl:p-8 xl:pb-[calc(2rem+var(--bulkbar-h,0px))]">
           <Outlet />
         </main>
 

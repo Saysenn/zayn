@@ -39,22 +39,22 @@ export default function PaymentStartRules({ useEndDate }) {
 
   return (
     <div className="space-y-3">
-      <p className="text-[11px] text-text-muted">
+      <p className="text-xs text-text-muted">
         {`Preset ${formatDate(preset)}, so the month runs 1 to ${lastDay} ${month}.`}
       </p>
 
-      <div className="overflow-x-auto rounded border border-border">
+      <div className="table-wrap">
         <table className="w-full border-collapse text-sm">
           <thead>
-            <tr className="text-left text-[11px] uppercase tracking-wide text-text-faint">
+            <tr>
               {/* THE PRESET LEADS. It is the month being asked about, so
                   the row reads "for this month, this start, this end, this
                   colour". Every row shares it, which is the point: the
                   colour is the start measured against ONE month. */}
-              <th className="border-b border-border px-3 py-2 pr-3 font-semibold">Preset</th>
-              <th className="border-b border-border px-3 py-2 pr-3 font-semibold">Payment start</th>
-              <th className="border-b border-border px-3 py-2 pr-3 font-semibold">End date</th>
-              <th className="border-b border-border px-3 py-2 font-semibold">Colour</th>
+              <th className="th">Preset</th>
+              <th className="th">Payment start</th>
+              <th className="th">End date</th>
+              <th className="th">Colour</th>
             </tr>
           </thead>
           <tbody>
@@ -62,8 +62,8 @@ export default function PaymentStartRules({ useEndDate }) {
               const state = paymentStartState(s.start, preset, s.end, useEndDate);
               const words = paymentStartWords(s.start, preset, s.end, useEndDate);
               return (
-                <tr key={`${s.start}-${s.end}`}>
-                  <td className="whitespace-nowrap border-b border-border px-3 py-2 pr-3 text-text-muted">
+                <tr key={`${s.start}-${s.end}`} className="hover:bg-surface-sunken">
+                  <td className="td whitespace-nowrap text-text-muted">
                     {formatDate(preset)}
                   </td>
                   {/* The start cell wears the colour, exactly as it does
@@ -72,20 +72,20 @@ export default function PaymentStartRules({ useEndDate }) {
                       column that caused it. On EVERY row, in both toggle
                       states, so a row without an icon never reads as a row
                       with nothing to say. */}
-                  <td className={`whitespace-nowrap border-b border-border px-3 py-2 ${PAYMENT_START_CLASS[state]}`}>
+                  <td className={`td whitespace-nowrap ${PAYMENT_START_CLASS[state]}`}>
                     <span className="flex items-center justify-between gap-2">
                       <span>{s.start ? formatDate(s.start) : '—'}</span>
                       <PaymentStartWhy start={s.start} preset={preset} end={s.end} useEndDate={useEndDate} />
                     </span>
                   </td>
-                  <td className="whitespace-nowrap border-b border-border px-3 py-2 pr-3 text-text-muted">
+                  <td className="td whitespace-nowrap text-text-muted">
                     {s.end ? formatDate(s.end) : '—'}
                   </td>
                   {/* WHY THIS ROW IS THIS COLOUR UNDER THIS TOGGLE, not a
                       fixed label on the sample. It read "Finished months
                       ago" beside a GREEN cell, because the sample's note
                       never moved when the toggle did. */}
-                  <td className="border-b border-border px-3 py-2">
+                  <td className="td">
                     <span className="text-xs">
                       <span className="font-semibold">{words.word}</span>
                       <span className="text-text-muted">{` · ${words.reason}`}</span>
@@ -98,7 +98,7 @@ export default function PaymentStartRules({ useEndDate }) {
         </table>
       </div>
 
-      <p className="text-[11px] leading-snug text-text-muted">
+      <p className="text-xs leading-snug text-text-muted">
         {useEndDate
           ? 'The end date counts: a deal that finished shows red, and one ending this month shows amber.'
           : 'The end date is ignored, so a finished deal looks the same as a running one.'}

@@ -6,9 +6,6 @@ import {
   useMasterSheet,
   useCreateMasterSheetRow,
   useUpdateMasterSheetRow,
-  useDeleteMasterSheetRowOptimistic,
-  useStopMasterSheetRow,
-  useBulkDeleteMasterSheetRows,
   useMasterSheetCellEdit, useDealStatus, usePersonFill,
 } from '../hooks/useMasterSheet';
 import { useGroups } from '../hooks/useChat';
@@ -29,7 +26,6 @@ import DraftNote from '../components/display/DraftNote';
 import DealPreview from '../components/display/DealPreview';
 import HandlerTabs from '../components/display/HandlerTabs';
 import { useFormDraft } from '../hooks/useFormDraft';
-import FilterCheckbox from '../components/filters/FilterCheckbox';
 import { SEARCH_FIELDS, SEARCH_ANY, searchPlaceholder } from '../configs/searchFields';
 import NumberRangeFilter from '../components/filters/NumberRangeFilter';
 import { flaggedColumns, orphanNotices } from '../helpers/reviewFields';
@@ -48,15 +44,21 @@ import { Toolbar, SearchInput } from '../components/layout/PageHeader';
 import DuplicateBanner from '../components/display/DuplicateBanner';
 import Pagination from '../components/layout/Pagination';
 import { TableSkeleton } from '../components/display/Skeleton';
+import { EmptyState, ErrorState } from '../components/display/StateBlocks';
+import BulkBar, { BulkAction, BulkMenu } from '../components/layout/BulkBar';
+import SelectAll from '../components/forms/SelectAll';
+import useRowSelection from '../hooks/useRowSelection';
+import useBulkActions, { bulkMessage, splitHint, patchQueries, mapCachedRows } from '../hooks/useBulkActions';
+import { monthLabel } from '../helpers/monthLabel';
+import { countOf } from '../helpers/pluralNoun';
 import {
   SearchIcon, ImportIcon, DownloadIcon, PlusIcon, TrashIcon, EditIcon, StopHandIcon,
-  AlertCircleIcon, StarIcon, CloseIcon,
+  AlertCircleIcon, StarIcon, PaidIcon, ShouldBePaidIcon,
 } from '../components/icons';
 import EditableCell from '../components/forms/EditableCell';
 import StatusBadge from '../components/badges/StatusBadge';
 import { PERIOD, PERIOD_FILTER_OPTIONS } from '../helpers/paymentPeriod';
 import PaymentPeriod from '../components/badges/PaymentPeriod';
-import PaydayIndicator from '../components/badges/PaydayIndicator';
 import Toggle from '../components/forms/Toggle';
 import CopyPersonDetails from '../components/forms/CopyPersonDetails';
 import { setCellEditing } from '../hooks/useCellEditing';
@@ -64,7 +66,7 @@ import { paymentStartState, PAYMENT_START_CLASS } from '../helpers/paymentStartS
 // THE RATES ARE ON THE MONTHLY AMOUNT. A deliberate mirror of the API's
 // own rates.helper, so the browser can paint the rated figure before the
 // server answers. See helpers/rates.js.
-import { withRates, hasRates } from '../helpers/rates';
+import { withRates } from '../helpers/rates';
 import { paymentStartWhyParts } from '../components/display/PaymentStartWhy';
 import { formatDate } from '../helpers/formatDate';
 import { useSettings } from '../hooks/useSettings';
@@ -73,7 +75,7 @@ import { useStickyState, useClearSticky } from '../hooks/useStickyState';
 import { INTERNAL, NEVER_BANK } from '../configs/sheetValues';
 // Deal Status NAMES review_monthly and end_note. Not a stored column.
 import {
-  DEAL_STATUS, DEAL_STATUS_OPTIONS, DEAL_STATUS_LABEL, DEAL_STATUS_MEANS,
+  DEAL_STATUS_OPTIONS, DEAL_STATUS_LABEL, DEAL_STATUS_MEANS,
   dealStatusOf, dealStatusTone,
 } from '../configs/dealStatus';
 import { LINK_FILTER } from '../configs/linkFilters';
@@ -459,7 +461,7 @@ function Field({ field, form, onChange, options, isNew, single = false }) {
 
 /**
  * The row editor — one form for both adding and editing, because they take
- * exactly the same fields. Only the save call and the delete button differ.
+ * exactly the same fields. Only the save call differs.
  *
  * Synced and manual rows are both fully editable: the whole point of this
  * table is that the admin's version is the final one, so a sheet-sourced
@@ -489,10 +491,6 @@ function RowModal({ row, onClose }) {
   const [editForm, setEditForm] = useState(() => (isNew ? EMPTY_FORM : rowToForm(row)));
   const form = isNew ? draftForm : editForm;
   const setForm = isNew ? setDraftForm : setEditForm;
-  // The row's own Delete button (SheetRow, below) jumps straight to this
-  // confirm step instead of opening a plain edit form the admin then has
-  // to find Delete inside — same confirm-before-destroy flow either way.
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
   /**
    * ===============================
    * * WHAT THIS PERSON'S OTHER DEALS ALREADY KNOW
@@ -520,11 +518,11 @@ function RowModal({ row, onClose }) {
 
   const create = useCreateMasterSheetRow();
   const update = useUpdateMasterSheetRow();
-  // Optimistic: the row vanishing IS the confirmation, and waiting for
-  // the round trip with it still on screen invites a second click.
-  const remove = useDeleteMasterSheetRowOptimistic();
-  const error = create.error || update.error || remove.error;
-  const isPending = create.isPending || update.isPending || remove.isPending;
+  // NO DELETE IN HERE. A deal goes from the row's own bin or the bulk bar,
+  // both of which say what survives; a red button at the foot of an edit
+  // form read as part of saving it.
+  const error = create.error || update.error;
+  const isPending = create.isPending || update.isPending;
 
   function set(key, value) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -708,7 +706,7 @@ function RowModal({ row, onClose }) {
           couldn't make sense of still arrives — with the reason attached.
           This is the "CRM asks the questions, admin answers them" step. */}
       {!isNew && row.needs_review && (
-        <div className="mb-3 p-3 bg-warning-tint text-sm">
+        <div className="mb-3 rounded-lg bg-warning-tint p-3 text-sm">
           <p className="font-semibold text-warning mb-1">This row came in messy</p>
           <p className="text-text-muted">{row.review_reason || 'The sheet parse flagged it, with no reason given.'}</p>
           <Button
@@ -932,37 +930,9 @@ function RowModal({ row, onClose }) {
             button itself, where you find out at the moment you reach for
             it. */}
 
-        {error && <p className="text-sm text-danger mt-3">{error.message}</p>}
+        {error && <div className="mt-3"><ErrorState error={error} title="Couldn't save this deal" /></div>}
 
-        <div className="flex justify-between gap-2 mt-4 flex-wrap">
-          <div>
-            {!isNew && !confirmingDelete && (
-              <Button variant="danger" onClick={() => setConfirmingDelete(true)}>Delete row</Button>
-            )}
-            {!isNew && confirmingDelete && (
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm text-text-muted">
-                  {row.source === 'manual' ? 'Gone for good, nothing else holds this row.' : 'Comes back on the next sync unless the sheet dropped it too.'}
-                </span>
-                <Button
-                  variant="danger"
-                  disabled={isPending}
-                  onClick={() => {
-                    // Closed immediately rather than in onSuccess — the row is
-                    // already gone from the table, so holding the modal open
-                    // would leave it confirming something that already looks
-                    // done. A failure puts the row back and says so.
-                    remove.mutate({ id: row.id, subject: row.person_name, group: row.group_name });
-                    onClose();
-                  }}
-                >
-                  Confirm delete
-                </Button>
-                <Button onClick={() => setConfirmingDelete(false)}>Cancel</Button>
-              </div>
-            )}
-          </div>
-
+        <div className="flex justify-end gap-2 mt-4 flex-wrap">
           <div className="flex gap-2">
             <Button onClick={onClose}>Cancel</Button>
             {/* Save is available on every step, not just the last: a
@@ -1055,55 +1025,6 @@ const PAYMENT_OUTCOMES = [
   { value: 'not_received', label: 'Not received' },
   { value: 'no_response', label: 'No response' },
 ];
-
-/**
- * The admin's yes/no decision, with the sheet's own words underneath.
- *
- * Two facts, one cell, never merged. The toggle writes `override_*`, the
- * same two columns the People page writes — one home now, not a mirrored
- * pair, so there is nothing left that can drift. The line under it is
- * `should_be_paid` / `paid` exactly as the boss typed them into the
- * sheet, and the toggle never touches it.
- *
- * `fallback` is what an undecided row shows, and it is deliberately the
- * SAME default the People page resolves an untouched override to
- * (should be paid yes, paid no). Rendering a "Set" button here instead left
- * the whole column switch-less, since every row is null until someone
- * touches it, and it showed a different answer than People showed for the
- * same person. The null-vs-false distinction still lives in the column
- * itself; the sheet's own text stays visible right beside it, and an
- * undecided switch is faded so "defaulting to this" still reads
- * differently from "an admin decided this".
- */
-function OverrideToggle({ value, fallback, sheetText, label, outcome, onChange }) {
-  const decided = value === true || value === false;
-  const checked = decided ? value : fallback;
-
-  return (
-    <td className="td" onClick={(e) => e.stopPropagation()}>
-      <div className="flex items-center gap-2">
-        <span
-          className={`inline-flex ${decided ? '' : 'opacity-60'}`}
-          title={decided ? undefined : `No decision recorded yet, showing the default (${fallback ? 'yes' : 'no'})`}
-        >
-          <Toggle checked={checked} onChange={onChange} label={label} />
-        </span>
-        {/* Only the Paid column passes an outcome. The icon says whether
-            the person's own payday answer settled this or left something
-            for a human: it's what the toggle CAN'T say, since 'received
-            the lot' and 'received half' are both Paid on. */}
-        <PaydayIndicator outcome={outcome} />
-        {/* What the sheet itself says. An icon, not text: printed inline
-            it changed the column's width row by row and pushed the
-            switches out of line, and unlabelled grey text beside a switch
-            reads as part of the switch. See components/CellInfo.jsx. */}
-        {sheetText ? (
-          <CellInfo {...popup.sheetSays(sheetText)} />
-        ) : null}
-      </div>
-    </td>
-  );
-}
 
 // A thin wrapper so each cell in the row stays one line. Owns the
 // snake_case -> camelCase translation and the editing guard, both of
@@ -1386,18 +1307,20 @@ function dateSuggestions(row, onCellSave, useEndDate) {
  * phone is actually holding ("what does this person earn here, and have
  * they been paid") and everything else is one tap away in the editor.
  *
- * The two switches stay ON the card rather than behind the editor. Marking
- * somebody paid while standing in front of them is the single most likely
- * reason this page is open on a phone at all.
+ * NO SWITCHES ON THE CARD ANY MORE. Should be paid and Paid are the bulk
+ * bar's now: tick the card (or several) and set them there, one place for
+ * the act on every screen size.
  */
-function DealCard({ row, onEdit, onCellSave }) {
+function DealCard({ row, selected, onToggleSelect, onEdit }) {
   const notices = orphanNotices(row);
-
-  const setOverride = (field, value) =>
-    onCellSave({ id: row.id, fields: { [field]: value }, subject: row.person_name, label: field });
 
   return (
     <RecordCard
+      // THE SAME TICK THE TABLE HAS, top left, so a phone fills the bulk
+      // bar too.
+      selected={selected}
+      onSelect={() => onToggleSelect(row.id)}
+      selectLabel={`Select ${row.person_name ?? 'this deal'}`}
       title={row.person_name ?? '(no handler)'}
       subtitle={[row.company, row.group_name, row.role_label].filter(Boolean).join(' · ')}
       lead={formatMoney(row.payable_amount, row.currency)}
@@ -1421,62 +1344,28 @@ function DealCard({ row, onEdit, onCellSave }) {
         { label: 'Monthly', value: formatMoney(row.monthly_amount, row.currency) },
         { label: 'Payable days', value: row.payable_days },
       ]}
-      actions={
-        <>
-          {/* Labelled, unlike the table's bare switches. A column header
-              does the naming there; on a card there is no header. */}
-          <label className="flex items-center gap-2 text-sm">
-            <Toggle
-              checked={row.override_should_be_paid ?? true}
-              onChange={(v) => setOverride('overrideShouldBePaid', v)}
-              label="Should be paid"
-            />
-            <span className="text-text-muted">Should be paid</span>
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <Toggle
-              checked={row.override_paid ?? false}
-              onChange={(v) => setOverride('overridePaid', v)}
-              label="Paid"
-            />
-            <span className="text-text-muted">Paid</span>
-          </label>
-        </>
-      }
     />
   );
 }
 
 /**
- * One icon button in the Actions column.
- *
- * `title` AND `aria-label`, both the same word. The tooltip is for the eye
- * and the label is for a screen reader, and an icon-only control with
- * neither is a guess.
- *
- * `stopPropagation` because the cell underneath opens an editor on click.
+ * Whether a click on a row means "open the editor". Not when it landed on
+ * something with its own job (the tick, an open cell's input, a marker's
+ * popup button), and not when it bubbled up through a portal (a cell's
+ * dropdown list is drawn on <body> but React still routes its clicks here).
  */
-function RowAction({ label, Icon, onClick, danger = false, active }) {
-  // `active` set makes it a switch: on = warning tint, off = greyed.
-  const tone = active === undefined
-    ? (danger ? 'bg-transparent text-danger hover:bg-danger-tint' : 'bg-transparent text-text-muted hover:bg-surface-sunken')
-    : (active ? 'bg-warning-tint text-warning' : 'bg-transparent text-text-muted opacity-50 hover:opacity-100 hover:bg-surface-sunken');
-  return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      aria-pressed={active}
-      className={`btn-quiet min-h-0 border-0 px-1.5 py-1 ${tone}`}
-      onClick={(e) => { e.stopPropagation(); onClick(); }}
-    >
-      <Icon width={15} height={15} />
-    </button>
-  );
+const OWN_CLICK = 'input, select, textarea, button, a, label, [role="button"], [role="menu"], [role="listbox"], [role="option"], [data-editable-cell]';
+function opensRow(e) {
+  if (!e.currentTarget.contains(e.target)) return false;
+  if (e.target.closest(OWN_CLICK)) return false;
+  // The padding of a cell that is open for editing is still that cell.
+  if (e.target.closest('td')?.querySelector('input, select, textarea, [role="combobox"]')) return false;
+  // A drag to select text is reading, not opening.
+  return !window.getSelection?.()?.toString();
 }
 
 const SheetRow = memo(function SheetRow({
-  row, selected, onToggleSelect, onEdit, onStop, onDelete, onCellSave, onDealStatus, groups, options,
+  row, selected, onToggleSelect, onEdit, onCellSave, onDealStatus, groups, options,
   colorUsesEndDate, cryptoPercent = 0,
 }) {
   // The three date columns, and only those. Accepting one writes the WHOLE
@@ -1496,14 +1385,21 @@ const SheetRow = memo(function SheetRow({
   const rated = withRates(row, { cryptoPercent });
 
   return (
-    // No row-level click any more. Every cell is now editable in place, so
-    // "click the row to open the full editor" and "click a cell to edit it"
-    // were the same gesture meaning two different things — and clicking
-    // INSIDE an open cell's input bubbled up here and threw the modal over
-    // what you were typing. The full editor is the Edit button in Actions,
-    // which is the only thing that should open it.
-    <tr className="hover:bg-surface-sunken">
-      <td className="td sticky-col" onClick={(e) => e.stopPropagation()}>
+    // THE ROW OPENS THE FULL EDITOR, now the Actions column is gone. An
+    // editable cell stops its own click, so a click on a value still edits
+    // that value in place; only the rest of the row lands here. See
+    // opensRow for what it refuses.
+    <tr
+      className={`cursor-pointer hover:bg-surface-sunken ${selected ? 'row-selected' : ''}`}
+      tabIndex={0}
+      role="link"
+      aria-label={`Edit ${row.person_name ?? 'this deal'}`}
+      onClick={(e) => { if (opensRow(e)) onEdit(row); }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); onEdit(row); }
+      }}
+    >
+      <td className="td sticky-col w-8" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-1.5">
           <input
             type="checkbox"
@@ -1715,39 +1611,6 @@ const SheetRow = memo(function SheetRow({
         onSave={onCellSave}
         display={<PaymentPeriod period={row.payment_period} />}
       />
-      {/* Two different facts in one cell, deliberately. The TOGGLE is the
-          admin's structured decision (override_*), the same fact the People
-          page edits — toggling here mirrors there and vice versa. The grey
-          text under it is the sheet's own raw column, whatever the boss
-          actually typed, which the toggle never overwrites.
-          See CLAUDE.md: collapsing the two would lose which is which. */}
-      <OverrideToggle
-        value={row.override_should_be_paid}
-        fallback
-        sheetText={row.should_be_paid}
-        label="should be paid"
-        onChange={(next) => onCellSave({
-          id: row.id,
-          fields: { overrideShouldBePaid: next },
-          subject: row.person_name,
-          label: 'should be paid',
-          verb: next ? 'enabled' : 'disabled',
-        })}
-      />
-      <OverrideToggle
-        value={row.override_paid}
-        fallback={false}
-        sheetText={row.paid}
-        label="paid"
-        outcome={row.payment_outcome}
-        onChange={(next) => onCellSave({
-          id: row.id,
-          fields: { overridePaid: next },
-          subject: row.person_name,
-          label: 'paid',
-          verb: next ? 'enabled' : 'disabled',
-        })}
-      />
       {/* whatbot's own payday confirmation, mirrored from payment_status
           (migration 016) — the person's answer, distinct from both columns
           above (the sheet's text, and the admin's decision). Editable, like
@@ -1759,44 +1622,129 @@ const SheetRow = memo(function SheetRow({
         display={row.payment_outcome ? <StatusBadge status={row.payment_outcome} /> : '—'}
         onSave={onCellSave}
       />
-      {/* ===============================
-           * ICONS ONLY, AND THE SHAPE CARRIES THE DIFFERENCE
-           * ===============================
-           * His call 2026-09-17. Three words across twenty six columns was
-           * the widest thing on the row for the least said.
-           *
-           * TWO OF THEM ARE RED, and that is the point: both consequences
-           * are real, and the red says "this one counts". What separates
-           * them is the SHAPE, the way it does on CellSuggestion's three
-           * marks. A raised palm is an ending you can undo from the
-           * Archive; a bin is a row that goes. Edit is grey because it
-           * opens a form and decides nothing.
-           *
-           * EVERY ONE KEEPS ITS WORDS for a screen reader and on hover: an
-           * icon-only control that says nothing is a guess.
-           */}
-      <td className="td">
-        <div className="flex gap-0.5">
-          <RowAction label="Edit" onClick={() => onEdit(row)} Icon={EditIcon} />
-          <RowAction
-            label={row.special_case_deal ? 'Special case (click to undo)' : SPECIAL_CASE_SWITCH}
-            Icon={StarIcon}
-            active={Boolean(row.special_case_deal)}
-            onClick={() => onCellSave({
-              id: row.id,
-              fields: { specialCaseDeal: !row.special_case_deal },
-              subject: row.person_name,
-              label: 'special case',
-              verb: row.special_case_deal ? 'disabled' : 'enabled',
-            })}
-          />
-          <RowAction label="Stop" danger onClick={() => onStop(row)} Icon={StopHandIcon} />
-          <RowAction label="Delete" danger onClick={() => onDelete(row)} Icon={TrashIcon} />
-        </div>
-      </td>
     </tr>
   );
 });
+
+/**
+ * ===============================
+ * * THE BAR'S WRITES, ON SCREEN BEFORE THE SERVER ANSWERS
+ * ===============================
+ * The same deal is cached three ways: the sheet's `{ rows, total }`, and a
+ * person's and a company's `{ person|company: { deals } }`. Each returns
+ * the rollback useBulkActions runs if the write fails.
+ */
+const BULK_COLUMN = { ...COLUMN_FOR, specialCaseDeal: 'special_case_deal' };
+
+function eachDeal(data, fn) {
+  for (const side of ['person', 'company']) {
+    if (Array.isArray(data?.[side]?.deals)) {
+      const deals = mapCachedRows(data[side].deals, fn);
+      return deals === data[side].deals ? data : { ...data, [side]: { ...data[side], deals } };
+    }
+  }
+  return mapCachedRows(data, fn);
+}
+
+// Fields onto the ticked deals wherever they are cached. `skipStopped`
+// leaves a stopped deal alone, as the server does.
+function setOnDeals(qc, ids, fields, { skipStopped = false } = {}) {
+  const want = new Set(ids);
+  const cols = Object.fromEntries(Object.entries(fields).map(([k, v]) => [BULK_COLUMN[k] ?? k, v]));
+  return patchQueries(qc, [['master-sheet'], ['person'], ['company']], (data) => eachDeal(data, (r) => (
+    want.has(r.id) && !(skipStopped && r.stopped_on) ? { ...r, ...cols } : r
+  )));
+}
+
+// Off the live sheet: a Stop sends them to the Archive, a Delete away. The
+// Archive's own list is under the same prefix, and they are not in it.
+function dropFromSheet(qc, ids) {
+  const want = new Set(ids);
+  return patchQueries(qc, [['master-sheet']], (data) => mapCachedRows(data, (r) => (want.has(r.id) ? null : r)));
+}
+
+/**
+ * ===============================
+ * * ONE FIELD ONTO EVERY TICKED DEAL
+ * ===============================
+ * The bar's Edit. Only the columns that are genuinely the same across a
+ * block of deals: a method, a currency, a group, a preset month, a
+ * location. Names, amounts and banking differ row by row, so setting one
+ * on six deals at once is a mistake waiting for a click.
+ *
+ * `month` is the preset: the boss's period marker is a month, and the
+ * first of it is what the sheet stores.
+ */
+const BULK_EDIT_FIELDS = [
+  { key: 'paymentMethod', label: 'Payment method', from: 'methods', closed: true },
+  { key: 'currency', label: 'Currency', from: 'currencies' },
+  { key: 'groupName', label: 'Group', from: 'groups', searchable: true },
+  { key: 'presetOn', label: 'Preset month', type: 'month' },
+  { key: 'location', label: 'Location', from: 'locations', searchable: true },
+];
+
+function BulkEditModal({ field, rows, options, busy, onClose, onApply }) {
+  const [value, setValue] = useState('');
+  const isMonth = field.type === 'month';
+  const sent = isMonth && value ? `${value}-01` : value;
+  const fields = { [field.key]: sent };
+  // THE SAME WARNING THE CELL GIVES, counted across the ticked rows. A
+  // preset move recomputes the payable amount, and on a row somebody typed
+  // that figure into by hand, the typed one goes.
+  const wiped = sent ? rows.filter((r) => recomputeWarning(r, fields)).length : 0;
+  const shown = isMonth ? monthLabel(value, true) : value;
+  const n = rows.length;
+
+  return (
+    <Modal title={`${field.label} on ${n} ${n === 1 ? 'deal' : 'deals'}`} onClose={onClose}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (sent) onApply(fields, field.label, shown);
+        }}
+      >
+        <FloatingField label={field.label} filled={isMonth || Boolean(value)}>
+          {isMonth ? (
+            <input
+              type="month"
+              className="form-control"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              aria-label={field.label}
+            />
+          ) : (
+            <Select
+              size="form"
+              value={value}
+              onChange={(v) => setValue(v ?? '')}
+              options={options[field.from] ?? []}
+              searchable={field.searchable}
+              allowCustom={!field.closed}
+              placeholder=""
+            />
+          )}
+        </FloatingField>
+
+        {wiped > 0 && (
+          <div className="mt-3 flex items-start gap-2 rounded-lg bg-warning-tint px-3 py-2.5 text-sm text-warning" role="alert">
+            <AlertCircleIcon width={16} height={16} className="mt-0.5 shrink-0" />
+            <p className="m-0">
+              {wiped} of these {wiped === 1 ? 'has' : 'have'} a payable amount typed by hand.
+              Changing the preset recomputes it from the formula, and the typed figure goes.
+            </p>
+          </div>
+        )}
+
+        <div className="mt-4 flex justify-end gap-2">
+          <Button size="md" onClick={onClose}>Cancel</Button>
+          <Button size="md" type="submit" variant="primary" disabled={!sent || busy} phase={busy ? 'working' : 'idle'}>
+            {busy ? 'Applying…' : `Apply to ${n}`}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
 
 export default function MasterSheetPage() {
   // Roles and companies for the multi-select cells. Same source the row
@@ -1829,11 +1777,6 @@ export default function MasterSheetPage() {
   // rather than become a filter for the opposite value.
   const [shouldBePaid, setShouldBePaid] = useStickyState('masterSheet.shouldBePaid', undefined); // undefined | 'true'
   const [paid, setPaid] = useStickyState('masterSheet.paid', undefined);
-  // WHICH MONTH THE ROW IS FOR, against the month we are in now. The
-  // preset is the boss's own period marker and only the current month
-  // counts toward an export's total, so "which are still set to last
-  // month" is the question that decides whether a payout file is empty.
-  const [presetWhen, setPresetWhen] = useStickyState('masterSheet.presetWhen', '');
   // The deal's COMPANY status. "What have I still to set" once a company is
   // winding down is one click, not a read of ninety six rows.
   const [companyStatus, setCompanyStatus] = useStickyState('masterSheet.companyStatus', '');
@@ -1847,12 +1790,6 @@ export default function MasterSheetPage() {
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState(null); // a row, or 'new'
   const [exporting, setExporting] = useState(false);
-  const [deleting, setDeleting] = useState(null); // a row, via the Actions column's Delete button
-  const deleteRow = useDeleteMasterSheetRowOptimistic();
-  // The reversible ending, beside the destructive one. Separate state, so
-  // the two confirms can never show each other's words.
-  const [stopping, setStopping] = useState(null);
-  const stopRow = useStopMasterSheetRow();
   // The count only, for the link below. The queue itself belongs to
   // /review, which fetches it when you get there.
   //
@@ -1860,13 +1797,13 @@ export default function MasterSheetPage() {
   // every other link go straight to `/review` rather than seeding a param
   // that opened a modal on this one.
   const reviewPending = useReviewPending();
-  // Bulk-select — scoped to the current page's loaded rows, not "every row
-  // matching the filter across every page." Simpler and safer: an admin
-  // sees exactly which rows a bulk delete will hit, never a count larger
-  // than what's on screen.
-  const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [confirmingBulkDelete, setConfirmingBulkDelete] = useState(false);
-  const bulkDelete = useBulkDeleteMasterSheetRows();
+  // The bulk bar's own writes, and the two of them that ask first. None of
+  // them waits: the rows change and the toast says so on the click.
+  const { run: runBulk } = useBulkActions();
+  const [confirmingBulkStop, setConfirmingBulkStop] = useState(false);
+  // Which one field the bar's Edit is setting on every ticked deal.
+  const [bulkEditing, setBulkEditing] = useState(null);
 
   // Parse, look, then apply. Shared with Settings and People so the diff
   // step cannot exist on one door and not the others. See useImportFlow.
@@ -1888,15 +1825,11 @@ export default function MasterSheetPage() {
   // row computes its rated figure from the same value the export uses.
   const cryptoPercent = Number(settings?.cryptoPercent) || 0;
 
-  const tableRef = useStickyColumns(2, [page, group, source, review, status, shouldBePaid, paid, presetWhen, companyStatus, amount, debouncedQuery, searchField, currency, paymentMethod, dealStatus, specialCase]);
+  const tableRef = useStickyColumns(2, [page, group, source, review, status, shouldBePaid, paid, companyStatus, amount, debouncedQuery, searchField, currency, paymentMethod, dealStatus, specialCase]);
 
   // Any filter change can put the current page past the end of the new
   // result set — same reset every other paginated page here does.
-  useEffect(() => setPage(1), [group, source, review, status, shouldBePaid, paid, presetWhen, companyStatus, amount, debouncedQuery, searchField, currency, paymentMethod, dealStatus, specialCase]);
-  // A selection scoped to "what's on screen" stops meaning anything once
-  // the screen changes — page, filters, or the rows themselves (another
-  // admin's edit, a sync) all invalidate it.
-  useEffect(() => setSelectedIds(new Set()), [group, source, review, status, shouldBePaid, paid, presetWhen, companyStatus, amount, debouncedQuery, searchField, currency, paymentMethod, dealStatus, page]);
+  useEffect(() => setPage(1), [group, source, review, status, shouldBePaid, paid, companyStatus, amount, debouncedQuery, searchField, currency, paymentMethod, dealStatus, specialCase]);
 
   // Inline cell edits. Separate from the modal's own update mutation:
   // this one is optimistic, because a cell has no Save button and no
@@ -1926,7 +1859,6 @@ export default function MasterSheetPage() {
     status: status || undefined,
     shouldBePaid,
     paid,
-    presetWhen: presetWhen || undefined,
     companyStatus: companyStatus || undefined,
     amountField: amount.field || undefined,
     amountMin: amount.min || undefined,
@@ -1968,8 +1900,111 @@ export default function MasterSheetPage() {
     [dealStatusWrite],
   );
 
+  /**
+   * BULK SELECT, scoped to the rows on screen, never "every row matching
+   * the filter". The hook cuts the ticks back to what is visible whenever a
+   * filter, a search, a page turn or a sync changes it, so a bulk act can
+   * never hit a row you can no longer see.
+   */
+  const visibleIds = useMemo(() => (rows ?? []).map((r) => r.id), [rows]);
+  const sel = useRowSelection(visibleIds);
+  const selectedRows = useMemo(() => (rows ?? []).filter((r) => sel.has(r.id)), [rows, sel]);
+  // AND A FILTER CHANGE DROPS IT OUTRIGHT. Pruning only removes rows that
+  // left the screen; a widened filter would keep old ticks beside rows
+  // nobody ticked, so the bar would act on a mix you never chose.
+  const clearSelection = sel.clear;
+  useEffect(() => { clearSelection(); }, [clearSelection, group, source, review, status, shouldBePaid, paid, companyStatus, amount, debouncedQuery, searchField, currency, paymentMethod, dealStatus, specialCase, page]);
+
   const groups = useMemo(() => groupNames ?? [], [groupNames]);
-  const filterActive = Boolean(group || source || review || status || shouldBePaid || paid || presetWhen || companyStatus || amount.field || currency || paymentMethod || dealStatus || specialCase);
+  // The lists the bar's Edit offers: the same ones the cells and the
+  // filters already read, so a value picked in bulk is one a cell knows.
+  const bulkEditOptions = useMemo(() => ({
+    methods: PAYMENT_METHODS,
+    currencies: unionOptions(filterOptions?.currencies, CURRENCIES),
+    groups,
+    locations: filterOptions?.locations ?? [],
+  }), [filterOptions, groups]);
+
+  /**
+   * A SWITCH COLUMN ONTO EVERY TICKED DEAL. Should be paid, Paid and
+   * Special case all skip a stopped deal: it is owed nothing, so deciding
+   * its pay means nothing. The rows flip on the click, the same skip
+   * applied on screen as the server applies; Undo is on the toast at once.
+   */
+  const bulkSwitch = useCallback((fields, verb, already) => {
+    const ids = sel.ids;
+    runBulk({
+      call: () => apiService.masterSheet.bulkUpdate(ids, fields, { skipStopped: true }),
+      optimistic: (qc) => setOnDeals(qc, ids, fields, { skipStopped: true }),
+      toast: bulkMessage(verb, ids.length, 'deal'),
+      report: (d) => bulkMessage(verb, d.updated.length, 'deal', [
+        [d.skipped?.same, already],
+        [d.skipped?.stopped, 'stopped, skipped'],
+        [d.skipped?.gone, 'gone since'],
+      ]),
+      undoBatch: (d) => d.batchId,
+      failure: `Couldn't update ${countOf(ids.length, 'deal')}`,
+    });
+    sel.clear();
+  }, [sel, runBulk]);
+
+  // STOP: the rows leave this list on the click (they live in the Archive
+  // now) and the count drops with them.
+  const bulkStop = () => {
+    const ids = sel.ids;
+    setConfirmingBulkStop(false);
+    runBulk({
+      call: () => apiService.masterSheet.bulkStop(ids),
+      optimistic: (qc) => dropFromSheet(qc, ids),
+      toast: { ...bulkMessage('stopped', ids.length, 'deal'), detail: 'Moved to the archive' },
+      report: (d) => bulkMessage('stopped', d.stopped.length, 'deal', [[d.skipped, 'already stopped']]),
+      undoBatch: (d) => d.batchId,
+      failure: `Couldn't stop ${countOf(ids.length, 'deal')}`,
+      icon: 'stop',
+    });
+    sel.clear();
+  };
+
+  // DELETE: gone on the click. No Undo, a delete has no batch to revert,
+  // which is why it asks first.
+  const bulkDeleteRows = () => {
+    const ids = sel.ids;
+    setConfirmingBulkDelete(false);
+    runBulk({
+      call: () => apiService.masterSheet.bulkDelete({ ids, via: 'admin' }),
+      optimistic: (qc) => dropFromSheet(qc, ids),
+      toast: bulkMessage('deleted', ids.length, 'deal'),
+      report: (d) => bulkMessage('deleted', d.deleted?.length ?? ids.length, 'deal'),
+      icon: 'trash',
+      failure: `Couldn't delete ${countOf(ids.length, 'deal')}`,
+    });
+    sel.clear();
+  };
+
+  // ONE FIELD onto every ticked deal, from the bar's Edit.
+  const bulkEdit = (fields, label, shown) => {
+    const ids = sel.ids;
+    setBulkEditing(null);
+    runBulk({
+      call: () => apiService.masterSheet.bulkUpdate(ids, fields),
+      optimistic: (qc) => setOnDeals(qc, ids, fields),
+      toast: bulkMessage(`set to ${shown}`, ids.length, 'deal'),
+      report: (d) => bulkMessage(`set to ${shown}`, d.updated.length, 'deal', [
+        [d.skipped?.same, 'already that'],
+        [d.skipped?.gone, 'gone since'],
+      ]),
+      undoBatch: (d) => d.batchId,
+      failure: `Couldn't change the ${label.toLowerCase()} on ${countOf(ids.length, 'deal')}`,
+    });
+    sel.clear();
+  };
+
+  // What each row's own switch SHOWS, undecided rows at their default, so
+  // the hint above Yes / No counts what is on screen.
+  const shownShouldBePaid = (r) => (r.override_should_be_paid === true || r.override_should_be_paid === false
+    ? r.override_should_be_paid : true);
+  const shownPaid = (r) => (r.override_paid === true || r.override_paid === false ? r.override_paid : false);
+  const filterActive = Boolean(group || source || review || status || shouldBePaid || paid || companyStatus || amount.field || currency || paymentMethod || dealStatus || specialCase);
   const isEmpty = !isLoading && rows && rows.length === 0;
 
   return (
@@ -2006,7 +2041,7 @@ export default function MasterSheetPage() {
               {/* The gold alert circle, which already means "work to do,
                   one press away" on CellSuggestion's marks. Not a warning
                   triangle: nothing is wrong, there is a question waiting. */}
-              <AlertCircleIcon width={15} height={15} />
+              <AlertCircleIcon width={16} height={16} />
               Review {reviewPending.count}
             </LinkButton>
           )}
@@ -2015,7 +2050,7 @@ export default function MasterSheetPage() {
               groups or one. A link cannot ask, and generating the wrong
               month silently is worse than one extra click. */}
           <Button variant="quiet" onClick={() => setExporting(true)}>
-            <DownloadIcon width={15} height={15} />
+            <DownloadIcon width={16} height={16} />
             Export
           </Button>
           {/* The messy human-made sheet goes in here, not into whatbot's
@@ -2027,7 +2062,7 @@ export default function MasterSheetPage() {
             percent={importState.percent}
             onChange={handleImport}
           >
-            <ImportIcon width={15} height={15} />
+            <ImportIcon width={16} height={16} />
             {importState.phase === 'uploading'
               ? `${importState.percent}%`
               : importState.phase === 'saving'
@@ -2035,7 +2070,7 @@ export default function MasterSheetPage() {
                 : 'Import'}
           </FileButton>
           <Button variant="primary" onClick={() => setEditing('new')}>
-            <PlusIcon width={15} height={15} />
+            <PlusIcon width={16} height={16} />
             Add deal
           </Button>
         </div>
@@ -2058,26 +2093,26 @@ export default function MasterSheetPage() {
           { key: 'synced', n: counts.synced ?? 0, label: 'from the sheet' },
           { key: 'manual', n: counts.manual ?? 0, label: 'added by hand' },
         ].map((s) => (
-          <button
+          <Button
             key={s.key}
-            type="button"
+            size="xs"
             aria-pressed={source === s.key}
-            className={`btn-quiet min-h-0 border-0 p-0 hover:underline ${
+            className={`px-0 hover:bg-transparent hover:underline ${
               source === s.key ? 'font-semibold text-text underline' : 'text-text-faint'
             }`}
             onClick={() => { setSource(source === s.key ? '' : s.key); setPage(1); }}
           >
             {s.n} {s.label}
-          </button>
+          </Button>
         ))}
         {counts.needs_review > 0 && (
-          <button
-            type="button"
-            className="btn-quiet min-h-0 p-0 border-0 text-warning font-semibold underline"
+          <Button
+            size="xs"
+            className="px-0 font-semibold text-warning underline hover:bg-transparent hover:text-warning"
             onClick={() => setReview('true')}
           >
             {counts.needs_review} need a check
-          </button>
+          </Button>
         )}
       </div>
 
@@ -2109,9 +2144,10 @@ export default function MasterSheetPage() {
              the pair ran off a phone screen. */
           <div className="flex w-full items-center gap-2 sm:w-auto [&>*:last-child]:min-w-0">
             {/* Narrow on purpose: the open panel floors at 224px, so the
-                options stay readable even though the trigger truncates. */}
+                options stay readable. Wide enough that the default,
+                "Anything", reads whole: cut to "Anyt…" it looked broken. */}
             <Select
-              size="sm" className="w-20 shrink-0"
+              size="sm" className="w-28 shrink-0"
               value={searchField}
               onChange={(v) => { setSearchField(v ?? SEARCH_ANY); setPage(1); }}
               options={SEARCH_FIELDS}
@@ -2124,26 +2160,6 @@ export default function MasterSheetPage() {
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
-        }
-        inline={
-          /* Only the two an admin reaches for constantly stay in the open.
-             The rest moved behind the filter button: five checkboxes plus
-             a search box on one row is a toolbar you have to read rather
-             than glance at, and the panel already exists for exactly that.
-             Ticked always means "narrow to this", never "show the
-             opposite" — cleared is no filter at all. */
-          <>
-            <FilterCheckbox
-              label="Should be paid"
-              value={shouldBePaid}
-              onChange={(v) => { setShouldBePaid(v); setPage(1); }}
-            />
-            <FilterCheckbox
-              label="Paid"
-              value={paid}
-              onChange={(v) => { setPaid(v); setPage(1); }}
-            />
-          </>
         }
         // The server's count for the current filters, not `rows.length`,
         // which is only the page that happened to load.
@@ -2159,15 +2175,15 @@ export default function MasterSheetPage() {
         // `review` is absent on purpose: it has no control in the panel,
         // so opening it would show nothing. It stays in filtersCount, so
         // Clear still shows and still undoes it.
-        filtersActive={Boolean(group || status || presetWhen || companyStatus || amount.field || query || currency || paymentMethod || dealStatus || specialCase)}
-        filtersCount={[group, source, status, review, shouldBePaid, paid, presetWhen, companyStatus, amount.field, currency, paymentMethod, dealStatus, specialCase].filter(Boolean).length}
+        filtersActive={Boolean(group || status || companyStatus || amount.field || query || currency || paymentMethod || dealStatus || specialCase || shouldBePaid || paid)}
+        filtersCount={[group, source, status, review, shouldBePaid, paid, companyStatus, amount.field, currency, paymentMethod, dealStatus, specialCase].filter(Boolean).length}
         storageKey="masterSheet.panel"
         onClearFilters={() => {
           setGroup(''); setSource(''); setStatus(''); setReview(''); setQuery(''); setSearchField(SEARCH_ANY); setCurrency(''); setPaymentMethod('');
           setDealStatus('');
           setSpecialCase('');
           setShouldBePaid(undefined); setPaid(undefined);
-          setPresetWhen(''); setCompanyStatus(''); setAmount({}); setPage(1);
+          setCompanyStatus(''); setAmount({}); setPage(1);
           // AND FORGET THEM. Resetting the state alone leaves the old
           // values in storage, so Clear would work until you walked to a
           // row and came back to the filters you had just cleared.
@@ -2181,7 +2197,7 @@ export default function MasterSheetPage() {
             <Select
               size="sm" className="w-44" searchable
               value={group} onChange={(v) => { setGroup(v ?? ''); setPage(1); }}
-              options={groups} placeholder="All"
+              options={groups} placeholder="All groups"
             />
             {/* The PERSON's payment period on that deal, from its end
                 date. Not the company's own active/closed. */}
@@ -2189,27 +2205,7 @@ export default function MasterSheetPage() {
               size="sm" className="w-44"
               value={status} onChange={(v) => { setStatus(v ?? ''); setPage(1); }}
               options={PERIOD_FILTER_OPTIONS}
-              placeholder="Any payment period"
-            />
-            {/* WHICH MONTH THE ROW IS FOR, against the month we are in.
-                A Select and not three checkboxes: they are mutually
-                exclusive, a row cannot be current and old at once, and
-                three ticks that cancel each other is a control that can
-                show a state it does not have.
-
-                Cleared means no filter, which includes the twelve roster
-                rows with no preset at all. Those are owed every month and
-                belong to none of the three, so none of the options claims
-                them. */}
-            <Select
-              size="sm" className="w-44"
-              value={presetWhen} onChange={(v) => { setPresetWhen(v ?? ''); setPage(1); }}
-              options={[
-                { value: 'current', label: 'Preset: this month' },
-                { value: 'future', label: 'Preset: a future month' },
-                { value: 'old', label: 'Preset: an old month' },
-              ]}
-              placeholder="Any preset month"
+              placeholder="All payment periods"
             />
             {/* THE DEAL'S COMPANY, not the deal. A deal has no status the
                 UI may call that: this is the company's, and it is here so
@@ -2221,7 +2217,7 @@ export default function MasterSheetPage() {
               options={COMPANY_STATUS_OPTIONS.map((o) => ({
                 value: o.value, label: `Company: ${o.label.toLowerCase()}`,
               }))}
-              placeholder="Any company status"
+              placeholder="All company statuses"
             />
             {/* AND THE DEAL'S OWN, which is his word or the review tick,
                 never a stored column. Labelled "Deal:" against the one
@@ -2233,7 +2229,30 @@ export default function MasterSheetPage() {
               options={DEAL_STATUS_OPTIONS.map((o) => ({
                 value: o.value, label: `Deal: ${o.label.toLowerCase()}`,
               }))}
-              placeholder="Any deal status"
+              placeholder="All deal statuses"
+            />
+            {/* SHOULD BE PAID AND PAID, IN THE PANEL. They were two switches
+                beside the search, and once the bulk bar arrived a switch in
+                the toolbar read as an ACTION on the ticked rows rather than
+                a filter. Here they are filters like every other, and both
+                sides are offered: "who is not paid yet" is the question. */}
+            <Select
+              size="sm" className="w-48"
+              value={shouldBePaid ?? ''} onChange={(v) => { setShouldBePaid(v || undefined); setPage(1); }}
+              options={[
+                { value: 'true', label: 'Should be paid: yes' },
+                { value: 'false', label: 'Should be paid: no' },
+              ]}
+              placeholder="Should be paid: any"
+            />
+            <Select
+              size="sm" className="w-40"
+              value={paid ?? ''} onChange={(v) => { setPaid(v || undefined); setPage(1); }}
+              options={[
+                { value: 'true', label: 'Paid: yes' },
+                { value: 'false', label: 'Paid: no' },
+              ]}
+              placeholder="Paid: any"
             />
             {/* SPECIAL CASE: a deal paid a month its own dates exclude.
                 Diane can narrow by it and this page could not, so the same
@@ -2262,7 +2281,7 @@ export default function MasterSheetPage() {
               size="sm" className="w-36"
               value={currency} onChange={(v) => { setCurrency(v ?? ''); setPage(1); }}
               options={(filterOptions?.currencies ?? []).map((c) => ({ value: c, label: c }))}
-              placeholder="Any currency"
+              placeholder="All currencies"
             />
             <Select
               size="sm" className="w-40"
@@ -2271,7 +2290,7 @@ export default function MasterSheetPage() {
               // in the filter above a column reading "bank" is two names for
               // one thing on one screen.
               options={(filterOptions?.methods ?? []).map((m) => ({ value: m, label: m }))}
-              placeholder="Any method"
+              placeholder="All methods"
             />
             {/* A FIGURE BETWEEN TWO BOUNDS, from the shared component, so
                 the next page that needs one does not grow its own. */}
@@ -2286,45 +2305,18 @@ export default function MasterSheetPage() {
             />
           </>
         }
-        actions={selectedIds.size > 0 ? (
-          /* THE SAME BULK BAR THE REVIEW PAGE HAS. This was a hand-rolled
-             strip under the toolbar with raw `btn-quiet` buttons and no
-             icons; Review's sat in the toolbar as Buttons with icons. Two
-             bulk bars, two shapes, one app. Review's is the settled one
-             (reviewPageUx.test.js pins it), so this moved to match. */
-          <>
-            <span className="whitespace-nowrap text-xs font-semibold tabular-nums text-text-muted">
-              {selectedIds.size} selected
-            </span>
-            <Button variant="quiet" onClick={() => setSelectedIds(new Set())}>
-              <CloseIcon width={15} height={15} />
-              Clear
-            </Button>
-            {/* ASKS IN A DIALOG, not inline. It used to swap this bar for
-                "Delete 6 for good?" and two more links, which was the only
-                destructive confirm in the CRM that never said what SURVIVES —
-                and deleting deals leaves every person and company standing,
-                which is the whole thing worth knowing before pressing it. */}
-            <Button variant="danger" onClick={() => setConfirmingBulkDelete(true)}>
-              <TrashIcon width={15} height={15} />
-              Delete selected
-            </Button>
-          </>
-        ) : null}
+        // The bulk act lives in the bar at the bottom now, beside the rows
+        // you just ticked rather than at the top of a long table.
       />
 
-      {bulkDelete.error && (
-        <p className="mb-2 text-sm text-danger">{bulkDelete.error.message}</p>
-      )}
-
-      {error && <div className="p-8 text-center text-text-muted text-sm">{error.message}</div>}
+      <ErrorState error={error} title="Couldn't load the master sheet" />
 
       {isEmpty && (
-        <div className="p-8 text-center text-text-muted text-sm">
-          {query || filterActive
-            ? 'No deals match that.'
-            : 'Nothing here yet. Import a sheet on Settings, or add a deal by hand.'}
-        </div>
+        query || filterActive
+          ? <EmptyState icon={SearchIcon} title="No deals match that" hint="Try another search, or clear the filters." />
+          // Both doors are on THIS page, in the row above: Import and
+          // Add deal. Pointing at Settings sent people somewhere else.
+          : <EmptyState icon={ImportIcon} title="No deals yet" hint="Import a sheet or add a deal with the buttons above." />
       )}
 
       {/* Cards on a phone. The table below is 26 columns wide and no
@@ -2332,7 +2324,13 @@ export default function MasterSheetPage() {
       {rows && rows.length > 0 && (
         <CardList>
           {rows.map((r) => (
-            <DealCard key={r.id} row={r} onEdit={setEditing} onCellSave={saveCell} />
+            <DealCard
+              key={r.id}
+              row={r}
+              selected={sel.has(r.id)}
+              onToggleSelect={sel.toggle}
+              onEdit={setEditing}
+            />
           ))}
         </CardList>
       )}
@@ -2348,37 +2346,14 @@ export default function MasterSheetPage() {
           <table ref={tableRef} className="w-full border-separate border-spacing-0 text-sm">
             <thead>
               <tr>
-                <th className="th sticky-col">
-                  <input
-                    type="checkbox"
-                    /* Boolean(), NOT the bare `&&` chain. While the rows
-                       are still loading `rows` is undefined, so the chain
-                       returned UNDEFINED and React read the box as
-                       uncontrolled; the moment the page loaded it became a
-                       boolean and React warned that a control had changed
-                       kind under it. Twice on every visit, in the console.
-                       Found in the browser 2026-09-22. */
-                    checked={Boolean(rows?.length && selectedIds.size === rows.length)}
-                    ref={(el) => {
-                      if (el) {
-                        el.indeterminate = Boolean(
-                          selectedIds.size > 0 && rows && selectedIds.size < rows.length,
-                        );
-                      }
-                    }}
-                    onChange={() =>
-                      setSelectedIds((prev) =>
-                        rows && prev.size === rows.length ? new Set() : new Set(rows?.map((r) => r.id)),
-                      )
-                    }
-                    aria-label="Select all on this page"
-                  />
+                <th className="th sticky-col w-8">
+                  <SelectAll count={sel.count} total={sel.total} onChange={sel.setAll} />
                 </th>
                 {/* Every column the boss's own sheet has (21 of them, see
                     docs/boss/Master sheet for tech-4.xlsx), in its order,
-                    plus the three CRM-side facts that have no sheet column:
-                    the admin's should-be-paid/paid overrides and whatbot's
-                    payday confirmation. The table scrolls horizontally
+                    plus whatbot's payday confirmation, which has no sheet
+                    column. The admin's should-be-paid / paid answers are
+                    the bulk bar's now. The table scrolls horizontally
                     (.table-wrap) rather than hiding columns. */}
                 <th className="th sticky-col sticky-edge">Name</th>
                 <th className="th">Group</th>
@@ -2408,35 +2383,24 @@ export default function MasterSheetPage() {
                 <th className="th">Account no.</th>
                 <th className="th">Sort code</th>
                 <th className="th">Payment period</th>
-                {/* The three payment answers, kept together and after the
-                    period: whether the period is still running is what
-                    decides whether the other three matter. */}
-                <th className="th">Should be paid</th>
-                <th className="th">Paid</th>
+                {/* whatbot's payday answer. Should be paid and Paid are
+                    set from the bulk bar now, and filtered by the two
+                    toggles above; no column of switches. */}
                 <th className="th">Confirmed</th>
-                <th className="th">Actions</th>
               </tr>
             </thead>
             <tbody>
               {isLoading
-                ? <TableSkeleton columns={27} />
+                ? <TableSkeleton columns={29} />
                 : rows.map((r) => (
                     <SheetRow
                       colorUsesEndDate={colorUsesEndDate}
                       cryptoPercent={cryptoPercent}
                       key={r.id}
                       row={r}
-                      selected={selectedIds.has(r.id)}
-                      onToggleSelect={(id) =>
-                        setSelectedIds((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(id)) next.delete(id); else next.add(id);
-                          return next;
-                        })
-                      }
+                      selected={sel.has(r.id)}
+                      onToggleSelect={sel.toggle}
                       onEdit={setEditing}
-                      onStop={setStopping}
-                      onDelete={setDeleting}
                       onCellSave={saveCell}
                       onDealStatus={pickDealStatus}
                       groups={groups}
@@ -2480,17 +2444,36 @@ export default function MasterSheetPage() {
 
       {/* The table's own bulk select. Same dialog as the single row, so
           deleting six says what deleting one says. */}
+      {/* Both close on the click: the rows change at once and the
+          request runs behind them. */}
       {confirmingBulkDelete && (
         <ConfirmDialog
-          {...confirm.bulkDeleteRows(selectedIds.size)}
-          icon={<TrashIcon width={15} height={15} />}
-          busy={bulkDelete.isPending}
+          {...confirm.bulkDeleteRows(sel.count)}
+          icon={<TrashIcon width={16} height={16} />}
           onCancel={() => setConfirmingBulkDelete(false)}
-          onConfirm={() =>
-            bulkDelete.mutate({ ids: [...selectedIds], via: 'admin' }, {
-              onSuccess: () => { setSelectedIds(new Set()); setConfirmingBulkDelete(false); },
-            })
-          }
+          onConfirm={bulkDeleteRows}
+        />
+      )}
+
+      {/* The ending you can take back, for many. Red like every Stop, told
+          apart from Delete by the palm; Undo in the toast puts the lot back. */}
+      {confirmingBulkStop && (
+        <ConfirmDialog
+          {...confirm.bulkStopRows(sel.count)}
+          confirmVariant="danger"
+          icon={<StopHandIcon width={16} height={16} />}
+          onCancel={() => setConfirmingBulkStop(false)}
+          onConfirm={bulkStop}
+        />
+      )}
+
+      {bulkEditing && (
+        <BulkEditModal
+          field={bulkEditing}
+          rows={selectedRows}
+          options={bulkEditOptions}
+          onClose={() => setBulkEditing(null)}
+          onApply={bulkEdit}
         />
       )}
 
@@ -2528,58 +2511,55 @@ export default function MasterSheetPage() {
         />
       )}
 
-      {/* The row's own Delete button. A small yes/no, NOT the 25-field
-          editor with a confirm at the bottom of it: opening the full form
-          reads as "edit this", and you had to scroll to discover you were
-          deleting. */}
-      {deleting && (
-        <ConfirmDialog
-          {...confirm.deleteRow({
-            personName: deleting.person_name,
-            company: deleting.company,
-            groupName: deleting.group_name,
-            roleLabel: deleting.role_label,
-            money: formatMoney(deleting.monthly_amount, deleting.currency),
-            fromSheet: deleting.source !== 'manual',
-          })}
-          icon={<TrashIcon width={15} height={15} />}
-          onCancel={() => setDeleting(null)}
-          onConfirm={() => {
-            // Optimistic: the row vanishing IS the confirmation, and
-            // holding the dialog open through the round trip invites a
-            // second click. A failure puts the row back and says so.
-            deleteRow.mutate({
-              id: deleting.id,
-              subject: deleting.person_name,
-              group: deleting.group_name,
-            });
-            setDeleting(null);
-          }}
+      {/* ===============================
+          * WHAT YOU CAN DO TO THE TICKED DEALS
+          * ===============================
+          The bar rises from the bottom when a row is ticked. Stop and Delete
+          are both red, told apart by the palm and the bin. Nothing here
+          waits for the server, so nothing is ever disabled. */}
+      <BulkBar count={sel.count} noun="deal" onClear={sel.clear}>
+        <BulkMenu
+          icon={ShouldBePaidIcon}
+          label="Should be paid"
+          hint={splitHint(selectedRows, shownShouldBePaid)}
+          options={[
+            { label: 'Yes', onSelect: () => bulkSwitch({ overrideShouldBePaid: true }, 'marked should be paid', 'already yes') },
+            { label: 'No', onSelect: () => bulkSwitch({ overrideShouldBePaid: false }, 'marked not to be paid', 'already no') },
+          ]}
         />
-      )}
-
-      {/* The reversible ending. No trash icon and no danger tint: the point
-          of the dialog is that this one keeps the row. */}
-      {stopping && (
-        <ConfirmDialog
-          {...confirm.stopRow({
-            personName: stopping.person_name,
-            company: stopping.company,
-            groupName: stopping.group_name,
-            roleLabel: stopping.role_label,
-            money: formatMoney(stopping.monthly_amount, stopping.currency),
-          })}
-          onCancel={() => setStopping(null)}
-          onConfirm={() => {
-            stopRow.mutate({
-              id: stopping.id,
-              subject: stopping.person_name,
-              group: stopping.group_name,
-            });
-            setStopping(null);
-          }}
+        <BulkMenu
+          icon={PaidIcon}
+          label="Paid"
+          hint={splitHint(selectedRows, shownPaid)}
+          options={[
+            { label: 'Yes', onSelect: () => bulkSwitch({ overridePaid: true }, 'marked paid', 'already yes') },
+            { label: 'No', onSelect: () => bulkSwitch({ overridePaid: false }, 'marked unpaid', 'already no') },
+          ]}
         />
-      )}
+        <BulkMenu
+          icon={EditIcon}
+          label="Edit"
+          options={BULK_EDIT_FIELDS.map((f) => ({ label: f.label, onSelect: () => setBulkEditing(f) }))}
+        />
+        {/* The same value the row's star writes: true on, false off. */}
+        <BulkMenu
+          icon={StarIcon}
+          label="Special case"
+          hint={splitHint(selectedRows, (r) => Boolean(r.special_case_deal))}
+          options={[
+            { label: 'On', onSelect: () => bulkSwitch({ specialCaseDeal: true }, 'made a special case', 'already on') },
+            { label: 'Off', onSelect: () => bulkSwitch({ specialCaseDeal: false }, 'back to their dates', 'already off') },
+          ]}
+        />
+        <BulkAction icon={StopHandIcon} variant="danger" onClick={() => setConfirmingBulkStop(true)}>
+          Stop
+        </BulkAction>
+        {/* ASKS IN A DIALOG that says what SURVIVES: deleting deals leaves
+            every person and company standing. */}
+        <BulkAction icon={TrashIcon} variant="danger" onClick={() => setConfirmingBulkDelete(true)}>
+          Delete
+        </BulkAction>
+      </BulkBar>
 
       {/* Diane is mounted once at app level (Layout.jsx) rather than per
           page — one instance, one conversation, one WebGL context. */}

@@ -49,8 +49,9 @@ test('ONLY THE FIRST TAB ACCEPTS, the rest select', () => {
   assert.match(CODE, /const SELECT_LABELS = \{ on: 'Select all', off: 'Deselect all' \}/);
   assert.match(CODE, /const ACCEPT_LABELS = \{ on: 'Accept all', off: 'Reject all' \}/);
   assert.match(CODE, /labels=\{tab === 'changed' \? ACCEPT_LABELS : SELECT_LABELS\}/);
-  // The company tab's own per group control is always a selection.
-  assert.match(CODE, /labels=\{SELECT_LABELS\}/);
+  // The company tab's own per group control is always a selection: the
+  // shared select-all CHECKBOX (not an Accept button), ticking the group.
+  assert.match(CODE, /<SelectAllBox\s+count=\{on\}\s+total=\{ids\.length\}\s+onChange=\{\(checked\) => onToggleGroup\(ids, checked\)\}/);
   // And the words are not written out at the button any more.
   assert.doesNotMatch(CODE, /'Reject all' : 'Accept all'/);
 });

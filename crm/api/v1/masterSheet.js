@@ -782,22 +782,148 @@ router.post('/master-sheet/bulk-update', async (req, res, next) => {
       return next(new AppError(400, 'No fields to set.'));
     }
 
+    // ONE ACT IN HISTORY. Every row this writes shares a batch, so History
+    // shows "Paid → yes on 3 deals" once and the toast's Undo puts all
+    // three back with one press.
+    const batchId = randomUUID();
+    // The bulk bar sends this for Paid / Should be paid / Special case: a
+    // stopped deal is owed nothing, so deciding its pay is meaningless.
+    const skipStopped = req.body?.skipStopped === true;
     const updated = [];
+    const skipped = { same: 0, stopped: 0, gone: 0 };
     for (const id of ids) {
       // Already numbers: parseIds converted them once, up front.
       const before = await repo.findById(id);
       // A row that has gone since the panel was drawn is skipped, not an
       // error: the count is what gets reported back, so the toast says how
       // many actually moved rather than claiming all of them did.
-      if (!before) continue;
+      if (!before) { skipped.gone += 1; continue; }
+      if (skipStopped && before.stopped_on) { skipped.stopped += 1; continue; }
+      // ALREADY THERE, SO NOT TOUCHED. Ticking three deals where two are
+      // already paid and pressing Paid → Yes writes ONE change, not three,
+      // so History and Undo hold only what really moved.
+      if (alreadySet(before, fields)) { skipped.same += 1; continue; }
       const patch = { ...fields };
       const derived = recomputePayable(before, patch);
-      const row = await repo.update(id, patch, 'admin', { derived });
-      if (row) updated.push(row.id);
+      const row = await repo.update(id, patch, 'admin', { derived, batchId });
+      if (row) updated.push(row);
     }
 
-    broadcast(null, 'master-sheet:changed', { action: 'bulk-updated', ids: updated });
-    res.json({ updated });
+    broadcast(null, 'master-sheet:changed', { action: 'bulk-updated', ids: updated.map((r) => r.id) });
+    // The same return leg the single PATCH has: People reads these two
+    // columns, and without it stays stale in every other open tab.
+    if (updated.length && ('overrideShouldBePaid' in fields || 'overridePaid' in fields)) {
+      broadcast(null, 'assignments:changed', { action: 'bulk-updated' });
+      broadcast(null, 'people:changed', { action: 'bulk-updated' });
+    }
+    res.json({ updated: updated.map((r) => r.id), skipped, batchId: updated.length ? batchId : null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Is every field in this patch already the row's value? Only for the
+ * switch-like fields, where "the same" is unambiguous: a yes is a yes. A
+ * date or an amount is compared by its own rules in update, not here.
+ */
+const SWITCHES = new Set(['overrideShouldBePaid', 'overridePaid', 'needsReview']);
+function alreadySet(before, fields) {
+  const keys = Object.keys(fields);
+  if (!keys.length) return false;
+  return keys.every((key) => {
+    if (SWITCHES.has(key)) {
+      const was = before[repo.COLUMN_FOR[key]];
+      return (was ?? null) === (fields[key] ?? null);
+    }
+    // Special case is a date, but the bar only ever turns it on or off.
+    if (key === 'specialCaseDeal') {
+      return Boolean(before.special_case_deal) === Boolean(fields.specialCaseDeal);
+    }
+    return false;
+  });
+}
+
+/**
+ * ===============================
+ * * STOP AND RESUME, MANY AT ONCE
+ * ===============================
+ * The same `stop` and `resume` a single row goes through, row by row, so
+ * the guards (a closed company refuses resume) cannot be skipped by doing
+ * it in bulk. One batch, so it is one act in History and one Undo.
+ */
+router.post('/master-sheet/bulk-stop', async (req, res, next) => {
+  try {
+    const ids = parseIds(req.body?.ids);
+    const batchId = randomUUID();
+    const stopped = [];
+    let skipped = 0;
+    for (const id of ids) {
+      const before = await repo.findById(id);
+      // Already stopped keeps its own date: a second stop would move it
+      // and rewrite a month that was settled on the first.
+      if (!before || before.stopped_on) { skipped += 1; continue; }
+      const row = await repo.stop(id, { on: currentDay(), reason: repo.STOPPED_REASON.BY_HAND, batchId });
+      if (row) stopped.push(row.id);
+    }
+    broadcast(null, 'master-sheet:changed', { action: 'bulk-stopped', ids: stopped });
+    if (stopped.length) {
+      broadcast(null, 'assignments:changed', { action: 'bulk-stopped' });
+      broadcast(null, 'people:changed', { action: 'bulk-stopped' });
+    }
+    res.json({ stopped, skipped, batchId: stopped.length ? batchId : null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/master-sheet/bulk-resume', async (req, res, next) => {
+  try {
+    const ids = parseIds(req.body?.ids);
+    const batchId = randomUUID();
+    const resumed = [];
+    const refused = [];
+    let skipped = 0;
+    for (const id of ids) {
+      const before = await repo.findById(id);
+      if (!before || !before.stopped_on) { skipped += 1; continue; }
+      // Closed with its company: reopening the company is the way back.
+      if (before.stopped_reason === repo.REOPEN_THE_COMPANY) { refused.push(before.company); continue; }
+      const row = await repo.resume(id, { batchId });
+      if (row) resumed.push(row.id);
+    }
+    broadcast(null, 'master-sheet:changed', { action: 'bulk-resumed', ids: resumed });
+    if (resumed.length) {
+      broadcast(null, 'assignments:changed', { action: 'bulk-resumed' });
+      broadcast(null, 'people:changed', { action: 'bulk-resumed' });
+    }
+    res.json({ resumed, skipped, refused: [...new Set(refused)], batchId: resumed.length ? batchId : null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * UNDO MANY. Either one bulk act by its batch (the toast's Undo) or the
+ * change ids ticked on History. Through revertChangeBatch, the same path
+ * a single undo takes, so the two cannot drift apart.
+ */
+router.post('/master-sheet/changes/revert-many', async (req, res, next) => {
+  try {
+    const { batchId } = req.body || {};
+    let ids;
+    if (batchId) {
+      if (!UUID.test(String(batchId))) return next(new AppError(400, 'Not a batch id.'));
+      ids = await repo.changeIdsForBatch(batchId);
+    } else {
+      ids = parseIds(req.body?.ids);
+    }
+    const { done, failed } = await repo.revertChangeBatch(ids);
+    broadcast(null, 'master-sheet:changed', { action: 'reverted' });
+    broadcast(null, 'people:changed', { action: 'reverted' });
+    broadcast(null, 'companies:changed', { action: 'reverted' });
+    broadcast(null, 'assignments:changed', { action: 'reverted' });
+    res.json({ reverted: done.length, failed });
   } catch (err) {
     next(err);
   }

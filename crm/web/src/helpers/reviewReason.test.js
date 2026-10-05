@@ -99,7 +99,7 @@ test('THE PAGE FILTERS BY THE TAB, and the answers act on the tab', () => {
   assert.match(src, /countByReason\(rows\)/);
   // Switching tabs clears the selection, or "yes to all" acts on rows from
   // a tab nobody is looking at.
-  assert.match(src, /setTab\(key\); setSelected\(new Set\(\)\);/);
+  assert.match(src, /setTab\(key\); sel\.clear\(\);/);
 });
 
 test('AND THE ROW NO LONGER REPEATS THE TAB AS A BADGE', () => {

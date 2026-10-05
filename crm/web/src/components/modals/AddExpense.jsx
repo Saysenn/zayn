@@ -224,7 +224,7 @@ export default function AddExpense({
             />
           </FloatingField>
 
-          <p className="text-[11px] leading-5 text-text-faint">
+          <p className="text-xs leading-5 text-text-faint">
             {rateLocked && 'AED converts to itself, so the rate is 1.'}
             {!rateLocked && rateUsable && form.currency && (
               <span className="block tabular-nums text-text-muted">
@@ -285,13 +285,13 @@ export default function AddExpense({
               {added} added. The date, currency, rate and group carry over.
             </span>
           )}
-          <Button variant="quiet" disabled={busy} onClick={onClose}>Cancel</Button>
+          <Button size="md" variant="secondary" disabled={busy} onClick={onClose}>Cancel</Button>
           {!editing && (
-            <Button variant="secondary" disabled={!ready || busy} onClick={saveAgain}>
+            <Button size="md" variant="secondary" disabled={!ready || busy} onClick={saveAgain}>
               Save and add another
             </Button>
           )}
-          <Button variant="primary" disabled={!ready || busy} onClick={() => onSave(payload())}>
+          <Button size="md" variant="primary" disabled={!ready || busy} phase={busy ? 'working' : 'idle'} onClick={() => onSave(payload())}>
             {busy ? 'Saving…' : 'Save'}
           </Button>
         </div>

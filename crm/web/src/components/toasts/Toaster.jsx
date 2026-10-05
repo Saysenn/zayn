@@ -1,10 +1,13 @@
 import { Link } from 'react-router-dom';
 import { useNotifications } from '../../hooks/useNotifications';
 import { useDiane } from '../agentOrb/DianeContext';
-import { CloseIcon } from '../icons';
+import {
+  CloseIcon, CheckIcon, TrashIcon, AlertCircleIcon, WarningIcon, InfoIcon, ImportIcon, RestoreIcon, UndoIcon,
+  StopHandIcon, ResumeIcon,
+} from '../icons';
 
 /**
- * The stacked strips, tucked into the top-right corner.
+ * The stacked strips, in the bottom-right corner.
  *
  * z-[60] on purpose. This used to be z-30 — the same layer as Diane's
  * overlay — so any toast raised while she was open rendered behind her and
@@ -17,22 +20,29 @@ import { CloseIcon } from '../icons';
  * marks meaning, and the strip itself stays quiet.
  */
 
+// THE SHARED SET, not a second one drawn here. The strip used to carry its
+// own seven paths at a heavier stroke, so a bin in a toast and a bin on a
+// row were two different bins.
 const ICONS = {
-  check: <path d="M20 6L9 17l-5-5" />,
-  trash: <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" />,
-  alert: <><circle cx="12" cy="12" r="9" /><path d="M12 7v6M12 16.5v.01" /></>,
-  warn: <><path d="M12 3l9 16H3z" /><path d="M12 9v4M12 16.5v.01" /></>,
-  info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 7.5v.01" /></>,
-  import: <path d="M12 19V7M7 12l5-5 5 5M4 21h16" />,
-  // Undo. Same shape as RestoreIcon in icons.jsx: putting a value back is
-  // its own kind of write, not a plain save.
-  restore: <><path d="M3 7h18v3H3z" /><path d="M5 10v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9" /><path d="M12 18v-5" /><path d="M9.5 15.5 12 13l2.5 2.5" /></>,
+  check: CheckIcon,
+  trash: TrashIcon,
+  alert: AlertCircleIcon,
+  warn: WarningIcon,
+  info: InfoIcon,
+  import: ImportIcon,
+  restore: RestoreIcon,
+  undo: UndoIcon,
+  // The bar's Stop and Resume say what happened with their own marks.
+  stop: StopHandIcon,
+  resume: ResumeIcon,
 };
 
 // One map, the same shape as Button's VARIANTS — so "make warnings amber"
-// stays a one-line change rather than a hunt through markup.
+// stays a one-line change rather than a hunt through markup. Success is
+// the fixed green, not the accent: in an orange or yellow theme an accent
+// tick read as a warning.
 const LEVELS = {
-  success: { icon: 'check', tint: 'bg-accent-tint', fg: 'text-accent-strong' },
+  success: { icon: 'check', tint: 'bg-success-tint', fg: 'text-success-strong' },
   error: { icon: 'alert', tint: 'bg-danger-tint', fg: 'text-danger' },
   warning: { icon: 'warn', tint: 'bg-warning-tint', fg: 'text-warning' },
   info: { icon: 'info', tint: 'bg-surface-sunken', fg: 'text-text-muted' },
@@ -56,13 +66,10 @@ export default function Toaster() {
 
   return (
     <div
-      // Starts BELOW the page header, not over it. The header is sticky
-      // and holds "Ask Diane" in the same top-right corner — a toast
-      // landing on top of it covered the one control that's meant to be
-      // reachable from every page. `top` is the header's own height token
-      // (tailwind.config.js `spacing.header`) plus a small gap, so the two
-      // can't drift apart if that height ever changes.
-      className="fixed right-3 top-[calc(theme(spacing.header)+0.5rem)] z-[60] flex flex-col gap-2 w-full max-w-[19rem] pointer-events-none"
+      // BOTTOM RIGHT, out of the way of the header and "Ask Diane". It
+      // rises above the bulk bar while one is open: BulkBar writes its
+      // own height to --bulkbar-h, so the two can never overlap.
+      className="fixed right-3 bottom-[calc(theme(spacing.bottomnav)+theme(spacing.safebottom)+var(--bulkbar-h,0px)+0.5rem)] md:bottom-[calc(var(--bulkbar-h,0px)+0.75rem)] z-[60] flex flex-col gap-2 w-full max-w-[20rem] pointer-events-none transition-[bottom] duration-200"
       role="status"
       aria-live="polite"
     >
@@ -70,7 +77,7 @@ export default function Toaster() {
         const level = LEVELS[t.level] ?? LEVELS.info;
         // An explicit icon wins over the level's default — a delete is a
         // success, but a bin says what happened far faster than a tick.
-        const icon = ICONS[t.icon] ?? ICONS[level.icon];
+        const Icon = ICONS[t.icon] ?? ICONS[level.icon];
 
         // Only socket toasts have a destination. A "Saved" toast has
         // nowhere to go, and wrapping it in a link to "/" meant an
@@ -87,12 +94,7 @@ export default function Toaster() {
               className={`shrink-0 w-6 h-6 flex items-center justify-center rounded-full ${level.tint} ${level.fg}`}
               aria-hidden="true"
             >
-              <svg
-                width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
-              >
-                {icon}
-              </svg>
+              <Icon width={14} height={14} />
             </span>
 
             <Body {...bodyProps} className="flex-1 min-w-0 no-underline">
@@ -103,6 +105,18 @@ export default function Toaster() {
                 </p>
               )}
             </Body>
+
+            {/* ONE ACTION, at most: Undo after a bulk change, mostly. It
+                closes the strip, since what it reported is no longer true. */}
+            {t.action && (
+              <button
+                type="button"
+                className="toast-action"
+                onClick={() => { dismissToast(t.id); t.action.onClick(); }}
+              >
+                {t.action.label}
+              </button>
+            )}
 
             {/* THE SHARED ICON, not a ✕ character. The glyph rendered at
                 whatever the font felt like and sat off centre beside a 14px

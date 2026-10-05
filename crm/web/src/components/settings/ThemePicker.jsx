@@ -23,7 +23,7 @@ export default function ThemePicker() {
             aria-checked={chosen}
             onClick={() => setTheme(id)}
             className={`block min-h-0 w-full rounded-lg border bg-surface p-2 text-left transition ${
-              chosen ? 'border-accent-strong ring-2 ring-accent-strong/30' : 'border-border hover:border-border-strong'
+              chosen ? 'border-accent-strong ring-1 ring-accent-strong' : 'border-border hover:border-border-strong'
             }`}
           >
             {/* Its own colours, whatever theme is showing: the pale fill, the strong step and the tint. */}

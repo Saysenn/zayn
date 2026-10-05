@@ -81,4 +81,11 @@ function deleteBatch({ source, level, limit = 200 } = {}) {
     .then((result) => result.rowCount);
 }
 
-module.exports = { create, prune, list, count, deleteBatch };
+// The ticked rows on the Logs page, by id.
+function deleteIds(ids) {
+  return pool
+    .query('DELETE FROM tb_logs WHERE id = ANY($1::bigint[])', [ids])
+    .then((result) => result.rowCount);
+}
+
+module.exports = { create, prune, list, count, deleteBatch, deleteIds };

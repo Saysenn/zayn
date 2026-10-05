@@ -8,7 +8,9 @@ import { popup } from '../../configs/popups.config';
 import ImportColumnsNote from './ImportColumnsNote';
 import ConfirmDialog from '../modals/ConfirmDialog';
 import { confirm } from '../../configs/confirms.config';
-import { ImportIcon, ChevronIcon } from '../icons';
+import { ImportIcon, ChevronIcon, CheckIcon, TrashIcon } from '../icons';
+import SelectAllBox from '../forms/SelectAll';
+import UnderlineTabs from '../layout/UnderlineTabs';
 import { usePeopleFilters } from '../../hooks/usePeople';
 import { unionOptions } from '../../helpers/optionList';
 
@@ -66,10 +68,11 @@ const TABS = [
    * partial sheet, a trimmed export or a renamed person all land here too,
    * which is exactly why the tab deletes nothing on its own.
    *
-   * Red, alone among the four, because it is the only tab whose button
-   * destroys something. The other three write or read.
+   * NOT RED ON THE TAB. A tab is navigation; the red belongs to the one
+   * Delete button inside it, which only exists where the caller passed
+   * `onDeleteRows` (the Master Sheet; deals are deleted nowhere else).
    */
-  { key: 'notInFile', label: 'Potentially ended deals', tone: 'danger' },
+  { key: 'notInFile', label: 'Potentially ended deals' },
   // COMPANY STATUS SITS BEFORE Similar deals, when the file carries one.
   // The first four tabs are the upload's own decisions and this is a fifth;
   // Similar deals is a reading you go to last, so appending the tab that
@@ -122,7 +125,7 @@ const ROW_GRID = 'flex flex-col gap-1 sm:grid sm:grid-cols-[9rem_minmax(0,1fr)_m
 
 // THE TICK'S FOOTPRINT, IN ONE PLACE, so a heading and the mark under it
 // cannot drift apart when the mark changes size.
-const TICK = 'h-4 w-4';
+const TICK = 'h-3.5 w-3.5';
 
 /**
  * THE INCOMING VALUE IS EDITABLE, when the column is one that can be set.
@@ -254,13 +257,13 @@ function Side({ chosen, onChoose, label, children }) {
     >
       <span
         aria-hidden
-        className={`${TICK} flex shrink-0 items-center justify-center border-2 text-[10px] leading-none ${
+        className={`${TICK} flex shrink-0 items-center justify-center rounded-full border ${
           chosen
             ? 'border-accent bg-accent text-accent-ink'
-            : 'border-text-faint bg-surface text-transparent group-hover:border-accent'
+            : 'border-border-strong bg-surface text-transparent group-hover:border-accent'
         }`}
       >
-        ✓
+        <CheckIcon width={10} height={10} />
       </span>
       <span className="min-w-0 flex-1">{children}</span>
     </button>
@@ -296,7 +299,9 @@ function SelectAll({
 
   return (
     <span className="flex items-center gap-2 whitespace-nowrap text-xs text-text-muted">
-      <Button size="sm" variant={all ? 'danger' : 'primary'} onClick={() => onChange(!all)}>
+      {/* Never red: un-picking rows destroys nothing. Soft accent while
+          there is something left to take, plain once it is all in. */}
+      <Button size="sm" variant={all ? 'secondary' : 'accent'} onClick={() => onChange(!all)}>
         {all ? labels.off : labels.on}
       </Button>
       <span className="tabular-nums">{accepted} of {total} {verb}</span>
@@ -478,7 +483,7 @@ function FillRow({ column, field, value, source, input, options, onSaveRow, onAp
 function RowCard({ row, accepted, onToggle, children }) {
   return (
     <div
-      className={`border p-3 transition-colors ${
+      className={`rounded-lg border p-3 transition-colors ${
         accepted
           ? 'border-accent/40 bg-accent-tint'
           : 'border-border bg-surface-sunken opacity-60'
@@ -538,8 +543,15 @@ function NotInFileNote({ rows }) {
  * ONE LINE PER DEAL, grouped by group. See TABS for why this is not the
  * RowCard the other two tabs use.
  */
+/**
+ * `canDelete` is false where the caller passed no `onDeleteRows`. Deals are
+ * deleted on the Master Sheet alone, so the same list opened from Settings
+ * or People is a reading: no ticks, no button, nothing that looks like it
+ * could remove a row from here.
+ */
 function DeletableList({
   rows, note, group, onGroup, marked, onToggle, onToggleGroup, selectedCount, onDelete, deleting,
+  canDelete = true,
 }) {
   const groups = useMemo(
     () => [...new Set(rows.map((r) => r.group_name || '(no group)'))].sort(),
@@ -564,7 +576,7 @@ function DeletableList({
           it happens on its own, before and independently of whatever the
           sheet is proposing. Said once at the top rather than on every
           line. */}
-      <p className="bg-surface-sunken px-3 py-2 text-sm text-text-muted">{note}</p>
+      <p className="rounded-lg bg-surface-sunken px-3 py-2 text-sm text-text-muted">{note}</p>
 
       {/* THE LIST'S OWN TOOLBAR: what you are looking at on the left, what
           you can do with it on the right. The action lived up in the tab
@@ -588,9 +600,17 @@ function DeletableList({
             placeholder="All"
           />
         )}
-        {selectedCount > 0 && (
-          <Button variant="danger" size="sm" className="ml-auto" disabled={deleting} onClick={onDelete}>
-            {deleting ? 'Deleting…' : `Delete ${selectedCount} selected`}
+        {canDelete && selectedCount > 0 && (
+          <Button
+            variant="danger"
+            size="sm"
+            className="ml-auto"
+            disabled={deleting}
+            phase={deleting ? 'working' : 'idle'}
+            onClick={onDelete}
+          >
+            <TrashIcon width={16} height={16} />
+            {deleting ? 'Deleting…' : `Delete ${selectedCount}`}
           </Button>
         )}
       </div>
@@ -599,40 +619,45 @@ function DeletableList({
         const ids = deals.map((d) => d.id).filter((id) => id != null);
         const on = ids.filter((id) => marked.has(id)).length;
         return (
-          <div key={name} className="border border-border">
-            {/* INSIDE the box and on the same px-2.5 as the rows. It sat
-                outside with no padding, so its checkbox was eleven pixels
-                left of every checkbox beneath it. */}
+          <div key={name} className="overflow-hidden rounded-lg border border-border">
+            {/* INSIDE the box and on the same px-2.5 as the rows, so its
+                checkbox sits straight above every checkbox beneath it. A
+                select-all is a CHECKBOX, the same one every table has. */}
             <div className="flex items-center gap-2 border-b border-border bg-surface-sunken px-2.5 py-1.5">
-              <SelectAll
-                total={ids.length}
-                accepted={on}
-                verb="selected"
-                labels={SELECT_LABELS}
-                onChange={(checked) => onToggleGroup(ids, checked)}
-              />
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-text-faint">
+              {canDelete && (
+                <SelectAllBox
+                  count={on}
+                  total={ids.length}
+                  onChange={(checked) => onToggleGroup(ids, checked)}
+                />
+              )}
+              <span className="text-xs font-semibold uppercase tracking-wide text-text-faint">
                 {name} <span className="tabular-nums">({deals.length})</span>
               </span>
+              {canDelete && on > 0 && (
+                <span className="ml-auto text-xs tabular-nums text-text-muted">{on} selected</span>
+              )}
             </div>
             <div>
               {deals.map((d) => (
                 <label
                   key={d.id ?? `${d.person_name}-${d.company}-${d.role_label}`}
                   className={`flex items-center gap-2 border-b border-border px-2.5 py-1.5 text-sm last:border-b-0 ${
-                    marked.has(d.id) ? 'bg-danger-tint' : ''
+                    canDelete && marked.has(d.id) ? 'row-selected' : ''
                   }`}
                 >
                   {/* UNTICKED BY DEFAULT, unlike the other two tabs. There
                       the common case is agreeing with a newer file; here the
                       common case is a partial sheet, and the right answer is
                       to delete nothing. */}
-                  <input
-                    type="checkbox"
-                    checked={marked.has(d.id)}
-                    disabled={d.id == null}
-                    onChange={() => onToggle(d.id)}
-                  />
+                  {canDelete && (
+                    <input
+                      type="checkbox"
+                      checked={marked.has(d.id)}
+                      disabled={d.id == null}
+                      onChange={() => onToggle(d.id)}
+                    />
+                  )}
                   <span className="font-medium">{d.person_name || '(no handler)'}</span>
                   <span className="text-text-muted">{d.company || '(no company)'}</span>
                   <span className="ml-auto text-xs text-text-faint">{d.role_label}</span>
@@ -1173,36 +1198,15 @@ export default function ImportDiffModal({
           </div>
         )}
 
-        <div className="flex flex-wrap gap-1 self-start rounded-lg border border-border bg-surface-sunken p-1">
-          {/* The optional tab drops out when the file carries no company
-              block, rather than being appended when it does: its POSITION
-              in the list is the thing being stated. */}
-          {TABS.filter((t) => !t.hidden && (!t.optional || companyDiff)).map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setTab(t.key)}
-              // The danger tab keeps its red whether or not it is open, so
-              // it reads as "this one removes things" from across the
-              // strip rather than only once you land on it.
-              // A filled pill rather than an accent underline. Same change
-              // as the settings tabs and HandlerTabs: the weight comes from
-              // a fill, so hover and active cannot read alike.
-              className={`min-h-0 rounded-md border-0 px-4 py-1.5 text-sm transition-colors ${
-                tab === t.key
-                  ? (t.tone === 'danger'
-                    ? 'bg-danger-tint font-semibold text-danger shadow-sm'
-                    : 'bg-surface font-semibold text-text shadow-sm')
-                  : (t.tone === 'danger'
-                    ? 'text-danger/70 hover:bg-danger-tint'
-                    : 'text-text-muted hover:bg-surface')
-              }`}
-            >
-              {t.label} <span className="tabular-nums">({counts[t.key]})</span>
-            </button>
-          ))}
-
-        </div>
+        {/* The optional tab drops out when the file carries no company
+            block, rather than being appended when it does: its POSITION
+            in the list is the thing being stated. */}
+        <UnderlineTabs
+          tabs={TABS.filter((t) => !t.hidden && (!t.optional || companyDiff))
+            .map((t) => ({ key: t.key, label: t.label, count: counts[t.key] }))}
+          active={tab}
+          onChange={setTab}
+        />
 
         {/* The select-all sits at the head of this row rather than above a
             column heading, because it is the same kind of thing as the
@@ -1266,13 +1270,17 @@ export default function ImportDiffModal({
           {reading && deletable.length > 0 && (
             <DeletableList
               rows={deletable}
-              note={tab === 'inFile'
-                ? 'Deals found in the CRM that are also in the imported file. You can use this '
-                  + 'to delete deals based on the imported file: import a file containing ended '
-                  + 'deals and delete them here.'
-                : 'The imported file does not mention these, which does not mean they are '
-                  + 'finished. Nothing here goes unless you tick it. Decide whether to remove '
-                  + 'them or not.'}
+              canDelete={Boolean(onDeleteRows)}
+              note={!onDeleteRows
+                ? 'The imported file does not mention these, which does not mean they are '
+                  + 'finished. The import removes nothing; delete a finished deal on the Master Sheet.'
+                : tab === 'inFile'
+                  ? 'Deals found in the CRM that are also in the imported file. You can use this '
+                    + 'to delete deals based on the imported file: import a file containing ended '
+                    + 'deals and delete them here.'
+                  : 'The imported file does not mention these, which does not mean they are '
+                    + 'finished. Nothing here goes unless you tick it. Decide whether to remove '
+                    + 'them or not.'}
               group={deleteGroup}
               onGroup={setDeleteGroup}
               marked={marked}
@@ -1312,7 +1320,7 @@ export default function ImportDiffModal({
                       every line. Two ticks facing each other are only
                       obvious when the columns are named, and the alternative
                       is repeating "keep" and "take" down twenty rows. */}
-                  <span className={`${ROW_GRID} pb-1 text-[10px] uppercase tracking-wide text-text-faint`}>
+                  <span className={`${ROW_GRID} pb-1 text-xs uppercase tracking-wide text-text-faint`}>
                     <span className="hidden sm:block" />
                     {/* EXISTING and INCOMING, the only two words an import
                         uses. "Keep this" and "Take from the file" were a

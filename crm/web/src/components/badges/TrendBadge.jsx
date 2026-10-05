@@ -17,7 +17,7 @@ export default function TrendBadge({ comparison, compact = false }) {
       : `${percentText ? `${percentText} ` : ''}${direction}`;
 
   return (
-    <span className={`badge ${SKINS[direction]} ${compact ? 'px-2 py-0 text-[10px]' : ''}`}>
+    <span className={`badge ${SKINS[direction]} ${compact ? 'px-2 py-0 text-xs' : ''}`}>
       {label}
     </span>
   );

@@ -1,4 +1,7 @@
+import { createPortal } from 'react-dom';
 import { useEffect } from 'react';
+import Button from '../buttons/Button';
+import { CloseIcon } from '../icons';
 
 // `wide` is for form modals with more fields than fit in one readable
 // column — the master sheet's row editor has 20+. Fixed widths rather than
@@ -26,7 +29,8 @@ const TONES = {
     panel: 'bg-surface sm:border sm:border-border',
     head: 'border-b border-border bg-surface-sunken/70',
     title: 'text-text',
-    close: 'btn-quiet',
+    // Null: the CRM's close is the shared quiet icon Button.
+    close: null,
     // The body is the one scrolling region, so it is the one that drew the
     // platform's full width bar down the side of a dialog.
     scroll: 'scroll-slim',
@@ -62,7 +66,12 @@ export default function Modal({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  return (
+  // INTO <body>, not where the dialog was opened. Rendered in place, any
+  // ancestor with a transform, a filter or a backdrop blur (the sticky
+  // header has one) becomes what `fixed inset-0` is measured against, and
+  // the backdrop stopped short of the top of the window with a strip of
+  // undimmed page above it.
+  return createPortal(
     <div
       // z-50, above the table's sticky cells.
       //
@@ -100,14 +109,24 @@ export default function Modal({
             scrolls away leaves you in a form with no idea what it is. */}
         <div className={`flex shrink-0 items-center justify-between px-4 py-3 ${skin.head}`}>
           <h2 className={`truncate pr-2 text-base font-bold sm:text-lg ${skin.title}`}>{title}</h2>
-          <button
-            type="button"
-            className={`min-h-0 shrink-0 border-none p-1 ${skin.close}`}
-            onClick={onClose}
-            aria-label="Close"
-          >
-            ✕
-          </button>
+          {/* The shared icon, never a ✕ glyph, which sat at the font's
+              weight rather than the 2px stroke every other icon has. Diane
+              keeps her own bare button: btn-quiet's grey fill would land
+              on her near-black panel. */}
+          {skin.close ? (
+            <button
+              type="button"
+              className={`min-h-0 shrink-0 p-1.5 ${skin.close}`}
+              onClick={onClose}
+              aria-label="Close"
+            >
+              <CloseIcon width={16} height={16} />
+            </button>
+          ) : (
+            <Button size="icon" className="shrink-0" onClick={onClose} aria-label="Close">
+              <CloseIcon width={16} height={16} />
+            </Button>
+          )}
         </div>
         {/* The one scrolling region. It used to be the whole dialog, which
             scrolled the header away with it.
@@ -118,6 +137,7 @@ export default function Modal({
           {children}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -1447,6 +1447,18 @@ async function findChangeBatches({ hours = 24, limit = 20000 } = {}) {
 }
 
 /**
+ * The change ids one bulk act wrote, still standing. What the toast's Undo
+ * and History's bulk undo hand to revertChangeBatch.
+ */
+async function changeIdsForBatch(batchId) {
+  const { rows } = await pool.query(
+    `SELECT id FROM tb_mastersheet_changes WHERE batch_id = $1::uuid AND reverted_at IS NULL ORDER BY id`,
+    [batchId],
+  );
+  return rows.map((r) => r.id);
+}
+
+/**
  * Every id in the batch, one at a time through the same single revert, so
  * a batch undo and a hand undo cannot drift apart. A row that refuses is
  * NAMED rather than averaged into a count: a half-undone mass edit is the
@@ -2240,7 +2252,7 @@ function removeMany(ids, { via } = {}) {
  */
 // `async`, so a bad reason arrives as a REJECTION like every other failure
 // in this file. Thrown synchronously it escapes a caller's .catch entirely.
-async function stop(id, { on, reason, via = 'admin' }) {
+async function stop(id, { on, reason, via = 'admin', batchId = null }) {
   if (!Object.values(STOPPED_REASON).includes(reason)) {
     throw new Error(`${reason} is not a stop reason`);
   }
@@ -2257,12 +2269,15 @@ async function stop(id, { on, reason, via = 'admin' }) {
             -- LOGGED, so History shows the stop and an undo can reach it.
             logged AS (
               INSERT INTO tb_mastersheet_changes (row_id, person_name, field, old_value, new_value, changed_via, batch_id)
-              SELECT m.id, m.person_name, 'stoppedOn', b.stopped_on::text, m.stopped_on::text, $4, gen_random_uuid()
+              SELECT m.id, m.person_name, 'stoppedOn', b.stopped_on::text, m.stopped_on::text, $4,
+                     COALESCE($5::uuid, gen_random_uuid())
                 FROM moved m JOIN before b ON b.id = m.id
                WHERE b.stopped_on IS DISTINCT FROM m.stopped_on
             )
        SELECT * FROM moved`,
-      [id, on, reason, via],
+      // A bulk stop passes one batchId for every row, so History shows it
+      // as one act and one undo puts it all back.
+      [id, on, reason, via, batchId],
     )
     .then((r) => r.rows[0] ?? null);
 }
@@ -2336,7 +2351,7 @@ async function stopMany(ids, { on, reason }) {
  * putting a deal back on a company that is gone is the one resume that
  * makes the sheet wrong, and a second caller would not think to re-check.
  */
-function resume(id, { via = 'admin' } = {}) {
+function resume(id, { via = 'admin', batchId = null } = {}) {
   cache.invalidate();
   return pool
     .query(
@@ -2349,12 +2364,13 @@ function resume(id, { via = 'admin' } = {}) {
             ),
             logged AS (
               INSERT INTO tb_mastersheet_changes (row_id, person_name, field, old_value, new_value, changed_via, batch_id)
-              SELECT m.id, m.person_name, 'stoppedOn', b.stopped_on::text, NULL, $3, gen_random_uuid()
+              SELECT m.id, m.person_name, 'stoppedOn', b.stopped_on::text, NULL, $3,
+                     COALESCE($4::uuid, gen_random_uuid())
                 FROM moved m JOIN before b ON b.id = m.id
                WHERE b.stopped_on IS NOT NULL
             )
        SELECT * FROM moved`,
-      [id, REOPEN_THE_COMPANY, via],
+      [id, REOPEN_THE_COMPANY, via, batchId],
     )
     .then((r) => r.rows[0] ?? null);
 }
@@ -3159,6 +3175,7 @@ module.exports = {
   revertFieldChange,
   findChangeBatches,
   revertChangeBatch,
+  changeIdsForBatch,
   isUndoableField,
   BATCH_GAP_SECONDS,
   ENDING_SOON_MONTHS,

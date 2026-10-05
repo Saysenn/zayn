@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { useMasterSheetCellEdit, useDeleteMasterSheetRow } from '../../hooks/useMasterSheet';
+import { useMasterSheetCellEdit } from '../../hooks/useMasterSheet';
 import Button from '../buttons/Button';
 import Select from './Select';
 import FloatingField from './FloatingField';
-import { PlusIcon, TrashIcon } from '../icons';
+import { PlusIcon } from '../icons';
+import { EmptyState } from '../display/StateBlocks';
 
 /**
  * Who works on what, edited in one place.
@@ -33,6 +34,9 @@ import { PlusIcon, TrashIcon } from '../icons';
  * deal is already real, so a Save button beside it would only add a
  * step and a way to lose the edit; a new one isn't real until it has a
  * counterpart, so it needs the explicit act.
+ *
+ * NO REMOVE. Deleting a deal is the Master Sheet's alone; ending one is
+ * Stop, which keeps the row and its history in the Archive.
  */
 
 const METHODS = [
@@ -48,7 +52,7 @@ const BLANK = {
 
 // One grid definition, used by the caption row and every row under it, so
 // the columns cannot drift apart.
-const COLS = 'grid gap-2 sm:grid-cols-[1.6fr_1fr_1fr_2.25rem] items-center';
+const COLS = 'grid gap-2 sm:grid-cols-[1.6fr_1fr_1fr] items-center';
 
 export default function DealsEditor({
   mode,
@@ -62,11 +66,9 @@ export default function DealsEditor({
 }) {
   const isPerson = mode === 'person';
   const cellEdit = useMasterSheetCellEdit();
-  const removeDeal = useDeleteMasterSheetRow();
 
   const [draft, setDraft] = useState(null);
   const [error, setError] = useState(null);
-  const [confirming, setConfirming] = useState(null);
 
   // The one thing that differs between the two directions.
   const counterpart = {
@@ -109,7 +111,7 @@ export default function DealsEditor({
           <span className="ml-1.5 font-normal text-text-faint">{deals.length}</span>
         </h3>
         {!draft && (
-          <Button onClick={() => { setDraft({ ...BLANK, groupName: defaultGroup }); setError(null); }}>
+          <Button variant="accent" onClick={() => { setDraft({ ...BLANK, groupName: defaultGroup }); setError(null); }}>
             <PlusIcon width={14} height={14} />
             Add {isPerson ? 'company' : 'handler'}
           </Button>
@@ -117,20 +119,18 @@ export default function DealsEditor({
       </div>
 
       {deals.length === 0 && !draft && (
-        <p className="border border-dashed border-border px-3 py-5 text-center text-sm text-text-muted">
-          {isPerson
-            ? `${subjectName} is not on any company yet.`
-            : `Nobody is paid through ${subjectName} yet.`}
-        </p>
+        <EmptyState
+          title={isPerson ? `${subjectName} is not on any company yet` : `Nobody is paid through ${subjectName} yet`}
+          hint={`Add ${isPerson ? 'a company' : 'a handler'} to start a deal.`}
+        />
       )}
 
       {deals.length > 0 && (
-        <div className="border border-border">
+        <div className="overflow-hidden rounded-lg border border-border">
           <div className={`${COLS} border-b border-border bg-surface-sunken px-2.5 py-1.5`}>
             <span className="form-caption">{counterpart.caption}</span>
             <span className="form-caption">Group</span>
             <span className="form-caption">Role</span>
-            <span />
           </div>
 
           <div className="divide-y divide-border">
@@ -138,7 +138,7 @@ export default function DealsEditor({
               <div key={d.id} className={`${COLS} px-2.5 py-2`}>
                 {/* Read-only on purpose. Changing it would silently turn
                     this deal into a different one, which is two acts
-                    (remove, add) wearing one control. */}
+                    (end one, add another) wearing one control. */}
                 <span className="truncate text-sm font-medium">
                   {counterpart.value(d) ?? <span className="text-text-faint">(none)</span>}
                 </span>
@@ -160,42 +160,6 @@ export default function DealsEditor({
                   onChange={(v) =>
                     cellEdit({ id: d.id, fields: { roleLabel: v }, subject: subjectName, label: 'role' })}
                 />
-
-                {/* Confirms in place rather than in a second modal stacked
-                    on this one, which is where people lose track of what
-                    they were removing. */}
-                {confirming === d.id ? (
-                  <div className="col-span-full flex items-center justify-end gap-2 pt-1">
-                    <span className="text-xs text-text-muted">
-                      Remove {counterpart.value(d) ?? 'this row'}? The other side keeps its rows.
-                    </span>
-                    <Button onClick={() => setConfirming(null)}>Cancel</Button>
-                    <Button
-                      variant="danger"
-                      disabled={removeDeal.isPending}
-                      onClick={() =>
-                        removeDeal.mutate(
-                          {
-                            id: d.id,
-                            subject: `${counterpart.value(d) ?? 'That row'} from ${subjectName}`,
-                          },
-                          { onSuccess: () => setConfirming(null) },
-                        )
-                      }
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                ) : (
-                  <Button
-                    size="icon"
-                    variant="danger"
-                    aria-label={`Remove ${counterpart.value(d) ?? 'this row'} from ${subjectName}`}
-                    onClick={() => setConfirming(d.id)}
-                  >
-                    <TrashIcon width={14} height={14} />
-                  </Button>
-                )}
               </div>
             ))}
           </div>

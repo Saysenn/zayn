@@ -131,7 +131,7 @@ test('the header caption is the span, faint, and only says forecast when there i
   assert.match(page, /const forecasting = points\.some\(\(point\) => point\.source === 'projectedForecast'\)/);
   assert.match(page, /<ForecastNote points=\{data\.trend\} range=\{rangeLabel\} \/>/);
   // Faint, and no bold half.
-  assert.match(page, /<p className="text-\[11px\] text-text-faint">\{range\}\{forecasting \? ' forecast' : ''\}<\/p>/);
+  assert.match(page, /<p className="text-xs text-text-faint">\{range\}\{forecasting \? ' forecast' : ''\}<\/p>/);
   // At a horizon of nothing there is no forecast in the range, and a caption
   // is not allowed to be the one thing on the page claiming otherwise.
   assert.match(page, /forecasting \? ' forecast' : ''/);
@@ -786,8 +786,8 @@ test('Monthly Comparison leads with the change, and it is never clamped', () => 
   assert.match(page, /key: 'this', label: WORD_FOR\.thisMonth/);
   assert.match(page, /key: 'next', label: WORD_FOR\.forecast/);
   // Raw lists the same two rows and must not go back to its own wording.
-  assert.match(page, /<dt className="text-\[10px\] text-text-faint">\{WORD_FOR\.thisMonth\}<\/dt>/);
-  assert.match(page, /<dt className="text-\[10px\] text-text-faint">\{WORD_FOR\.saved\}<\/dt>/);
+  assert.match(page, /<dt className="text-xs text-text-faint">\{WORD_FOR\.thisMonth\}<\/dt>/);
+  assert.match(page, /<dt className="text-xs text-text-faint">\{WORD_FOR\.saved\}<\/dt>/);
   const panel = page.match(/function MonthOnMonth\([\s\S]*?\n\}/)[0];
   assert.doesNotMatch(panel, /label: thisMonth|label: lastMonth|label: next\.label/);
   // A month with no figure is dropped, never listed as a zero.
@@ -966,7 +966,12 @@ test('the group charts fit their panel and no panel body scrolls sideways', () =
 
   assert.doesNotMatch(bars, /min-w-\[/);
   assert.doesNotMatch(page, /bodyClassName="overflow-x-auto/);
-  assert.match(page, /className="scroll-slim overflow-x-auto"/);
+  // The wide table scrolls inside its OWN wrapper: the shared .table-wrap,
+  // which carries overflow-auto and the slim scrollbar.
+  const css = read('../index.css');
+  assert.match(page, /className="table-wrap is-nested/);
+  assert.match(css, /\.table-wrap \{\s*@apply overflow-auto/);
+  assert.match(css, /\.scroll-slim, \.table-wrap \{/);
 });
 
 // ===============================
@@ -1051,10 +1056,13 @@ test('the page headings step down on a phone', () => {
   const page = read('./DashboardPage.jsx');
 
   assert.match(header, /text-lg font-bold[^"]*sm:text-xl md:text-2xl/);
-  assert.match(page, /text-lg font-bold[^"]*sm:text-xl md:text-2xl/);
+  // The dashboard's title IS the PageHeader now, so it steps down with it
+  // rather than carrying its own copy of the classes.
+  assert.match(page, /<PageHeader\b/);
+  assert.doesNotMatch(page, /<h1\b/);
   // The money card steps down again when it is showing SEVERAL currencies,
   // or three stacked lines stretch the whole row.
-  assert.match(page, /dense \? 'text-\[13px\] sm:text-sm' : 'text-base sm:text-xl'/);
+  assert.match(page, /dense \? 'text-sm' : 'text-base sm:text-xl'/);
   assert.match(page, /dense=\{mode === RAW\}/);
 });
 

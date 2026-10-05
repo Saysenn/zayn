@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useStickyState } from '../hooks/useStickyState';
 import { formatNumber } from '../helpers/formatMoney';
 import { Link } from 'react-router-dom';
@@ -14,11 +14,11 @@ import Button, { FileButton, LinkButton } from '../components/buttons/Button';
 import Toggle from '../components/forms/Toggle';
 import Select from '../components/forms/Select';
 import PercentField from '../components/forms/PercentField';
-import HistoryModal from '../components/modals/HistoryModal';
+import UnderlineTabs from '../components/layout/UnderlineTabs';
 import PageHeader from '../components/layout/PageHeader';
 import { ACTIVE_NAV_CLASS } from '../configs/navigationStyles';
 import {
-  ImportIcon, MasterSheetIcon, ChatIcon, ToolsIcon, WarningIcon, RestoreIcon, ReceiptIcon,
+  ImportIcon, MasterSheetIcon, ChatIcon, ToolsIcon, WarningIcon, ReceiptIcon,
   LogsIcon, TrashIcon, PaletteIcon, SparkleIcon,
 } from '../components/icons';
 
@@ -84,7 +84,9 @@ const SECTIONS = [
       { key: 'data', label: 'Data' },
       { key: 'preset-formula', label: 'Preset formula' },
       { key: 'locations', label: 'Locations' },
-      { key: 'history', label: 'History' },
+      // NO HISTORY TAB. It was a card with one button opening the same list
+      // the account menu's History page shows, so the safety net had two
+      // doors that could drift. The account menu is the one.
     ],
   },
   // GLOBAL RATES, its own subject. Not a master sheet tab: these apply to
@@ -131,11 +133,11 @@ function DangerAction({ title, description, phrase, mutation, doneMessage, icon:
       <h3 className="font-semibold text-sm mb-1">{title}</h3>
       <p className="text-text-muted text-sm mb-3">{description}</p>
 
-      {done && <p className="text-sm text-accent-strong font-semibold mb-3">{doneMessage}</p>}
+      {done && <p className="text-sm text-success-strong font-semibold mb-3">{doneMessage}</p>}
 
       {!open ? (
-        <Button variant="danger" size="md" onClick={() => { setOpen(true); setDone(false); }}>
-          {Icon && <Icon width={15} height={15} />}
+        <Button variant="danger" size="sm" onClick={() => { setOpen(true); setDone(false); }}>
+          {Icon && <Icon width={16} height={16} />}
           {title}
         </Button>
       ) : (
@@ -152,15 +154,17 @@ function DangerAction({ title, description, phrase, mutation, doneMessage, icon:
             autoComplete="off"
           />
           {mutation.error && <p className="text-sm text-danger">{mutation.error.message}</p>}
+          {/* Cancel left, the destructive one right, as in every confirm. */}
           <div className="flex gap-2">
+            <Button size="form" onClick={() => { setOpen(false); setTyped(''); }}>Cancel</Button>
             <Button
               variant="danger"
+              size="form"
               disabled={typed !== phrase || mutation.isPending}
               onClick={handleConfirm}
             >
               {mutation.isPending ? 'Working…' : 'Confirm'}
             </Button>
-            <Button onClick={() => { setOpen(false); setTyped(''); }}>Cancel</Button>
           </div>
         </div>
       )}
@@ -193,7 +197,7 @@ function SettingSwitch({ label, checked, onChange, disabled, on, off }) {
 function CryptoExample({ percent }) {
   const base = 1000;
   return (
-    <p className="text-[11px] text-text-muted">
+    <p className="text-xs text-text-muted">
       {`Someone paid in crypto and owed ${formatNumber(base)} is worth `}
       {`${formatNumber(base + base * (percent / 100))} to find: `}
       {`their amount plus ${formatNumber(base * (percent / 100))}.`}
@@ -209,8 +213,11 @@ export default function SettingsPage() {
   // a rule, reload to check it took, and landed back on Master sheet / Data
   // every time. Same reasoning as the filter panels.
   const [section, setSection] = useStickyState('settings.section', 'master-sheet');
-  const [tab, setTab] = useStickyState('settings.tab', 'data');
+  const [storedTab, setTab] = useStickyState('settings.tab', 'data');
   const tabs = TABS_FOR.get(section);
+  // A remembered tab that no longer exists (History moved to the account
+  // menu) falls back to the section's first, rather than a blank panel.
+  const tab = tabs && !tabs.some((t) => t.key === storedTab) ? tabs[0].key : storedTab;
 
   function pickSection(key) {
     setSection(key);
@@ -219,7 +226,6 @@ export default function SettingsPage() {
     const next = TABS_FOR.get(key);
     if (next) setTab(next[0].key);
   }
-  const [showHistory, setShowHistory] = useState(false);
   const { data, isLoading } = useSettings();
   const { mutate: update, isPending } = useUpdateSettings();
   const burnMonth = useBurnMonth();
@@ -227,8 +233,8 @@ export default function SettingsPage() {
   // the diff, apply what was accepted. Shared so the diff step cannot end
   // up on one door and not the others.
   const {
-    importState, busy, preview, committing, rereading, deleting,
-    handleImport, applyImport, applyDefaults, cancelPreview, deleteRows,
+    importState, busy, preview, committing, rereading,
+    handleImport, applyImport, applyDefaults, cancelPreview,
   } = useImportFlow();
 
   const devMode = data?.devMode ?? false;
@@ -290,34 +296,11 @@ export default function SettingsPage() {
         </nav>
 
         <div className="min-w-0 flex-1 flex flex-col gap-6">
-          {/* ONLY WHERE THERE IS MORE THAN ONE JOB. Three of the four
-              sections have none, so the extra layer costs nothing where it
-              is not needed.
-
-              A SEGMENTED CONTROL, not an underline. The underline was a 2px
-              accent bar under one tab, which was the heaviest mark on a
-              page of hairlines and hollow cards. The active tab is a filled
-              pill in a tinted track now: same job, and the weight comes
-              from a fill rather than from a rule. */}
-          {tabs && (
-            <div className="inline-flex gap-1 self-start overflow-x-auto rounded-lg border border-border bg-surface-sunken p-1">
-              {tabs.map((t) => (
-                <button
-                  key={t.key}
-                  type="button"
-                  onClick={() => setTab(t.key)}
-                  aria-current={t.key === tab ? 'page' : undefined}
-                  className={`min-h-0 whitespace-nowrap rounded-md border-0 px-3 py-1.5 text-sm transition-colors ${
-                    t.key === tab
-                      ? 'bg-surface font-semibold text-text shadow-sm'
-                      : 'bg-transparent text-text-muted hover:text-text'
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          )}
+          {/* ONLY WHERE THERE IS MORE THAN ONE JOB. Most sections have
+              one, so the extra layer costs nothing where it is not needed.
+              The same UnderlineTabs every other page uses: the segmented
+              pill this was drew a second, heavier tab style for one page. */}
+          {tabs && <UnderlineTabs tabs={tabs} active={tab} onChange={setTab} />}
 
           {tab === 'data' && section === 'master-sheet' && (
             <>
@@ -327,13 +310,13 @@ export default function SettingsPage() {
               >
                 <div className="flex items-center gap-3 flex-wrap">
                   <FileButton
-                    size="md"
+                    size="sm"
                     disabled={busy}
                     phase={importState.phase}
                     percent={importState.percent}
                     onChange={handleImport}
                   >
-                    <ImportIcon width={15} height={15} />
+                    <ImportIcon width={16} height={16} />
                     {importState.phase === 'uploading'
                       ? `Sending ${importState.percent}%`
                       : importState.phase === 'saving'
@@ -362,18 +345,6 @@ export default function SettingsPage() {
                 description="Existing rows update. Rows missing from the new sheet are kept, and listed on the Potentially ended deals tab for you to remove or not. Anything you edited by hand stays as you left it, and rows you added by hand are never offered there."
               />
             </>
-          )}
-
-          {tab === 'history' && section === 'master-sheet' && (
-            <Card
-              title="Recent changes"
-              description="Every edit made in the last 7 days, and a one click undo for each. Undo puts the old value back and records that it happened, so nothing is erased."
-            >
-              <Button size="md" onClick={() => setShowHistory(true)}>
-                <RestoreIcon width={15} height={15} />
-                Open history
-              </Button>
-            </Card>
           )}
 
           {tab === 'locations' && section === 'master-sheet' && (
@@ -433,7 +404,7 @@ export default function SettingsPage() {
                   {/* THE MONTHS, NAMED. Same rule as the dashboard's own
                       control: a number alone is what let "3 months" be read
                       as three months BACK for as long as it was. */}
-                  <p className="text-[11px] text-text-faint">{historyWindow(historyMonths)}</p>
+                  <p className="text-xs text-text-faint">{historyWindow(historyMonths)}</p>
                 </div>
               )}
             </Card>
@@ -556,13 +527,16 @@ export default function SettingsPage() {
                   off="Off"
                 />
               )}
-              {/* A Button, not a bare link with a button class: it sat a
-                  weight lighter than every other control on the page. */}
-              <div className="mt-4">
-                <LinkButton as={Link} to="/logs" variant="quiet" size="md">
-                  <LogsIcon width={15} height={15} />
-                  View logs
+              {/* THE ONE WAY TO THE LOGS PAGE. It is not in the sidebar, so
+                  this has to read as a door rather than a footnote. */}
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <LinkButton as={Link} to="/logs" variant="secondary" size="sm">
+                  <LogsIcon width={16} height={16} />
+                  Open the Logs page
                 </LinkButton>
+                <span className="text-xs text-text-faint">
+                  {devMode ? 'New errors are being recorded there.' : 'Nothing new is recorded while this is off.'}
+                </span>
               </div>
             </Card>
           )}
@@ -586,8 +560,6 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {showHistory && <HistoryModal onClose={() => setShowHistory(false)} />}
-
       {/* Nothing from the file has been written yet. Cancel leaves the
           table exactly as it was. */}
       {preview && (
@@ -595,11 +567,9 @@ export default function SettingsPage() {
           preview={preview}
           committing={committing}
           rereading={rereading}
-          deleting={deleting}
           onCancel={cancelPreview}
           onCommit={applyImport}
           onApplyDefaults={applyDefaults}
-          onDeleteRows={deleteRows}
         />
       )}
     </div>

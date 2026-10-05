@@ -57,12 +57,14 @@ export function DetailCard({ title, action, flush = false, highlighted = false, 
   return (
     // `overflow-hidden` is what makes the header's own background stop at
     // the radius. Without it the card is round and its header is square.
-    <section className={`overflow-hidden rounded-lg border border-border bg-surface shadow-md ${fill ? 'h-full' : ''}`}>
+    <section className={`overflow-hidden rounded-lg border border-border bg-surface shadow-sm ${fill ? 'h-full' : ''}`}>
       <div className={`flex items-center justify-between gap-2 border-b px-3 py-1.5 ${
-        highlighted ? 'border-accent-deep bg-accent' : 'border-border bg-surface-sunken/70'
+        // `highlighted` is a TINT, never a solid fill: the card says "this
+        // one leads" without shouting over the rest of the page.
+        highlighted ? 'border-border bg-accent-tint/50' : 'border-border bg-surface-sunken/70'
       }`}>
         <h2 className={`text-xs font-semibold uppercase tracking-wide ${
-          highlighted ? 'text-accent-ink' : 'text-text-faint'
+          highlighted ? 'text-accent-strong' : 'text-text-faint'
         }`}>{title}</h2>
         {action}
       </div>
@@ -76,7 +78,7 @@ export function DetailCard({ title, action, flush = false, highlighted = false, 
 export function Stat({ label, value, lead = false }) {
   return (
     <div>
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-text-faint">{label}</p>
+      <p className="text-xs font-semibold uppercase tracking-wide text-text-faint">{label}</p>
       <p className={`mt-0.5 font-semibold tabular-nums ${lead ? 'text-lg' : 'text-xs'}`}>{value}</p>
     </div>
   );

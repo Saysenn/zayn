@@ -7,18 +7,20 @@
 // where a class works; a real value only where SVG or a gradient needs one.
 
 // The card every KPI, panel and modal tile stands on. One definition, so a
-// panel and a modal tile cannot drift apart.
-export const DASH_SURFACE = 'rounded-xl border border-border bg-surface shadow-[0_3px_16px_rgb(var(--n-shadow)/0.055)]';
+// panel and a modal tile cannot drift apart. The app's own card: rounded-lg,
+// a hairline and at most shadow-sm, the same as every other page's.
+export const DASH_SURFACE = 'rounded-lg border border-border bg-surface shadow-sm';
 
-export const DASH_LIFT = 'transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_12px_30px_rgb(var(--n-shadow)/0.12)] motion-reduce:transform-none';
+export const DASH_LIFT = 'transition duration-200 hover:-translate-y-0.5 hover:shadow-md motion-reduce:transform-none';
 
-// The four icon tiles on the KPI row. A gradient cannot be a token, so the
-// values live here rather than inline in the card.
+// The four icon tiles on the KPI row. THEME TOKENS, not hex gradients with
+// white glyphs: a tint fill with its own ink on top, the way every badge in
+// the CRM is drawn, so the tiles follow light and dark with everything else.
 export const KPI_TONES = Object.freeze({
-  green: 'bg-gradient-to-br from-[#16c477] to-[#24a966] text-white shadow-[0_8px_20px_rgba(22,196,119,.22)]',
-  amber: 'bg-gradient-to-br from-[#ffc426] to-[#efa900] text-white shadow-[0_8px_20px_rgba(239,169,0,.2)]',
-  blue: 'bg-gradient-to-br from-[#52a7ee] to-[#2788db] text-white shadow-[0_8px_20px_rgba(39,136,219,.2)]',
-  violet: 'bg-gradient-to-br from-[#a886f3] to-[#805ddd] text-white shadow-[0_8px_20px_rgba(128,93,221,.2)]',
+  green: 'bg-success-tint text-success-strong',
+  amber: 'bg-warning-tint text-warning-strong',
+  blue: 'bg-metric-blue text-metric-blue-ink',
+  violet: 'bg-metric-violet text-metric-violet-ink',
 });
 
 // ===============================
@@ -27,12 +29,13 @@ export const KPI_TONES = Object.freeze({
 // Four white cards in a row read as one block, and the eye has to read the
 // label to tell them apart. A wash and a drawing make each one findable
 // from across the screen. Both are FAINT on purpose: the figure is the
-// thing, and artwork that competes with a total is worse than none.
+// thing, and artwork that competes with a total is worse than none. The
+// wash ends on the same tint token as the card's tile.
 export const KPI_SURFACES = Object.freeze({
-  green: 'bg-gradient-to-br from-surface via-surface to-[#e6f7ef]',
-  amber: 'bg-gradient-to-br from-surface via-surface to-[#fdf2df]',
-  blue: 'bg-gradient-to-br from-surface via-surface to-[#e8f1fd]',
-  violet: 'bg-gradient-to-br from-surface via-surface to-[#f0eafd]',
+  green: 'bg-gradient-to-br from-surface via-surface to-success-tint',
+  amber: 'bg-gradient-to-br from-surface via-surface to-warning-tint',
+  blue: 'bg-gradient-to-br from-surface via-surface to-metric-blue',
+  violet: 'bg-gradient-to-br from-surface via-surface to-metric-violet',
 });
 
 // The ink the artwork is drawn in, one per tone. SVG cannot read a Tailwind
@@ -114,4 +117,5 @@ export function seriesInk(index) {
 
 // Dark, like the reference: a tooltip is an overlay on the chart, not
 // another white card sitting on top of a white card.
-export const CHART_TOOLTIP = 'rounded-lg border border-white/10 bg-text/95 text-white shadow-xl backdrop-blur-sm';
+// Tokens both ways: the text colour as the fill, the surface as the ink.
+export const CHART_TOOLTIP = 'rounded-lg border border-border bg-text/95 text-surface shadow-md backdrop-blur-sm';

@@ -123,4 +123,21 @@ function listOpenPairs() {
     .then((result) => result.rows);
 }
 
-module.exports = { create, updateStatus, listGrouped, listForPerson, listOpenPairs };
+// Every concern of the ticked people on Flagged, moved to one status. Only
+// the ones not already there, so status_changed_at stays true.
+function updateStatusForPeople(people, status) {
+  const groups = people.map((p) => p.group);
+  const ids = people.map((p) => p.personId);
+  return pool
+    .query(
+      `UPDATE tb_concerns c
+          SET status = $3, status_changed_at = now()
+         FROM unnest($1::text[], $2::text[]) AS w(group_name, person_id)
+        WHERE c.group_name = w.group_name AND c.person_id = w.person_id AND c.status <> $3
+        RETURNING ${ROW.split(',').map((col) => `c.${col.trim()}`).join(', ')}`,
+      [groups, ids, status],
+    )
+    .then((result) => result.rows);
+}
+
+module.exports = { create, updateStatus, updateStatusForPeople, listGrouped, listForPerson, listOpenPairs };

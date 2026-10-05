@@ -107,6 +107,43 @@ router.get('/companies/:key', async (req, res, next) => {
   }
 });
 
+/**
+ * THE BULK BAR ON COMPANIES: a tier, or a status, onto every ticked
+ * company. Through applyCompanyStatus, one company at a time, the same
+ * door the single edit and Diane use.
+ *
+ * NEVER A CLOSING STATUS. Closing or dissolving asks, per company, which
+ * deals stop; there is no honest way to answer that for ten at once.
+ */
+router.post('/companies/bulk', async (req, res, next) => {
+  try {
+    const { keys, tier, status } = req.body || {};
+    const list = (Array.isArray(keys) ? keys : []).filter((k) => typeof k === 'string' && k);
+    if (status !== undefined) {
+      if (!Object.values(companiesRepo.COMPANY_STATUS).includes(status)) {
+        return next(new AppError(400, messages.notACompanyStatus(status)));
+      }
+      if (companiesRepo.isTerminal(status)) {
+        return next(new AppError(400, 'Close or dissolve companies one at a time, so you can pick which deals stop.'));
+      }
+    }
+    if (tier === undefined && status === undefined) return next(new AppError(400, 'Nothing to set.'));
+    const updated = [];
+    let cascaded = false;
+    for (const key of list) {
+      // eslint-disable-next-line no-await-in-loop
+      const out = await applyCompanyStatus(key, { tier, status });
+      if (out?.company) updated.push(key);
+      if (out?.deals || out?.reviewQueueChanged) cascaded = true;
+    }
+    broadcast(null, 'companies:changed', { action: 'bulk-updated' });
+    if (cascaded) broadcast(null, 'master-sheet:changed', { action: 'company-status' });
+    res.json({ updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.patch('/companies/:key', async (req, res, next) => {
   try {
     const {

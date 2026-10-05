@@ -111,18 +111,27 @@
     @apply cursor-not-allowed opacity-60;
   }
 
-  /* `accent-strong`, not the fill. A focus ring has to be seen against
-     white and the fill is too pale to do it. */
-  input:focus, textarea:focus, select:focus, button:focus-visible {
+  /* A TYPING FIELD IN FOCUS: the accent border and a soft halo, not a
+     hard 2px outline. The outline read as a thick dark frame round every
+     box you clicked into. `accent-strong` on the border, because the fill
+     is too pale to be seen against white on its own. */
+  input:not([type='checkbox']):not([type='radio']):focus, textarea:focus, select:focus {
+    @apply outline-none border-accent-strong;
+    box-shadow: 0 0 0 3px theme('colors.accent.tint-strong');
+  }
+  /* A tick box or a button only rings when the KEYBOARD got there: clicking
+     one is not a reason to frame it. */
+  input[type='checkbox']:focus-visible, input[type='radio']:focus-visible, button:focus-visible {
     @apply outline outline-2 outline-accent-strong outline-offset-1;
   }
+  input[type='checkbox']:focus:not(:focus-visible) { outline: none; }
 
   /* inline-flex + nowrap is not cosmetic: every button in this app is
      icon + label, and the default `display: block` let the label wrap
      under its own icon the moment a toolbar got tight. Fixed here rather
      than by pasting the same three utilities onto every usage. */
   button {
-    @apply cursor-pointer rounded border border-border-strong bg-surface px-4 py-2 min-h-10
+    @apply cursor-pointer rounded border border-border bg-surface px-4 py-2 min-h-10
            inline-flex items-center justify-center gap-1.5 whitespace-nowrap;
   }
 
@@ -329,11 +338,97 @@
     animation: toast-in .22s cubic-bezier(.22, 1, .36, 1) both;
   }
   @keyframes toast-in {
-    from { opacity: 0; transform: translateX(14px) scale(.97); }
+    from { opacity: 0; transform: translateY(10px) scale(.97); }
     to   { opacity: 1; transform: none; }
   }
   /* The dismiss, quiet until reached for. `min-h-0` and the reset are what
      undo the base `button` rule, which is sized for a toolbar. */
+  /* ===============================
+     * THE BULK BAR
+     * ===============================
+     Floats over the bottom of the page while rows are ticked. Thin border,
+     one soft shadow, no accent rail: it is a tool tray, not a banner. On a
+     phone it sits above the bottom nav. */
+  .bulk-bar-wrap {
+    @apply pointer-events-none fixed inset-x-0 z-40 flex justify-center px-3
+           bottom-[calc(theme(spacing.bottomnav)+theme(spacing.safebottom)+0.5rem)] md:bottom-4;
+  }
+  /* AS WIDE AS ITS ACTIONS, centred on the screen. One line always: on a
+     phone the actions scroll sideways inside the bar rather than wrapping
+     it into a second row that covers more of the table. */
+  .bulk-bar {
+    @apply pointer-events-auto flex w-auto max-w-full items-center gap-2 rounded-lg border border-border
+           bg-surface px-3 py-2;
+    /* LIFTED, not coloured: a deep soft shadow plus a tight one under the
+       edge, so it reads as floating over the table without an accent fill
+       competing with the page's own primary button. */
+    box-shadow: 0 12px 32px -6px rgb(0 0 0 / 0.22), 0 3px 8px -2px rgb(0 0 0 / 0.12);
+    animation: bulk-in .2s cubic-bezier(.22, 1, .36, 1) both;
+  }
+  @keyframes bulk-in {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: none; }
+  }
+  .bulk-bar-actions {
+    @apply flex min-w-0 flex-1 flex-nowrap items-center gap-1 overflow-x-auto;
+    scrollbar-width: none;
+    /* A soft fade at both ends says "more this way" on a phone, where the
+       row is wider than the bar. Invisible when everything fits. */
+    mask-image: linear-gradient(to right, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%);
+    padding-inline: 6px;
+  }
+  .bulk-bar-actions::-webkit-scrollbar { display: none; }
+  .bulk-bar-actions > * { flex-shrink: 0; }
+  .bulk-menu {
+    @apply fixed z-[61] min-w-[11rem] max-h-[min(20rem,60vh)] overflow-y-auto rounded-lg border border-border bg-surface py-1.5 shadow-lg;
+    transform-origin: bottom left;
+    animation: menu-pop .16s cubic-bezier(.22, 1, .36, 1) both;
+  }
+  /* The Drivers tab's chip and location pickers: the same item look as the
+     bulk bar's menus, popping out of their trigger. */
+  .pick-menu {
+    @apply fixed z-[70] max-h-[min(16rem,60vh)] w-52 overflow-y-auto rounded-lg border border-border bg-surface py-1.5 shadow-lg;
+    animation: pick-pop .16s cubic-bezier(.22, 1, .36, 1) both;
+  }
+  @keyframes pick-pop {
+    from { opacity: 0; transform: translateY(-4px) scale(.96); }
+    to   { opacity: 1; transform: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { .pick-menu { animation: none; } }
+  /* THE MULTI-PICKER'S PANEL: a list on the left, the picked one's details
+     on the right. Above dialogs (50), below a Select opened inside it (55). */
+  .multi-pick {
+    @apply fixed z-[52] flex max-h-[min(26rem,calc(100vh-1.5rem))] flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-lg;
+    animation: pick-pop .16s cubic-bezier(.22, 1, .36, 1) both;
+  }
+  @media (prefers-reduced-motion: reduce) { .multi-pick { animation: none; } }
+  .bulk-menu-item {
+    @apply flex min-h-0 w-full items-center gap-2 rounded-none border-none bg-transparent px-2.5 py-1.5 text-left text-sm
+           justify-start text-text transition-colors hover:bg-surface-sunken;
+  }
+  /* A ticked row reads as ticked from across the table, not only by its box. */
+  .row-selected, .row-selected:hover { @apply bg-accent-tint; }
+  /* The frozen columns paint their own ground, so they need telling too. */
+  .row-selected .sticky-col, .row-selected .sticky-edge { @apply bg-accent-tint; }
+  @media (prefers-reduced-motion: reduce) {
+    .bulk-bar, .bulk-menu { animation: none; }
+  }
+
+  /* THE DRIVERS MAP'S DOTS: a soft halo on hover, held while open. */
+  .map-dot-halo { opacity: 0; transition: opacity .18s ease; }
+  .map-dot:hover .map-dot-halo, .map-dot:focus-visible .map-dot-halo, .map-dot.is-on .map-dot-halo { opacity: .22; }
+  /* A pin LIFTS on hover and while open. --u is one screen pixel in map
+     units, set on the zoomed group, so the lift is the same at every zoom. */
+  .map-pin { transition: transform .18s cubic-bezier(.22, 1, .36, 1); }
+  .map-dot:hover .map-pin, .map-dot:focus-visible .map-pin, .map-dot.is-on .map-pin {
+    transform: translateY(calc(var(--u, 1px) * -3));
+  }
+  @media (prefers-reduced-motion: reduce) { .map-pin { transition: none; } }
+
+  .toast-action {
+    @apply min-h-0 shrink-0 self-center rounded border-none bg-transparent px-2 py-1 text-xs font-semibold
+           text-accent-strong transition-colors hover:bg-accent-tint;
+  }
   .toast-dismiss {
     @apply min-h-0 shrink-0 rounded-full border-none bg-transparent p-1 text-text-faint
            transition-colors hover:bg-surface-sunken hover:text-text;

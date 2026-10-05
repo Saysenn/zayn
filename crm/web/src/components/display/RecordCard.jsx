@@ -66,6 +66,9 @@ export function ClampedText({ children, lines = 2, className = '', infoLabel = '
  * `interactive` is for a card that IS the list rather than a phone's copy
  * of one. It lifts, scales and strengthens its shadow, and stretches to its
  * row's height so a grid has no gaps.
+ *
+ * `onSelect` adds the bulk bar's tick, top left, the same checkbox a table
+ * row has in its first column. `selected` says whether it is ticked.
  */
 export default function RecordCard({
   title,
@@ -79,6 +82,9 @@ export default function RecordCard({
   actions,
   onOpen,
   interactive = false,
+  selected = false,
+  onSelect,
+  selectLabel = 'Select',
 }) {
   const cardBody = (
     <>
@@ -94,6 +100,12 @@ export default function RecordCard({
           being wide is MoneyTotals, not this. */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 basis-0 flex-1 items-start gap-3">
+          {onSelect && (
+            // Its own click, so ticking a card never opens it.
+            <span className="flex h-5 shrink-0 items-center" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+              <input type="checkbox" checked={selected} onChange={onSelect} aria-label={selectLabel} />
+            </span>
+          )}
           {Icon && (
             <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-accent-tint text-accent-strong">
               <Icon width={16} height={16} />
@@ -112,7 +124,7 @@ export default function RecordCard({
         {lead !== undefined && lead !== null && (
           <div className="shrink-0 text-right">
             {leadLabel && (
-              <p className="text-[10px] font-medium uppercase tracking-wide text-text-faint">{leadLabel}</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-text-faint">{leadLabel}</p>
             )}
             <p className="mt-0.5 whitespace-nowrap text-sm font-semibold tabular-nums text-text">{lead}</p>
           </div>
@@ -128,7 +140,7 @@ export default function RecordCard({
             <dl className={`grid grid-cols-2 gap-x-4 gap-y-2.5 ${body ? 'mt-3 border-t border-border pt-3' : ''}`}>
               {facts.map((f) => (
                 <div key={f.label} className={f.wide ? 'col-span-2 min-w-0' : 'min-w-0'}>
-                  <dt className="text-[10px] font-medium uppercase tracking-wide text-text-faint">
+                  <dt className="text-xs font-medium uppercase tracking-wide text-text-faint">
                     {f.label}
                   </dt>
                   <dd className="mt-0.5 flex items-start gap-1 text-xs text-text">
@@ -177,11 +189,11 @@ export default function RecordCard({
       {...open}
       className={`flex flex-col rounded-lg border border-border bg-surface p-3 shadow-sm ${
         onOpen ? 'cursor-pointer' : ''
-      } ${
+      } ${selected ? 'row-selected' : ''} ${
         // The hover z keeps a lifted card above the neighbour that follows
         // it in the document.
         interactive
-          ? 'relative h-full transition duration-150 hover:z-[1] hover:-translate-y-0.5 hover:scale-[1.01] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent'
+          ? 'relative h-full transition duration-150 hover:z-[1] hover:-translate-y-0.5 hover:scale-[1.01] hover:shadow-lg focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent'
           : ''
       }`}
     >
