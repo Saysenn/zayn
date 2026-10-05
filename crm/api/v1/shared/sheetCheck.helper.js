@@ -50,6 +50,7 @@ const SECTIONS = Object.freeze([
   ['breaksUpload', 'WILL BREAK THE NEXT UPLOAD'],
   ['contradicts', 'CONTRADICTS ITSELF'],
   ['dates', 'DATES DO NOT FOLLOW'],
+  ['missingInfo', 'MISSING INFO'],
   ['worthALook', 'WORTH A LOOK'],
 ]);
 
@@ -280,7 +281,15 @@ const RULES = [
     const other = ctx.otherGroupMoney(r);
     return other ? `${Number(r.monthly_amount).toLocaleString()} here, ${other}` : null;
   }],
-  ['worthALook', (r) => (!text(r.phone) ? 'no phone' : null)],
+  // ---- MISSING INFO ----
+  // EVERY EMPTY FIELD, NAMED. "Missing infos" listed Liam Edwards as "no
+  // phone", and his postcode and door number were empty too. His call
+  // 2026-10-05: say exactly what is missing. Bank details are cannotPay's.
+  ['missingInfo', (r) => {
+    const gone = [['phone', r.phone], ['postcode', r.postcode], ['door number', r.door_number], ['location', r.location]]
+      .filter(([, v]) => !text(v)).map(([label]) => label);
+    return gone.length ? `no ${gone.join(', ')}` : null;
+  }],
   ['worthALook', (r) => (r.needs_review === true ? 'flagged messy by the import' : null)],
 ];
 

@@ -886,3 +886,25 @@ WRITES.push({
     { say: 'yes', expect: { db: kiranMoved(0) } },
   ],
 });
+
+// AUTO MODE NEVER SAVES ONE OF TWO PEOPLE ON ITS OWN. Clone 2026-10-05: "add
+// 100 to craig sterling and dean cole" saved Craig at once, previewed Dean,
+// called Craig "not found", and the undo missed him.
+const ottoMara = async (db) => `${Number((await deal(db, 'Otto Fenn', 'Ironleaf')).payable_amount)},${Number((await deal(db, 'Mara Quill', 'Pinecrest')).payable_amount)}`;
+const omBase = {};
+const omMoved = (by) => async (db) => {
+  const [o, m] = omBase.v.split(',').map(Number);
+  const now = await ottoMara(db);
+  return now === `${o + by},${m + by}` ? null : `payables ${now}, wanted ${o + by},${m + by}`;
+};
+WRITES.push({
+  name: 'auto mode: two people in one sentence are one preview, both saved, both undone',
+  auto: true,
+  turns: [
+    { say: 'how much is otto fenn owed this month', expect: { db: async (db) => { omBase.v = await ottoMara(db); return null; } } },
+    { say: 'add 100 to otto fenn and mara quill', expect: { reply: /Otto Fenn[\s\S]*Mara Quill|Mara Quill[\s\S]*Otto Fenn/, db: omMoved(0) } },
+    { say: 'yes', expect: { db: omMoved(100) } },
+    { say: 'undo that' },
+    { say: 'yes', expect: { db: omMoved(0) } },
+  ],
+});

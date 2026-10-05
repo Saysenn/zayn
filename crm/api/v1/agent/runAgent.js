@@ -1847,6 +1847,24 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
       } catch { reachesMany = true; }
       if (reachesMany) logger.info({ tool: name }, 'diane: a profile rate on several deals, so it asks first');
     }
+    /**
+     * TWO PEOPLE IN ONE SENTENCE ARE ONE CHANGE. Clone 2026-10-05, auto on:
+     * "add 100 to craig sterling and dean cole" saved Craig at once, previewed
+     * Dean alone, then said Craig "was not found", and the undo missed him.
+     * Auto mode is for one deal they named, so this goes to the one preview.
+     */
+    if (!reachesMany && name === 'update_master_sheet_row' && couldSkip(name, tool)) {
+      try {
+        // eslint-disable-next-line global-require
+        const { peopleIn } = require('./tools/resolvePerson');
+        // eslint-disable-next-line global-require
+        const all = await require('../repos/masterSheetRows.repo').findAll({ page: 1, pageSize: 2000 });
+        if (peopleIn(all?.rows ?? [], lastSaid(history)).length > 1) {
+          reachesMany = true;
+          logger.info({ tool: name }, 'diane: several people named, so it asks first');
+        }
+      } catch { reachesMany = true; }
+    }
     if (!guessed && !reachesMany && couldSkip(name, tool) && await autoConfirmOn(turn)) {
       logger.info({ tool: name }, 'diane: auto mode, no confirmation asked');
       args.confirmed = true;
@@ -3711,7 +3729,9 @@ async function runAgentTurn(history, contextName, onEvent) {
       // is supported if this turn's tools or the conversation showed it.
       if (raw && !unseenRetry) {
         const seen = fold(`${history.map((m) => `${m.content ?? ''} ${JSON.stringify(m.list ?? m.card ?? m.check ?? '')}`).join(' ')} ${JSON.stringify(toolResults)}`);
-        const named = [...raw.matchAll(/\b(?:at|with|on|in)\s+([A-Z][\w&'-]+(?:\s+[A-Z][\w&'-]+)*)/g)]
+        // ONE LINE: across a break, "in NEXUS\nDewell" read as a company called
+        // that, and a relayed preview list was refused. Clone 2026-10-05.
+        const named = [...raw.matchAll(/\b(?:at|with|on|in)[ \t]+([A-Z][\w&'-]+(?:[ \t]+[A-Z][\w&'-]+)*)/g)]
           // "at Ironleaf's" is Ironleaf: the possessive was a false alarm.
           .map((m) => m[1].replace(/['’]s$/i, ''))
           .filter((n) => !/^(?:January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|GBP|USD|AED|EUR|EURO|Euros?|Dollars?|Dirhams?|Pounds?|Sterling|Cash|Crypto|Bank|I|Diane|The|This|That|Archive|Master Sheet|USD\s.*)$/.test(n));
@@ -4119,7 +4139,11 @@ async function runAgentTurn(history, contextName, onEvent) {
        * She says one line about it and stops; reading a drawn report back
        * out loud is the wall it replaced. See shared/sheetCheck.helper.js.
        */
-      if (result?.check) onEvent?.({ type: 'check', check: result.check });
+      // ONCE A TURN: the same report drawn twice in a row, live 2026-10-05.
+      if (result?.check && !turnState.wrote.get('__check')) {
+        turnState.wrote.set('__check', true);
+        onEvent?.({ type: 'check', check: result.check });
+      }
 
       /**
        * ===============================

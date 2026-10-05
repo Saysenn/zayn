@@ -7628,6 +7628,10 @@ async function perPersonUpdate(args) {
       + `${updated.length === 1 ? 'row' : 'rows'}:\n${lines.join('\n')}\n\n`
       + (plan.length === 1 ? 'Say what each deal got, one line each, by company and group.'
         : 'Say what each person got, one line each. They are different changes.'),
+    // EVERY LINE, from the tool: told to "say each one", she reported four of
+    // Nathan's five deals. Clone 2026-10-05.
+    reply: `Done.\n${lines.map((l) => l.trim()).join('\n')}`,
+    computedReply: true,
   };
 }
 

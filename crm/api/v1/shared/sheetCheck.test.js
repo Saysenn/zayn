@@ -30,6 +30,9 @@ const OK = {
   currency: 'AED',
   payment_method: 'cash',
   phone: '07700900000',
+  postcode: 'AB1 2CD',
+  door_number: '1',
+  location: 'Leeds',
   preset_on: '2026-09-01',
   assigned_on: '2025-01-01',
   payment_start_on: '2025-04-01',
@@ -234,8 +237,17 @@ test('SECTIONS COME IN COST ORDER, and empty ones are absent', () => {
   ];
   assert.deepEqual(
     sheetCheck(rows, { month: MONTH }).sections.map((s) => s.key),
-    ['paysWrong', 'cannotPay', 'worthALook'],
+    ['paysWrong', 'cannotPay', 'missingInfo'],
   );
+});
+
+// 2026-10-05: "missing infos" said "no phone" for Liam Edwards, whose
+// postcode and door number were empty too. Every empty field is named.
+test('MISSING INFO NAMES EVERY EMPTY FIELD, in one line', () => {
+  const out = sheetCheck([{ ...OK, phone: '', postcode: '', door_number: '' }], { month: MONTH });
+  const [section] = out.sections;
+  assert.equal(section.key, 'missingInfo');
+  assert.equal(section.rows[0].fault, 'no phone, postcode, door number');
 });
 
 test('A LONG SECTION IS CUT, AND SAYS IT WAS', () => {
