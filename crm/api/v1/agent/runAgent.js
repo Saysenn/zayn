@@ -1062,7 +1062,42 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
       logger.info({ tool: name, months: at.months }, 'diane: a later month, so it is parked');
       const { said: _s, saidRecent: _r, turn: _t, specialCaseAnswered: _a, ...change } = rest;
       let { confirmed, ...parked } = change;
-      if (name === 'update_master_sheet_row' && parked.id == null) {
+      /**
+       * AN ID SHE PICKED MUST BE THE PERSON THEY NAMED. "add 5% to zayn
+       * deals next month" came as id 1, which is Johnathon's, and the
+       * preview she wrote said "Zayn". Clone 2026-10-05.
+       */
+      if (name === 'update_master_sheet_row' && parked.id != null && !parked.targetPerson) {
+        // eslint-disable-next-line global-require
+        const row = await require('../repos/masterSheetRows.repo').findById(Number(parked.id)).catch(() => null);
+        const heard = `${said}\n${recentSaid(history)}`.toLowerCase();
+        const first = String(row?.person_name ?? '').toLowerCase().split(/\s+/)[0];
+        if (!row || (first && !new RegExp(`\\b${first.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(heard))) {
+          return {
+            summary: `NOTHING WAS CHANGED OR SAVED. Deal #${parked.id} is ${row ? `${row.person_name}'s` : 'not on the sheet'}, `
+              + 'and they did not name that person. Never guess an id: call again with targetPerson as they said it.',
+          };
+        }
+      }
+      // ALL OF A PERSON'S DEALS when they said so ("zayn's deals", "both",
+      // "all"): one parked entry per live deal. 2026-10-05.
+      if (name === 'update_master_sheet_row' && parked.id == null && parked.targetPerson
+        && !parked.targetCompany && !parked.targetGroup && !parked.targetRole
+        && /\b(?:deals|all|both|every|each)\b/i.test(said)) {
+        // eslint-disable-next-line global-require
+        const { resolvePerson } = require('./tools/resolvePerson');
+        // eslint-disable-next-line global-require
+        const found = await require('../repos/masterSheetRows.repo').searchFuzzy({ q: parked.targetPerson });
+        const person = resolvePerson(found, parked.targetPerson, said);
+        const live = person.matched && !person.ambiguous ? person.rows.filter((r) => !r.stopped_on) : [];
+        if (live.length > 1) {
+          const {
+            targetPerson: _p, targetCompany: _c, targetGroup: _g, targetRole: _ro, ...exact
+          } = parked;
+          parked = { ...exact, ids: live.map((r) => r.id) };
+        }
+      }
+      if (name === 'update_master_sheet_row' && parked.id == null && !parked.ids) {
         const id = await dealIdFor(parked, said);
         if (id == null) {
           return {

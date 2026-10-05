@@ -57,7 +57,7 @@ function isRelative(value) {
 }
 
 // Arguments that are machinery, not values to set.
-const NOT_A_VALUE = new Set(['confirmed', 'said', 'turn', 'id', 'person', 'deal', 'companies', 'status']);
+const NOT_A_VALUE = new Set(['confirmed', 'said', 'turn', 'id', 'ids', 'person', 'deal', 'companies', 'status']);
 
 /**
  * @returns {{ok: true, spec: object} | {ok: false, why: string}}
@@ -73,7 +73,9 @@ function checkParkable(tool, args = {}) {
     };
   }
 
-  if (args[spec.idField] === undefined || args[spec.idField] === null || args[spec.idField] === '') {
+  // SEVERAL EXACT DEALS count as named: `ids`, one entry each. 2026-10-05.
+  const several = spec.idField === 'id' && Array.isArray(args.ids) && args.ids.length > 0;
+  if (!several && (args[spec.idField] === undefined || args[spec.idField] === null || args[spec.idField] === '')) {
     return {
       ok: false,
       why: `A parked change has to name the exact ${spec.noun} now, not a filter to run later. `

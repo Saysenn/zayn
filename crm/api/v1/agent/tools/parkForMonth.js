@@ -148,36 +148,126 @@ const parkForMonth = {
       };
     }
 
-    const rowId = Number(args[check.spec.idField]);
-    const row = Number.isInteger(rowId) ? await rowsRepo.findById(rowId) : null;
-    if (!row) {
+    /**
+     * A PERSON'S OWN RATE, for a later month. update_person was on the
+     * allow list and could never be parked: the deal path read the name as a
+     * row id and said "that deal is not there". Clone 2026-10-05, "add 5% to
+     * kiran vale deals next month". The finished value is worked out now
+     * against their profile, and it reaches every deal they hold.
+     */
+    if (check.spec.idField === 'person') {
+      // eslint-disable-next-line global-require
+      const { resolvePerson } = require('./resolvePerson');
+      // eslint-disable-next-line global-require
+      const peopleRepo = require('../../repos/people.repo');
+      const found = await rowsRepo.searchFuzzy({ q: args.person });
+      const person = resolvePerson(found, args.person, rawArgs.said);
+      if (person.ambiguous || !person.matched || !person.rows?.length) {
+        return { summary: `NOTHING WAS SAVED. "${args.person}" is not one person on the sheet. Ask who they mean.` };
+      }
+      const profile = await peopleRepo.findById(person.rows[0].person_id);
+      const name = profile?.display_name ?? person.rows[0].person_name;
+      const one = { ...args, person: name };
+      const current = { addonPercent: Number(profile?.addon_percent ?? 0), feePercent: Number(profile?.fee_percent ?? 0) };
+      for (const key of Object.keys(one)) {
+        if (!key.endsWith('Delta')) continue;
+        const field = key.slice(0, -'Delta'.length);
+        if (field in current) one[field] = Math.round((current[field] + Number(one[key])) * 100) / 100;
+        delete one[key];
+      }
+      const changes = Object.keys(current).filter((f) => one[f] !== undefined)
+        .map((f) => `${f === 'addonPercent' ? 'add on' : 'fee'} ${current[f]}% → ${Number(one[f])}%`);
+      if (changes.length === 0) {
+        return { summary: 'Only an add on or a fee can be parked for a person. Ask what should change.' };
+      }
+      const live = person.rows.filter((r) => !r.stopped_on).length;
+      const what = `${changes.join(', ')} on ${name}'s own rate, so on all ${live} of their deals`;
+      const needs = confirmFirst(rawArgs.confirmed, {
+        act: `park this for ${name}, applied at the start of each month below`,
+        count: months.length,
+        noun: 'month',
+        keeps: 'Nothing changes now. It is applied on the first sign-in of that month, and the new rate stays from then on.',
+        lines: months.map((m) => `  ${monthLabel(m)}: ${what}`),
+      });
+      if (needs) return needs;
+      const saved = [];
+      for (const month of months) {
+        // eslint-disable-next-line no-await-in-loop
+        saved.push(await queue.park({
+          dueMonth: month, tool, args: one, expect: {}, targetIds: [], said: `${name}: ${what}`,
+        }));
+      }
+      return {
+        summary: `Parked for ${name}: ${months.map(monthLabel).join(', ')}. Nothing has changed yet.`,
+        reply: `Done. Saved for ${months.map(monthLabel).join(', ')}: ${what}. Nothing has changed on the sheet yet.`,
+        computedReply: true,
+        parked: saved.map((e) => ({ id: e.id, month: e.due_month })),
+      };
+    }
+
+    /**
+     * ONE DEAL OR SEVERAL. "Add 5% to zayn's deals next month" is both of
+     * his deals: with only one id allowed she made one up, #1, which was
+     * somebody else's. Several ids park one entry per deal, shown in ONE
+     * preview. Clone 2026-10-05.
+     */
+    const rowIds = (Array.isArray(args.ids) && args.ids.length ? args.ids : [args[check.spec.idField]])
+      .map(Number).filter(Number.isInteger);
+    const rowsNow = (await Promise.all(rowIds.map((id) => rowsRepo.findById(id)))).filter(Boolean);
+    if (rowsNow.length === 0 || rowsNow.length !== rowIds.length) {
       return { summary: 'That deal is not there, so there is nothing to park. Find it first.' };
     }
 
-    const who = [row.person_name, row.company, row.group_name].filter(Boolean).join(' · ');
-
     /**
-     * THE WORLD AS IT IS NOW, so the runner can tell whether it still
-     * matches. Only the fields being written: a snapshot of everything
-     * would skip on any unrelated edit.
+     * "+5%" IS WORKED OUT NOW, per deal, against today's value: a parked
+     * change must carry the FINISHED value (see parkable.js). It came as
+     * addonPercentDelta and was shown as "update master sheet deal".
      */
-    const expect = {};
-    for (const field of Object.keys(args)) {
-      const column = rowsRepo.COLUMN_FOR[field];
-      if (column) expect[field] = row[column];
-    }
-
-    // WHAT changes, beside WHEN: "Monthly amount 3500 → 3800", not a bare month.
-    // A PARKED STOP SAYS "stop the deal": it read "company Reliapay
-    // Employment → Reliapay Employment", the field that only found it.
-    // Clone 2026-10-05.
-    const what = check.spec.terminal ? 'stop the deal'
-      : Object.keys(expect).map((f) => `${f.replace(/([A-Z])/g, ' $1').toLowerCase()} ${expect[f] ?? 'empty'} → ${args[f]}`).join(', ');
-    const lines = months.map((m) => `  ${monthLabel(m)}: ${what || tool.replace(/_/g, ' ')}`);
+    const plans = rowsNow.map((row) => {
+      const { ids: _ids, ...base } = args;
+      const one = { ...base, ...(check.spec.idField === 'id' ? { id: row.id } : {}) };
+      for (const key of Object.keys(one)) {
+        if (!key.endsWith('Delta')) continue;
+        const field = key.slice(0, -'Delta'.length);
+        const column = rowsRepo.COLUMN_FOR[field];
+        if (column) one[field] = Math.round((Number(row[column] ?? 0) + Number(one[key])) * 100) / 100;
+        delete one[key];
+      }
+      /**
+       * THE WORLD AS IT IS NOW, so the runner can tell whether it still
+       * matches. Only the fields being written: a snapshot of everything
+       * would skip on any unrelated edit.
+       */
+      const expect = {};
+      for (const field of Object.keys(one)) {
+        const column = rowsRepo.COLUMN_FOR[field];
+        if (column) expect[field] = row[column];
+      }
+      const who = [row.person_name, row.company, row.group_name].filter(Boolean).join(' · ');
+      // WHAT changes, beside WHEN: "Monthly amount 3500 → 3800", not a bare month.
+      // A PARKED STOP SAYS "stop the deal": it read "company Reliapay
+      // Employment → Reliapay Employment", the field that only found it.
+      // Clone 2026-10-05.
+      const what = check.spec.terminal ? 'stop the deal'
+        : Object.keys(expect).map((f) => {
+          // "add on 0% → 5%", not "addon percent 0.00 → 5".
+          const pct = /Percent$/.test(f);
+          const label = pct ? f.replace(/Percent$/, '').replace(/^addon$/, 'add on') : f.replace(/([A-Z])/g, ' $1').toLowerCase();
+          const shown = (v) => (v == null || v === '' ? 'empty' : pct ? `${Number(v)}%` : v);
+          return `${label} ${shown(expect[f])} → ${shown(one[f])}`;
+        }).join(', ');
+      return { row, args: one, expect, who, what: what || tool.replace(/_/g, ' ') };
+    });
+    const single = plans.length === 1;
+    const who = single ? plans[0].who : `${plans[0].row.person_name}'s ${plans.length} deals`;
+    const what = single ? plans[0].what : plans.map((p) => `${p.who}: ${p.what}`).join('; ');
+    const lines = months.flatMap((m) => (single
+      ? [`  ${monthLabel(m)}: ${plans[0].what}`]
+      : plans.map((p) => `  ${monthLabel(m)}: ${p.who}, ${p.what}`)));
     const needs = confirmFirst(rawArgs.confirmed, {
       act: `park this for ${who}, applied at the start of each month below`,
-      count: months.length,
-      noun: 'month',
+      count: months.length * plans.length,
+      noun: single ? 'month' : 'change',
       // WORDED FOR HIM, because she reads it out: it once ended "so never
       // say only about the month", an instruction to her. 2026-10-04.
       keeps: check.spec.terminal
@@ -189,22 +279,23 @@ const parkForMonth = {
     });
     if (needs) return needs;
 
-    // WHAT IT DOES, never their sentence: confirmed by "yes", the sentence was "yes".
-    const said = `${who}: ${what || tool.replace(/_/g, ' ')}`;
     const saved = [];
     for (const month of months) {
-      // eslint-disable-next-line no-await-in-loop
-      const entry = await queue.park({
-        dueMonth: month,
-        tool,
-        args,
-        expect,
-        targetIds: [rowId],
-        said,
-        // "MAKE IT DECEMBER INSTEAD" moves it rather than adding a second.
-        anyMonth: months.length === 1 && INSTEAD.test(`${rawArgs.said ?? ''}\n${rawArgs.saidRecent ?? ''}`),
-      });
-      saved.push(entry);
+      for (const plan of plans) {
+        // eslint-disable-next-line no-await-in-loop
+        const entry = await queue.park({
+          dueMonth: month,
+          tool,
+          args: plan.args,
+          expect: plan.expect,
+          targetIds: [plan.row.id],
+          // WHAT IT DOES, never their sentence: confirmed by "yes", the sentence was "yes".
+          said: `${plan.who}: ${plan.what}`,
+          // "MAKE IT DECEMBER INSTEAD" moves it rather than adding a second.
+          anyMonth: single && months.length === 1 && INSTEAD.test(`${rawArgs.said ?? ''}\n${rawArgs.saidRecent ?? ''}`),
+        });
+        saved.push(entry);
+      }
     }
 
     return {
@@ -216,9 +307,9 @@ const parkForMonth = {
       // ITS OWN FINISHED SENTENCE, so a yes needs no model round. Clone
       // 2026-10-05: left to her, the yes ended "keep it scheduled or
       // cancel it?" about the thing they had just agreed to.
-      reply: check.spec.terminal && months.length === 1
+      reply: check.spec.terminal && single && months.length === 1
         ? `Done. ${who} stops at the start of ${monthLabel(months[0])}, so ${monthLabel(shift(months[0], -1))} is still paid. Nothing has changed on the sheet yet.`
-        : `Done. Saved for ${months.map(monthLabel).join(', ')}: ${what || tool.replace(/_/g, ' ')}. Nothing has changed on the sheet yet.`,
+        : `Done. Saved for ${months.map(monthLabel).join(', ')}: ${what}. Nothing has changed on the sheet yet.`,
       computedReply: true,
       parked: saved.map((e) => ({ id: e.id, month: e.due_month })),
     };
@@ -349,6 +440,35 @@ const cancelParked = {
         summary: `NOTHING WAS CALLED OFF: no parked entry matches that. What IS parked:\n${listing}\n`
           + 'Say what is parked and ask which one. Never say nothing is parked when the list above has entries.',
       };
+    }
+    /**
+     * ONE ACT PARKED AS SEVERAL ENTRIES is called off as one: "add 5% to
+     * kiran's deals" is an entry per deal, and "cancel kiran's add on" asked
+     * which of three, then deadlocked on "yes". Same person, same change,
+     * or they said all of them. 2026-10-05.
+     */
+    const personOf = (p) => String(p.said ?? '').split(/ · |: /)[0].trim().toLowerCase();
+    const changeOf = (p) => String(p.said ?? '').slice(String(p.said ?? '').indexOf(': ') + 2).trim().toLowerCase();
+    const oneAct = picked.length > 1 && (/\b(?:all|both|every|them|those|these)\b/i.test(String(args.said ?? args.match ?? ''))
+      || (new Set(picked.map(personOf)).size === 1 && new Set(picked.map(changeOf)).size === 1));
+    if (oneAct) {
+      const needs = confirmFirst(args.confirmed, {
+        act: 'call off these parked changes, so they never run',
+        count: picked.length,
+        noun: 'parked change',
+        lines: picked.map((p) => `${monthLabel(p.due_month)}: ${p.said}`),
+        identity: `call off parked #${picked.map((p) => p.id).join(',')}`,
+      });
+      if (needs) return needs;
+      const gone = [];
+      for (const p of picked) {
+        // eslint-disable-next-line no-await-in-loop
+        if (await queue.cancel(p.id)) gone.push(p);
+      }
+      if (gone.length === 0) return { summary: 'Those have already run or been called off. Nothing was changed. Say so.' };
+      const reply = `Called off ${gone.length} parked ${gone.length === 1 ? 'change' : 'changes'}: `
+        + `${gone.map((p) => `${p.said} (due 1 ${monthLabel(p.due_month)})`).join('; ')}. Nothing on the sheet changed.`;
+      return { summary: reply, reply, computedReply: true };
     }
     if (picked.length > 1) {
       return {

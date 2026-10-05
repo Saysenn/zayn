@@ -424,7 +424,33 @@ WRITES.push(
   // Clone run 2026-10-05: "whos" was not heard as a second question.
   {
     name: 'a count and a "whos owed most" in one line are both answered',
-    turns: [{ say: 'how many deals in baker and whos owed most there', expect: { reply: /\b\d+ deals?\b[\s\S]*Kiran Vale|Kiran Vale[\s\S]*\b\d+ deals?\b/ } }],
+    turns: [{ say: 'how many deals in baker and whos owed most there', expect: { reply: /^(?=[\s\S]*\b(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve) deals?\b)(?=[\s\S]*Kiran Vale)/i } }],
+  },
+  // Live 2026-10-05: "add 5% to zayn deals next month" parked deal #1,
+  // somebody else's, under a preview that said Zayn.
+  {
+    name: 'a next month add on for all of a person\'s deals parks one per deal, finished values',
+    turns: [
+      { say: 'add 5% to kiran vale deals next month', expect: { reply: /0% → 5%/ } },
+      { say: 'yes', expect: { db: async (db) => {
+        // Either one entry per deal, or one on her own rate: never anyone
+        // else, never a "+5" left to compound.
+        const { rows } = await db.query("SELECT s.tool, s.args, m.person_name FROM tb_scheduled_actions s LEFT JOIN tb_mastersheet m ON m.id = (s.args->>'id')::int WHERE s.status = 'parked' AND (s.args ? 'addonPercent' OR s.args ? 'addonPercentDelta')");
+        const whose = rows.map((r) => r.person_name ?? r.args.person);
+        if (rows.length === 0) return 'nothing parked';
+        if (whose.some((w) => w !== 'Kiran Vale')) return `parked on someone else: ${whose.join(', ')}`;
+        if (rows.some((r) => Number(r.args.addonPercent) !== 5 || r.args.addonPercentDelta !== undefined)) return `args ${JSON.stringify(rows.map((r) => r.args))}`;
+        const perDeal = rows.filter((r) => r.tool === 'update_master_sheet_row').length;
+        return perDeal === 3 || (rows.length === 1 && rows[0].tool === 'update_person') ? null : `parked ${rows.length}: ${rows.map((r) => r.tool).join(', ')}`;
+      } } },
+      // Called off again, so no later case finds it ("cancel the harbor
+      // nine one" matched Kiran's Harbor Nine deal).
+      { say: "cancel kiran vale's parked add on" },
+      { say: 'yes', expect: { db: async (db) => {
+        const { rows } = await db.query("SELECT count(*)::int AS n FROM tb_scheduled_actions WHERE status = 'parked' AND (args ? 'addonPercent' OR args ? 'addonPercentDelta')");
+        return rows[0].n === 0 ? null : `${rows[0].n} still parked`;
+      } } },
+    ],
   },
   {
     name: 'a fee set on a named deal goes to that deal',
