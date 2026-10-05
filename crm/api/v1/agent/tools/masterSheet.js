@@ -6044,7 +6044,18 @@ const updateRow = {
     const row = await repo.findById(before.id) ?? saved;
     broadcast(null, 'master-sheet:changed', { action: 'updated', id: row.id, via: 'agent' });
     // IN WORDS: it read "monthlyAmount: 1300, payableAmount: 1300". 2026-09-30.
-    const changed = Object.keys(fields).map((key) => `${(FIELD_LABELS[key] ?? key).replace(/^./, (c) => c.toUpperCase())} ${formatValue(fields[key])}`).join(', ');
+    // AND WHAT IT WAS: "Payable amount 13600" alone left nobody able to tell
+    // what had moved. Live 2026-10-05. The words before "(was" stay as they
+    // were, because changeAgain reads them.
+    const wasOf = (key) => {
+      const col = ADDABLE[key] ?? key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+      const old = before?.[col];
+      const same = String(old) === String(fields[key])
+        || (old !== '' && Number.isFinite(Number(old)) && Number(old) === Number(fields[key]));
+      return old === undefined || old === null || old === '' || same
+        ? '' : ` (was ${formatValue(old)})`;
+    };
+    const changed = Object.keys(fields).map((key) => `${(FIELD_LABELS[key] ?? key).replace(/^./, (c) => c.toUpperCase())} ${formatValue(fields[key])}${wasOf(key)}`).join(', ');
     // THE ROW IS ON THE SHEET AND OWES NOTHING, so she asks rather than
     // leaving it at zero for somebody to find at the end of the month.
     // See specialCaseDealAsk: the trigger is the state, never a phrase.

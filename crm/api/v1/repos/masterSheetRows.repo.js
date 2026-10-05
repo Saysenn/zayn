@@ -1457,7 +1457,11 @@ async function revertChangeBatch(ids, onEach = null, { via = 'admin', batchId = 
   const failed = [];
   // A profile revert closes its sibling entries itself, so they are done.
   const covered = new Set();
-  for (const id of ids) {
+  // NEWEST FIRST. Two edits to one field in a batch, put back oldest first,
+  // left the middle value: "add 100" then "make it 13700" undid to 13600,
+  // not 13500. Clone 2026-10-05.
+  const newestFirst = [...ids].sort((a, b) => Number(b) - Number(a));
+  for (const id of newestFirst) {
     if (covered.has(Number(id))) {
       done.push({ ok: true, covered: true });
       onEach?.(done.length + failed.length, {});

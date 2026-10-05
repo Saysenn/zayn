@@ -908,3 +908,21 @@ WRITES.push({
     { say: 'yes', expect: { db: omMoved(0) } },
   ],
 });
+
+// A CHANGE SAYS WHAT IT WAS, "MAKE IT X" IS NOT A REPEAT, AND ONE UNDO PUTS
+// BOTH BACK. Live and clone 2026-10-05: "Payable amount 13600" with no before,
+// "actually make it 13700" answered "it has not moved", and the undo landed on
+// 13600 instead of 13500.
+const ottoPay = async (db) => Number((await deal(db, 'Otto Fenn', 'Ironleaf')).payable_amount);
+const ottoBase = {};
+WRITES.push({
+  name: 'auto mode: a change says what it was, "make it X" changes it again, one undo puts it all back',
+  auto: true,
+  turns: [
+    { say: 'how much is otto fenn owed this month', expect: { db: async (db) => { ottoBase.v = await ottoPay(db); return null; } } },
+    { say: "add 100 to otto fenn's payable", expect: { reply: /\(was /, db: async (db) => ((await ottoPay(db)) === ottoBase.v + 100 ? null : `payable ${await ottoPay(db)}`) } },
+    { say: 'actually make it 2000', expect: { noReply: /has not moved/i, db: async (db) => ((await ottoPay(db)) === 2000 ? null : `payable ${await ottoPay(db)}`) } },
+    { say: 'undo that' },
+    { say: 'yes', expect: { db: async (db) => ((await ottoPay(db)) === ottoBase.v ? null : `payable ${await ottoPay(db)}, wanted ${ottoBase.v}`) } },
+  ],
+});

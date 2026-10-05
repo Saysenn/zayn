@@ -4261,7 +4261,9 @@ async function runAgentTurn(history, contextName, onEvent) {
       // A QUESTION ASKED AGAIN is still a question, never "it has not
       // moved". Clone run 2026-10-05: "which group is it?" repeated came
       // back as "I ran it again and it has not moved." over the question.
-      const checked = terminalComputed && saidAlready(terminalReply, history) && !/\?\s*$/.test(terminalReply)
+      // NOR A WRITE: "make it 13700" saved, and read as a repeat of the 13600
+      // line it was told "it has not moved". Clone 2026-10-05.
+      const checked = terminalComputed && !terminalWrote && saidAlready(terminalReply, history) && !/\?\s*$/.test(terminalReply)
         ? `${LOOKED_AGAIN}\n${terminalReply}`
         : terminalReply;
       return {
