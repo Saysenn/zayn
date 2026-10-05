@@ -130,7 +130,17 @@ function overwroteAnAmount({
   // The figure itself, or her own sum of it: both belong to `add`, where the
   // tool does the arithmetic and every person named travels in one call.
   const hers = saidNumbers.some((x) => x === n || x === n - now);
-  if (!hers) return null;
+  /**
+   * A FIGURE NOBODY SAID. "add 100 to both zayn deals", one turn after "he
+   * is owed AED 8,400", came as payable SET to 8,400 and monthly +100, and
+   * the yes wrote it. Clone 2026-10-05. They asked to ADD; a value set that
+   * is neither their figure nor their figure plus the old one is hers.
+   */
+  if (!hers) {
+    return `NOTHING HAS BEEN CHANGED. They asked to ADD, and this SETS the ${label} to ${n}, `
+      + `a figure they never said (it is ${now} now). Send only what they asked: add: { <field>: `
+      + '<their figure> } on the field they named, and leave every other amount out.';
+  }
   // THEIR figure, never hers: the add is what they said.
   const added = saidNumbers.includes(n) ? n : n - now;
   return `THAT WOULD OVERWRITE, NOT ADD. They asked to add ${added} and this SETS the ${label} to `

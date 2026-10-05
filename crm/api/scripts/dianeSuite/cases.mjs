@@ -847,3 +847,42 @@ WRITES.push({
     { say: 'yes', expect: { db: async (db) => (Number((await deal(db, 'Otto Fenn', 'Ironleaf')).monthly_amount) === 1500 ? null : 'not back to 1500') } },
   ],
 });
+
+// ONE PERSON'S DEALS, ONE CHANGE, ONE YES. Live 2026-10-05: "add 100 to both
+// zayn deals" asked "which group, or both?", "both" asked it again, and a yes
+// on the clone set payable to the "owed" figure. Auto mode on and off.
+const kiranPayables = async (db) => (await db.query(
+  "SELECT company, payable_amount FROM tb_mastersheet WHERE person_name = 'Kiran Vale' ORDER BY company",
+)).rows.map((r) => `${r.company}:${Number(r.payable_amount)}`).join(',');
+const kiranBase = {};
+const kiranMoved = (by) => async (db) => {
+  const now = await kiranPayables(db);
+  const want = kiranBase.v.split(',').map((x) => { const [c, n] = x.split(':'); return `${c}:${Number(n) + by}`; }).join(',');
+  return now === want ? null : `payables ${now}, wanted ${want}`;
+};
+for (const auto of [false, true]) {
+  WRITES.push({
+    name: `"add 100 to all of a person's deals" is one preview and one yes (auto ${auto ? 'on' : 'off'})`,
+    auto,
+    turns: [
+      { say: 'how much is kiran vale owed this month', expect: { db: async (db) => { kiranBase.v = await kiranPayables(db); return null; } } },
+      {
+        say: "add 100 to all of kiran vale's deals",
+        expect: { reply: /Brightwell[\s\S]*Harbor Nine|Harbor Nine[\s\S]*Brightwell/, noReply: /which (group|company|one)|different value/i, db: kiranMoved(0) },
+      },
+      { say: 'yes', expect: { db: kiranMoved(100) } },
+      { say: 'undo that' },
+      { say: 'yes', expect: { db: kiranMoved(0) } },
+    ],
+  });
+}
+WRITES.push({
+  name: '"both" answers "which one, or both?"',
+  turns: [
+    { say: 'how much is kiran vale owed this month', expect: { db: async (db) => { kiranBase.v = await kiranPayables(db); return null; } } },
+    { say: "add 50 to kiran vale's deals", expect: { noReply: /which (group|company|one)/i, db: kiranMoved(0) } },
+    { say: 'yes', expect: { db: kiranMoved(50) } },
+    { say: 'undo that' },
+    { say: 'yes', expect: { db: kiranMoved(0) } },
+  ],
+});

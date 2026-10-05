@@ -5812,6 +5812,20 @@ const updateRow = {
           ...(args.add ? { add: args.add } : {}),
         }), args);
       }
+      /**
+       * "BOTH" WAS OFFERED, SO IT HAS TO BE DOABLE. "add 100 to both zayn
+       * deals" asked "which group, or both?", and "both" asked it again: this
+       * door only ever wrote one deal. Every deal it reaches goes to the bulk
+       * door instead, one preview line each and one yes. Live 2026-10-05.
+       */
+      if (picked.ask === 'which' && changing && ALL_THEIR_DEALS.test(String(args.said ?? ''))) {
+        return handOverCall([{
+          person: person.rows[0].person_name,
+          allDeals: true,
+          ...(Object.keys(fields).length > 0 ? { set: fields } : {}),
+          ...(args.add ? { add: args.add } : {}),
+        }], args);
+      }
       if (picked.ask === 'which') {
         const sorted = sortDealsForDisplay(picked.rows);
         /**
@@ -7150,6 +7164,12 @@ function oneDealFor(entry, rows, fields, add, saidRecent) {
       };
     }
   }
+  // "BOTH" IS AN ANSWER. "add 100 to both zayn deals" was asked which of the
+  // two, and "both" to that had nowhere to go. Live 2026-10-05.
+  if (entry.allDeals && !entry.company) {
+    const live = rows.filter((r) => !r.stopped_on);
+    return { rows: live.length > 0 ? live : rows };
+  }
   const oneDeal = Object.keys(add).length > 0 || Object.keys(fields).some((k) => NAMED_DEALS_ONLY[k]);
   if (oneDeal && guessedDeal(rows, entry.company, saidRecent)) return { ask: whichDealAsk(who, rows) };
   if (oneDeal && reach.length > 1) {
@@ -7166,6 +7186,9 @@ function oneDealFor(entry, rows, fields, add, saidRecent) {
 }
 
 const round2 = (n) => Math.round(n * 100) / 100;
+
+// "both", "all of them", "his deals": every deal the person holds.
+const ALL_THEIR_DEALS = /\b(?:both|all|every|each|deals)\b/i;
 
 /**
  * The sentence carrying the instruction: this one if it holds a figure, else
@@ -7367,7 +7390,9 @@ function dealLine(row, patch) {
     }
     return `${label} to "${value}"`;
   });
-  return `  ${displayPersonName(row.person_name)} at ${row.company || 'no company'}: ${bits.join(', ')}`;
+  // THE GROUP TOO: Zayn's two deals both read "Zayn at Workforce". 2026-10-05.
+  const where = `${row.company || 'no company'}${row.group_name ? ` in ${row.group_name}` : ''}`;
+  return `  ${displayPersonName(row.person_name)} at ${where}: ${bits.join(', ')}`;
 }
 
 /**
@@ -7562,11 +7587,13 @@ async function perPersonUpdate(args) {
   // THE LINES GO AS A LIST, so the relay guard holds her to every one: given
   // as prose she answered with a total and "yes" matched nothing. 2026-09-25.
   const pending = confirmFirst(args.confirmed, {
-    act: `set a DIFFERENT value on each of them${done ? ` (${done.trim()})` : ''}`,
+    // ONE PERSON'S DEALS, one change: "a DIFFERENT value on each of them"
+    // said of "add 100 to both zayn deals" was simply untrue. 2026-10-05.
+    act: `${plan.length === 1 ? `change ${displayPersonName(plan[0].person)}'s deals` : 'set a DIFFERENT value on each of them'}${done ? ` (${done.trim()})` : ''}`,
     count: rowCount,
     noun: 'row',
-    keeps: 'Read every line back. They are different changes and a count on its own hides that, '
-      + 'so nobody could tell one wrong value from the rest.',
+    keeps: 'Read every line back. A count on its own hides which deal moved, so nobody could '
+      + 'tell one wrong value from the rest.',
     lines: lines.map((l) => l.trim()),
   });
   if (pending) return pending;
@@ -7598,8 +7625,9 @@ async function perPersonUpdate(args) {
   broadcast(null, 'master-sheet:changed', { action: 'bulk-updated', ids: updated, via: 'agent' });
   return {
     summary: `Done. ${plan.length} ${plan.length === 1 ? 'person' : 'people'}, ${updated.length} `
-      + `${updated.length === 1 ? 'row' : 'rows'}, each with its own value:\n${lines.join('\n')}\n\n`
-      + 'Say what each person got, one line each. They are different changes.',
+      + `${updated.length === 1 ? 'row' : 'rows'}:\n${lines.join('\n')}\n\n`
+      + (plan.length === 1 ? 'Say what each deal got, one line each, by company and group.'
+        : 'Say what each person got, one line each. They are different changes.'),
   };
 }
 
@@ -7732,6 +7760,11 @@ const bulkUpdate = {
               description: 'ONE of their deals, by its company (or group). Needed when the person '
                 + 'holds several deals and the change is about one: a special case, a payable '
                 + 'amount, or an amount added.',
+            },
+            allDeals: {
+              type: 'boolean',
+              description: 'Every live deal this person holds, when they said "both", "all" or '
+                + '"his deals". Leave company out with it.',
             },
             set: {
               type: 'object',
