@@ -216,6 +216,12 @@ async function findAll({
        LEFT JOIN totals_json t ON t.ckey = a.ckey
        LEFT JOIN tb_companies c ON lower(c.name) = a.ckey
        WHERE true ${statusSql} ${oldGroupSql}
+         -- LIVE DEALS ONLY, like the dashboard's count: a company whose every
+         -- deal is stopped by hand is not listed (it showed 32 against the
+         -- dashboard's 30). A closed or liquidating one stays, because
+         -- closing stops its deals and it must still be reopenable. 2026-10-05.
+         AND (EXISTS (SELECT 1 FROM deals l WHERE l.ckey = a.ckey AND l.stopped_on IS NULL)
+              OR COALESCE(c.status, 'active') <> 'active')
        ${emptyToo ? `UNION ALL
        SELECT ${keySql('c.name')}, c.name, ARRAY[]::text[], 0, 0, 0, false, false, 0,
               '{}'::jsonb, c.company_id, c.name, COALESCE(c.status, 'active'), c.closed_on,
