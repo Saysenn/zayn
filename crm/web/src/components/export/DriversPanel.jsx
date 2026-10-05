@@ -75,9 +75,27 @@ export default function DriversPanel({ group, onBlockingChange }) {
   // RENAMING A RUN: its label is his to change, saved for everyone.
   const rename = useMutation({
     mutationFn: (nextRuns) => apiService.exports.saveDrivers({ runs: nextRuns }),
-    onError: (err) => notify({ level: 'error', message: "Couldn't rename that run", detail: err.message }),
+    onError: (err) => notify({ level: 'error', message: "Couldn't save the runs", detail: err.message }),
     onSettled: () => queryClient.invalidateQueries({ queryKey }),
   });
+  // ADDING AND REMOVING RUNS. A new run takes the first colour no run has;
+  // only an EMPTY run can go, so no location is ever left without one.
+  const RUN_COLORS = ['#2563eb', '#be185d', '#4d7c0f', '#0e7490', '#9333ea', '#b45309', '#475569'];
+  function addRun(label) {
+    const clean = String(label ?? '').trim();
+    if (!clean || clean.length > 40) return;
+    const current = data?.runs ?? [];
+    const base = clean.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'run';
+    let id = base;
+    for (let n = 2; current.some((r) => r.id === id) || id === 'abroad'; n += 1) id = `${base}-${n}`;
+    const used = new Set(current.map((r) => r.color));
+    const color = RUN_COLORS.find((c) => !used.has(c)) ?? RUN_COLORS[current.length % RUN_COLORS.length];
+    rename.mutate([...current, { id, label: clean, color }]);
+  }
+  function removeRun(id) {
+    rename.mutate((data?.runs ?? []).filter((r) => r.id !== id));
+  }
+
   function renameRun(id, label) {
     const clean = String(label ?? '').trim();
     if (!clean || clean.length > 40) return;
@@ -136,6 +154,7 @@ export default function DriversPanel({ group, onBlockingChange }) {
             key={z.id}
             zone={z}
             onRename={z.id === abroad.id ? null : (label) => renameRun(z.id, label)}
+            onRemove={z.id === abroad.id || places.some((p) => p.run === z.id) ? null : () => removeRun(z.id)}
             places={places.filter((p) => p.run === z.id)}
             zones={zones}
             onDrop={(key) => { const p = places.find((x) => x.key === key); if (p) move(p, z.id); }}
@@ -143,6 +162,7 @@ export default function DriversPanel({ group, onBlockingChange }) {
             onOpen={setPopFor}
           />
         ))}
+        <AddRun onAdd={addRun} />
         <Zone
           zone={{ id: null, label: 'Unassigned', color: UNSET_COLOR }}
           places={places.filter((p) => !p.run)}
@@ -174,50 +194,91 @@ export default function DriversPanel({ group, onBlockingChange }) {
             </button>
           )}
         </div>
-        {checks.length > 0 && (
-          <div className="rounded-lg border border-border px-3 py-2.5">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-text-faint">Before export</p>
-            <ul className="mt-1 space-y-2 text-sm">
-              {checks.map((c) => (
-                <li key={c.kind}>
-                  <p className={c.blocking ? 'text-danger' : 'text-text'}>{c.text}</p>
-                  {c.hint && <p className="text-xs text-text-muted">{c.hint}</p>}
-                  {c.items?.length > 0 && (
-                    <div className="mt-1 flex flex-wrap gap-1.5">
-                      {c.items.map((item) => (
-                        <label key={item.id} className="flex items-center gap-1 rounded border border-border px-1.5 py-px text-xs">
-                          <span className="text-text">{item.name}</span>
-                          <select
-                            aria-label={`Set the location for ${item.name}`}
-                            defaultValue=""
-                            disabled={rowEdit.isPending}
-                            onChange={(e) => { if (e.target.value) setLocation(item, e.target.value); }}
-                            className="min-h-0 rounded-sm border-0 bg-transparent p-0 text-xs text-accent-strong"
-                          >
-                            <option value="">Set location…</option>
-                            {places
-                              .filter((p) => p.key !== placeKeyOf(item.current))
-                              .sort((a, b) => (a.key === item.suggest ? -1 : b.key === item.suggest ? 1 : 0))
-                              .map((p) => (
-                                <option key={p.key} value={p.name}>{p.name}{p.key === item.suggest ? ' (suggested)' : ''}</option>
-                              ))}
-                          </select>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+        <BeforeExport checks={checks} places={places} busy={rowEdit.isPending} onSetLocation={setLocation} />
       </div>
     </div>
   );
 }
 
+/**
+ * BEFORE EXPORT, one short line per check: what is wrong and the names, each
+ * with its own ▾ to fix it. What to do sits in the ⓘ; info-only notes fold
+ * away; nothing left is one green line.
+ */
+function BeforeExport({ checks, places, busy, onSetLocation }) {
+  const [notesOpen, setNotesOpen] = useState(false);
+  const lines = checks.filter((c) => !c.note);
+  const notes = checks.filter((c) => c.note);
+  if (lines.length === 0 && notes.length === 0) {
+    return <p className="rounded-md border border-border px-2.5 py-1.5 text-xs font-semibold text-success">✓ Ready to export</p>;
+  }
+  return (
+    <div className="rounded-md border border-border px-2.5 py-2 text-xs">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-text-faint">Before export</p>
+      {lines.length === 0 && <p className="mt-1 font-semibold text-success">✓ Ready to export</p>}
+      <ul className="mt-1 space-y-1">
+        {lines.map((c) => <CheckLine key={c.kind} check={c} places={places} busy={busy} onSetLocation={onSetLocation} />)}
+      </ul>
+      {notes.length > 0 && (
+        <>
+          <button
+            type="button"
+            aria-expanded={notesOpen}
+            onClick={() => setNotesOpen((v) => !v)}
+            className="mt-1 min-h-0 border-0 bg-transparent p-0 text-[11px] text-text-muted shadow-none hover:text-text"
+          >
+            {notes.length} {notes.length === 1 ? 'note' : 'notes'} {notesOpen ? '▾' : '▸'}
+          </button>
+          {notesOpen && (
+            <ul className="mt-1 space-y-1">
+              {notes.map((c) => <CheckLine key={c.kind} check={c} places={places} busy={busy} onSetLocation={onSetLocation} />)}
+            </ul>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function CheckLine({ check: c, places, busy, onSetLocation }) {
+  const dot = c.blocking ? 'bg-danger' : c.note ? 'bg-text-faint' : 'bg-warning';
+  return (
+    <li className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+      <span className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} aria-hidden="true" />
+      <span className={c.blocking ? 'text-danger' : c.note ? 'text-text-muted' : 'text-text'}>{c.short ?? c.text}</span>
+      {c.items?.map((item) => (
+        <span key={item.id} className="inline-flex items-center gap-1">
+          <span className="relative inline-flex items-center gap-0.5 rounded px-1 text-text hover:bg-surface-sunken">
+            {item.name}
+            <span className="text-[10px] text-accent-strong" aria-hidden="true">▾</span>
+            <select
+              aria-label={`Set the location for ${item.name}`}
+              value=""
+              disabled={busy}
+              onChange={(e) => { if (e.target.value) onSetLocation(item, e.target.value); }}
+              className="absolute inset-0 min-h-0 w-full cursor-pointer opacity-0"
+            >
+              <option value="">Set location…</option>
+              {places
+                .filter((p) => p.key !== placeKeyOf(item.current))
+                .sort((a, b) => (a.key === item.suggest ? -1 : b.key === item.suggest ? 1 : 0))
+                .map((p) => (
+                  <option key={p.key} value={p.name}>{p.name}{p.key === item.suggest ? ' (suggested)' : ''}</option>
+                ))}
+            </select>
+          </span>
+          {item.detail && <span className="text-[11px] text-text-faint">({item.detail})</span>}
+        </span>
+      ))}
+      {c.hint && (
+        <span title={c.hint} aria-label={c.hint} className="cursor-help text-[11px] text-text-faint">ⓘ</span>
+      )}
+    </li>
+  );
+}
+
 /** One run (or Unassigned): a drop target holding its location chips. */
-function Zone({ zone, places, zones, hint, onDrop, onMove, onOpen, onRename, hideWhenEmpty = false }) {
+function Zone({ zone, places, zones, hint, onDrop, onMove, onOpen, onRename, onRemove, hideWhenEmpty = false }) {
   const [over, setOver] = useState(false);
   if (hideWhenEmpty && places.length === 0) return null;
   const people = places.reduce((n, p) => n + p.people, 0);
@@ -235,7 +296,12 @@ function Zone({ zone, places, zones, hint, onDrop, onMove, onOpen, onRename, hid
           <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: zone.color }} aria-hidden="true" />
           {onRename ? <RunName label={zone.label} color={zone.color} onRename={onRename} /> : zone.label}
         </h3>
-        <span className="text-[11px] tabular-nums text-text-faint">{people} ppl</span>
+        <span className="flex items-center gap-1.5 text-[11px] tabular-nums text-text-faint">
+          {people} ppl
+          {onRemove && (
+            <button type="button" aria-label={`Remove ${zone.label}`} title="Remove this empty run" onClick={onRemove} className="min-h-0 border-0 bg-transparent p-0 text-sm leading-none text-text-faint shadow-none hover:text-danger">×</button>
+          )}
+        </span>
       </div>
       {hint && <p className="text-[11px] text-text-muted">{hint}</p>}
       <div className="mt-1 flex flex-wrap gap-1">
@@ -290,6 +356,44 @@ function RunName({ label, color, onRename, className = '' }) {
       }}
       className="min-h-0 w-36 rounded-sm border border-border bg-surface px-1 py-0 text-xs font-semibold text-text"
     />
+  );
+}
+
+/** "+ Add a run": a name, then Enter. */
+function AddRun({ onAdd }) {
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState('');
+  if (!open) {
+    return (
+      <button type="button" onClick={() => setOpen(true)} className="min-h-0 border-0 bg-transparent p-0 text-xs font-semibold text-accent-strong shadow-none hover:underline">
+        + Add a run
+      </button>
+    );
+  }
+  const done = (save) => {
+    if (save && value.trim()) onAdd(value.trim());
+    setValue('');
+    setOpen(false);
+  };
+  return (
+    <div className="flex items-center gap-1.5">
+      <input
+        // eslint-disable-next-line jsx-a11y/no-autofocus
+        autoFocus
+        aria-label="New run name"
+        placeholder="Name, e.g. Midlands run"
+        value={value}
+        maxLength={40}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); done(true); }
+          if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(false); }
+        }}
+        className="min-h-0 w-48 rounded border border-border bg-surface px-1.5 py-0.5 text-xs text-text"
+      />
+      <button type="button" disabled={!value.trim()} onClick={() => done(true)} className="btn-primary min-h-0 px-2.5 py-0.5 text-xs">Add</button>
+      <button type="button" onClick={() => done(false)} className="btn-quiet min-h-0 px-2 py-0.5 text-xs">Cancel</button>
+    </div>
   );
 }
 

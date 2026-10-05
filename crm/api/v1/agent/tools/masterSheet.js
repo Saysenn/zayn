@@ -405,7 +405,10 @@ function mentionedDealValue(rows, said, field) {
    * that reaches exactly ONE of this person's companies, is that company.
    * Two or more is still a question. 2026-09-30.
    */
-  const heard = new Set(String(said ?? '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4));
+  // NEVER A WORD OF THEIR OWN NAME: "which company is peter gibson at"
+  // narrowed to "Peter KP", one of his three. Clone 2026-10-05.
+  const ownName = new Set(rows.flatMap((row) => String(row.person_name ?? '').toLowerCase().split(/[^a-z0-9]+/)));
+  const heard = new Set(String(said ?? '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !ownName.has(w)));
   const hits = values.filter((value) => value.toLowerCase().split(/[^a-z0-9]+/).some((w) => w.length >= 4 && heard.has(w)));
   return hits.length === 1 ? hits[0] : null;
 }
@@ -504,7 +507,21 @@ function narrowPersonDeals(rows, args = {}) {
           if (word.length >= 3 && v.toLowerCase().split(/[^a-z0-9]+/).includes(word)) hits.push([other, v]);
         }
       }
-      return hits.length === 1 ? hits[0] : [home, value];
+      if (hits.length === 1) return hits[0];
+      /**
+       * SEVERAL WORDS ACROSS FIELDS: "baker director" is the group and the
+       * role of one deal, and matched neither field whole. Suite 2026-10-05.
+       * Every word found on exactly one of their deals is that deal.
+       */
+      const words = word.split(/[^a-z0-9]+/).filter(Boolean);
+      if (words.length > 1) {
+        const covering = rows.filter((row) => {
+          const own = DEAL_TARGET_FIELDS.map((f) => String(row[f] ?? '').toLowerCase()).join(' ').split(/[^a-z0-9]+/);
+          return words.every((w) => own.includes(w));
+        });
+        if (covering.length === 1) return ['id', covering[0].id];
+      }
+      return [home, value];
     });
   if (targets.length === 0) return { rows, targeted: false, missing: null };
 
@@ -1111,12 +1128,38 @@ function askedFieldReply(rows, said, saidRecent = '') {
   const names = [...new Set(rows.map((row) => displayPersonName(row.person_name)).filter(Boolean))];
   if (names.length !== 1) return null;
   // "Handled internally" is said as what it means, never read out as a number.
-  const shown = (v) => (column.endsWith('_on') ? dateInWords(v) : (SENTINEL_SAYS[v] ?? String(v ?? '').trim()));
-  const values = [...new Set(rows.map((r) => shown(r[column])).filter(Boolean))];
+  const shownOne = (v) => (column.endsWith('_on') ? dateInWords(v) : (SENTINEL_SAYS[v] ?? String(v ?? '').trim()));
+  /**
+   * "BANK DETAILS" IS THE BANK, THE ACCOUNT AND THE SORT CODE. Clone run
+   * 2026-10-05: "whats peter gibsons bank details" got "Peter Gibson's bank
+   * details is Barclays." and nothing anyone could pay into.
+   */
+  const bankBits = (r) => [
+    shownOne(r.bank_details),
+    r.account_number && !SENTINEL_SAYS[r.account_number] ? `account ${String(r.account_number).trim()}` : '',
+    r.sort_code && !SENTINEL_SAYS[r.sort_code] ? `sort code ${String(r.sort_code).trim()}` : '',
+  ].filter(Boolean).join(', ');
+  const cellOf = (r) => (column === 'bank_details' ? bankBits(r) : shownOne(r[column]));
+  const verb = column === 'bank_details' ? 'are' : 'is';
+  const values = [...new Set(rows.map(cellOf).filter(Boolean))];
   if (values.length === 0) return `${names[0]} has no ${label} on file.`;
-  if (values.length === 1) return `${names[0]}'s ${label} is ${values[0]}.`.replace(' is handled internally', ': handled internally');
-  return `${names[0]} has ${values.length} different ${label}s: `
-    + `${rows.filter((r) => shown(r[column])).map((r) => `${shown(r[column])} (${r.company || r.group_name})`).join(', ')}.`;
+  if (values.length === 1) return `${names[0]}'s ${label} ${verb} ${values[0]}.`.replace(` ${verb} handled internally`, ': handled internally');
+  /**
+   * EACH VALUE ONCE, with where it is held. "Nathan has 2 different groups:
+   * INDIGO (...), MILKMAN (...), MILKMAN (...)" named a group per deal, and
+   * "companys: Peter KP (Peter KP)" named a company by itself. 2026-10-05.
+   */
+  const bank = column === 'bank_details';
+  const whereOf = (r) => (column === 'company' ? r.group_name : column === 'group_name' ? r.company : (r.company || r.group_name));
+  const byValue = new Map();
+  for (const r of rows) {
+    const v = cellOf(r);
+    if (!v) continue;
+    byValue.set(v, [...(byValue.get(v) ?? []), whereOf(r)].filter(Boolean));
+  }
+  const plural = bank ? label : label.endsWith('y') ? `${label.slice(0, -1)}ies` : `${label}s`;
+  const parts = [...byValue].map(([v, where]) => `${v} (${[...new Set(where)].join(', ')})`);
+  return `${names[0]} has ${values.length} different ${plural}: ${parts.join(bank ? '; ' : ', ')}.`;
 }
 
 function detailsCardReply(rows, said = '', saidRecent = '') {
@@ -1223,12 +1266,16 @@ const findAndShow = {
      */
     // "IS BYRON IN NEXUS?" with only the name sent: the place is read off
     // their sentence. 2026-10-04.
-    const placeSaid = /^\s*(?:is|are)\s+.+?\s+(?:in|at|on|with|part of)\s+([a-z][\w &'-]{1,40}?)\s*\?*\s*$/i.exec(String(args.said ?? ''))?.[1];
+    // A GREETING IN FRONT ("hi diane, quick one - is zayn in nexus?") is
+    // not the question. Clone 2026-10-05.
+    const askedLine = String(args.said ?? '')
+      .replace(/^\s*(?:(?:hi|hey|hello|hiya|yo|morning|ok(?:ay)?|so|right|diane|babe|darling|quick (?:one|q(?:uestion)?)|question|sorry|pls|please)\b[\s,.!:;-]*)+(?=\S)/i, '');
+    const placeSaid = /^\s*(?:is|are)\s+.+?\s+(?:in|at|on|with|part of)\s+([a-z][\w &'-]{1,40}?)\s*\?*\s*$/i.exec(askedLine)?.[1];
     const askedGroup = args.groupName ?? args.company ?? placeSaid;
     // ONLY A QUESTION GETS A YES OR NO: "the umbrella one" (picking a deal)
     // was answered "No, Drew is not in Umbrella". And a word of the name
     // counts: Umbrella is Umbrella UK Holdings. 2026-10-04.
-    const asksIn = /^\s*(?:is|are|does)\b/i.test(String(args.said ?? ''));
+    const asksIn = /^\s*(?:is|are|does)\b/i.test(askedLine);
     const within = (value) => {
       const w = String(askedGroup ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
       const v = String(value ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
@@ -1239,7 +1286,7 @@ const findAndShow = {
         .filter((r) => !r.stopped_on && fold(r.person_name) === fold(args.name));
       const inside = exact.filter((r) => within(r.group_name) || within(r.company));
       // AND YES IS AN ANSWER TOO: "is mara quill in baker?" drew her card.
-      if (inside.length > 0 && /^\s*(?:is|are|does)\b/i.test(String(args.said ?? ''))) {
+      if (inside.length > 0 && asksIn) {
         const where = [...new Set(inside.map((r) => `${r.group_name}${r.company ? ` (${r.company})` : ''}`))].join(', ');
         const reply = `Yes, ${inside[0].person_name} is in ${where}.`;
         return { summary: `${reply} Say exactly that.`, reply, computedReply: true, rows: inside.map(summarizeRow) };
@@ -2344,7 +2391,7 @@ function describeFilter(a) {
   if (has(a.source, 'synced')) bits.push('from an imported sheet');
   // The END DATE, said apart from the payment period on purpose: "ending"
   // is a date on the row, "ended" is what the period predicate decided.
-  if (has(a.endWhen, 'soon')) bits.push(`ending within ${ENDING_SOON_MONTHS} months`);
+  if (has(a.endWhen, 'soon')) bits.push(`ending within ${a.endSoonMonths ?? ENDING_SOON_MONTHS} months`);
   if (has(a.endWhen, 'this-month')) bits.push('ending this month');
   if (has(a.endWhen, 'future')) bits.push('ending after this month');
   if (has(a.endWhen, 'past')) bits.push('with an end date already passed');
@@ -3144,6 +3191,16 @@ const filterRows = {
      * "MORE THAN 1000" DOES NOT INCLUDE 1000. Live 2026-09-30 it listed four
      * deals of exactly GBP 1,000. The bound is strict when their words are.
      */
+    /**
+     * "ENDING IN THE NEXT 2 MONTHS" IS TWO, not the default three. Clone
+     * 2026-10-05: answered "within the next 3 months".
+     */
+    if ([].concat(args.endWhen ?? []).includes('soon')) {
+      const n = /\bnext\s+(\d+|one|two|three|four|five|six)\s+months?\b/i.exec(heardNoun)?.[1];
+      const asNumber = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 }[String(n).toLowerCase()] ?? Number(n);
+      // eslint-disable-next-line no-param-reassign
+      if (asNumber > 0) args = { ...args, endSoonMonths: asNumber };
+    }
     const { rows, total } = await repo.findAll({ ...args, ...strictBounds(args), page: 1, pageSize: TOTAL_ROW_LIMIT });
     // EVERY match, not the first 60: "show me all deals" drew 60 under a title
     // saying 90. The list scrolls; a cut nobody sees is the bug. 2026-09-30.
@@ -3393,7 +3450,8 @@ const filterRows = {
      * them ("show", "list", "who", "which") still draws them.
      */
     const heardNow = String(args.said ?? '');
-    if (/\bhow many\b/i.test(heardNow) && !/\b(?:show|list|who|which|name|see)\b/i.test(heardNow)) {
+    // "HOWS MANY", "how mny": the typed slips of it too. Clone 2026-10-05.
+    if (/\bhow'?s? (?:many|mny|manny)\b|\bhw many\b|\bnumber of\b/i.test(heardNow) && !/\b(?:show|list|who|which|name|see)\b/i.test(heardNow)) {
       const people = new Set(rows.map((r) => r.person_id ?? r.person_name).filter(Boolean)).size;
       /**
        * A NARROWED COUNT SAYS WHAT NARROWED IT, and out of how many. Live
@@ -4079,7 +4137,15 @@ async function totalReply(rows, month, args, whoLabel = null, plural = false, {
     figures: ['headline', 'converted'],
   };
 
-  const wanted = SHAPES[args.only] ?? SHAPES.all;
+  // "TOTAL IN USD" LEADS WITH THE USD. Clone 2026-10-05: the dollar figure
+  // came last, under three currencies and five add on lines.
+  const askedUsd = !args.only && /\b(?:in|to|as)\s+(?:usd|dollars?|us dollars?|\$)\b/i.test(String(args.said ?? ''));
+  const usdHead = askedUsd && converted && !converted.unconvertible?.length
+    ? /^(.*? (?:is|are) owed )(.+?)( for [^.\n]+)\.$/.exec(String(part.headline[0] ?? '')) : null;
+  if (usdHead) {
+    part.usdFirst = [`${usdHead[1]}USD ${amountText(converted.usd)}${usdHead[3]}.`, `In each currency: ${usdHead[2]}.`];
+  }
+  const wanted = usdHead ? ['usdFirst'] : SHAPES[args.only] ?? SHAPES.all;
   const picked = wanted.flatMap((key) => part[key]);
   // A SHAPE THAT CAME OUT EMPTY FALLS BACK TO EVERYTHING. Asking for only
   // the USD on an answer that was never converted would otherwise return
@@ -4955,13 +5021,24 @@ const createRow = {
     const prior = String(rawNewArgsIn?.priorAnswer ?? '');
     // Her preview is worded her way ("ready to add", "here is the deal"),
     // so it is known by what it holds: this person's name and "add".
-    const midAdd = /^To add .+ I still need\b|\bas a new deal\b|\bnew deal\b|is not a group on the sheet/i.test(prior)
+    const midAdd = /^To add .+ I still need\b|\bas a new deal\b|\bnew deal\b|is not a group on the sheet|Which group is it/i.test(prior)
       || Boolean(addDraft?.fields?.personName && Date.now() - addDraft.at < 15 * 60 * 1000
         && fold(prior).includes(fold(addDraft.fields.personName)) && /\badd/i.test(prior));
     const given = Object.fromEntries(Object.entries(rawNewArgsIn ?? {})
       .filter(([k, v]) => fieldKeys.includes(k) && v !== undefined && v !== null && v !== ''));
+    // A NAME THEY DID NOT SAY is hers, from an older draft: "actually make it
+    // 1250" on Tomas's preview came as Mira Solene, the deal before. Clone
+    // 2026-10-05. The deal on screen is the one being corrected.
+    const nameUnsaid = given.personName && rawNewArgsIn?.confirmed !== true
+      && /^\s*(?:(?:actually|no|nah|sorry|wait|oh|oops)[\s,]+)*(?:make it|change it to|it'?s|its|should be)\b/i.test(String(rawNewArgsIn?.said ?? ''))
+      && !fold(String(rawNewArgsIn?.said ?? '')).includes(fold(given.personName).split(' ')[0]);
     const sameDeal = addDraft && Date.now() - addDraft.at < 15 * 60 * 1000 && midAdd
-      && (!given.personName || fold(given.personName) === fold(addDraft.fields.personName ?? given.personName));
+      && (!given.personName || nameUnsaid
+        || fold(given.personName) === fold(addDraft.fields.personName ?? given.personName));
+    if (sameDeal && nameUnsaid && fold(given.personName) !== fold(addDraft.fields.personName ?? '')) {
+      delete given.personName;
+      for (const k of ['groupName', 'company', 'roleLabel', 'assignedOn']) delete given[k];
+    }
     // ON THE YES, THE PREVIEW WINS: the yes replays her original arguments
     // (a role of "baker"), while what he agreed to was the corrected draft.
     const rawNewArgs = !sameDeal ? { ...rawNewArgsIn }
@@ -5015,7 +5092,11 @@ const createRow = {
       const group = (spellings?.groups ?? []).find((g) => fold(g) === fold(word));
       const company = (spellings?.companies ?? []).find((c) => fold(c) === fold(word));
       const role = (spellings?.roles ?? []).find((r) => fold(r) === fold(word));
-      const put = group ? ['groupName', group] : company ? ['company', company] : role ? ['roleLabel', role] : null;
+      // A FIGURE IS THE MONTHLY: "actually make it 980" came back with the
+      // old 950 and was added at 950. Clone 2026-10-05.
+      const figure = /^(?:(?:gbp|usd|eur|aed|£|\$)\s*)?(\d[\d,]*(?:\.\d+)?)(?:\s*(?:gbp|usd|eur|aed|a month|monthly|per month))?$/i.exec(word.trim());
+      const put = group ? ['groupName', group] : company ? ['company', company] : role ? ['roleLabel', role]
+        : figure ? ['monthlyAmount', Number(figure[1].replace(/,/g, ''))] : null;
       if (put) {
         // The draft's own values back, then only the one they corrected.
         for (const k of ['groupName', 'company', 'roleLabel']) {
@@ -5041,6 +5122,28 @@ const createRow = {
       }
     }
     /**
+     * "WHICH GROUP IS IT?" IS ANSWERED BY THEM, NEVER BY HER. Clone run
+     * 2026-10-05: a bare "yes" to that question came back as group "ALL
+     * GROUPS" and a preview was drawn. After the question, a group they did
+     * not say is dropped, so the question is asked again.
+     */
+    if (/Which group is it/.test(prior) && rawNewArgsIn?.confirmed !== true
+      && typeof rawNewArgs.groupName === 'string' && rawNewArgs.groupName.trim()) {
+      const spellings = await Promise.resolve(repo.knownSpellings?.()).catch(() => null);
+      const heard = groupsHeardIn(String(rawNewArgsIn?.said ?? ''), spellings?.groups ?? []);
+      const saidIt = fold(String(rawNewArgsIn?.said ?? '')).includes(fold(rawNewArgs.groupName));
+      if (!saidIt && !heard.some((g) => fold(g) === fold(rawNewArgs.groupName))) {
+        if (heard.length === 1) rawNewArgs.groupName = heard[0];
+        else rawNewArgs.groupName = '';
+      }
+    }
+    if (typeof rawNewArgs.groupName === 'string' && !rawNewArgs.groupName.trim() && /Which group is it/.test(prior)) {
+      const spellings = await Promise.resolve(repo.knownSpellings?.()).catch(() => null);
+      const ask = `Which group is it: ${(spellings?.groups ?? []).join(', ')}?`;
+      addDraft = { at: Date.now(), fields: Object.fromEntries(Object.entries(rawNewArgs).filter(([k, v]) => fieldKeys.includes(k) && k !== 'groupName' && v != null && v !== '')) };
+      return { summary: `NOTHING WAS ADDED YET. They have not named the group. ${ask} Ask exactly that.`, reply: ask, computedReply: true };
+    }
+    /**
      * THE GROUP MUST BE ONE THE SHEET HAS. "tech, baker" came as role
      * "baker", group "tech", and the preview offered a deal in a group
      * called TECH. A role that IS a group, beside a group that is not, is
@@ -5051,12 +5154,32 @@ const createRow = {
       const groups = spellings?.groups ?? [];
       if (groups.length && !groups.some((g) => fold(g) === fold(rawNewArgs.groupName))) {
         const roleIsGroup = groups.find((g) => fold(g) === fold(rawNewArgs.roleLabel));
-        if (roleIsGroup) {
+        // THE COMPANY AND THE GROUP SWAPPED: "on pinecrest ... in baker" came
+        // as group "pinecrest", company "baker". 2026-10-04.
+        const companyIsGroup = groups.find((g) => fold(g) === fold(rawNewArgs.company));
+        const groupIsCompany = (spellings?.companies ?? []).find((c) => fold(c) === fold(rawNewArgs.groupName));
+        if (companyIsGroup || groupIsCompany) {
+          const wasGroup = rawNewArgs.groupName;
+          rawNewArgs.groupName = companyIsGroup ?? null;
+          rawNewArgs.company = groupIsCompany ?? wasGroup;
+          if (!rawNewArgs.groupName) {
+            const said = String(rawNewArgsIn?.said ?? '').toLowerCase();
+            rawNewArgs.groupName = groups.find((g) => new RegExp(`\\b${g.toLowerCase()}\\b`).test(said)) ?? null;
+          }
+        }
+        // ONE SLIP OF A REAL GROUP is that group: "on milkmn" was asked
+        // "which group is it?" with MILKMAN in the list. Clone 2026-10-05.
+        if (rawNewArgs.groupName && !groups.some((g) => fold(g) === fold(rawNewArgs.groupName))) {
+          const slip = groupsHeardIn(String(rawNewArgs.groupName), groups);
+          if (slip.length === 1) rawNewArgs.groupName = slip[0];
+        }
+        const groupNowKnown = rawNewArgs.groupName && groups.some((g) => fold(g) === fold(rawNewArgs.groupName));
+        if (!groupNowKnown && roleIsGroup) {
           const wasGroup = rawNewArgs.groupName;
           rawNewArgs.groupName = roleIsGroup;
           rawNewArgs.roleLabel = wasGroup;
-        } else {
-          const ask = `${rawNewArgs.groupName} is not a group on the sheet. Which group is it: ${groups.join(', ')}?`;
+        } else if (!groupNowKnown) {
+          const ask = `${rawNewArgs.groupName ? `${rawNewArgs.groupName} is not a group on the sheet. ` : ''}Which group is it: ${groups.join(', ')}?`;
           delete rawNewArgs.groupName;
           addDraft = { at: Date.now(), fields: Object.fromEntries(Object.entries(rawNewArgs).filter(([k, v]) => fieldKeys.includes(k) && v != null && v !== '')) };
           return { summary: `NOTHING WAS ADDED YET. ${ask} Ask exactly that.`, reply: ask, computedReply: true };
@@ -5583,7 +5706,15 @@ const updateRow = {
       if (answered) return handOverCall(answered, args);
       // company and roleLabel here are values being WRITTEN, never a target:
       // "set his role to Mid 3" looked for a Mid 3 deal and found none.
-      const targetsOnly = { ...args, company: undefined, roleLabel: undefined };
+      // ON THE YES, THE SENTENCE THAT NAMED THE DEAL is the one before it.
+      // Clone run 2026-10-05: "change his indigo director monthly to 4200"
+      // previewed the Director deal, and "yep" asked which of three deals.
+      const targetsOnly = {
+        ...args,
+        company: undefined,
+        roleLabel: undefined,
+        ...(args.confirmed ? { said: `${args.said ?? ''}\n${args.saidRecent ?? ''}` } : {}),
+      };
       const narrowed = narrowPersonDeals(person.rows, targetsOnly);
       /**
        * ===============================
@@ -5604,6 +5735,20 @@ const updateRow = {
        */
       const picked = pickDeal(person.rows, targetsOnly, narrowPersonDeals);
       const reached = picked.rows ?? (picked.deal ? [picked.deal] : person.rows);
+      /**
+       * A ROLE THEY NAMED THE DEAL BY IS NOT A NEW ROLE. Suite 2026-10-05:
+       * "change kiran vale's baker director monthly to 3100" came with
+       * roleLabel "baker director" and the yes renamed the role to it. With
+       * no word of changing a role, a roleLabel holding one of their roles
+       * only points at the deal.
+       */
+      if (fields.roleLabel !== undefined
+        && !/\brole\b|\bpromot|\bdemot|\bmake (?:him|her|them) (?:a|an|the)\b/i.test(`${args.said ?? ''} ${args.saidRecent ?? ''}`)
+        && person.rows.some((r) => r.role_label && fold(fields.roleLabel).includes(fold(r.role_label)))) {
+        delete fields.roleLabel;
+        delete fields.role;
+        delete fields.seat;
+      }
       const movesMoney = Object.keys(args.add ?? {}).length > 0 || Object.keys(fields).some((k) => NAMED_DEALS_ONLY[k]);
       if (movesMoney && !args.confirmed && !namedBy(args.saidRecent, person.rows[0].person_name)) {
         return notNamedAsk(displayPersonName(person.rows[0].person_name));
@@ -5891,7 +6036,15 @@ const updateRow = {
     // See specialCaseDealAsk: the trigger is the state, never a phrase.
     const ask = (args.specialCaseAnswered ?? []).includes(Number(row.id)) ? null : specialCaseDealAsk(row, fields);
     // The group too: "Gloria at Workforce" was four deals. 2026-10-03.
-    const reply = `${displayPersonName(row.person_name)} at ${[row.company, row.group_name].filter(Boolean).join(' in ')} updated. ${changed}.`
+    // PAID BY BANK WITH NOTHING TO PAY INTO is said now, not found on the
+    // bank run. Clone 2026-10-05: Johnathon moved to bank, no details held.
+    const toBank = fields.paymentMethod !== undefined && /bank/i.test(String(row.payment_method ?? ''));
+    const realAccount = String(row.account_number ?? '').trim() && !SENTINEL_SAYS[row.account_number];
+    const noBank = !toBank || realAccount ? ''
+      : SENTINEL_SAYS[row.account_number] || SENTINEL_SAYS[row.bank_details]
+        ? ` Their bank details are marked "${row.bank_details ?? row.account_number}", so there is nothing to pay into until that is changed.`
+        : ' There are no bank details on file for this deal yet, so add them before the bank run.';
+    const reply = `${displayPersonName(row.person_name)} at ${[row.company, row.group_name].filter(Boolean).join(' in ')} updated. ${changed}.${noBank}`
       + (ask ? ` ${ask}` : '');
     return {
       summary: `Updated #${row.id}: ${row.person_name}.${ask ? ` ASK THIS, in your own words: ${ask}` : ''}`,

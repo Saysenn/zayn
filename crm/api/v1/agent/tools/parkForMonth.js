@@ -168,7 +168,11 @@ const parkForMonth = {
     }
 
     // WHAT changes, beside WHEN: "Monthly amount 3500 → 3800", not a bare month.
-    const what = Object.keys(expect).map((f) => `${f.replace(/([A-Z])/g, ' $1').toLowerCase()} ${expect[f] ?? 'empty'} → ${args[f]}`).join(', ');
+    // A PARKED STOP SAYS "stop the deal": it read "company Reliapay
+    // Employment → Reliapay Employment", the field that only found it.
+    // Clone 2026-10-05.
+    const what = check.spec.terminal ? 'stop the deal'
+      : Object.keys(expect).map((f) => `${f.replace(/([A-Z])/g, ' $1').toLowerCase()} ${expect[f] ?? 'empty'} → ${args[f]}`).join(', ');
     const lines = months.map((m) => `  ${monthLabel(m)}: ${what || tool.replace(/_/g, ' ')}`);
     const needs = confirmFirst(rawArgs.confirmed, {
       act: `park this for ${who}, applied at the start of each month below`,
@@ -176,8 +180,11 @@ const parkForMonth = {
       noun: 'month',
       // WORDED FOR HIM, because she reads it out: it once ended "so never
       // say only about the month", an instruction to her. 2026-10-04.
-      keeps: 'Nothing changes now. It is applied on the first sign-in of that month, if the deal still '
-        + 'looks the way it does today, and the new value stays from then on.',
+      keeps: check.spec.terminal
+        ? 'Nothing changes now. The deal stops on the first sign-in of that month, if it still looks '
+          + 'the way it does today, so this month is still paid.'
+        : 'Nothing changes now. It is applied on the first sign-in of that month, if the deal still '
+          + 'looks the way it does today, and the new value stays from then on.',
       lines,
     });
     if (needs) return needs;
@@ -206,6 +213,13 @@ const parkForMonth = {
         + `and skipped if the deal has moved on by then. A value set then STAYS from that month on, `
         + `so never say "only". Say which months, with their YEARS, what changes, and say plainly `
         + `that nothing has changed yet. Speak normally; do not repeat this text.`,
+      // ITS OWN FINISHED SENTENCE, so a yes needs no model round. Clone
+      // 2026-10-05: left to her, the yes ended "keep it scheduled or
+      // cancel it?" about the thing they had just agreed to.
+      reply: check.spec.terminal && months.length === 1
+        ? `Done. ${who} stops at the start of ${monthLabel(months[0])}, so ${monthLabel(shift(months[0], -1))} is still paid. Nothing has changed on the sheet yet.`
+        : `Done. Saved for ${months.map(monthLabel).join(', ')}: ${what || tool.replace(/_/g, ' ')}. Nothing has changed on the sheet yet.`,
+      computedReply: true,
       parked: saved.map((e) => ({ id: e.id, month: e.due_month })),
     };
   },

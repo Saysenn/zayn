@@ -155,6 +155,17 @@ export const WRITES = [
     ],
   },
   {
+    // Clone run 2026-10-05: a bare yes to "which group is it?" became ALL
+    // GROUPS, and the repeated question read "I ran it again".
+    name: 'an unknown group is asked about, a yes never picks one, the named one is used',
+    turns: [
+      { say: 'add a deal for dara quill, tech at pinecrest in zebra group, 700 gbp a month, appointed 1 june 2026', expect: { reply: /Which group is it/ } },
+      { say: 'yes', expect: { reply: /Which group is it/, noReply: /ran it again/, db: async (db) => ((await deal(db, 'Dara Quill', 'Pinecrest')) ? 'added on a bare yes' : null) } },
+      { say: 'otter', expect: { reply: /OTTER/ } },
+      { say: 'yes', expect: { db: async (db) => ((await deal(db, 'Dara Quill', 'Pinecrest'))?.group_name === 'OTTER' ? null : 'not added in OTTER') } },
+    ],
+  },
+  {
     name: 'stopping a deal previews, then stops it on yes',
     turns: [
       { say: "stop casey test's deal, she left", expect: { db: async (db) => ((await deal(db, 'Casey Test', 'Pinecrest')).stopped_on ? 'stopped before yes' : null) } },
@@ -331,6 +342,89 @@ WRITES.push(
         db: async (db) => (Number((await deal(db, 'Felix Orr', 'Ironleaf')).monthly_amount) === 1400 ? null : 'monthly not 1,400'),
       },
     }],
+  },
+  // Clone run 2026-10-05: the preview named the Director deal and "yep"
+  // asked which of three deals.
+  {
+    name: 'a yes applies the deal the preview named, never asks which',
+    turns: [
+      { say: "change kiran vale's baker director monthly to 3100", expect: { reply: /3,?100/ } },
+      { say: 'yep', expect: { noReply: /Which \w+ should get/, db: async (db) => (Number((await deal(db, 'Kiran Vale', 'Brightwell')).monthly_amount) === 3100 ? null : 'monthly not 3,100') } },
+    ],
+  },
+  // Clone run 2026-10-05: the owed question was dropped on the preview and the yes.
+  {
+    name: 'a change shown with an owed question gives the new figure on the yes',
+    turns: [
+      { say: "make felix orr's monthly 1450 and whats he owed this month", expect: { reply: /once you say yes/ } },
+      { say: 'yes', expect: { reply: /1,450/, db: async (db) => (Number((await deal(db, 'Felix Orr', 'Ironleaf')).monthly_amount) === 1450 ? null : 'monthly not 1,450') } },
+    ],
+  },
+  {
+    name: 'a slip of a group in an add is that group',
+    turns: [
+      { say: 'add a deal for nia brook, tech at pinecrest in corvd, 800 gbp a month, appointed 1 june 2026', expect: { reply: /CORVID/, noReply: /Which group is it/ } },
+    ],
+  },
+  {
+    name: 'a figure as a correction mid add changes the monthly',
+    turns: [
+      { say: 'add a deal for remy tallis, admin at ironleaf in otter, 700 gbp a month, appointed 1 june 2026', expect: { reply: /700/ } },
+      { say: 'actually make it 850', expect: { reply: /850/ } },
+      { say: 'yes', expect: { db: async (db) => (Number((await deal(db, 'Remy Tallis', 'Ironleaf'))?.monthly_amount) === 850 ? null : 'not added at 850') } },
+    ],
+  },
+  // Clone run 2026-10-05: slang "hows many" drew a 23 row list.
+  {
+    name: 'a typed "hows many" is a count with nothing drawn',
+    turns: [{ say: 'hows many ppl r paid by bank in baker', expect: { noDraw: true, reply: /\d+ (?:of \d+ )?deals?/ } }],
+  },
+  // Clone run 2026-10-05: the USD came last under every currency.
+  {
+    name: 'a total asked in usd leads with the usd figure',
+    turns: [{ say: 'whats the whole sheet owed this month in usd', expect: { reply: /^[^\n]*owed USD [\d,]/ } }],
+  },
+  // Clone run 2026-10-05: refused as "not a filter", ten rounds, and a yes
+  // that asked "keep it or cancel it?".
+  {
+    name: 'a stop at the end of this month is parked, and the yes is one line',
+    turns: [
+      { say: 'stop otto fenn end of this month', expect: { reply: /stop the deal/ } },
+      { say: 'yes', expect: { reply: /^Done\./, noReply: /cancel it\?/, db: async (db) => ((await deal(db, 'Otto Fenn', 'Ironleaf'))?.stopped_on ? 'stopped now, not parked' : null) } },
+    ],
+  },
+  // Clone run 2026-10-05: sent to the filter, matched another person too.
+  {
+    name: '"what group is X in" names each group once, in words',
+    turns: [{ say: 'what group is kiran vale in', expect: { noDraw: true, reply: /^(?=[\s\S]*BAKER)(?=[\s\S]*CORVID)(?=[\s\S]*OTTER)/ } }],
+  },
+  // Clone run 2026-10-05: "next 2 months" was answered for three.
+  {
+    name: '"ending in the next 2 months" is two months, not the default three',
+    turns: [{ say: 'any deals ending in the next 2 months?', expect: { noReply: /\b(?:3|three) months\b/ } }],
+  },
+  // Clone run 2026-10-05: the greeting hid the question.
+  {
+    name: 'a greeting in front of "is X in Y" still gets a yes or no',
+    turns: [
+      { say: 'hi diane, quick one - is kiran vale in otter?', expect: { reply: /^Yes\b/ } },
+      { say: 'hey is otto fenn in corvid', expect: { reply: /^No\b/ } },
+    ],
+  },
+  // Clone run 2026-10-05: read as "who is paid by cash", and "back on
+  // cash" was taken for a resume.
+  {
+    name: '"pay X by cash" changes their method, never a list or a resume',
+    turns: [
+      { say: 'actually pay otto fenn by cash', expect: { tools: ['update_master_sheet_row'], noTools: ['filter_master_sheet', 'resume_deal'] } },
+      { say: 'yes', expect: { db: async (db) => ((await deal(db, 'Otto Fenn', 'Ironleaf'))?.payment_method === 'cash' ? null : 'method not cash') } },
+      { say: 'put otto fenn back on bank', expect: { noTools: ['resume_deal'] } },
+    ],
+  },
+  // Clone run 2026-10-05: "whos" was not heard as a second question.
+  {
+    name: 'a count and a "whos owed most" in one line are both answered',
+    turns: [{ say: 'how many deals in baker and whos owed most there', expect: { reply: /\b\d+ deals?\b[\s\S]*Kiran Vale|Kiran Vale[\s\S]*\b\d+ deals?\b/ } }],
   },
   {
     name: 'a fee set on a named deal goes to that deal',

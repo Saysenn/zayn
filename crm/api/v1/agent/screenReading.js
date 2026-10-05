@@ -123,7 +123,11 @@ function withoutRecital(reply, shown) {
   const lower = lead.toLowerCase();
   const at = Math.min(...names.map((n) => lower.indexOf(String(n).toLowerCase())).filter((i) => i > 0));
   if (Number.isFinite(at)) {
-    const cut = lead.slice(0, at).replace(/[\s:,;-]*(?:including|they are|namely|which are)?[\s:,;-]*$/i, '').trim();
+    // AT THE COLON when the names follow one: a short name ("Ad") is not
+    // counted, so the cut fell after it and left a list of one. Clone
+    // 2026-10-05.
+    const colon = lead.lastIndexOf(':', at);
+    const cut = (colon > 10 ? lead.slice(0, colon) : lead.slice(0, at)).replace(/[\s:,;-]*(?:including|they are|namely|which are|held by|by|for|from|with|and)?[\s:,;-]*$/i, '').trim();
     if (cut.length > 10) return `${cut}.${keepQ}`;
   }
   return `${lead}${keepQ}`;

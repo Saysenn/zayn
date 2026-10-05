@@ -319,7 +319,7 @@ function listValues(raw, allowed = null) {
  */
 async function findAll({
   group, company, roleLabel, tier, source, needsReview, status, shouldBePaid, paid,
-  missingPerson, missingCompany, missingPhone, missingBank, presetWhen, paymentStartWhen, endWhen, appointmentWhen,
+  missingPerson, missingCompany, missingPhone, missingBank, presetWhen, paymentStartWhen, endWhen, endSoonMonths, appointmentWhen,
   acceptingPostals, label, paymentOutcome, oldGroup, sheetShouldBePaid, sheetPaid,
   amountField, amountMin, amountMax, amountMinStrict = false, amountMaxStrict = false, payableVsMonthly, q, searchField,
   currency, paymentMethod, stopped = false, stoppedFrom, stoppedTo, stoppedReason,
@@ -688,7 +688,7 @@ async function findAll({
       monthParam();
       if (value === 'soon') {
         if (!soonHorizon) {
-          params.push(ENDING_SOON_MONTHS);
+          params.push(Number(endSoonMonths) > 0 ? Number(endSoonMonths) : ENDING_SOON_MONTHS);
           soonHorizon = `$${params.length}::int`;
         }
         return 'end_on IS NOT NULL '
@@ -707,7 +707,7 @@ async function findAll({
     } else if (endWhen === 'soon') {
       params.push(thisMonth);
       const from = `$${params.length}::date`;
-      params.push(ENDING_SOON_MONTHS);
+      params.push(Number(endSoonMonths) > 0 ? Number(endSoonMonths) : ENDING_SOON_MONTHS);
       where.push(
         `end_on IS NOT NULL AND date_trunc('month', end_on) >= date_trunc('month', ${from}) `
         + `AND date_trunc('month', end_on) <= date_trunc('month', ${from}) `

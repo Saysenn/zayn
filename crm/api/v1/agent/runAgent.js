@@ -60,12 +60,14 @@ const BREAKDOWN_ASK = /\bbreak\s?(?:it |that |this |them )?down\b|\bbreakdown\b/
 // message is the ask, so "show me the companies' deals" is not caught.
 const COMPANIES_LIST_ASK = /^\s*(?:please\s+)?(?:list|show(?: me)?|give me|what are|which are)\s+(?:all\s+)?(?:the\s+|our\s+)?companies\s*[.?!]*\s*$/i;
 // A second request after the first: "... and also what's gab owed?".
-const SECOND_ASK = /\b(?:and|also|plus|then)\b[^.!?]*\b(?:what'?s?|how (?:much|many)|who|which|show|tell|list|give)\b/i;
+// "whos", "who's", "hows many": typed as said. "how many deals in nexus and
+// whos owed most there" lost its first half. Clone 2026-10-05.
+const SECOND_ASK = /\b(?:and|also|plus|then)\b[^.!?]*\b(?:what'?s?|how'?s? (?:much|many)|who(?:'?s)?|which|show|tell|list|give)\b/i;
 // "bring casey test's deal back" went to the deal filter twice. 2026-09-30.
 // "actually put pino's nexus deal back" asked a question instead. 2026-10-03.
 // A DEAL put back, so "put it back" stays an undo.
 // "PUT JUNO BACK ON" too: once answered with no tool and a claim she was back. 2026-10-04.
-const RESUME_ASK = /\b(?:resume|reinstate|un-?stop|bring\w* (?:[\w'’-]+ ){0,4}back|put (?:[\w'’-]+ ){0,4}deals? back|put (?:[\w'’-]+ ){1,3}back on\b)\b/i;
+const RESUME_ASK = /\b(?:resume|reinstate|un-?stop|bring\w* (?:[\w'’-]+ ){0,4}back|put (?:[\w'’-]+ ){0,4}deals? back|put (?:[\w'’-]+ ){1,3}back on\b(?!\s+(?:cash|bank|crypto|paypal|card|\d|£|\$|gbp|usd|aed|eur)))\b/i;
 // A YES TO HER OWN "shall I resume it?" is a resume. Live 2026-10-03 she
 // answered that yes with "it is back live" and called nothing.
 const BARE_YES = /^\s*(?:y|ya|yes|yep|yeah|yup|ok|okay|sure|go ahead|do it|please do)[.!\s]*$/i;
@@ -109,13 +111,15 @@ const FORCED_ROUTES = [
   // THE ANSWER TO HER "TO ADD X I STILL NEED ..." goes back to add_deal,
   // however messy it is. 2026-10-04.
   [{
-    test: (said, history = []) => /^To add .+ I still need\b|is not a group on the sheet\. Which group/.test(lastAssistantAnswer(history) ?? '')
+    test: (said, history = []) => /^To add .+ I still need\b|(?:is not a group on the sheet\. )?Which group is it/.test(lastAssistantAnswer(history) ?? '')
       && !/\?\s*$/.test(String(said)) && !CALLED_OFF_ADD.test(String(said)),
   }, 'add_deal'],
   // AND A SHORT CORRECTION WHILE THE NEW DEAL IS SHOWN for a yes ("actually
   // make it corvid") is the same add, changed. 2026-10-04.
   [{
-    test: (said, history = []) => /\bas a new deal\b|\bnew deal\b|\b(?:ready )?to add\b|\bthe deal (?:for|to add)\b/i.test(lastAssistantAnswer(history) ?? '')
+    // OR THE PREVIEW'S OWN DEAL LINE, however she worded around it ("here
+    // is the deal as it will be added"): LA suite 2026-10-05.
+    test: (said, history = []) => /\bas a new deal\b|\bnew deal\b|\b(?:ready )?to add\b|\bthe deal (?:for|to add)\b|\bwill be added\b|·[^\n]*\ba month\b[^\n]*·\s*appointed\b/i.test(lastAssistantAnswer(history) ?? '')
       && /^\s*(?:(?:actually|no|sorry|wait|oh|oops)[\s,]+)*(?:make it|change it to|it'?s|its|should be|put (?:her|him|them) in|not\b)/i.test(said),
   }, 'add_deal'],
   // "ADD A DEAL" / "NEW DEAL FOR X" starts it, in words. 2026-10-04.
@@ -125,11 +129,17 @@ const FORCED_ROUTES = [
   // "WHO'S PAID IN EUROS" names them: it came back as a total with no
   // names. The filter lists who; a total can follow. 2026-10-04.
   [/^\s*who(?:'s|s| is| are| gets?)\s+paid\s+(?:in|by|with|via)\b/i, 'filter_master_sheet'],
+  // "PAY JOHNATHON BY BANK" IS A CHANGE to one person's method. It was
+  // read as "who is paid by cash" and drew 32 INDIGO deals. Clone 2026-10-05.
+  [/^\s*(?:(?:actually|ok(?:ay)?|so|now|and)[\s,]+)*(?:pay|put|switch|move|change)\s+(?!(?:every|all|everyone|everybody)\b)[a-z][\w' -]{1,40}?\s+(?:by|to|on(?:to)?|in|via)\s+(?:cash|bank|crypto|paypal)\b/i, 'update_master_sheet_row'],
   // "WHAT'S WRONG WITH LIAM'S DATES" is that person's sheet check. 2026-10-04.
   [/\b(?:what'?s|what is|whats)\s+(?:wrong|up|the (?:issue|problem))\s+with\b|\bwhy (?:is|are)\s+[\w' ]+\s+flagged\b/i, 'audit_master_sheet'],
   // "WHAT'S NATHAN ON" is what they are paid, deal by deal: twice it was
   // answered with their add on and fee rates. 2026-10-04.
   [/^\s*what(?:'s|s| is)\s+(?!the\b|it\b|that\b|this\b)[a-z][\w' -]{1,40}?\s+on\s*\??\s*$/i, 'find_and_show_details'],
+  // "WHAT GROUP IS NATHAN IN" is that person's field: sent to the filter it
+  // searched every column, matched KJ too and said "2 people". 2026-10-05.
+  [/^\s*(?:what|which)\s+(?:groups?|compan(?:y|ies))\s+(?:is|are|does)\s+(?!(?:the|it|that|this|everyone|everybody)\b)[a-z][\w' -]{1,40}?\s+(?:in|on|at|with|work (?:at|for)|belong to)\s*\??\s*$/i, 'find_and_show_details'],
   // "IS BYRON IN NEXUS?" is a yes or no about one person. 2026-10-04.
   [/^\s*(?:is|are)\s+(?!(?:anyone|anybody|there|it|that|this|everyone|everybody|someone|somebody|he|she|they|we|i)\b)[a-z][\w' -]{1,40}?\s+(?:in|at|on|with|part of)\s+[a-z][\w &'-]{1,40}\?*\s*$/i, 'find_and_show_details'],
   // "WHICH COMPANY HAS THE MOST DEALS" is a count by name, never the sheet
@@ -1066,6 +1076,19 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
         } = parked;
         parked = { ...exact, id };
       }
+      // A STOP AT THE END OF THE MONTH names its deal the same way. Clone
+      // 2026-10-05: "stop jay from reliapay end of this month" was refused
+      // as "not a filter to run later" and went round ten model rounds.
+      if (name === 'stop_deal' && parked.deal == null && parked.person) {
+        const deal = await dealIdFor({ targetPerson: parked.person, targetCompany: parked.company, targetGroup: parked.group }, said);
+        if (deal == null) {
+          return {
+            summary: 'NOTHING WAS CHANGED OR SAVED. To stop it later it has to be ONE exact deal. Ask '
+              + 'which of their deals they mean, then call stop_deal again with that company and the same `when`.',
+          };
+        }
+        parked = { ...parked, deal };
+      }
       return invokeTool(tools, 'park_for_month', JSON.stringify({
         tool: name, args: parked, months: at.months, ...(confirmed ? { confirmed } : {}),
       }), history, onEvent, turn);
@@ -1928,6 +1951,24 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
       remember(result.redirect?.name ?? name, result.redirect?.args ?? modelArgs, result.confirming);
       if (turn) turn.wrote.set('__pending', true);
     }
+    /**
+     * "BUMP X TO 3600 AND WHATS HE OWED NOW", shown for a yes: no total is
+     * given while a change waits (it would be the old figure), so the
+     * preview says the figure comes with the yes, and the yes gives it (see
+     * owedAskWaiting). Clone run 2026-10-05: the question was just dropped.
+     */
+    const said = lastSaid(history);
+    if (result?.pending && tool.writes && args.targetPerson && !agreed(said)
+      && SECOND_ASK.test(said) && /\b(?:owed|owe|total|how much)\b/i.test(said)) {
+      const later = "I'll give you what they're owed once you say yes, so it is the new figure.";
+      result.summary = `${result.summary ?? ''}\n\nTHEY ALSO ASKED WHAT IS OWED. Quote no figure for it now; `
+        + `say this line, word for word, before asking for the yes:\n"${later}"`;
+      if (typeof result.reply === 'string') {
+        result.reply = /\n[^\n]*\?\s*$/.test(result.reply)
+          ? result.reply.replace(/\n([^\n]*\?\s*)$/, `\n${later}\n$1`)
+          : `${result.reply}\n${later}`;
+      }
+    }
     return result;
   } catch (err) {
     // The most important thing on this page. A tool throwing is a real
@@ -2470,6 +2511,14 @@ async function runAgentTurn(history, contextName, onEvent) {
             : null;
     if (reply) return { reply, changedRowIds: [], context: context.key, claims: [] };
   }
+  /**
+   * AND A YES TO "CHANGE X AND WHAT IS SHE OWED" STILL OWES THE ANSWER. Clone
+   * run 2026-10-05: the preview said "owed the same as before", the yes said
+   * "updated", and the figure they asked for was never given.
+   */
+  const askBeforeYes = agreed(lastSaid(history))
+    ? String(history.filter((m) => m.role === 'user').slice(-2, -1)[0]?.content ?? '') : '';
+  const owedAskWaiting = SECOND_ASK.test(askBeforeYes) && /\b(?:owed|owe|total|how much)\b/i.test(askBeforeYes);
   const appliedSummaries = [];
   const heldWrites = new WeakSet();
   for (const heldCall of heldCalls) {
@@ -2518,8 +2567,18 @@ async function runAgentTurn(history, contextName, onEvent) {
   const onlyApplied = heldCalls.length === 1 ? toolResults[toolResults.length - 1] : null;
   if (onlyApplied?.computedReply && onlyApplied.reply
     && /^\s*(?:y|ya|yes|yep|yeah|yup|ok|okay|sure|go ahead|do it|confirm\w*)[.!\s]*$/i.test(lastSaid(history))) {
+    // The owed figure they asked for with the change, worked out in code
+    // after the write: no model round, and never the old figure.
+    let owedLine = '';
+    const owedFor = heldCalls[0].args?.targetPerson ?? heldCalls[0].args?.person;
+    if (owedAskWaiting && owedFor && !onlyApplied.pending && context.tools.some((t) => t.name === 'total_master_sheet')) {
+      const owed = await invokeTool(context.tools, 'total_master_sheet', JSON.stringify({ person: owedFor }), history, onEvent, turnState)
+        .catch(() => null);
+      onEvent?.({ type: 'tool-result', name: 'total_master_sheet', result: owed });
+      owedLine = /SAY EXACTLY THIS[^\n]*\n"([^"]+)"/.exec(String(owed?.summary ?? ''))?.[1] ?? '';
+    }
     return {
-      reply: onlyApplied.reply,
+      reply: owedLine ? `${onlyApplied.reply}\n${owedLine}` : onlyApplied.reply,
       changedRowIds: [...changedRowIds],
       context: context.key,
       claims: [],
@@ -2589,13 +2648,42 @@ async function runAgentTurn(history, contextName, onEvent) {
     return { reply: DISABLED.export_sheet, changedRowIds: [], context: context.key, claims: [] };
   }
 
+  /**
+   * A GREETING IN FRONT IS NOT THE QUESTION. "hi diane, quick one - is zayn
+   * in nexus?" missed the yes or no route that "is zayn in nexus?" takes,
+   * and the answer listed his deals with no yes or no. Clone 2026-10-05.
+   */
+  const routeSaid = String(lastSaid(history))
+    .replace(/^\s*(?:(?:hi|hey|hello|hiya|yo|morning|good (?:morning|afternoon|evening)|ok(?:ay)?|so|right|diane|babe|darling|quick (?:one|q(?:uestion)?)|question|sorry|pls|please)\b[\s,.!:;-]*)+(?=\S)/i, '');
   const forcedTool = (FORCED_ROUTES
-    .find(([asked, tool]) => asked.test(lastSaid(history), history) && context.tools.some((t) => t.name === tool))?.[1] ?? null)
+    .find(([asked, tool]) => (asked.test(lastSaid(history), history) || (routeSaid !== lastSaid(history) && asked.test(routeSaid, history)))
+      && context.tools.some((t) => t.name === tool))?.[1] ?? null)
     ?? (BARE_YES.test(lastSaid(history)) && RESUME_OFFERED.test(lastAssistantAnswer(history))
       && heldCalls.length === 0 && context.tools.some((t) => t.name === 'resume_deal') ? 'resume_deal' : null);
   if (forcedTool && !roundTools.some((t) => t.function?.name === forcedTool)) roundTools = openAITools;
 
+  /**
+   * A TOTAL TAKEN BEFORE A CHANGE IN THE SAME MESSAGE IS STALE. "make felix
+   * orr's monthly 1400 and also whats he owed" totalled first, changed
+   * second, and answered with the old 1,300. Once a write follows a total in
+   * this turn, she is told to total again before answering. 2026-10-04.
+   */
+  let totalledBeforeWrite = false;
+  let staleTotalPending = false;
+  let staleTotalNudged = false;
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    if (staleTotalPending && !staleTotalNudged) {
+      staleTotalNudged = true;
+      staleTotalPending = false;
+      messages.push({
+        role: 'system',
+        content: totalledBeforeWrite
+          ? 'THE TOTAL YOU GOT WAS WORKED OUT BEFORE THE CHANGE YOU JUST MADE, so it is the old '
+            + 'figure. Call total_master_sheet again now and answer the question with the new one.'
+          : `THE CHANGE IS DONE, and they also asked: "${askBeforeYes}". Call total_master_sheet now `
+            + 'for that and say the new figure after saying what changed.',
+      });
+    }
     let completion;
     try {
       completion = await streamCompletion(openai, {
@@ -3819,7 +3907,11 @@ async function runAgentTurn(history, contextName, onEvent) {
       if (call.function.name === 'export_sheet') calledExport = true;
       // A FACT ABOUT THE CALL, never about her prose: did anything that
       // CHANGES DATA run at all? The flag is on the tool. See setIntent.js.
-      if (context.tools.find((t) => t.name === call.function.name)?.writes) wroteThisTurn = true;
+      if (context.tools.find((t) => t.name === call.function.name)?.writes) {
+        if (totalledBeforeWrite || owedAskWaiting) staleTotalPending = true;
+        wroteThisTurn = true;
+      }
+      if (call.function.name === 'total_master_sheet' && !wroteThisTurn) totalledBeforeWrite = true;
 
       const fingerprint = `${call.function.name}(${call.function.arguments ?? ''})`;
       if (seenThisRound.has(fingerprint)) {
@@ -4027,6 +4119,7 @@ async function runAgentTurn(history, contextName, onEvent) {
           terminalWrote = Boolean(
             context.tools.find((t) => t.name === call.function.name)?.writes,
           );
+
         }
       }
     }
@@ -4091,6 +4184,7 @@ async function runAgentTurn(history, contextName, onEvent) {
     const secondAskOpen = calls.length === 1 && SECOND_ASK.test(lastSaid(history));
 
     if (terminalReply && !terminalPartial && !dodgedTheInstruction && !lookupSpokeForAWrite && !secondAskOpen
+      && !(staleTotalPending && !staleTotalNudged)
       && (terminalComputed || calls.length - interimCount === 1)) {
       /**
        * ===============================
@@ -4105,7 +4199,10 @@ async function runAgentTurn(history, contextName, onEvent) {
        * she looked again, which is TRUE by construction here, because this
        * path only exists when a tool actually ran this turn.
        */
-      const checked = terminalComputed && saidAlready(terminalReply, history)
+      // A QUESTION ASKED AGAIN is still a question, never "it has not
+      // moved". Clone run 2026-10-05: "which group is it?" repeated came
+      // back as "I ran it again and it has not moved." over the question.
+      const checked = terminalComputed && saidAlready(terminalReply, history) && !/\?\s*$/.test(terminalReply)
         ? `${LOOKED_AGAIN}\n${terminalReply}`
         : terminalReply;
       return {

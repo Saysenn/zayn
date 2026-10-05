@@ -270,6 +270,7 @@ function checksFor(sorted, setup = {}, spots = null) {
       blocking: true,
       text: `${unassigned.length} location${unassigned.length === 1 ? ' has' : 's have'} no run yet: ${unassigned.join(', ')}`,
       hint: 'Drag it to a run, or to Outside UK. The export waits until every place has one.',
+      short: `${unassigned.join(', ')}: no run yet`,
     });
   }
   if (sorted.noLocation.length) {
@@ -277,6 +278,7 @@ function checksFor(sorted, setup = {}, spots = null) {
       kind: 'noLocation',
       text: `${sorted.noLocation.length} cash deal${sorted.noLocation.length === 1 ? ' has' : 's have'} no location: ${[...new Set(sorted.noLocation.map((r) => r.person_name))].join(', ')}`,
       hint: 'Not on any run until they have one. Set it here and it is saved on the master sheet.',
+      short: 'No location:',
       items: sorted.noLocation.map((r) => ({ id: r.id, name: r.person_name, suggest: nearestPlace(r, centres) })),
     });
   }
@@ -287,6 +289,7 @@ function checksFor(sorted, setup = {}, spots = null) {
       kind: 'cannotPost',
       text: `Can't be posted (in person meet, or not accepting postals): ${[...new Set(cannotPost.map((r) => r.person_name))].join(', ')}`,
       hint: 'Someone has to hand it over in person. Move the location to a run if that is how it goes.',
+      short: `Can't post: ${[...new Set(cannotPost.map((r) => r.person_name))].join(', ')}`,
     });
   }
   // A postcode far from the rest of its location's rows.
@@ -300,7 +303,14 @@ function checksFor(sorted, setup = {}, spots = null) {
       kind: 'postcodeFar',
       text: `Postcode far from its location: ${strays.map((r) => `${r.person_name} (${String(r.postcode).trim()} under ${r.location.trim()})`).join(', ')}`,
       hint: 'Probably the wrong location. Move it to the place its postcode is in, or leave it if the location is right.',
-      items: strays.map((r) => ({ id: r.id, name: r.person_name, current: r.location.trim(), suggest: nearestPlace(r, centres, r.place) })),
+      short: 'Far postcode:',
+      items: strays.map((r) => ({
+        id: r.id,
+        name: r.person_name,
+        current: r.location.trim(),
+        detail: `${String(r.postcode).trim().split(/\s+/)[0].toUpperCase()}, under ${r.location.trim()}`,
+        suggest: nearestPlace(r, centres, r.place),
+      })),
     });
   }
   const ukPeople = new Set(sorted.uk.map(personKey));
@@ -310,16 +320,12 @@ function checksFor(sorted, setup = {}, spots = null) {
       kind: 'bothSides',
       text: `On both the UK and Outside UK tabs: ${both.join(', ')}`,
       hint: 'Fine as it is: each deal goes on its own tab. Just so you know they appear twice.',
+      short: `On both tabs: ${both.join(', ')}`,
+      note: true,
     });
   }
-  const notGbp = sorted.uk.filter((r) => (r.currency || 'GBP') !== 'GBP');
-  if (notGbp.length) {
-    checks.push({
-      kind: 'notGbp',
-      text: `Paid in another currency in the UK: ${notGbp.map((r) => `${r.person_name} (${r.currency})`).join(', ')}`,
-      hint: 'A reminder that this cash is not pounds. Change it on the master sheet only if it is wrong.',
-    });
-  }
+  // ANOTHER CURRENCY IN THE UK IS NOT A CHECK: the sheet carries it with its
+  // own currency and totals each currency apart. His call 2026-10-04.
   return checks;
 }
 
