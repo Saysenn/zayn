@@ -1,0 +1,4 @@
+set payable days to 30 for everyone in nexus
+yes
+undo that
+yes

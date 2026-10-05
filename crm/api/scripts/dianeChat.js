@@ -50,7 +50,12 @@ require('dotenv').config();
  * they always were; writes are always confined to ZZTEST, which is what
  * every write scenario already targets.
  */
-require('../v1/testing/scratchOnly').arm();
+// THE ONE EXCEPTION: the local clone of live, which exists to be written to.
+// Both the flag AND the clone's own address, so a flag left set beside a
+// live DATABASE_URL still arms the guard. The nightly sweep uses it.
+const ON_CLONE = process.env.DIANE_ON_CLONE === '1'
+  && /@127\.0\.0\.1:54329\/crm_clone$/.test(String(process.env.DATABASE_URL ?? ''));
+if (!ON_CLONE) require('../v1/testing/scratchOnly').arm();
 
 const fs = require('node:fs');
 const path = require('node:path');
