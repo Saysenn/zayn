@@ -59,7 +59,19 @@ function agreed(said) {
   if (!text || text.length > 60) return false;
   if (NOT_PLAIN.test(text)) return false;
   if (NEW_ACT.test(text)) return false;
-  return AGREED.test(text);
+  if (!AGREED.test(text)) return false;
+  /**
+   * AN "OK SO" IN FRONT OF A WHOLE INSTRUCTION IS THE INSTRUCTION. "ok so
+   * ines calder, pay her by bank from now and currency gbp" fitted in sixty
+   * characters, was read as a yes to nothing, the write was refused, and she
+   * told them the deal was "already bank and GBP", which it was not.
+   * gpt-4.1 messy sweep, 2026-10-06. After the agreeing word and the filler,
+   * more than three words is something new being said.
+   */
+  const rest = text.replace(AGREED, '')
+    .replace(/\b(?:so|then|and|please|pls|thanks|thank you|thx|diane|go ahead|do it|that|it|sounds good|good|great|perfect|lovely|for both|both|all|of them|now|right|fine|cool)\b/gi, ' ')
+    .replace(/[^a-z0-9]+/gi, ' ').trim();
+  return rest === '' || rest.split(/\s+/).length <= 3;
 }
 
 /**
@@ -94,10 +106,36 @@ const CLARIFY = /\b(?:clarify|which (?:one|is it|did you|do you|should|would|you
 // "if you want to deduct 100 ... or reduce their fee" is the same offer.
 const OFFERED = /\b(?:whether|if you|you meant|did you|do you|either|you want)\b[^.!?\n]*\S\s+\bor\b\s+\S/i;
 
+/**
+ * A CONFIRMATION WITH AN "OR" IN IT IS STILL ONE QUESTION. Her preview ends
+ * "Is that what you want, or does anything need changing before I go
+ * ahead?", and EITHER_OR read that as two readings: the yes to it was
+ * refused and she asked "both deals, or only one?" all over again. Clone,
+ * gpt-4.1, 2026-10-06: "add 100 to zayn deals", "yes". The second half
+ * of such an "or" offers no other reading of the change, it offers a way
+ * to change it, so a yes means the first half.
+ */
+const CONFIRM_OR = new RegExp(
+  ',?\\s+\\bor\\b\\s+(?:'
+    + '(?:does|do|is)\\s+(?:anything|something)\\b'
+    + '|not\\b'
+    + '|anything\\s+else\\b'
+    + '|(?:any|some)\\s+changes?\\b'
+    + '|(?:would|should|do)\\s+you\\s+(?:like|want)\\s+(?:me\\s+)?(?:to\\s+)?(?:change|adjust|tweak|edit|make\\s+(?:any|a)\\s+change)'
+    + '|(?:should|shall)\\s+I\\s+(?:change|adjust|leave|hold)'
+    + ')[^.!?\\n]*\\?\\s*$',
+  'i',
+);
+
+// HER WORDINGS VARY: "or is there anything you want to tweak first?",
+// "or should anything be adjusted?", "or anything wrong?". An "or" whose
+// second half is about ANYTHING to fix offers no other reading. 2026-10-06.
+const CONFIRM_OR_LOOSE = /\bor\b[^?]*\b(?:anything|something|tweak\w*|adjust\w*|fix\w*|else|wrong|amend\w*|keep\w*|leave\w*|as (?:it|they) (?:is|are))\b[^?]*\?\s*$/i;
+
 function eitherOrAsked(answer) {
   const text = String(answer ?? '').trim();
   if (!text.endsWith('?')) return false;
-  if (EITHER_OR.test(text)) return true;
+  if (EITHER_OR.test(text) && !CONFIRM_OR.test(text) && !CONFIRM_OR_LOOSE.test(text)) return true;
   const sentences = text.split(/(?<=[.!?])\s+/);
   const last = sentences[sentences.length - 1] ?? '';
   const before = sentences[sentences.length - 2] ?? '';
@@ -254,7 +292,25 @@ function alreadyShown(confirming, priorAnswer) {
   if (want.size === 0) return false;
   const shown = facts(priorAnswer);
   if (shown.size === 0) return false;
-  for (const fact of want) if (!shown.has(fact)) return false;
+  /**
+   * THE PERIOD IN "change this deal for October 2026" is when it counts,
+   * not which change it is. She read the monthly change out in full, never
+   * said "October 2026" for it, and the yes skipped it while applying the
+   * paid switch held beside it. gpt-4.1 messy sweep, 2026-10-06. A month is
+   * excused only when everything else (names, companies, figures) was said,
+   * and there is something else.
+   */
+  const month = (f) => /^\d{4}-\d{2}$/.test(f);
+  const others = [...want].filter((f) => !month(f));
+  // Only the period stamp of an ordinary edit. A special case or a change
+  // parked for a month IS about that month, and must be said.
+  const periodOnly = /\bchange this deal for [A-Z][a-z]+ \d{4}\b/.test(String(confirming))
+    && !/special case|\bfrom\b|\bstarting\b|\bpark|\bschedul|next month/i.test(String(confirming));
+  for (const fact of want) {
+    if (shown.has(fact)) continue;
+    if (periodOnly && month(fact) && others.length >= 2 && others.every((f) => shown.has(f))) continue;
+    return false;
+  }
   return true;
 }
 
@@ -326,13 +382,61 @@ function nextTurn() {
 const PERSON = /\b([A-Z][a-z'-]{2,}) ([A-Z][a-z'-]{2,})\b/g;
 const peopleIn = (text) => new Set([...String(text ?? '').matchAll(PERSON)].map((m) => `${m[1]} ${m[2]}`.toLowerCase()));
 
+// What a call CHANGES: every key that is not about WHO or WHICH.
+const SCOPE_KEYS = new Set(['id', 'targetPerson', 'targetCompany', 'targetGroup', 'targetRole', 'person', 'people',
+  'group', 'company', 'confirmed', 'said', 'saidRecent', 'except', 'allDeals', 'perPerson', 'set', 'add', 'when',
+  'changeId', 'batch', 'last', 'name']);
+function argFields(args) {
+  const out = new Set();
+  const take = (o) => { for (const k of Object.keys(o ?? {})) if (!SCOPE_KEYS.has(k)) out.add(k); };
+  take(args); take(args?.set); take(args?.add);
+  for (const e of Array.isArray(args?.perPerson) ? args.perPerson : []) { take(e?.set); take(e?.add); }
+  return out;
+}
+
+// The fields a proposal names, by the labels the previews use.
+const FIELD_NAMES = /\b(monthly amount|payable amount|payable days|should be paid|paid|currency|payment method|fee|add on|preset|end date|payment start|appointment|label|notes?|location|special case|postcode|door number|bank|account number|sort code|role|needs review|status)\b/gi;
+const fieldsIn = (text) => new Set((String(text ?? '').match(FIELD_NAMES) ?? []).map((f) => f.toLowerCase().replace(/^notes$/, 'note')));
+
 function remember(name, args, confirming) {
   if (!confirming) return;
-  const mine = peopleIn(confirming);
-  for (let i = REMEMBERED.length - 1; i >= 0; i -= 1) {
-    if ([...peopleIn(REMEMBERED[i].confirming)].some((p) => mine.has(p))) REMEMBERED.splice(i, 1);
+  /**
+   * A GROUP CHANGE NAMES NOBODY. "set notes to \"checked\"" over CORVID has
+   * no name or figure in it, so nothing she said could ever match it and
+   * the yes re-previewed it instead of applying. gpt-4.1 messy sweep,
+   * 2026-10-06. Who it is aimed at (the group, the people) is what she
+   * reads out, so that is what it is matched on.
+   */
+  let aimedAt = null;
+  {
+    const aimed = [
+      args?.group, args?.match, args?.company, args?.person, args?.targetPerson, args?.targetCompany,
+      args?.name, args?.newName,
+      ...(args?.people ?? []), ...(args?.companies ?? []),
+      ...(Array.isArray(args?.perPerson) ? args.perPerson.map((e) => e?.person) : []),
+    ]
+      .filter((x) => typeof x === 'string' && x.trim())
+      .map((x) => x.trim().replace(/^./, (c) => c.toUpperCase()));
+    if (aimed.length) aimedAt = aimed;
   }
-  REMEMBERED.push({ name, args, confirming, at: Date.now(), turn: TURN });
+  const mine = peopleIn(confirming);
+  // AN OLDER proposal for the same person is replaced. One made in THIS
+  // turn is kept beside it: "his monthly 1600 and mark him paid" is two
+  // previews for Otto, and the second dropped the first, so the yes saved
+  // only "paid". gpt-4.1 messy sweep, 2026-10-06.
+  // Within a turn, only the SAME field is a restatement (a row's payable
+  // change re-proposed as a bulk one); a different field is a second change.
+  // The fields come from the CALL, which always carries them; the preview
+  // text for one row reads "change this deal" and names none.
+  const myFields = argFields(args);
+  for (let i = REMEMBERED.length - 1; i >= 0; i -= 1) {
+    const older = REMEMBERED[i];
+    if (![...peopleIn(older.confirming)].some((p) => mine.has(p))) continue;
+    const theirs = argFields(older.args);
+    const sameField = myFields.size === 0 || theirs.size === 0 || [...theirs].some((f) => myFields.has(f));
+    if (older.turn !== TURN || sameField) REMEMBERED.splice(i, 1);
+  }
+  REMEMBERED.push({ name, args, confirming, aimedAt, at: Date.now(), turn: TURN });
   while (REMEMBERED.length > KEEP) REMEMBERED.shift();
 }
 
@@ -357,6 +461,21 @@ function remember(name, args, confirming) {
  */
 const STALE_MS = 10 * 60 * 1000;
 
+/**
+ * Is what a change is AIMED AT in her question? Each target's real words
+ * (three letters or more, not filler) must appear, any order, any case:
+ * "kiran vale's parked add on" is named by "Kiran Vale: add on 0% → 5%".
+ */
+const FILLER = new Set(['the', 'and', 'for', 'parked', 'change', 'changes', 'one', 'deal', 'deals', 'his', 'her', 'their']);
+function targetNamed(aimed, text) {
+  if (!Array.isArray(aimed) || aimed.length === 0) return false;
+  const hay = String(text ?? '').toLowerCase();
+  return aimed.every((a) => {
+    const words = String(a).toLowerCase().replace(/['’]s\b/g, '').split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !FILLER.has(w));
+    return words.length > 0 && words.every((w) => new RegExp(`\\b${w}`).test(hay));
+  });
+}
+
 function recallAll(said, priorAnswer) {
   if (!agreed(said)) return [];
   const now = Date.now();
@@ -367,11 +486,19 @@ function recallAll(said, priorAnswer) {
   for (let i = REMEMBERED.length - 1; i >= 0; i -= 1) {
     const one = REMEMBERED[i];
     if (now - one.at > STALE_MS) continue;
-    if (!alreadyShown(one.confirming, priorAnswer)) continue;
+    // Matched on its target when it names nobody: the group or people it
+    // is aimed at, said in any case ("CORVID", "Corvid's").
+    const namesTarget = targetNamed(one.aimedAt, priorAnswer);
+    // The target stands for the change only when it IS the target: a whole
+    // group ("put every CORVID monthly back"), or a change that names nobody.
+    const byTarget = namesTarget && (Boolean(one.args?.group) || facts(one.confirming).size === 0);
+    if (!alreadyShown(one.confirming, priorAnswer) && !byTarget) continue;
     const shape = shapeOf(one.name, one.args);
     // THE SAME PROPOSAL under two argument shapes is one change. Applying
     // both put one undo back twice, and the second reached an older change.
-    const proposal = `${one.name}|${one.confirming}`;
+    // ...and the same FIELDS: one row's monthly and its paid switch both read
+    // "change this deal", and the yes applied only the newer. 2026-10-06.
+    const proposal = `${one.name}|${one.confirming}|${[...argFields(one.args)].sort().join(',')}`;
     if (seen.has(shape) || seen.has(proposal)) continue;
     seen.add(shape);
     seen.add(proposal);
@@ -502,6 +629,7 @@ function onlyHeld() {
 }
 
 module.exports = {
+  targetNamed,
   somethingHeld,
   onlyHeld,
   shouldConfirm,

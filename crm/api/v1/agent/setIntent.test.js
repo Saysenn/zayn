@@ -259,3 +259,18 @@ test('BUT ASKING ABOUT IT IS STILL ASKING', () => {
     'what makes a special case',
   ]) assert.equal(isSpecialCaseInstruction(said), false, said);
 });
+
+// TERSE ORDERS, gpt-4.1 bulk sweep 2026-10-06: each was read as a lookup.
+test('a terse order with no verb in front is still an order; a lookup is not', () => {
+  const { isSetInstruction } = require('./setIntent');
+  for (const s of [
+    'dudcut 200 to kiran vales deals', 'kiran vale monthly 2750 every deal', 'switch all kiran vale deals to aed',
+    'door no 12b for kiran all deals', 'label all kiran deals VIP', 'kiran accepts postals, set it on all',
+    'note on every kiran deal: chase the invoice', 'kiran vale fee 5% everywhere', 'end date 31 dec for all of kirans deals',
+    'kiran shouldnt get paid this month on any deal', 'add 100 to zayn deals',
+  ]) assert.equal(isSetInstruction(s), true, s);
+  for (const s of [
+    'how much is kiran owed', 'show all kiran deals', 'list kiran vale deals', 'what is kirans monthly?',
+    'kiran vale', 'total for milkman this month', 'who is paid by bank', 'is kiran paid on any deal?', 'closer look at zayn',
+  ]) assert.equal(isSetInstruction(s), false, s);
+});

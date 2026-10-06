@@ -5,7 +5,7 @@ const { resolveContext, openingTools, HELD_UNTIL_NEEDED } = require('./contexts'
 // ever for a change the previous answer already described.
 const {
   shouldConfirm, remember, recallAll, forget, completed, alreadyDone, confirmationHeld,
-  declined, dropShown, nextTurn, agreed, eitherOrAsked, somethingHeld, onlyHeld,
+  declined, dropShown, nextTurn, agreed, eitherOrAsked, somethingHeld, onlyHeld, facts, targetNamed,
 } = require('./confirmReplay');
 // Whether a call wrote, read off its broadcast rather than its wording.
 const { watchWrites } = require('../shared/writeTap.helper');
@@ -76,6 +76,39 @@ const RESUME_OFFERED = /(?:\bresum\w*|\bdeals?\b[^?]*\bback\b)[^?]*\?\s*$/i;
 // "no. set drew's fee on capilano associates to 3%" read the rates back
 // instead of setting one. A rate set ON a named deal has one door. 2026-09-30.
 const DEAL_RATE_SET = /\b(?:set|change|make|put)\b[^.?!]*\b(?:fee|add[\s-]?on)s?\b[^.?!]*\bon\s+(?!top\b)[a-z][^.?!]*\b\d+(?:\.\d+)?\s*(?:%|percent)/i;
+// THE SCOPE SAID OUT LOUD: "his deals", "all", "every", "each", "both",
+// "everywhere". "deal" alone is one of them, so it is not here.
+const EVERY_DEAL = /\b(?:deals|all|every|each|both|everywhere|everything|any\s+deal)\b/i;
+
+/**
+ * AN EDIT TO EVERY DEAL IS THE BULK TOOL, on the first round. gpt-4.1
+ * sweep 2026-10-06: told "dudcut 200 to zayn deals" she said "I'll show
+ * you the change before anything is saved", recorded a claim and stopped,
+ * twice, with no preview, so the yes that followed had nothing to apply
+ * and she answered it with his total. Instructions alone did not move her;
+ * the first round is made to call the tool whose preview IS the question.
+ * Not the acts with their own doors: stop, delete, resume, undo, a review
+ * answer, a new deal.
+ */
+// "change kiran", "update zayn pls", "edit otto": a verb, a name, nothing else.
+const VAGUE_EDIT = /^\s*(?:(?:hey|hi|ok|okay|diane|pls|please|can you|could you)\b[,\s]*)*(?:change|update|edit|fix|modify|sort out|amend|adjust)\s+(?!all\b|every\b|the\s+\w+\s+(?:to|for)\b)[a-z][a-z' -]{1,40}?\s*(?:pls|please|thanks|thx)?[.!]?\s*$/i;
+
+const LATER_MONTH = /\b(?:next month|from (?:next|the \d|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*|starting|beginning|as of|come (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)|in (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*|for the next \d+ months|schedul\w*|park\w*|end of (?:this|the) month)\b/i;
+
+const EVERY_DEAL_EDIT = {
+  test: (said) => {
+    const text = String(said ?? '');
+    return isSetInstruction(text) && EVERY_DEAL.test(text)
+      && !/\b(?:stop|end|terminate|delete|remove|resume|restart|reopen|undo|revert|roll\s*back|answer|review\s+answer)\b/i.test(text)
+      && !/\badd\s+(?:a|an|another|new)\s+(?:deal|row|company|handler)/i.test(text)
+      // A LATER MONTH is parked, one per deal, by the one row tool's `when`:
+      // the bulk tool has no `when`, and forced there "add 5% to kiran vale
+      // deals next month" went round in circles. 2026-10-06.
+      && !LATER_MONTH.test(text)
+      && !/\b(?:everyone|everybody|whole sheet|all groups|every group|all the groups)\b/i.test(text);
+  },
+};
+
 const FORCED_ROUTES = [
   [RESUME_ASK, 'resume_deal'],
   // "JUNO PARK IS DONE WITH US, STOP HER DEAL" is a stop, said in so many
@@ -173,6 +206,7 @@ const FORCED_ROUTES = [
   [/\b(?:what'?s|what is|whats|give me|tell me|send me|do (?:we|you) have|have (?:we|you) got|is there|got)\b[^.?!]*\b(?:phone(?: number)?|mobile|post ?code|sort code|account number|bank details|(?:a|the|his|her|their) number)\b/i, 'find_and_show_details'],
   // "Who is owed the most" is a ranking: see rankAskedIn. 2026-10-03.
   [{ test: (said) => Boolean(rankAskedIn(said)) }, 'total_master_sheet'],
+  [EVERY_DEAL_EDIT, 'bulk_update_master_sheet'],
 ];
 
 // The read-only narrowing below. Off: see where it is used.
@@ -305,7 +339,7 @@ const { checkRateDirection } = require('./checkRateDirection');
 const { checkPointed, DISABLED } = require('./disabledTools');
 const { bypassAttempt, BYPASS_REPLY } = require('./blockBypass');
 const { asksUndoPlainly } = require('./undoIntent');
-const { fold } = require('./tools/resolvePerson');
+const { fold, personMentionedIn } = require('./tools/resolvePerson');
 const { PROMPT_PLACEHOLDERS } = require('./promptPlaceholders');
 const { rankAskedIn } = require('./tools/masterSheet');
 // A tool's own orders, read out to the admin. See checkLeak.js.
@@ -1751,8 +1785,10 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
     // the edit with extra fields and claimed it again. A held preview is
     // applied by the runtime before this, so nothing real is lost. 2026-09-29.
     // Not for a held call being applied: that yes IS to something. See applyingHeld.
+    // ANY question in it, not only a last character: "Did you mean Otto
+    // Fenn? Let me know and I'll add 100!" asked, and its yes was refused.
     if (tool.writes && agreed(args.said) && !turn?.applyingHeld
-      && !/\?\s*$/.test(lastAssistantAnswer(history))
+      && !/\?/.test(lastAssistantAnswer(history) ?? '')
       // A preview she showed without a question mark is still a preview.
       && !confirmationHeld(name, modelArgs, args.said, lastAssistantAnswer(history))
       && recallAll(args.said, lastAssistantAnswer(history)).length === 0) {
@@ -2011,7 +2047,7 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
      * owedAskWaiting). Clone run 2026-10-05: the question was just dropped.
      */
     const said = lastSaid(history);
-    if (result?.pending && tool.writes && args.targetPerson && !agreed(said)
+    if (result?.pending && tool.writes && (args.targetPerson || args.id != null) && !agreed(said)
       && SECOND_ASK.test(said) && /\b(?:owed|owe|total|how much)\b/i.test(said)) {
       const later = "I'll give you what they're owed once you say yes, so it is the new figure.";
       result.summary = `${result.summary ?? ''}\n\nTHEY ALSO ASKED WHAT IS OWED. Quote no figure for it now; `
@@ -2367,6 +2403,45 @@ async function runAgentTurn(history, contextName, onEvent) {
         + 'Do not look anybody up first.',
     });
   }
+  /**
+   * ===============================
+   * * "HIS DEALS" IS EVERY DEAL, SO IT IS ONE BULK CHANGE
+   * ===============================
+   * gpt-4.1 bulk sweep, 2026-10-06: "dudcut 200 to kiran vales deals" was
+   * looked up and answered "Kiran Vale has three deals, which one?", and
+   * "kirans location is manchester now for every deal" went to the one row
+   * tool, whose yes then asked "all of them, or one?". The scope was said:
+   * deals, all, every, both, everywhere. So it goes straight to the bulk
+   * tool, with the preview it always shows, and nobody is asked which.
+   */
+  /**
+   * A NAME AND NO CHANGE. "change kiran" was answered "which one do you want
+   * to STOP?": an act nobody said, on money. With no field and no value the
+   * only right move is one short question. gpt-4.1 messy sweep, 2026-10-06.
+   */
+  if (VAGUE_EDIT.test(lastSaid(history))) {
+    messages.push({
+      role: 'system',
+      content: 'THEY NAMED SOMEONE BUT NOT WHAT TO CHANGE. Ask ONE short question: what would they like '
+        + 'changed for that person (which field, and to what). Do not assume stop, end, delete, paid or '
+        + 'any field, and do not look anything up or change anything yet.',
+    });
+  }
+  if (isSetInstruction(lastSaid(history)) && EVERY_DEAL.test(lastSaid(history)) && !LATER_MONTH.test(lastSaid(history))) {
+    messages.push({
+      role: 'system',
+      content: 'THIS IS ONE CHANGE TO EVERY DEAL THEY NAMED (they said deals, all, every, each, both '
+        + 'or everywhere). Call bulk_update_master_sheet straight away, without looking anybody up '
+        + 'first and without asking which deal or which group: for ONE person, perPerson '
+        + '[{ person: <the name as they said it>, allDeals: true, set: {...} or add: {...} }]; for '
+        + 'several named people, `people`. A percentage on the monthly is raiseMonthlyPercent with '
+        + '`people` [name]. "add/deduct N" with no field named is the payable amount (add, negative '
+        + 'to take off). Their own details (postcode, door number, bank, account, sort code, phone, '
+        + 'accepting postals) go in that person\'s set too. If they named a GROUP, a company or '
+        + '"everyone" rather than people, use those filters instead of perPerson. Do NOT use '
+        + 'update_master_sheet_row.',
+    });
+  }
   const changedRowIds = new Set();
   const shownCardIds = new Set();
   // Lists drawn THIS turn, so two calls returning the same rows cannot
@@ -2415,6 +2490,9 @@ async function runAgentTurn(history, contextName, onEvent) {
   // Its own flag: a dropped line is not a wrong figure, so no other guard
   // here can see it.
   let relayRetry = false;
+  let namedRetry = false;
+  // A retry that must call one tool: set by the guard, used on the next round only.
+  let forceNextTool = null;
   // A yes or no question answered without its yes or no. See checkVerdict.js.
   let verdictRetry = false;
   // "It was increased" on a yes turn that wrote nothing. See checkClaimedWrite.js.
@@ -2536,7 +2614,21 @@ async function runAgentTurn(history, contextName, onEvent) {
   // A plain yes to the ONE thing held, when her question lost its details. See onlyHeld.
   if (heldCalls.length === 0 && agreed(lastSaid(history)) && /^\s*(?:y|ya|yes|yep|yeah|yup|ok|okay|sure|go ahead|do it|confirm\w*)[.!\s]*$/i.test(lastSaid(history))) {
     const one = onlyHeld();
-    if (one) heldCalls.push(one);
+    // ONLY IF HER LAST WORDS WERE ABOUT IT. After "I got a bit lost going
+    // round in circles", a plain yes applied the change held from that same
+    // muddle, which she never showed. gpt-4.1 messy sweep, 2026-10-06. Her
+    // question may lose the figures; it may not lose the person.
+    const priorFacts = facts(String(prior ?? ''));
+    // A name, or the GROUP it is aimed at ("undo the CORVID part of change"
+    // answered "put every CORVID monthly back"): capitals are not facts, so
+    // a group is matched as a word, in any case.
+    const priorText = String(prior ?? '');
+    const groupsIn = (one?.confirming ?? '').match(/\b[A-Z]{3,}\b/g) ?? [];
+    const CODES = new Set(['GBP', 'AED', 'USD', 'EUR', 'EURO', 'NOT', 'AND', 'THE', 'YES']);
+    const aboutIt = one && ([...facts(one.confirming)].some((f) => /[a-z]/.test(f) && priorFacts.has(f))
+      || groupsIn.filter((g) => !CODES.has(g)).some((g) => new RegExp(`\\b${g}\\b`, 'i').test(priorText))
+      || targetNamed(one.aimedAt, priorText));
+    if (one && aboutIt) heldCalls.push(one);
   }
   /**
    * A BARE YES TO NO QUESTION. After "Added Kiran Vale ..." a stray "yes"
@@ -2623,7 +2715,11 @@ async function runAgentTurn(history, contextName, onEvent) {
     // The owed figure they asked for with the change, worked out in code
     // after the write: no model round, and never the old figure.
     let owedLine = '';
-    const owedFor = heldCalls[0].args?.targetPerson ?? heldCalls[0].args?.person;
+    // By its deal id too: she often finds the deal first and sends only the id.
+    const owedFor = heldCalls[0].args?.targetPerson ?? heldCalls[0].args?.person
+      ?? (heldCalls[0].args?.id != null
+        ? (await require('../repos/masterSheetRows.repo').findById(Number(heldCalls[0].args.id)).catch(() => null))?.person_name
+        : undefined);
     if (owedAskWaiting && owedFor && !onlyApplied.pending && context.tools.some((t) => t.name === 'total_master_sheet')) {
       const owed = await invokeTool(context.tools, 'total_master_sheet', JSON.stringify({ person: owedFor }), history, onEvent, turnState)
         .catch(() => null);
@@ -2713,7 +2809,81 @@ async function runAgentTurn(history, contextName, onEvent) {
       && context.tools.some((t) => t.name === tool))?.[1] ?? null)
     ?? (BARE_YES.test(lastSaid(history)) && RESUME_OFFERED.test(lastAssistantAnswer(history))
       && heldCalls.length === 0 && context.tools.some((t) => t.name === 'resume_deal') ? 'resume_deal' : null);
-  if (forcedTool && !roundTools.some((t) => t.function?.name === forcedTool)) roundTools = openAITools;
+  /**
+   * A YES WITH NOTHING HELD, TO AN EDIT SHE ONLY TALKED ABOUT. She said "I'll
+   * show you the change first, ok?" without calling anything, and the yes
+   * was answered with a total. The yes is to the edit before it: run that
+   * edit's preview now. It still asks before writing. gpt-4.1, 2026-10-06.
+   */
+  const askedBefore = String(history.filter((m) => m.role === 'user').slice(-2, -1)[0]?.content ?? '');
+  const yesToTalkedEdit = !forcedTool && heldCalls.length === 0 && BARE_YES.test(lastSaid(history))
+    && /\?\s*$/.test(String(lastAssistantAnswer(history) ?? '').trim())
+    && EVERY_DEAL_EDIT.test(askedBefore) && context.tools.some((t) => t.name === 'bulk_update_master_sheet');
+  if (yesToTalkedEdit) {
+    messages.push({
+      role: 'system',
+      content: `THEY SAID YES TO THE CHANGE THEY ASKED FOR JUST BEFORE: "${askedBefore}". Nothing was previewed yet. `
+        + 'Call bulk_update_master_sheet for exactly that change now, WITHOUT confirmed, so they see the real '
+        + 'rows; then read the preview back and ask once.',
+    });
+  }
+  /**
+   * ===============================
+   * * "DID YOU MEAN OTTO FENN?" "YES" IS THE ORIGINAL ORDER, FOR OTTO FENN
+   * ===============================
+   * gpt-4.1 messy sweep, 2026-10-06: "otto fen add 100", "did you mean Otto
+   * Fenn?", "yes", and she tried to ADD A DEAL for him, because the yes
+   * arrived with nothing held and the order was a turn behind. The yes
+   * settles the name; the order is the one they gave. Re-run it, with its
+   * preview, for the person she named.
+   */
+  let yesToName = null;
+  if (!forcedTool && !yesToTalkedEdit && heldCalls.length === 0 && BARE_YES.test(lastSaid(history))
+    && /\bdid you mean\b|\bdo you mean\b|\bmeant\b[^?]*\?/i.test(String(lastAssistantAnswer(history) ?? ''))
+    && askedBefore && (isSetInstruction(askedBefore) || EVERY_DEAL.test(askedBefore))) {
+    const people = (await require('../repos/people.repo').filterOptions().catch(() => null))?.people ?? [];
+    const prior = String(lastAssistantAnswer(history) ?? '');
+    const quoted = (prior.match(/"([^"]+)"/) ?? [])[1] ?? '';
+    const named = [...new Set(people.map((p) => p.name))]
+      .filter((n) => personMentionedIn(prior, n) && n.toLowerCase() !== quoted.toLowerCase());
+    if (named.length === 1) {
+      yesToName = named[0];
+      messages.push({
+        role: 'system',
+        content: `THEY CONFIRMED THE PERSON IS ${yesToName}. Their request was: "${askedBefore}". Do exactly `
+          + `that request now, for ${yesToName} (use that spelling), with its preview if it changes `
+          + 'anything. Do not look them up again and do not ask anything else.',
+      });
+    }
+  }
+  /**
+   * SEVERAL PEOPLE WHO ALREADY HAVE DEALS, EACH WITH A FIGURE, IS AN EDIT.
+   * "felix orr monthly 1400 and juno park monthly 650" was taken as two new
+   * deals and she asked which group and company each should go on; both
+   * already had one. gpt-4.1 messy sweep, 2026-10-06. When an order names
+   * two or more people on the sheet and asks for nothing new, the first
+   * round is the bulk change, one entry per person.
+   */
+  let severalExisting = false;
+  if (!forcedTool && heldCalls.length === 0 && isSetInstruction(lastSaid(history))
+    && !LATER_MONTH.test(lastSaid(history))
+    && !/\b(?:new|another|second|extra|create|open)\b|\badd(?:ing)?\s+(?:a\s+|an\s+)?(?:\w+\s+)?deal\b/i.test(lastSaid(history))
+    && context.tools.some((t) => t.name === 'bulk_update_master_sheet')) {
+    const everyone = (await require('../repos/people.repo').filterOptions().catch(() => null))?.people ?? [];
+    const named = [...new Set(everyone.map((p) => p.name))].filter((n) => personMentionedIn(lastSaid(history), n));
+    if (named.length >= 2) {
+      severalExisting = true;
+      messages.push({
+        role: 'system',
+        content: `${named.join(' and ')} ALREADY HAVE DEALS: this changes them, nothing new is added. Call `
+          + 'bulk_update_master_sheet once with perPerson, one entry per person (allDeals true), with exactly '
+          + 'what they said for each, so one preview covers everyone.',
+      });
+    }
+  }
+  const routedTool = forcedTool ?? (severalExisting ? 'bulk_update_master_sheet' : null) ?? (yesToTalkedEdit
+    || (yesToName && EVERY_DEAL_EDIT.test(askedBefore)) ? 'bulk_update_master_sheet' : null);
+  if (routedTool && !roundTools.some((t) => t.function?.name === routedTool)) roundTools = openAITools;
 
   /**
    * A TOTAL TAKEN BEFORE A CHANGE IN THE SAME MESSAGE IS STALE. "make felix
@@ -2739,6 +2909,7 @@ async function runAgentTurn(history, contextName, onEvent) {
     }
     let completion;
     try {
+      if (forceNextTool && !roundTools.some((t) => t.function?.name === forceNextTool)) roundTools = openAITools;
       completion = await streamCompletion(openai, {
         model: env.openaiModel,
         temperature: 0.2,
@@ -2768,8 +2939,10 @@ async function runAgentTurn(history, contextName, onEvent) {
         // "WE GOOD?" RUNS THE CHECK. Asked it live, she answered "everything
         // looks smooth, no flags" having looked at nothing, with 29 findings
         // on the sheet. The first round is made to call it. 2026-09-30.
-        ...(round === 0 && forcedTool ? { tool_choice: { type: 'function', function: { name: forcedTool } } } : {}),
+        ...((round === 0 && routedTool) || forceNextTool
+          ? { tool_choice: { type: 'function', function: { name: forceNextTool ?? routedTool } } } : {}),
       });
+      forceNextTool = null;
     } catch (err) {
       // The SDK's own status and body, not just err.message — "Request
       // failed" tells nobody anything, and this used to be the only trace
@@ -2879,7 +3052,7 @@ async function runAgentTurn(history, contextName, onEvent) {
             all.slice(0, offset).trim().length > 20 ? '' : m))
           .replace(/\n{3,}/g, '\n\n');
       }
-      const raw = choice.content?.trim();
+      let raw = choice.content?.trim();
 
       // The budget ran out. Two ways that shows, and only the first was
       // ever caught:
@@ -3752,6 +3925,67 @@ async function runAgentTurn(history, contextName, onEvent) {
         }
       }
 
+      /**
+       * A SECOND QUESTION'S COMPUTED ANSWER IS NEVER DROPPED. "how many deals
+       * in baker and whos owed most there": the ranking was worked out in
+       * code with SAY EXACTLY THIS, and she answered the count alone, every
+       * run. gpt-4.1 core suite, 2026-10-06. When they asked two things and a
+       * line she was told to say is missing, it goes out as written.
+       */
+      if (raw && /\band\b|\balso\b|,/i.test(lastSaid(history))) {
+        const owedFacts = facts(raw);
+        const missingSay = toolResults
+          .filter((r) => !r?.pending)
+          .map((r) => /SAY EXACTLY THIS[^\n]*\n"([^"]+)"/.exec(String(r?.summary ?? ''))?.[1]
+            ?? (r?.computedReply && typeof r.reply === 'string' && /\d/.test(r.reply) ? r.reply : null))
+          .filter(Boolean)
+          .filter((line) => [...facts(line)].some((f) => /\d/.test(f) && !owedFacts.has(f)));
+        if (missingSay.length > 0) raw = `${raw.trim()}\n${missingSay.join('\n')}`;
+      }
+      /**
+       * ===============================
+       * * EVERY PERSON THEY NAMED IS IN THE PREVIEW
+       * ===============================
+       * gpt-4.1 messy sweep, 2026-10-06: "felix orr monthly 1400 and juno
+       * park monthly 650" was previewed for Felix alone and the yes saved
+       * Felix alone; Juno was never mentioned again. A person named in the
+       * order and missing from every pending change this turn gets one
+       * retry, and if still missing is said out loud, never dropped.
+       */
+      if (raw && isSetInstruction(lastSaid(history))) {
+        const pendingText = toolResults.filter((r) => r?.pending)
+          .map((r) => `${r.confirming ?? ''}\n${(r.lines ?? []).join('\n')}\n${r.summary ?? ''}`).join('\n');
+        if (pendingText.trim()) {
+          const everyone = (await require('../repos/people.repo').filterOptions().catch(() => null))?.people ?? [];
+          const said = lastSaid(history);
+          const named = [...new Set(everyone.map((p) => p.name))].filter((n) => personMentionedIn(said, n));
+          const left = named.filter((n) => !personMentionedIn(pendingText, n));
+          if (named.length > 1 && left.length > 0 && !namedRetry) {
+            namedRetry = true;
+            forceNextTool = 'bulk_update_master_sheet';
+            logger.warn({ context: context.key, round, left }, 'diane: left a named person out of the change');
+            messages.push(choice);
+            messages.push({
+              role: 'user',
+              content: `YOU LEFT ${left.join(', ').toUpperCase()} OUT. They named ${named.join(', ')} in one order. `
+                + 'Call bulk_update_master_sheet ONCE with perPerson, one entry per person with exactly what they '
+                + 'said for that person, so ONE preview covers everyone. Do not drop anybody.',
+            });
+            continue;
+          }
+          if (named.length > 1 && left.length > 0) raw = `${raw.trim()}\n\n(Not included yet: ${left.join(', ')}.)`;
+        }
+      }
+      /**
+       * AND AFTER THE ONE RETRY, THE LINES GO OUT ANYWAY. A list she still
+       * drops lines from is never sent short: the missing ones are added
+       * word for word, because a yes applies every held change whether or
+       * not she read it out. 2026-10-06.
+       */
+      if (raw && relayRetry) {
+        const still = checkRelayed(raw, toolResults);
+        if (!still.ok) raw = `${raw.trim()}\n\nAlso:\n${still.missing.join('\n')}`;
+      }
       if (raw && !relayRetry) {
         const relayed = checkRelayed(raw, toolResults);
         if (!relayed.ok) {
@@ -3779,7 +4013,11 @@ async function runAgentTurn(history, contextName, onEvent) {
         }
       }
 
-      if (raw && !repeatRetry && saidAlready(raw, history)) {
+      // A FRESH PREVIEW IS NEVER A REPEAT. An undo of the change just made
+      // carries the same figures back the other way, was read as her saying
+      // it again, and she was told not to ask: she answered "you already
+      // answered" and the yes undid nothing. gpt-4.1 core suite, 2026-10-06.
+      if (raw && !repeatRetry && !toolResults.some((r) => r?.pending) && saidAlready(raw, history)) {
         repeatRetry = true;
         logger.info({ context: context.key, round }, 'diane: repeated herself, asking again');
         messages.push(choice);
@@ -3932,7 +4170,7 @@ async function runAgentTurn(history, contextName, onEvent) {
        * prose with nothing previewed, so the yes undid nothing. The route
        * already chose this tool for this message; it carries its own preview.
        */
-      if (wanted.length > 0 && wanted.every((n) => n === forcedTool)) {
+      if (wanted.length > 0 && wanted.every((n) => n === routedTool)) {
         widened = true;
         roundTools = openAITools;
       }

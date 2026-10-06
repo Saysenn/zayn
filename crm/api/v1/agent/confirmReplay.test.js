@@ -409,3 +409,46 @@ test('A ROW NUMBER IS NOT A FACT THE ADMIN AGREES TO', () => {
   // The name still has to match: a different person's delete is not covered.
   assert.equal(alreadyShown(confirming.replace('Orla Quennell', 'Ines Pardew'), shown), false);
 });
+
+// A CONFIRMATION WITH AN "OR" IS ONE QUESTION. Clone, gpt-4.1, 2026-10-06:
+// "add 100 to zayn deals", preview, "yes" refused as two readings.
+test('a confirm-shaped "or" is not two readings; a real choice still is', () => {
+  const { eitherOrAsked } = require('./confirmReplay');
+  for (const s of [
+    'Is that what you want, or does anything need changing before I go ahead?',
+    'Shall I go ahead, or not?',
+    'Want me to save that, or would you like to change anything first?',
+  ]) assert.equal(eitherOrAsked(s), false, s);
+  for (const s of [
+    'Should that be a flat amount from his fee, or 100 percent?',
+    'Is that 100 off the monthly, or would you like 100 percent off the fee?',
+    'Do you want both deals, or only one?',
+    'Should I apply it to INDIGO or MILKMAN?',
+  ]) assert.equal(eitherOrAsked(s), true, s);
+});
+
+test('looser confirm wordings with "or anything" are still one question', () => {
+  const { eitherOrAsked } = require('./confirmReplay');
+  assert.equal(eitherOrAsked('Ready for me to go ahead and make both changes, or is there anything you want to tweak first?'), false);
+  assert.equal(eitherOrAsked('Shall I save it, or should anything be adjusted?'), false);
+  assert.equal(eitherOrAsked('Should I cut 200 from INDIGO, MILKMAN, or both?'), true);
+});
+
+// "otto fenn his monthly should be 1600 now, and also mark him paid": two
+// previews for one person in one turn are two changes. 2026-10-06.
+test('two DIFFERENT fields for one person in one turn are both held', () => {
+  remember('update_master_sheet_row', { id: 5, set: { monthlyAmount: 1600 } },
+    'change this deal Otto Fenn at Ironleaf: monthly amount GBP 1,500 to GBP 1,600, payable amount GBP 1,500 to GBP 1,600');
+  remember('update_master_sheet_row', { id: 5, set: { overridePaid: true } },
+    'change this deal Otto Fenn at Ironleaf: paid (admin override) to true');
+  const held = recallAll('yes', 'Otto Fenn at Ironleaf: monthly 1,500 to 1,600, and paid to true. Shall I?');
+  assert.equal(held.length, 2);
+  held.forEach(forget);
+});
+
+test('the period stamp of an ordinary edit need not be read out; a special case month must', () => {
+  const { alreadyShown } = require('./confirmReplay');
+  const prior = 'Otto Fenn at Ironleaf in BAKER: monthly amount GBP 1,500 to GBP 1,600. Shall I?';
+  assert.equal(alreadyShown('change this deal for October 2026 Otto Fenn at Ironleaf monthly 1,600', prior), true);
+  assert.equal(alreadyShown('make Otto Fenn at Ironleaf a special case for October 2026, adding 1,600', prior), false);
+});

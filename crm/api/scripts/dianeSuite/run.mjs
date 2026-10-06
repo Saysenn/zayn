@@ -26,7 +26,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 // SUITE_SET=eval runs the held-out questions in evalCases.mjs instead: wording
 // no rule was written for, so a change is judged on what she was never taught.
-const SETS = { eval: './evalCases.mjs', eval2: './evalCases2.mjs', eval3: './evalCases3.mjs', eval4: './evalCases4.mjs', eval5: './evalCases5.mjs', eval6: './evalCases6.mjs', wander: './wanderCases.mjs' };
+const SETS = { eval: './evalCases.mjs', eval2: './evalCases2.mjs', eval3: './evalCases3.mjs', eval4: './evalCases4.mjs', eval5: './evalCases5.mjs', eval6: './evalCases6.mjs', wander: './wanderCases.mjs', bulk: './bulkCases.mjs', messy: './messyCases.mjs' };
 const { READS, WRITES, PENDING } = await import(SETS[process.env.SUITE_SET] ?? './cases.mjs');
 import { seed } from './seed.mjs';
 

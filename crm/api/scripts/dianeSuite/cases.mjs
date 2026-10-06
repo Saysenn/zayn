@@ -616,7 +616,7 @@ READS.push(
   },
   {
     name: '"no bank details" is a filter, not the whole sheet check',
-    turns: [{ say: 'does anyone have no bank details?', expect: { noTools: ['audit_master_sheet'], reply: /no bank details/i } }],
+    turns: [{ say: 'does anyone have no bank details?', expect: { noTools: ['audit_master_sheet'], reply: /(?:no|missing|without) bank details/i } }],
   },
 );
 

@@ -1871,7 +1871,41 @@ const DATE_FIELDS = ['assignedOn', 'paymentStartOn', 'presetOn', 'endOn'];
 /**
  * @returns {string|null} the reason to refuse, or null to allow.
  */
+const MONTH_NAMES = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+/**
+ * ===============================
+ * * A MONTH SAID WITHOUT A YEAR IS THE NEAREST ONE
+ * ===============================
+ * gpt-4.1 sweep, 2026-10-06: "kiran preset month november for all" came as
+ * 2023-11-01, the year she was trained in. The refusal below caught it and
+ * asked the year, and the yes that followed applied nothing. Their words
+ * named the month and no year, so the year is not hers to pick and not
+ * theirs to be asked: it is the occurrence of that month nearest to now,
+ * worked out here, the same for every date column. The preview shows the
+ * full date, so the year is seen before the yes.
+ *
+ * Only when their sentence names THAT month and NO year. A year they said,
+ * or a date with no month word in it, is left exactly as it came.
+ */
+function pinSaidYears(fields, said) {
+  const text = String(said ?? '').toLowerCase();
+  if (/\b(?:19|20)\d{2}\b/.test(text)) return;
+  const [cy, cm] = currentMonth().split('-').map(Number);
+  for (const key of DATE_FIELDS) {
+    const iso = fields[key];
+    if (typeof iso !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) continue;
+    const m = Number(iso.slice(5, 7));
+    if (!new RegExp(`\\b${MONTH_NAMES[m - 1]}`).test(text)) continue;
+    const best = [cy - 1, cy, cy + 1]
+      .map((y) => ({ y, d: Math.abs((y - cy) * 12 + (m - cm)) }))
+      .sort((a, b) => a.d - b.d)[0].y;
+    fields[key] = `${best}${iso.slice(4)}`;
+  }
+}
+
 function farOffPreset(fields, said) {
+  pinSaidYears(fields, said);
   const iso = fields.presetOn;
   if (!iso || !farOffMonth(iso, said)) return null;
 
@@ -1887,9 +1921,13 @@ function farOffPreset(fields, said) {
   // a question with an answer already in hand. "next month" became 2023.
   const relative = RELATIVE_MONTH.exec(String(said ?? ''));
   if (relative) {
+    // "NEXT MONTH" IS A MONTH THE CODE KNOWS. It was refused with the right
+    // answer in hand, and she asked them to confirm a date nobody was unsure
+    // of; the yes then went nowhere. Corrected here and shown in the preview.
+    // gpt-4.1 messy sweep, 2026-10-06.
     const meant = shiftMonth(now, RELATIVE_SHIFT[relative[1].toLowerCase()]);
-    return `NOTHING HAS BEEN CHANGED. That preset is ${iso}, but they said "${relative[0]}", which `
-      + `is ${monthName(meant)}. Send ${meant}-01 and show them that.`;
+    fields.presetOn = `${meant}-01`;
+    return null;
   }
   return `NOTHING HAS BEEN CHANGED. That preset is ${iso}, which is ${ago} `
     + `${away < 0 ? 'BEFORE' : 'AFTER'} ${monthName(now)}, and they never said the year `
@@ -5205,6 +5243,28 @@ const createRow = {
       // Casey on Acqua" is adding a handler, and that is this tool. 2026-09-30.
       const newCompany = rawNewArgs.company
         && !same.some((r) => fold(r.company) === fold(rawNewArgs.company));
+      // AND THE FIGURES ARE THE CHANGE. "felix orr monthly 1400 and juno park
+      // monthly 650" came here twice, asked "did you want to update them?",
+      // and the yes found nothing to apply. A change is what they gave, so
+      // it is previewed as one, through the same door a named edit takes.
+      // gpt-4.1 messy sweep, 2026-10-06.
+      const IDENTITY = new Set(['personName', 'personId', 'groupName', 'company', 'roleLabel', 'role', 'seat', 'said', 'saidRecent', 'confirmed']);
+      const change = Object.fromEntries(Object.entries(rawNewArgs ?? {})
+        .filter(([k, v]) => ROW_FIELDS[k] && !IDENTITY.has(k) && v != null && v !== ''));
+      if (same.length > 0 && !newCompany && Object.keys(change).length > 0) {
+        const entry = same.length === 1
+          ? { person: same[0].person_name, company: same[0].company, set: change }
+          : { person: same[0].person_name, allDeals: true, set: change };
+        // EVERY HAND OVER THIS TURN IS ONE CHANGE. Two of these in one round
+        // ("felix orr monthly 1400 and juno park monthly 650") each became
+        // its own preview, the second replaced the first, and the yes saved
+        // Felix alone. Accumulated on the turn, the last preview holds all.
+        const turn = rawNewArgs?.turn;
+        const prior = turn?.wrote?.get('__addHandover') ?? [];
+        const all = [...prior.filter((e) => fold(e.person) !== fold(entry.person)), entry];
+        turn?.wrote?.set('__addHandover', all);
+        return handOverCall(all, rawNewArgs);
+      }
       if (same.length > 0 && !newCompany) {
         return {
           summary: `NOTHING HAS BEEN ADDED. ${displayPersonName(same[0].person_name)} already holds `
@@ -5323,7 +5383,7 @@ const createRow = {
     if (!fields.presetOn) fields.presetOn = `${currentMonth()}-01`;
     const noYearNew = settleYears(fields, `${args.said ?? ''}\n${args.saidRecent ?? ''}`);
     if (noYearNew) return { summary: noYearNew };
-    const offNew = farOffPreset(fields, args.said);
+    const offNew = farOffPreset(fields, `${args.said ?? ''}\n${args.saidRecent ?? ''}`);
     if (offNew) return { summary: offNew };
 
     // A NEW DEAL COMPUTES ITS AMOUNT TOO. Created with a monthly amount and
@@ -5370,7 +5430,20 @@ const createRow = {
       count: 1,
       lines: [shown],
     });
-    if (pendingAdd) return pendingAdd;
+    /**
+     * THE YES ADDS WHAT WAS SHOWN, ALL OF IT. The deal was put together over
+     * two messages (role, group and amount, then "appointed 1 october") and
+     * the preview showed all of it, but the held call was only the second
+     * message's fields: the yes asked for the group again. gpt-4.1 core
+     * suite, 2026-10-06. Held as the whole deal, minus what the code works
+     * out itself, so the replay is exactly the preview.
+     */
+    if (pendingAdd) {
+      const DERIVED = new Set(['payableAmount', 'payableDays', 'status']);
+      const whole = Object.fromEntries(Object.entries(fields)
+        .filter(([k, v]) => !DERIVED.has(k) && v != null && v !== '' && ROW_FIELDS[k]));
+      return { ...pendingAdd, redirect: { name: 'add_deal', args: whole } };
+    }
 
     /**
      * THAT DEAL ALREADY EXISTS is an answer, not a crash.
@@ -5650,7 +5723,7 @@ const updateRow = {
     const noYear = settleYears(fields, `${args.said ?? ''}\n${args.saidRecent ?? ''}`);
     if (noYear) return { summary: noYear };
     // A guessed year is a row owed nothing, forever. See farOffPreset.
-    const offRow = farOffPreset(fields, args.said);
+    const offRow = farOffPreset(fields, `${args.said ?? ''}\n${args.saidRecent ?? ''}`);
     if (offRow) return { summary: offRow };
     if (fields.roleLabel) {
       const { role, seat } = parseRole(fields.roleLabel);
@@ -6628,7 +6701,16 @@ function rowsForNames(pool, names, said) {
     const who = new Set(partial.map(personKey));
     if (who.size === 1) rows.push(...partial);
     else if (who.size > 1) unclear.push({ name, names: [...new Set(partial.map((r) => r.person_name))] });
-    else unknown.push(name);
+    else {
+      // A POSSESSIVE IS NOT THE NAME. "kiran vales deals" came through as
+      // "Kiran Vales": the preview found him from their sentence, and the
+      // yes (whose sentence is only "yes") refused "nobody called Kiran
+      // Vales". The name without its 's, when that is exactly one person.
+      const bare = String(name).trim().replace(/['’]?s$/i, '');
+      const again = bare !== String(name).trim() && bare.length >= 3 ? resolvePerson(pool, bare, heard) : null;
+      if (again?.matched && !again.ambiguous) rows.push(...again.rows);
+      else unknown.push(name);
+    }
   }
 
   // `held` is the same array under the name the exception path reads.
@@ -6795,6 +6877,38 @@ function nameTrouble({ unknown, unclear }, act, done = 'CHANGED') {
     + `Do NOT ${act} anything until every name resolves: a name that misses is invisible in a `
     + 'count, so nobody would know somebody had been left out.';
 }
+
+// The PER_PERSON columns that are a fact about the person, not about who
+// they are: safe on every deal of ONE named person (perPerson), never on a
+// filtered set that could reach somebody else.
+/**
+ * A person named in the sentence, by their full name or their first name
+ * as a word ("kirans" and "kiran's" are Kiran). Exact words only: this is
+ * a refusal's trigger, and a near miss must not refuse a group change.
+ */
+/** The refusal when a named person is missing from a call's scope. */
+function personDropped(matched, said, except) {
+  // Held back by any part of their name: "except kiran" holds Kiran Vale.
+  const heldText = (except ?? []).join(' ');
+  const named = [...new Set(matched.map((r) => r.person_name).filter(Boolean))]
+    .filter((n) => !namedIn(heldText, n) && namedIn(said, n));
+  if (named.length === 0 || !matched.some((r) => !named.includes(r.person_name))) return null;
+  return `NOTHING HAS BEEN CHANGED. They named ${listOf(named)}, and this call has no person in `
+    + `it, so it would reach ${matched.length} deals across the sheet. Call it again with `
+    + `perPerson [{ person: "${named[0]}", allDeals: true, ... }] (or \`people\` [names], which a `
+    + 'percentage raise takes) so only their deals change.';
+}
+
+function namedIn(said, name) {
+  if (personMentionedIn(said, name)) return true;
+  const first = String(name).trim().split(/\s+/)[0]?.toLowerCase() ?? '';
+  if (first.length < 3) return false;
+  return String(said ?? '').toLowerCase().split(/[^a-z0-9']+/)
+    .map((w) => w.replace(/'?s$/, ''))
+    .includes(first);
+}
+
+const ONE_PERSONS_OWN = new Set(['phone', 'doorNumber', 'postcode', 'acceptingPostals', 'bankDetails', 'accountNumber', 'sortCode']);
 
 const PER_PERSON = {
   personName: 'a name belongs to one person',
@@ -7431,7 +7545,22 @@ async function raiseMonthly(args) {
     ...filtersIn(scoped.args), group: scoped.args.group || undefined, page: 1, pageSize: BULK_MAX,
   });
   if (total > matched.length) return { summary: `${total} rows match, more than I change at once. Ask them to narrow it by group.` };
-  const rows = matched.filter((r) => Number(r.monthly_amount) > 0);
+  // THE NAMED PEOPLE, and only them. This ignored `people` entirely, so
+  // "raise kiran 10%" with Kiran named raised every deal it matched.
+  // gpt-4.1 bulk sweep, 2026-10-06.
+  const onlyThese = (args.people ?? []).filter(Boolean);
+  let inScope = matched;
+  if (onlyThese.length > 0) {
+    const wanted = rowsForNames(matched, onlyThese, args.said);
+    if (wanted.unknown.length > 0 || wanted.unclear.length > 0) {
+      return { summary: nameTrouble(wanted, 'change'), ambiguous: wanted.unclear.length > 0 };
+    }
+    inScope = wanted.rows;
+  } else if (!args.confirmed) {
+    const dropped = personDropped(matched, args.said, args.except);
+    if (dropped) return { summary: dropped };
+  }
+  const rows = inScope.filter((r) => Number(r.monthly_amount) > 0);
   if (rows.length === 0) return { summary: 'No deal there has a monthly amount to raise. Say so; nothing was changed.' };
 
   const round2 = (v) => Math.round(v * 100) / 100;
@@ -7441,7 +7570,8 @@ async function raiseMonthly(args) {
     return { id: r.id, fields: patch, row: r };
   });
   const verb = pct > 0 ? `raise the monthly by ${pct}%` : `cut the monthly by ${Math.abs(pct)}%`;
-  const where = scoped.args.group ? ` in ${scoped.args.group}` : ' across every group';
+  const where = onlyThese.length > 0 ? ` for ${listOf([...new Set(rows.map((r) => r.person_name))])}`
+    : scoped.args.group ? ` in ${scoped.args.group}` : ' across every group';
   const pending = confirmFirst(args.confirmed, {
     act: `${verb} on every deal${where}`,
     count: changes.length,
@@ -7473,7 +7603,13 @@ async function perPersonUpdate(args) {
   // entry before anything is read: a bank account on one of five people is
   // still a bank account written from a list.
   const asked = [...new Set(entries.flatMap((e) => Object.keys(e.set ?? {})))];
-  const refused = asked.filter((k) => PER_PERSON[k]);
+  // ONE PERSON'S OWN FACTS ARE FINE HERE. Every entry is one named person,
+  // so "postcode M1 1AA on all of kiran's deals" puts HIS postcode on HIS
+  // deals: nobody else's row is reached. It was refused as "an address
+  // belongs to one person", which is exactly what it was. gpt-4.1 bulk
+  // sweep, 2026-10-06. Identity (name, group, company) and the boss's own
+  // paid columns stay refused: they are not facts about the person.
+  const refused = asked.filter((k) => PER_PERSON[k] && !ONE_PERSONS_OWN.has(k));
   if (refused.length > 0) {
     return {
       summary: `NOTHING HAS BEEN CHANGED. ${listOf(refused.map((k) => `${FIELD_LABELS[k] ?? k} (${PER_PERSON[k]})`))}. `
@@ -7534,7 +7670,7 @@ async function perPersonUpdate(args) {
     }
     // A GUESSED YEAR ON ONE ENTRY is a guessed year. Checked per entry,
     // because each carries its own preset.
-    const offMonth = farOffPreset(fields, args.said);
+    const offMonth = farOffPreset(fields, `${args.said ?? ''}\n${args.saidRecent ?? ''}`);
     if (offMonth) return { summary: offMonth };
     if (fields.needsReview === false) fields.reviewReason = '';
     const movesMoney = Object.keys(add.values).length > 0 || Object.keys(fields).some((k) => NAMED_DEALS_ONLY[k]);
@@ -7784,7 +7920,9 @@ const bulkUpdate = {
             set: {
               type: 'object',
               description: 'What THIS person changes TO. The same columns `set` takes, plus '
-                + '`specialCaseDeal` and `payableAmount` (this month), which are per named deal.',
+                + '`specialCaseDeal` and `payableAmount` (this month), which are per named deal, '
+                + 'plus THEIR OWN details on all their deals: phone, doorNumber, postcode, '
+                + 'acceptingPostals, bankDetails, accountNumber, sortCode.',
             },
             add: {
               type: 'object',
@@ -7812,7 +7950,36 @@ const bulkUpdate = {
     // ONE MESSAGE, ONE CONFIRMATION, even when every row gets a different
     // value. Its own path because none of the single value logic below
     // applies: see perPersonUpdate.
+    /**
+     * A PERCENTAGE IN THE PER PERSON SHAPE IS THE PERCENT RAISE. "bump kirans
+     * monthly by 10% on all of them" came as perPerson with no figure the
+     * shape can hold, and was answered "the CRM needs the new monthly for each
+     * deal". The percent tool works the figures out: hand it those people.
+     * gpt-4.1 sweep, 2026-10-06.
+     */
+    // A GROUP IN THE PER PERSON SHAPE IS THE GROUP: "zap all of corvid's
+    // notes" came as perPerson [{ person: 'corvid' }]. One entry, a group
+    // name, a plain set: it is the group filter. 2026-10-06.
+    if (Array.isArray(args.perPerson) && args.perPerson.length === 1 && !args.group) {
+      const [only] = args.perPerson;
+      const groups = (await peopleRepo.filterOptions().catch(() => null))?.groups ?? [];
+      const group = groups.find((g) => fold(g) === fold(only?.person ?? ''));
+      if (group && only.set && !only.add) {
+        const { perPerson, ...rest } = args;
+        args = { ...rest, group, set: { ...(rest.set ?? {}), ...only.set } };
+      }
+    }
     if (Array.isArray(args.perPerson) && args.perPerson.length > 0) {
+      const heard = `${args.said ?? ''}\n${args.saidRecent ?? ''}`;
+      const pct = args.raiseMonthlyPercent ?? (heard.match(/(-?\d+(?:\.\d+)?)\s*(?:%|per\s?cent)/i) ?? [])[1];
+      const onMonthly = /\b(?:monthly|raise|bump|increase|cut|lower|reduce)\b/i.test(heard)
+        && !/\b(?:fee|add[\s-]?on)\b/i.test(heard);
+      const holdsFigure = args.perPerson.some((e) => Object.keys(e.add ?? {}).length > 0
+        || Object.entries(e.set ?? {}).some(([k, v]) => k !== 'monthlyAmount' || Number(v) !== Number(pct)));
+      if (pct != null && onMonthly && !holdsFigure) {
+        const { perPerson, ...rest } = args;
+        return raiseMonthly({ ...rest, raiseMonthlyPercent: Number(pct), people: perPerson.map((e) => e.person) });
+      }
       return perPersonUpdate(args);
     }
     /**
@@ -7835,6 +8002,27 @@ const bulkUpdate = {
     if (scoped.question) return { summary: scoped.question };
     args = scoped.args;
 
+    /**
+     * A VALUE SENT AS A FILTER IS THE CHANGE. "set currency to aed for
+     * everyone in otter except kiran" came with currency AED as a FILTER and
+     * nothing to set: "nothing to set", then told them everyone was "already
+     * AED", which nothing had checked. A filter whose value their words say
+     * to set TO ("currency to aed") is the set. gpt-4.1 messy sweep, 2026-10-06.
+     */
+    if (!args.set || Object.keys(args.set).length === 0) {
+      const heardTo = `${args.said ?? ''}\n${args.saidRecent ?? ''}`;
+      const moved = {};
+      for (const [k, v] of Object.entries(args)) {
+        if (!ROW_FIELDS[k] || typeof v !== 'string' || !v.trim() || k === 'groupName') continue;
+        const esc = v.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        if (new RegExp(`\\bto\\s+${esc}\\b`, 'i').test(heardTo)) moved[k] = v;
+      }
+      if (Object.keys(moved).length > 0) {
+        const rest = { ...args };
+        for (const k of Object.keys(moved)) delete rest[k];
+        args = { ...rest, set: moved };
+      }
+    }
     const {
       set, confirmed, except, people, onProgress, said, open, ...filter
     } = args;
@@ -7880,9 +8068,35 @@ const bulkUpdate = {
     const groupAdd = addsOf(groupSplit.add);
     if (groupAdd.error) return { summary: `NOTHING HAS BEEN CHANGED. ${groupAdd.error}` };
 
+    /**
+     * "BUMP EVERYONE 100" IS AN ADD, never a set. It was previewed as "set
+     * the monthly amount to 100 on 14 deals": every person's pay replaced by
+     * a hundred, one yes away. gpt-4.1 messy sweep, 2026-10-06. Their words
+     * moved a figure BY an amount ("bump", "raise", "up", "add" and no "to
+     * N"), so a money column SET to that amount is refused here, in code.
+     */
+    const heardBy = `${said ?? ''}\n${args.saidRecent ?? ''}`;
+    const byAmount = /\b(?:bump|raise|increase|add|up|top\s*up|plus|knock|take|deduct|minus|cut|lower|reduce)\b/i.test(heardBy)
+      && !/\bto\s+(?:[£$€]|gbp|aed|usd|eur)?\s*\d/i.test(heardBy);
+    const setMoney = ['monthlyAmount', 'payableAmount'].filter((k) => fields[k] != null
+      && new RegExp(`(?:^|[^\\d.])${String(Number(fields[k])).replace('.', '\\.')}(?![\\d%])`).test(heardBy));
+    if (byAmount && setMoney.length > 0) {
+      return {
+        summary: `NOTHING HAS BEEN CHANGED. They said to move it BY ${fields[setMoney[0]]}, not to make it `
+          + `${fields[setMoney[0]]}, and setting it would replace every deal's figure. Adding an amount is `
+          + 'done per person: if they named people, call again with perPerson, each { person, allDeals: true, '
+          + `add: { payableAmount: ${fields[setMoney[0]]} } }. If they did not, ask ONE short question: which `
+          + 'people should get it, or did they mean a new fixed figure.',
+        reply: `Just to be sure, nothing has changed: should ${fields[setMoney[0]]} be ADDED to what they `
+          + `get, or did you mean a new fixed figure of ${fields[setMoney[0]]}? Adding an amount goes `
+          + 'person by person, so tell me who it is for.',
+        computedReply: true,
+      };
+    }
+
     // A GUESSED YEAR ACROSS EVERY ROW. This is where it actually happened:
     // 96 rows set to 2024-09-01 from the word "September". See farOffPreset.
-    const offMonth = farOffPreset(fields, said);
+    const offMonth = farOffPreset(fields, `${said ?? ''}\n${args.saidRecent ?? ''}`);
     if (offMonth) return { summary: offMonth };
 
     if (Object.keys(fields).length === 0 && Object.keys(groupAdd.values).length === 0) {
@@ -7893,7 +8107,8 @@ const bulkUpdate = {
         summary: unknown.length > 0
           ? `NOTHING HAS BEEN CHANGED: ${listOf(unknown)} ${unknown.length === 1 ? 'is not a column' : 'are not columns'} `
             + 'on a deal. Say so and ask which field they meant.'
-          : 'Nothing to set. Ask the admin which field they want changed.',
+          : 'NOTHING HAS BEEN CHANGED AND NOTHING WAS CHECKED: no field was given to set. Do NOT say '
+            + 'anything is already set. Ask the admin which field they want changed, and to what.',
       };
     }
     if (fields.needsReview === false) fields.reviewReason = '';
@@ -7935,6 +8150,21 @@ const bulkUpdate = {
       };
     }
 
+    /**
+     * A GROUP SENT AS A PERSON. "zap all of corvid's notes" came as people
+     * ["corvid"] and was refused as "nobody called corvid". CORVID is a
+     * group: it is the filter, not a name. gpt-4.1 messy sweep, 2026-10-06.
+     */
+    let peopleNamed = (people ?? []).filter(Boolean);
+    if (peopleNamed.length > 0 && !filter.group) {
+      const groups = (await peopleRepo.filterOptions().catch(() => null))?.groups ?? [];
+      const asGroups = peopleNamed.map((n) => groups.find((g) => fold(g) === fold(n))).filter(Boolean);
+      if (asGroups.length === 1) {
+        filter.group = asGroups[0];
+        peopleNamed = peopleNamed.filter((n) => fold(n) !== fold(asGroups[0]));
+      }
+    }
+
     const { rows: matched, total } = await repo.findAll({ ...filter, page: 1, pageSize: BULK_MAX });
 
     /**
@@ -7957,7 +8187,7 @@ const bulkUpdate = {
      * Two resolvers would drift, and the one that drifted would be the one
      * deciding whose row got changed.
      */
-    const onlyThese = (people ?? []).filter(Boolean);
+    const onlyThese = peopleNamed;
     const wanted = rowsForNames(matched, onlyThese, said);
     if (wanted.unknown.length > 0 || wanted.unclear.length > 0) {
       return { summary: nameTrouble(wanted, 'change'), ambiguous: wanted.unclear.length > 0 };
@@ -7966,6 +8196,22 @@ const bulkUpdate = {
     // NARROWED BEFORE ANYTHING ELSE, so `except` and the count are about
     // the people asked for and not about the whole sheet.
     const inScope = onlyThese.length > 0 ? wanted.rows : matched;
+
+    /**
+     * ===============================
+     * * THEY NAMED SOMEBODY, SO THE CHANGE IS THEIRS
+     * ===============================
+     * gpt-4.1 bulk sweep, 2026-10-06: "bump kirans monthly by 10% on all of
+     * them" was called with no person at all. The preview reached all 14
+     * deals on the sheet while her sentence said "Kiran holds three", and
+     * the yes raised all fourteen. A name in the request with no name in
+     * the scope is a dropped argument, never a wider change: refused here,
+     * in code, before any preview, whatever she wrote around it.
+     */
+    if (onlyThese.length === 0 && !confirmed) {
+      const dropped = personDropped(matched, said, except);
+      if (dropped) return { summary: dropped };
+    }
 
     const { held, unknown: missed, unclear } = rowsForNames(inScope, (except ?? []).filter(Boolean), said);
     // Held back by being stopped already: "except Dov" after his deals ended
@@ -9778,6 +10024,68 @@ const namesPerson = (text, person) => Boolean(person) && new RegExp(
 const UNDO_PIN_MS = 15 * 60 * 1000;
 let undoPin = null;
 
+// "the last 2 changes", "past three updates", "previous 2 edits".
+const LAST_N = /\b(?:last|past|previous|recent)\s+(\d+|two|three|four|five)\s+(?:changes?|updates?|edits?|things?)\b/i;
+const WORD_N = { two: 2, three: 3, four: 4, five: 5 };
+
+async function undoLast(args, count) {
+  const every = await repo.findChangeBatches({ hours: UNDO_HOURS });
+  // THE PERSON THEY NAMED, even when she left `people` out: "the past 2
+  // updates made for zayn" must never undo somebody else's two.
+  let names = (args.people ?? []).filter(Boolean);
+  if (names.length === 0) {
+    const said = undoSentence(args);
+    names = [...new Set(every.flatMap((b) => (b.changes ?? []).map((c) => c.person)).filter(Boolean))]
+      .filter((p) => namedIn(said, p));
+  }
+  const theirs = (b) => (b.changes ?? []).filter((c) => repo.isUndoableField(c.field) && (names.length === 0
+    || names.some((nm) => fold(c.person).includes(fold(nm)) || fold(nm).includes(fold(c.person)))));
+  const picked = every.filter((b) => !b.undoes && b.deals > 0 && theirs(b).length > 0).slice(0, count);
+  // Their names as the sheet spells them, not as they were typed.
+  const real = [...new Set(picked.flatMap((b) => theirs(b).map((c) => c.person)).filter(Boolean))];
+  const who = names.length ? ` for ${listOf(real.length ? real : names)}` : '';
+  if (picked.length === 0) {
+    return { summary: `Nothing${who} in the last ${UNDO_HOURS / 24} days is left to undo. NOTHING was put back. Say so plainly.` };
+  }
+  // Each change WITH its figures, newest first: "payable amount 4,100 → 3,950".
+  const fmt = (v) => (v == null || v === '' ? 'blank' : Number.isFinite(Number(v)) ? Number(v).toLocaleString('en-GB') : String(v));
+  const label = (b) => {
+    const fields = [...new Set(theirs(b).map((c) => c.field))];
+    return listOf(fields.map((f) => {
+      const v = (b.field_values ?? []).find((x) => x.field === f);
+      const name = FIELD_LABELS[f] ?? f;
+      return v ? `${name} ${fmt(v.value)} back to ${fmt(v.was)}` : name;
+    }));
+  };
+  const ids = picked.flatMap((b) => theirs(b).map((c) => c.id));
+  const deals = new Set(picked.flatMap((b) => theirs(b).map((c) => c.rowId))).size;
+  const short = picked.length < count ? ` Only ${picked.length} ${picked.length === 1 ? 'change is' : 'changes are'} left to undo${who}, so that is all this reaches.` : '';
+  const pending = confirmFirst(args.confirmed, {
+    act: `undo the last ${picked.length} changes${who}, newest first`,
+    lines: picked.map((b) => `${label(b)}`),
+    count: deals,
+    noun: 'deal',
+    keeps: `NAME EACH CHANGE (the field) and the person when you ask.${short}`,
+  });
+  if (pending) return pending;
+  const { done, failed } = await repo.revertChangeBatch(ids, null, { via: 'diane', batchId: randomUUID() });
+  broadcast(null, 'master-sheet:changed', { action: 'reverted', via: 'agent' });
+  broadcast(null, 'people:changed', { action: 'reverted' });
+  broadcast(null, 'companies:changed', { action: 'reverted' });
+  if (failed.length > 0) {
+    return {
+      summary: `${done.length} of ${ids.length} changes went back, and ${failed.length} DID NOT: `
+        + `${failed.map((f) => `#${f.id} (${f.reason})`).join(', ')}. Say both numbers and do NOT report this as done.`,
+    };
+  }
+  return {
+    summary: `Put back. The last ${picked.length} changes${who} are undone: ${picked.map((b) => label(b)).join(', then ')}, `
+      + `on ${deals} ${deals === 1 ? 'deal' : 'deals'}. Say which changes went back, in one sentence.${short}`,
+    reply: `Done, the last ${picked.length} changes${who} are undone: ${picked.map((b) => label(b)).join(', then ')}.`,
+    computedReply: true,
+  };
+}
+
 async function undoBatch(args) {
   const everyBatch = await repo.findChangeBatches({ hours: UNDO_HOURS });
   const unundone = REDO.test(String(args.said ?? '')) ? everyBatch : everyBatch.filter((b) => !b.undoes);
@@ -10256,6 +10564,12 @@ const undoChange = {
         description: 'People to LEAVE as they are, as the admin says them. For "put it all back '
           + 'except X". Every one is named back to them before anything is written.',
       },
+      last: {
+        type: 'integer',
+        description: 'HOW MANY of the most recent changes to put back, newest first: "undo the last 2 '
+          + 'changes", "revert the past 3 updates for Zayn" (with people [Zayn]). One preview, one yes. '
+          + 'Leave it out for just the latest.',
+      },
       confirmed: { type: 'boolean', description: 'Only on the SECOND call, after they agreed to THAT row.' },
     },
     // NOT required: a batch undo with no id means the most recent change,
@@ -10268,6 +10582,11 @@ const undoChange = {
     // change" once fell through and proposed two deals' stop dates instead. 2026-09-28.
     // On a "yes" or an "undo that", the field was named one message back.
     const said = undoSentence(args);
+    // "THE PAST 2 UPDATES" IS TWO CHANGES, not two deals. It undid the
+    // latest only and called it done. gpt-4.1 sweep, 2026-10-06.
+    const spokenN = (String(said).match(LAST_N) ?? [])[1];
+    const lastN = Number(args.last) || Number(spokenN) || WORD_N[String(spokenN).toLowerCase()] || 0;
+    if (lastN >= 2 && args.changeId == null) return undoLast(args, Math.min(lastN, 10));
     /**
      * SCHEDULED A MOMENT AGO, SO "CANCEL THAT" MEANS THE SCHEDULE. Clone
      * 2026-10-04: after parking a closure, "dont close it, cancel that"

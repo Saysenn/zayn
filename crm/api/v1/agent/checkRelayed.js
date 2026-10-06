@@ -33,6 +33,15 @@ const { facts } = require('./confirmReplay');
  * failed a different way, and the one she is answering is the latest.
  */
 function linesShown(toolResults = []) {
+  /**
+   * EVERY PENDING LIST THIS TURN, not the last one. "his monthly 1600 and
+   * mark him paid" is two previews for one person, both held, and one yes
+   * applies both. She showed only the paid line, and the monthly change
+   * went through unseen. gpt-4.1 messy sweep, 2026-10-06. A list that is
+   * not pending (already done) is a report, and the last of those wins.
+   */
+  const pending = toolResults.filter((r) => r?.pending && Array.isArray(r.lines) && r.lines.length > 0);
+  if (pending.length > 1) return pending.flatMap((r) => r.lines);
   for (let i = toolResults.length - 1; i >= 0; i -= 1) {
     const lines = toolResults[i]?.lines;
     if (Array.isArray(lines) && lines.length > 0) return lines;

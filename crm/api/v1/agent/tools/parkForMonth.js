@@ -347,10 +347,21 @@ const listParked = {
       return { summary: `Nothing is parked for a later month.${ranBlock}\n\nAnswer what they asked in one or two sentences.` };
     }
     const lines = rows.map((r) => `  ${monthLabel(r.due_month)}: ${r.said}`);
+    /**
+     * THE LIST IS THE ANSWER. Asked "what have I got scheduled?" she said
+     * "You have one change parked" and never said what it was, though this
+     * handed it to her. gpt-4.1 core suite, 2026-10-06. So the reply is
+     * built here, every item with its month, and goes out as written.
+     */
+    const reply = `${rows.length === 1 ? 'One change is' : `${rows.length} changes are`} parked for later, `
+      + `not applied yet:\n${rows.map((r) => `- ${monthLabel(r.due_month)}: ${r.said}`).join('\n')}`
+      + (ran.length > 0 ? `\n\nAlready ran:\n${ran.map((r) => `- ${monthLabel(r.due_month)}: ${r.said}: ${RAN_AS[r.status] ?? r.status}`).join('\n')}` : '');
     return {
       summary: `${rows.length} parked, none of it applied yet:\n${lines.join('\n')}${ranBlock}\n\n`
         + 'The parked ones WILL happen at the start of their month; they are not true now. Do not '
         + 'describe any of them as done, and do not quote a figure from one as a current value.',
+      reply,
+      computedReply: true,
     };
   },
 };
@@ -431,7 +442,7 @@ const cancelParked = {
     if (parked.length === 0) return { summary: 'Nothing is parked, so there is nothing to call off. Say so.' };
     const words = String(args.match ?? args.said ?? '').toLowerCase()
       .split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !/^(?:the|one|cancel|scrap|that|this|don|dont|for|and|actually|parked|scheduled|change|bump)$/.test(w));
-    const picked = args.id != null
+    let picked = args.id != null
       ? parked.filter((p) => Number(p.id) === Number(args.id))
       : parked.filter((p) => words.length > 0 && words.some((w) => String(p.said ?? '').toLowerCase().includes(w)));
     const listing = parked.map((p) => `#${p.id} ${monthLabel(p.due_month)}: ${p.said}`).join('\n');
@@ -448,6 +459,18 @@ const cancelParked = {
      * or they said all of them. 2026-10-05.
      */
     const personOf = (p) => String(p.said ?? '').split(/ · |: /)[0].trim().toLowerCase();
+    /**
+     * THE PERSON THEY SAID NARROWS IT. "cancel the mara one" came as match
+     * "BAKER", three entries in that group matched, and it asked which. Their
+     * own words name one person: when exactly one person's entries are among
+     * the matches, those are the ones. gpt-4.1 core suite, 2026-10-06.
+     */
+    if (picked.length > 1) {
+      const heard = String(args.said ?? '').toLowerCase();
+      const people = [...new Set(picked.map(personOf))]
+        .filter((who) => who && heard.split(/[^a-z0-9']+/).some((w) => w.length >= 3 && who.split(/\s+/).includes(w.replace(/'s$/, ''))));
+      if (people.length === 1) picked = picked.filter((p) => personOf(p) === people[0]);
+    }
     const changeOf = (p) => String(p.said ?? '').slice(String(p.said ?? '').indexOf(': ') + 2).trim().toLowerCase();
     const oneAct = picked.length > 1 && (/\b(?:all|both|every|them|those|these)\b/i.test(String(args.said ?? args.match ?? ''))
       || (new Set(picked.map(personOf)).size === 1 && new Set(picked.map(changeOf)).size === 1));

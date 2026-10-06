@@ -138,7 +138,65 @@ function isSetInstruction(said) {
   // ARITHMETIC IS NOT AN EDIT: "add gloria and zayn together" was taken as a write,
   // her correct total was refused, and she reached for the edit tool. 2026-09-28.
   if (SUMS.test(text) || ASKS_FOR.test(text)) return false;
-  return IMPERATIVE.test(text) || verbSlipped(text) || SHOULD_BE.test(text);
+  return IMPERATIVE.test(text) || verbSlipped(text) || SHOULD_BE.test(text) || terseEdit(text);
+}
+
+/**
+ * ===============================
+ * * THE ORDER WITH NO VERB IN FRONT
+ * ===============================
+ * Bulk sweep on gpt-4.1, 2026-10-06, every one read as a lookup and
+ * answered "Kiran Vale has 3 deals:":
+ *
+ *   "dudcut 200 to kiran vales deals"            a two letter slip
+ *   "kiran vale monthly 2750 every deal"          no verb at all
+ *   "switch all kiran vale deals to aed"          a verb nobody listed
+ *   "door no 12b for kiran all deals"             a field and a value
+ *   "label all kiran deals VIP"                   the field IS the verb
+ *   "kiran accepts postals, set it on all"        the verb after the name
+ *
+ * A STATEMENT, never a question: a question word in front, a question
+ * mark at the end, or a lookup verb ("show", "list", "how much") keeps
+ * the turn a lookup. Then any ONE of these makes it an order:
+ *
+ *   an edit verb ANYWHERE in it, or a two letter slip of a long one
+ *   a field named with a value after it
+ *   "on all", "every deal", "all his deals", "everywhere"
+ *
+ * Wrong costs a model round, never a write: see the note at the top.
+ */
+const LOOKUP_LEAD = /^\s*(?:(?:ok|okay|so|now|hey|diane|please)\b[,\s]*)*(?:what|which|who|whose|when|where|why|how|is|are|was|were|does|do|did|has|have|any|show|list|find|display|count|total|sum|compare|export|download|print|tell|give me|get me|look|check|see|view|open)\b/i;
+const EDIT_ANYWHERE = /\b(?:set|change|update|make|mark|put|move|switch|swap|replace|rename|label|tag|note|flag|clear|remove|add|deduct|subtract|minus|take|knock|bump|raise|increase|lower|reduce|cut|drop|apply|assign|give)\b/i;
+const FIELD_WORDS = /\b(?:monthly|payable(?:\s+(?:amount|days))?|days|currency|aed|gbp|euro|usd|paid|payment\s+method|method|bank|cash|crypto|location|door(?:\s+(?:no|number))?|postcode|post\s*code|postals?|acc(?:ount)?\s*(?:no|number)?|sort\s*code|label|note|notes|role|fee|add[\s-]?on|preset|end\s+date|start(?:\s+date)?|payment\s+start|appointment|appointed|special\s+case|review|reviewed)\b/i;
+const VALUE = /(?:\d|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b|\b(?:yes|no|true|false|vip)\b|:\s*\S|\bto\s+\S|\bis\s+\S|\bnow\b)/i;
+const SCOPE_ALL = /\b(?:on|for|to)\s+(?:all|every|each|any)\b|\b(?:all|every|each)\s+(?:of\s+)?(?:\w+'?s?\s+){0,3}deals?\b|\bevery\s*where\b|\ball\s+(?:his|her|their|of\s+them)\b/i;
+const LONG_SLIP_MIN = 6;
+
+/** A long verb two edits away in any word: "dudcut" is "deduct". */
+function verbSlippedAnywhere(text) {
+  return String(text).toLowerCase().split(/[^a-z]+/).some((w) => w.length >= LONG_SLIP_MIN
+    && !LONG_VERBS.includes(w) && !isInflection(w)
+    && LONG_VERBS.some((v) => v.length >= LONG_SLIP_MIN && slip2(w, v)));
+}
+
+function slip2(a, b) {
+  if (Math.abs(a.length - b.length) > 2) return false;
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j += 1) d[0][j] = j;
+  for (let i = 1; i <= a.length; i += 1) {
+    for (let j = 1; j <= b.length; j += 1) {
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  }
+  return d[a.length][b.length] <= 2;
+}
+
+function terseEdit(text) {
+  if (LOOKUP_LEAD.test(text) || /\?\s*$/.test(text)) return false;
+  if (EDIT_ANYWHERE.test(text) || verbSlippedAnywhere(text)) return true;
+  if (FIELD_WORDS.test(text) && VALUE.test(text.replace(FIELD_WORDS, ' '))) return true;
+  return SCOPE_ALL.test(text);
 }
 
 /**

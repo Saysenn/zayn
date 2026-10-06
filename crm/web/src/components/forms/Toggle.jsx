@@ -1,5 +1,6 @@
-// A real on/off switch, not a checkbox — accent when on, red (danger) when
-// off, always one or the other, never an ambiguous middle state.
+// A real on/off switch, not a checkbox — accent when on, grey when off,
+// always one or the other, never an ambiguous middle state. Off was red,
+// and red in this CRM means a delete; an unpaid deal is not an error.
 //
 // A PILL WITH A ROUND KNOB, now that the app has radii. It was square on
 // both, which is the one shape that reads as a broken control rather than
@@ -23,7 +24,7 @@ export default function Toggle({ checked, onChange, disabled, label }) {
       // the translate-x below then pushes it out past the edge — which is
       // exactly what made these render as broken rectangles.
       className={`relative inline-flex h-5 w-9 min-h-0 shrink-0 items-center justify-start gap-0 rounded-full border-0 p-0 transition-colors ${
-        checked ? 'bg-accent' : 'bg-danger'
+        checked ? 'bg-accent' : 'bg-border-strong'
       } ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
     >
       <span
