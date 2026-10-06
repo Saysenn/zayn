@@ -197,7 +197,8 @@ test('an empty change asks rather than writing nothing quietly', async () => {
   const { tool, seen } = load({ rows: [row(1)] });
   const out = await tool('bulk_update_master_sheet').handler({ group: 'INDIGO', set: {}, confirmed: true });
   assert.equal(seen.updated.length, 0);
-  assert.match(out.summary, /Nothing to set/);
+  // Reworded 2026-10-06 so she cannot read it as "already set".
+  assert.match(out.summary, /NOTHING HAS BEEN CHANGED AND NOTHING WAS CHECKED: no field was given to set/);
 });
 
 test('no match is said plainly, not treated as an error', async () => {

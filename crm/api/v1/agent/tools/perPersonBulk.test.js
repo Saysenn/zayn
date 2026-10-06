@@ -71,9 +71,9 @@ test('THE FIRST CALL WRITES NOTHING and lists a line PER PERSON', async () => {
   // A count on its own hides that they are DIFFERENT changes, so nobody
   // could tell one wrong value from the rest.
   // One line per DEAL, from and to (2026-09-25).
-  assert.match(out.summary, /Gloria at Acqua: payable days \d+ to 10/);
-  assert.match(out.summary, /Paddy at Leadstone: payable days \d+ to 0/);
-  assert.match(out.summary, /Nathan at Relia: monthly amount GBP [\d,]+ to GBP 750/);
+  assert.match(out.summary, /Gloria at Acqua in INDIGO: payable days \d+ to 10/);
+  assert.match(out.summary, /Paddy at Leadstone in INDIGO: payable days \d+ to 0/);
+  assert.match(out.summary, /Nathan at Relia in INDIGO: monthly amount GBP [\d,]+ to GBP 750/);
 });
 
 test('CONFIRMED, each person gets their OWN value', async () => {
@@ -101,19 +101,21 @@ test('the payable amount follows the days, per person', async () => {
 // ===============================
 // * EVERY GUARD THE OTHER PATH HAS
 // ===============================
+// A bank or an address on ONE named person's own deals is allowed since
+// 2026-10-06 (ONE_PERSONS_OWN); identity columns still are not.
 test('a per person column is refused BY NAME, on any entry', async () => {
   const { tool, wrote } = loadTool();
   const out = await tool.handler({
     perPerson: [
       { person: 'Gloria', set: { payableDays: 10 } },
-      { person: 'Paddy', set: { bankDetails: 'Barclays' } },
+      { person: 'Paddy', set: { groupName: 'MILKMAN' } },
     ],
     confirmed: true,
     said: 'go',
   });
   assert.equal(wrote.length, 0);
   assert.match(out.summary, /NOTHING HAS BEEN CHANGED/);
-  assert.match(out.summary, /paying many people into one account/);
+  assert.match(out.summary, /moving rows between groups changes their identity/);
 });
 
 test('a derived field is refused with its REAL reason', async () => {
@@ -161,9 +163,11 @@ test('an entry with nothing to set asks, rather than writing the rest', async ()
 test('a guessed year on ONE entry stops the lot', async () => {
   const { tool, wrote } = loadTool();
   const out = await tool.handler({
+    // No month word: "set gloria to september" is now pinned to the nearest
+    // September (pinSaidYears, 2026-10-06), so the year here is hers alone.
     perPerson: [{ person: 'Gloria', set: { presetOn: '2024-09-01' } }],
     confirmed: true,
-    said: 'set gloria to september',
+    said: 'move gloria preset back',
   });
   assert.equal(wrote.length, 0);
   assert.match(out.summary, /2024/);
@@ -223,7 +227,7 @@ test('a second person by NAME in one turn is sent to perPerson', async () => {
   const second = await update.handler({ targetPerson: 'Paddy', payableDays: 0, turn: t, said: 'gloria 10 paddy 0' });
   assert.equal(second.pending, true);
   assert.equal(second.redirect.name, 'bulk_update_master_sheet');
-  assert.deepEqual(second.lines.map((l) => l.split(':')[0]), ['Paddy at Leadstone']);
+  assert.deepEqual(second.lines.map((l) => l.split(':')[0]), ['Paddy at Leadstone in INDIGO']);
   assert.match(second.summary, /ALREADY SAVED THIS TURN, not part of this: Gloria/);
 });
 

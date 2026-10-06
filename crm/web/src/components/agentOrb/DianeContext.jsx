@@ -29,13 +29,23 @@ const DianeCtx = createContext(null);
  */
 const ONLY_CONTEXT = 'master-sheet';
 
+const OPEN_KEY = 'diane-open';
+function wasOpen() {
+  try { return sessionStorage.getItem(OPEN_KEY) === '1'; } catch { return false; }
+}
+
 export function DianeProvider({ children }) {
   const [context, setContext] = useState(ONLY_CONTEXT);
-  const [open, setOpen] = useState(false);
+  // A REFRESH KEEPS HER OPEN. It dropped the admin back on the page
+  // underneath, mid conversation. Per tab, like the conversation itself.
+  const [open, setOpen] = useState(wasOpen);
   // Once true, stays true — the overlay keeps rendering (hidden via its
   // own `open` prop) so the conversation survives closing and reopening,
   // and Three.js never loads until Diane is actually opened once.
-  const [everOpened, setEverOpened] = useState(false);
+  const [everOpened, setEverOpened] = useState(wasOpen);
+  useEffect(() => {
+    try { sessionStorage.setItem(OPEN_KEY, open ? '1' : ''); } catch { /* storage off: a refresh closes her */ }
+  }, [open]);
 
   // LOCKED HERE, where every way in passes: no key or no credit shows why instead.
   const ai = useAiStatus();

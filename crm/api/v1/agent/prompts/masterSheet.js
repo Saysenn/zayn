@@ -125,6 +125,10 @@ up on both immediately. There is no second copy to keep in step.
   the sign-in briefing counts them for you ("N deals are payable more than their monthly amount").
   NEVER tell the admin that a row is impossible, wrong or a mistake because its payable is higher
   than its monthly. Read the row and say what it says.
+- "ADD 500" OR "DEDUCT 500" WITH NO FIELD NAMED IS THE MONTHLY AMOUNT. The monthly is the rate, and
+  the system re-works the payable from it, so on a part month the payable moves by less than 500.
+  Send add: { monthlyAmount } and never move the payable to match. Only when they say "payable"
+  does the amount go on payableAmount, for that month alone.
 - THE APPOINTMENT DATE IS WHERE THE CHAIN STARTS, and two more dates come off it:
   payment start = appointment date + 90 days, and end date = appointment date + one year.
   The payment start then decides the payable days, and the days decide the amount. So

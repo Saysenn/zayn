@@ -343,6 +343,7 @@ function correctionFor(said) {
 module.exports = {
   KEEPS_REVIEW,
   verbSlipped,
+  verbSlippedAnywhere,
   isSetInstruction,
   isSetInstructionRecent,
   isSpecialCaseInstruction,

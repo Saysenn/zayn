@@ -688,13 +688,15 @@ test('a scope that matched nothing anywhere is checked before a zero is reported
   assert.doesNotMatch(out.summary, /nothing, saved actual/);
 });
 
+// "LAST MONTH", not "last august": the fixture is last month, and the words win
+// over the argument, so "august" read a month with no snapshot from October on.
 // A REGRESSION I WROTE. The guard read every scope slot, and a person is
 // correctly neither a group nor a company, so a real person with a quiet
 // month was told "there is no group called Gloria".
 test('a person with no money in a month is never called a missing group', async () => {
   const month = move(currentMonth(), -1);
   const out = await withRepos(
-    () => compareMonths.handler({ months: [month], person: 'Gloria', said: 'gloria last august' }),
+    () => compareMonths.handler({ months: [month], person: 'Gloria', said: 'gloria last month' }),
     { snapshots: { findMany: async () => [{ month, totals: { deals: [] } }] } },
   );
 
@@ -706,7 +708,7 @@ test('a person with no money in a month is never called a missing group', async 
 test('a real scope with no money still reports nothing', async () => {
   const month = move(currentMonth(), -1);
   const out = await withRepos(
-    () => compareMonths.handler({ months: [month], group: 'NEXUS', said: 'nexus last august' }),
+    () => compareMonths.handler({ months: [month], group: 'NEXUS', said: 'nexus last month' }),
     {
       snapshots: { findMany: async () => [{ month, totals: { deals: [] } }] },
       people: { filterOptions: async () => ({ groups: ['MILKMAN', 'NEXUS'], companies: ['Workforce'] }) },

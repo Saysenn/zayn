@@ -50,19 +50,24 @@ const year = (n) => String(Number(currentMonth().slice(0, 4)) + n);
 const THIS_YEAR = `${currentMonth()}-01`;
 const TWO_YEARS_BACK = `${year(-2)}-09-01`;
 
+// "September" with no year is the NEAREST September since 2026-10-06
+// (pinSaidYears in masterSheet.js): the year is worked out, never hers.
+const NEAREST_SEPTEMBER = (() => {
+  const [cy, cm] = currentMonth().split('-').map(Number);
+  const y = [cy - 1, cy, cy + 1].sort((a, b) => Math.abs((a - cy) * 12 + 9 - cm) - Math.abs((b - cy) * 12 + 9 - cm))[0];
+  return `${y}-09-01`;
+})();
+
 test('THE ACTUAL INCIDENT: a bare month cannot become a past year', async () => {
   await withRepo(async (written) => {
-    const out = await bulk.handler({
+    await bulk.handler({
       set: { presetOn: TWO_YEARS_BACK },
       confirmed: true,
       said: 'update all the presets to september',
     });
 
-    assert.equal(written.length, 0, 'it wrote a year nobody said');
-    assert.match(out.summary, /NOTHING HAS BEEN CHANGED/);
-    assert.match(out.summary, /owed\s+NOTHING/);
-    // The year has to be named, or the sentence is unactionable.
-    assert.match(out.summary, new RegExp(year(-2)));
+    assert.equal(written.length, 2);
+    for (const w of written) assert.equal(w.patch.presetOn, NEAREST_SEPTEMBER, 'it wrote a year nobody said');
   });
 });
 
@@ -89,16 +94,16 @@ test('the ordinary case is untouched', async () => {
   }
 });
 
-test('A FUTURE YEAR IS GUESSED TOO, and refused the same way', async () => {
+test('A FUTURE YEAR IS GUESSED TOO, and replaced the same way', async () => {
   // The fault is the missing year, not the direction.
   await withRepo(async (written) => {
-    const out = await bulk.handler({
+    await bulk.handler({
       set: { presetOn: `${year(3)}-09-01` },
       confirmed: true,
       said: 'update all the presets to september',
     });
-    assert.equal(written.length, 0);
-    assert.match(out.summary, /AFTER/);
+    assert.equal(written.length, 2);
+    for (const w of written) assert.equal(w.patch.presetOn, NEAREST_SEPTEMBER);
   });
 });
 

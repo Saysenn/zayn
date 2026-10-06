@@ -2938,6 +2938,10 @@ const summarizeDeals = {
       }
       const sorted = [...counts].sort((a, b) => (most[1].toLowerCase() === 'most' ? b[1] - a[1] : a[1] - b[1]));
       if (sorted.length === 0) {
+        if (args.group) {
+          const wrong = await notAGroup(args.group, args.said);
+          if (wrong) return { summary: wrong };
+        }
         const reply = 'There are no live deals to count.';
         return { summary: reply, reply, computedReply: true };
       }
@@ -2959,6 +2963,12 @@ const summarizeDeals = {
     const column = SUMMARY_FIELD[field];
     const rows = ((await repo.findAll({ ...filtersIn(args), ...(args.group ? { group: args.group } : {}), pageSize: 5000 }).catch(() => null))?.rows ?? [])
       .filter((r) => !r.stopped_on);
+    // A GROUP THAT NEVER EXISTED IS NOT "No live deals in X": the same
+    // confident zero the filter and the total refuse. Unit sweep 2026-10-06.
+    if (rows.length === 0 && args.group) {
+      const wrong = await notAGroup(args.group, args.said);
+      if (wrong) return { summary: wrong };
+    }
     const keyOf = SUMMARY_BY[args.by] ?? (() => 'all');
     const buckets = new Map();
     for (const r of rows) {
@@ -5608,9 +5618,10 @@ const updateRow = {
       // twice. The one deal door takes it too. 2026-09-25.
       add: {
         type: 'object',
-        description: 'An amount ADDED to what this deal holds now: "add 500 to her payable amount". '
-          + 'Keys: payableAmount, monthlyAmount, payableDays. Negative takes off. Never work the '
-          + 'new figure out yourself.',
+        description: 'An amount ADDED to what this deal holds now. "add 500" or "deduct 500" with no field '
+          + 'named is monthlyAmount, and the payable follows it; payableAmount only when they said '
+          + 'payable. Keys: monthlyAmount, payableAmount, payableDays. Negative takes off. Never work '
+          + 'the new figure out yourself.',
       },
       dealStatus: {
         type: 'string',
@@ -6369,9 +6380,24 @@ const auditRows = {
     type: 'object',
     properties: {
       person: { type: 'string', description: 'ONE person, when they ask what is wrong with them ("what\'s wrong with liam\'s dates"). Omit for the whole sheet.' },
+      people: { type: 'array', items: { type: 'string' }, description: 'SEVERAL people, when they asked about more than one. Use this INSTEAD of `person`.' },
     },
   },
-  async handler(args = {}) {
+  async handler(rawArgs = {}) {
+    // "WHAT'S WRONG WITH LIAM AND KIRAN" is two people's findings, each
+    // under their own name. `person` alone could carry one. 2026-10-06.
+    const people = listAsked(rawArgs.people);
+    if (people.length > 1) {
+      return answerEach({
+        values: people,
+        singular: 'person',
+        plural: 'people',
+        args: rawArgs,
+        handler: auditRows.handler,
+        guidance: `${people.length} SEPARATE PEOPLE, checked one at a time. Keep each person's findings under their own name.`,
+      });
+    }
+    const args = people.length === 1 ? { ...rawArgs, person: people[0] } : rawArgs;
     /**
      * ONE PERSON'S FINDINGS. Browser on the clone, 2026-10-04: after the
      * check listed "Liam Edwards: payment start 2026-12-03, its appointment
@@ -8085,7 +8111,7 @@ const bulkUpdate = {
         summary: `NOTHING HAS BEEN CHANGED. They said to move it BY ${fields[setMoney[0]]}, not to make it `
           + `${fields[setMoney[0]]}, and setting it would replace every deal's figure. Adding an amount is `
           + 'done per person: if they named people, call again with perPerson, each { person, allDeals: true, '
-          + `add: { payableAmount: ${fields[setMoney[0]]} } }. If they did not, ask ONE short question: which `
+          + `add: { ${setMoney[0]}: ${fields[setMoney[0]]} } }. If they did not, ask ONE short question: which `
           + 'people should get it, or did they mean a new fixed figure.',
         reply: `Just to be sure, nothing has changed: should ${fields[setMoney[0]]} be ADDED to what they `
           + `get, or did you mean a new fixed figure of ${fields[setMoney[0]]}? Adding an amount goes `
@@ -10324,7 +10350,10 @@ async function undoBatch(args) {
     };
   }
 
-  const label = listOf(batch.fields.map((f) => FIELD_LABELS[f] ?? f));
+  // WHAT IS PUT BACK, not the whole batch: undoing Zayn's add on said label,
+  // monthly, notes and four more had gone back too. Clone 2026-10-06.
+  const backFields = [...new Set(picked.filter((c) => !heldIds.has(c.id)).map((c) => c.field).filter(Boolean))];
+  const label = listOf((backFields.length > 0 ? backFields : batch.fields).map((f) => FIELD_LABELS[f] ?? f));
 
   // Field by field. Flattened, one batch setting three of them read as
   // "set to 1000, 2026-09-01, 30", which says nothing about which is which.

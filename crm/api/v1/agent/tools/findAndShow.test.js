@@ -57,7 +57,8 @@ test("one person's four companies are shown, not queried", async () => {
       deal({ id: 4, company: 'Imperium resourcing PR' }),
     ],
   });
-  const out = await tool.handler({ name: 'Nicola' });
+  // "show me": a card is drawn only when they ask to see one (his rule, 2026-10-03).
+  const out = await tool.handler({ name: 'Nicola', said: "show me all of Nicola's details" });
 
   assert.equal(out.cards?.length, 4, 'every deal she holds is a card');
   assert.ok(!/which one/i.test(out.summary), 'it must not ask which one');
@@ -100,7 +101,7 @@ test('the question names the PEOPLE, not every row', async () => {
 
 test('a single deal still reads as one card', async () => {
   const tool = loadTool({ rows: [deal()] });
-  const out = await tool.handler({ name: 'Nicola' });
+  const out = await tool.handler({ name: 'Nicola', said: 'show me Nicola' });
   assert.equal(out.cards?.length, 1);
   assert.match(out.summary, /ALREADY ON SCREEN as a card/);
 });
@@ -204,7 +205,7 @@ test('an exact name wins over fuzzier neighbours, and still shows every deal', a
       deal({ id: 3, person_id: 'zayn', person_name: 'Zayn' }),
     ],
   });
-  const out = await tool.handler({ name: 'Zane' });
+  const out = await tool.handler({ name: 'Zane', said: 'show me Zane' });
 
   assert.equal(out.cards?.length, 2, 'both of Zane\'s deals, and none of Zayn\'s');
   assert.ok(!/different people/.test(out.summary));
@@ -334,14 +335,16 @@ test('"show me only his payable days" is still a FIELD ask, even with show set',
 
 // A payout SET is not a field. `Bank` is one cell inside the bank set, so
 // answering that cell alone would hand back less than they asked for.
-test('a bank details ask keeps its narrowed card', async () => {
+// The set is now SAID in full, bank, account and sort code, rather than a
+// narrowed card (clone run 2026-10-05: "bank details is Barclays").
+test('a bank details ask answers the whole set, never the one cell', async () => {
   const tool = loadTool({ rows: [richard({ bank_details: 'Barclays', account_number: '12345678' })] });
   const out = await tool.handler({
     name: 'Richard', show: 'bank', said: 'show me his bank details',
   });
 
-  assert.equal(out.cards?.length, 1);
-  assert.match(out.reply, /one deal/);
+  assert.equal(out.reply, "Richard's bank details are Barclays, account 12345678.");
+  assert.equal(out.cards, undefined);
 });
 
 test('naming NO field keeps the card, so "show me richard" is unchanged', async () => {
@@ -359,7 +362,7 @@ test('several deals keep the cards: there is no single value to say', async () =
       richard({ id: 92, company: 'Acqua', payable_days: 12 }),
     ],
   });
-  const out = await tool.handler({ name: 'Richard', said: 'whats richards payable days' });
+  const out = await tool.handler({ name: 'Richard', said: 'show me richards payable days' });
 
   assert.equal(out.cards?.length, 2);
   assert.doesNotMatch(out.reply, /payable days: /);

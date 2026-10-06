@@ -2,6 +2,7 @@ const repo = require('../../repos/conversations.repo');
 const { confirmFirst } = require('./confirmFirst');
 // One rule for the year, shared with recall.
 const { daysSaid, settleYear } = require('./recall');
+const { notAGroup } = require('./notAGroup');
 
 /**
  * ===============================
@@ -113,6 +114,11 @@ const showPastConversation = {
     const filters = filtersOf(args);
     const found = await repo.find({ ...filters, limit: 20 });
     if (found.length === 0) {
+      // A group that never existed has no history: see recall's same check.
+      if (args.group) {
+        const wrong = await notAGroup(args.group, args.said);
+        if (wrong) return { summary: wrong };
+      }
       return {
         summary: 'No earlier conversation matches that. Say so plainly; do not describe one.',
         reply: 'I could not find an earlier conversation matching that.',

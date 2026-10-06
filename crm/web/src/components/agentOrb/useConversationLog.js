@@ -41,10 +41,19 @@ const IDLE_MS = 30 * 60 * 1000;
 const CHECKPOINT_BYTES = 50_000;
 const PATH = '/api/v1/conversations';
 
-function newConversation() {
+// THE SAME CONVERSATION AFTER A REFRESH, since the transcript is kept too
+// (AgentOverlay): a new id would file the same messages twice. 2026-10-06.
+const ID_KEY = 'diane.conversationId';
+
+function newConversation(keep = false) {
+  let kept = null;
+  try { kept = keep ? JSON.parse(sessionStorage.getItem(ID_KEY) ?? 'null') : null; } catch { kept = null; }
+  const id = kept?.id ?? crypto.randomUUID();
+  const startedAt = kept?.startedAt ?? new Date().toISOString();
+  try { sessionStorage.setItem(ID_KEY, JSON.stringify({ id, startedAt })); } catch { /* storage off */ }
   return {
-    id: crypto.randomUUID(),
-    startedAt: new Date().toISOString(),
+    id,
+    startedAt,
     checkpointed: false,
     rows: new Set(),
     people: new Set(),
@@ -54,7 +63,7 @@ function newConversation() {
 }
 
 export function useConversationLog(history) {
-  const convo = useRef(newConversation());
+  const convo = useRef(newConversation(true));
   // The latest transcript, readable from an event handler that was
   // registered once. Reading `history` there would close over whatever it
   // was when the listener was attached, which on unload is the worst

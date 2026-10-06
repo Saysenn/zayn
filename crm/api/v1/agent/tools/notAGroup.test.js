@@ -36,12 +36,15 @@ const WRITES = new Set([
   // It gained `group` and `company` when it learned to take NAMES instead
   // of a row id. Still a write, and its confirmation names every row.
   'delete_master_sheet_row',
+  // Deletes saved conversations, never rows, and lists them before a yes.
+  'delete_past_conversations',
 ]);
 
 test('EVERY READ TOOL THAT TAKES A GROUP CHECKS THE GROUP IS REAL', () => {
   const sources = {
     'masterSheet.js': fs.readFileSync(require.resolve('./masterSheet.js'), 'utf8'),
     'recall.js': fs.readFileSync(require.resolve('./recall.js'), 'utf8'),
+    'conversations.js': fs.readFileSync(require.resolve('./conversations.js'), 'utf8'),
     'monthHistory.js': fs.readFileSync(require.resolve('./monthHistory.js'), 'utf8'),
     'historicalBreakdown.js': fs.readFileSync(require.resolve('./historicalBreakdown.js'), 'utf8'),
   };
@@ -60,6 +63,8 @@ test('EVERY READ TOOL THAT TAKES A GROUP CHECKS THE GROUP IS REAL', () => {
     'filter_master_sheet',
     'list_concerns',
     'recall_past_conversations',
+    'show_past_conversation',
+    'summarize_deals',
     'total_master_sheet',
   ], 'the set of group-taking read tools changed');
 

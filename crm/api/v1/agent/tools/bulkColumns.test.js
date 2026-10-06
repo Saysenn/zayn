@@ -156,7 +156,7 @@ test('a field that is not a column at all says SO, rather than "nothing to set"'
  * `repo.findAll`, so a filter added once reaches all three tools.
  */
 test('the bulk tool takes every filter the lookup takes', () => {
-  const { masterSheetTools } = require('./masterSheet.js');
+  const { masterSheetTools, ORDERING_KEYS } = require('./masterSheet.js');
   const paramsOf = (name) => Object.keys(
     masterSheetTools.find((t) => t.name === name).parameters.properties,
   );
@@ -165,8 +165,10 @@ test('the bulk tool takes every filter the lookup takes', () => {
   const bulk = paramsOf('bulk_update_master_sheet');
 
   // `groups` is the lookup's own: it reads several groups at once, and the
-  // bulk tool covers the whole sheet by leaving `group` out instead.
-  const missing = find.filter((k) => !bulk.includes(k) && k !== 'groups');
+  // bulk tool covers the whole sheet by leaving `group` out instead. The
+  // ORDERING keys (sortBy, sortOrder, limit; 2026-10-04) order what is
+  // shown and narrow nothing, so a write has no use for them.
+  const missing = find.filter((k) => !bulk.includes(k) && k !== 'groups' && !ORDERING_KEYS.includes(k));
   assert.deepEqual(missing, [], `the bulk tool cannot narrow by ${missing.join(', ')}`);
 });
 

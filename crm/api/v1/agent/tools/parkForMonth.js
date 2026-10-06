@@ -277,7 +277,21 @@ const parkForMonth = {
           + 'looks the way it does today, and the new value stays from then on.',
       lines,
     });
-    if (needs) return needs;
+    /**
+     * THE PREVIEW GOES OUT AS WRITTEN. Clone 2026-10-06: she said "from next
+     * month ... nothing changes just yet", dropping the month and the from
+     * figure, so the "yes" matched nothing it had been shown and nothing was
+     * saved. A finished sentence, read to them as is.
+     */
+    if (needs) {
+      return {
+        ...needs,
+        reply: `Here's what I'd save for later, for ${who}:\n\n${lines.map((l) => l.trim()).join('\n')}\n\n`
+          + `Nothing changes now. ${check.spec.terminal ? 'The deal stops' : 'It is applied'} on the first `
+          + 'sign-in of that month. Shall I save it?',
+        computedReply: true,
+      };
+    }
 
     const saved = [];
     for (const month of months) {

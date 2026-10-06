@@ -75,7 +75,7 @@ test('IT STOPS THE NAMED DEAL, and the SERVER dates it', async () => {
   // has no business choosing that day.
   const { tools, wrote } = load([DEAL()]);
   const out = await tools.stopDeal.handler({ person: 'Gloria', confirmed: true });
-  assert.deepEqual(wrote, [{ stop: 1, on: '2026-09-17', reason: 'stopped_by_hand' }]);
+  assert.deepEqual(wrote, [{ stop: 1, on: '2026-09-17', reason: 'stopped_by_hand', via: 'diane' }]);
   assert.match(out.reply, /stopped from 17 September 2026/, 'in words, with the year');
 });
 
@@ -218,7 +218,7 @@ test('AND IT NAMES WHY EACH ONE STOPPED', async () => {
 test('IT READS ONLY STOPPED ROWS, never the live sheet', async () => {
   const { tools } = load([DEAL(), STOPPED({ id: 2, person_name: 'Paddy' })]);
   const out = await tools.listStoppedDeals.handler({});
-  assert.match(out.reply, /1 stopped deal,/);
+  assert.match(out.reply, /1 stopped deal \(Paddy\),/);
   assert.doesNotMatch(out.reply, /Gloria/);
 });
 
@@ -330,7 +330,7 @@ test('THE ARCHIVE SPEAKS RATED MONEY, one total per currency', async () => {
     DEAL({ id: 2, person_id: 'zayn', person_name: 'Zayn', currency: 'AED', monthly_amount: 1000, stopped_on: '2026-09-01', stopped_reason: 'stopped_by_hand' }),
   ], [['gloria', { addon: 5, fee: 0 }]]);
   const out = await tools.listStoppedDeals.handler({});
-  assert.match(out.summary, /^2 stopped deals, GBP 2,100.00 and AED 1,000.00 a month between them./);
+  assert.match(out.summary, /^2 stopped deals \(Gloria, Zayn\), GBP 2,100.00 and AED 1,000.00 a month between them./);
   assert.match(out.summary, /Gloria, Director, GBP 2,100.00/, 'each line rated too');
   assert.doesNotMatch(out.summary, /3,100|3,000/, 'never one sum across currencies');
 });
@@ -339,7 +339,7 @@ test('THE ARCHIVE SPEAKS RATED MONEY, one total per currency', async () => {
 test('A GROUP SENT AS A COMPANY IS READ AS THE GROUP', async () => {
   const { tools } = load([DEAL({ stopped_on: '2026-09-01', stopped_reason: 'stopped_by_hand' })]);
   const out = await tools.listStoppedDeals.handler({ company: 'ALPHA', said: 'what was stopped in alpha' });
-  assert.match(out.summary, /^1 stopped deal,/);
+  assert.match(out.summary, /^1 stopped deal \(Gloria\),/);
 });
 
 // 2026-09-30: "bring casey test's deal back" was refused, the apostrophe

@@ -345,10 +345,17 @@ function splitPersonAndGroup(person, options) {
   if (people.some(({ name }) => fold(name) === fold(asked))) return null;
 
   const named = groupsMentionedIn(asked, options?.groups ?? []);
-  if (named.length !== 1) return null;
+  /**
+   * ONE SLIP OF A GROUP SPLITS TOO. "zayn indgo 4500" kept "zayn indgo" as
+   * the name, asked which group, then said nobody called "zayn indgo" was on
+   * the sheet. Clone 2026-10-06. Only one group within a slip, as everywhere.
+   */
+  const slipped = named.length === 0 ? groupsWithinSlip(asked, options?.groups ?? []) : [];
+  if (named.length !== 1 && slipped.length !== 1) return null;
 
-  const group = named[0];
-  const rest = withoutWords(asked, group);
+  const group = named[0] ?? slipped[0];
+  const rest = named.length === 1 ? withoutWords(asked, group)
+    : asked.split(/\s+/).filter((w) => !within(fold(w), fold(group), 1)).join(' ').trim();
 
   // "milkman" on its own is `personSentAsGroup`'s case, not this one.
   if (!rest || !reachesPerson(rest, people)) return null;

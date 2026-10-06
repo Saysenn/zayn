@@ -90,8 +90,9 @@ function unknownArgs(tool, args) {
   // AN AMOUNT ADDED has one door: she sent "payableAmountDelta" to the one
   // deal tool, was refused, and told the admin it could not be done. 2026-09-25.
   const ADDED = /^(?:add|(?:payableAmount|monthlyAmount|payableDays)Delta)$/;
-  const ADD_DOOR = 'An amount ADDED is `add: { payableAmount: N }`: on update_master_sheet_row '
-    + 'for one deal, or bulk_update_master_sheet perPerson for several. It can be done.';
+  const ADD_DOOR = 'An amount ADDED is `add: { monthlyAmount: N }` (payableAmount only when they said '
+    + 'payable): on update_master_sheet_row for one deal, or bulk_update_master_sheet perPerson for '
+    + 'several. It can be done.';
 
   // ON A READ TOOL it pointed nowhere, and "end Dov's review deals" ended in
   // "I can't filter by person". 2026-09-25.

@@ -87,8 +87,8 @@ test('TWO NAMED DEALS BECOME SPECIAL CASES, each line naming what it adds', asyn
   const out = await tool.handler({ perPerson, said: 'make orla co b and bram co b special cases' });
   assert.equal(out.pending, true);
   assert.equal(wrote.length, 0);
-  assert.match(out.summary, /Orla Quennell at Co B: special case ON for \w+ \d{4}, adding GBP 1,000/);
-  assert.match(out.summary, /Bram Tevish at Co B: special case ON for \w+ \d{4}, adding GBP 500/);
+  assert.match(out.summary, /Orla Quennell at Co B in ZZTEST: special case ON for \w+ \d{4}, adding GBP 1,000/);
+  assert.match(out.summary, /Bram Tevish at Co B in ZZTEST: special case ON for \w+ \d{4}, adding GBP 500/);
   assert.doesNotMatch(out.summary, /Orla Quennell at Co A/, 'her other deal was reached');
 
   await tool.handler({ perPerson, confirmed: true, said: 'yes' });
@@ -104,8 +104,8 @@ test('AN AMOUNT ADDED to each named deal\'s payable, from and to', async () => {
     { person: 'Ines Pardew', company: 'Co A', add: { payableAmount: 750 } },
   ];
   const out = await tool.handler({ perPerson, said: 'add 500 to suki payable and 750 to ines' });
-  assert.match(out.summary, /Suki Varnell at Co A: payable amount GBP 3,000 to GBP 3,500/);
-  assert.match(out.summary, /Ines Pardew at Co A: payable amount GBP 1,100 to GBP 1,850/);
+  assert.match(out.summary, /Suki Varnell at Co A in ZZTEST: payable amount GBP 3,000 to GBP 3,500/);
+  assert.match(out.summary, /Ines Pardew at Co A in ZZTEST: payable amount GBP 1,100 to GBP 1,850/);
 
   await tool.handler({ perPerson, confirmed: true, said: 'yes' });
   assert.equal(wrote.find((w) => w.id === 4).fields.payableAmount, 3500);
@@ -187,7 +187,7 @@ test('A PAYABLE PREVIEW NAMES EVERY FIELD IT MOVES, never "untouched" when it is
 test('an amount ADDED sent to the one deal tool is shown its door', () => {
   const { unknownArgs } = require('../knownArgs');
   const one = require('./masterSheet').masterSheetTools.find((t) => t.name === 'update_master_sheet_row');
-  assert.match(unknownArgs(one, { id: 4, payableAmountDelta: 500 }), /add: \{ payableAmount: N \}.*It can be done/);
+  assert.match(unknownArgs(one, { id: 4, payableAmountDelta: 500 }), /add: \{ monthlyAmount: N \}.*payableAmount only when they said payable.*It can be done/);
 });
 
 test('A SECOND PERSON ON THE ONE DEAL TOOL IS HANDED THE FINISHED CALL', async () => {
@@ -199,7 +199,7 @@ test('A SECOND PERSON ON THE ONE DEAL TOOL IS HANDED THE FINISHED CALL', async (
   const out = await one.handler({ targetPerson: 'Bram Tevish', targetCompany: 'Co B', specialCaseDeal: true, said, turn });
   // THE RUNTIME builds the combined preview; she is never trusted to.
   assert.equal(out.pending, true);
-  assert.deepEqual(out.lines.map((l) => l.split(':')[0]), ['Orla Quennell at Co B', 'Bram Tevish at Co B']);
+  assert.deepEqual(out.lines.map((l) => l.split(':')[0]), ['Orla Quennell at Co B in ZZTEST', 'Bram Tevish at Co B in ZZTEST']);
   assert.equal(out.redirect.name, 'bulk_update_master_sheet');
   assert.deepEqual(out.redirect.args.perPerson.map((e) => [e.person, e.company, e.set.specialCaseDeal]), [
     ['Orla Quennell', 'Co B', true], ['Bram Tevish', 'Co B', true],
@@ -223,7 +223,7 @@ test('THE PER DEAL LINES GO OUT AS A LIST the relay guard can hold her to', asyn
   const out = await tool.handler({
     perPerson: [{ person: 'Suki Varnell', add: { payableAmount: 500 } }], said: 'add 500 to suki payable',
   });
-  assert.deepEqual(out.lines, ['Suki Varnell at Co A: payable amount GBP 3,000 to GBP 3,500']);
+  assert.deepEqual(out.lines, ['Suki Varnell at Co A in ZZTEST: payable amount GBP 3,000 to GBP 3,500']);
 });
 
 test('her OWN SUM of an add, sent as a set, goes to `add` too', async () => {
@@ -233,15 +233,16 @@ test('her OWN SUM of an add, sent as a set, goes to `add` too', async () => {
   assert.match(out.summary, /add: \{ payableAmount: 500 \}/);
 });
 
-test('"next month" sent with a guessed year is told which month it is', async () => {
+// "NEXT MONTH" IS A MONTH THE CODE KNOWS: since 2026-10-06 the guessed year
+// is corrected in place and shown in the preview, not refused (farOffPreset).
+test('"next month" sent with a guessed year is corrected to the month they meant', async () => {
   const { tool } = loadTool();
   const out = await tool.handler({
     perPerson: [{ person: 'Suki Varnell', set: { presetOn: '2023-10-01' } }],
     said: 'move suki preset to next month',
   });
-  const [y, m] = MONTH.split('-').map(Number);
-  const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
-  assert.match(out.summary, new RegExp(`they said "next month", which is .*Send ${next}-01`));
+  assert.equal(out.pending, true);
+  assert.deepEqual(out.lines, [`Suki Varnell at Co A in ZZTEST: preset date to "${NEXT}"`]);
 });
 
 test('the bulk identity names the people they named', async () => {
@@ -280,8 +281,8 @@ test('a second person with an ADD is handed the finished perPerson call, add inc
   await one.handler({ targetPerson: 'Suki Varnell', add: { payableAmount: 500 }, said, turn });
   const out = await one.handler({ targetPerson: 'Ines Pardew', targetCompany: 'Co A', add: { payableAmount: 750 }, said, turn });
   assert.deepEqual(out.lines, [
-    'Suki Varnell at Co A: payable amount GBP 3,000 to GBP 3,500',
-    'Ines Pardew at Co A: payable amount GBP 1,100 to GBP 1,850',
+    'Suki Varnell at Co A in ZZTEST: payable amount GBP 3,000 to GBP 3,500',
+    'Ines Pardew at Co A in ZZTEST: payable amount GBP 1,100 to GBP 1,850',
   ]);
   assert.deepEqual(out.redirect.args.perPerson.map((e) => [e.person, e.company, e.add.payableAmount]), [
     ['Suki Varnell', 'Co A', 500], ['Ines Pardew', 'Co A', 750],
@@ -340,8 +341,8 @@ test('"WHICH DEAL?" ANSWERED THROUGH THE ONE DEAL TOOL completes the whole plan'
   assert.match(asked.summary, /Ines Pardew holds 2 deals/);
   const out = await one.handler({ targetPerson: 'Ines Pardew', targetCompany: 'Co A', said: 'the co a one', turn: { wrote: new Map() } });
   assert.deepEqual(out.lines, [
-    'Suki Varnell at Co A: payable amount GBP 3,000 to GBP 3,500',
-    'Ines Pardew at Co A: payable amount GBP 1,100 to GBP 1,850',
+    'Suki Varnell at Co A in ZZTEST: payable amount GBP 3,000 to GBP 3,500',
+    'Ines Pardew at Co A in ZZTEST: payable amount GBP 1,100 to GBP 1,850',
   ]);
   assert.equal(out.redirect.name, 'bulk_update_master_sheet');
 });
@@ -381,4 +382,23 @@ test('a CONFIRMED replay stands on the lines agreed, not on words two turns back
     saidRecent: 'yes\nthe co a one',
   });
   assert.equal(wrote.find((w) => w.id === 5).fields.payableAmount, 1850);
+});
+
+test('"DEDUCT 500" WITH NO FIELD IS THE MONTHLY, and the payable follows it; "payable" said keeps it there', async () => {
+  const { invokeTool } = require('../runAgent');
+  const { recallAll, forget } = require('../confirmReplay');
+  // Written straight away in auto mode, previewed otherwise: either way it names the field it moved.
+  const run = async (said) => {
+    const { wrote } = loadTool();
+    const tools = require('./masterSheet').masterSheetTools;
+    const out = await invokeTool(tools, 'update_master_sheet_row', JSON.stringify({ id: 4, add: { payableAmount: -500 } }),
+      [{ role: 'user', content: said }], null, { wrote: new Map(), claims: [] });
+    recallAll('yes', out.summary ?? '').forEach(forget);
+    const fields = wrote.find((w) => w.id === 4)?.fields;
+    return fields
+      ? { monthly: fields.monthlyAmount === 2500, payable: fields.payableAmount === 2500 }
+      : { monthly: /monthly amount GBP 3,000 to GBP 2,500/i.test(out.summary), payable: /payable amount GBP 3,000 to GBP 2,500/i.test(out.summary) };
+  };
+  assert.deepEqual(await run('deduct 500 to suki varnell'), { monthly: true, payable: false });
+  assert.deepEqual(await run('deduct 500 from suki varnell payable'), { monthly: false, payable: true });
 });

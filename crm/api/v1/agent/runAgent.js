@@ -14,7 +14,7 @@ const rowsRepo = require('../repos/masterSheetRows.repo');
 const { writeTarget, namedSomeoneElse, refusalFor } = require('./namedOther');
 // Auto mode: the closed ALLOW list of confirmations that may be skipped,
 // and the one time the admin is asked whether to turn it on.
-const { couldSkip, autoConfirmOffer } = require('./autoConfirm');
+const { couldSkip, spelledOut, autoConfirmOffer } = require('./autoConfirm');
 const { stripMarkdown } = require('./stripMarkdown');
 const { noDashes } = require('./noDashes');
 const { dealWords } = require('./dealWords');
@@ -95,6 +95,68 @@ const VAGUE_EDIT = /^\s*(?:(?:hey|hi|ok|okay|diane|pls|please|can you|could you)
 
 const LATER_MONTH = /\b(?:next month|from (?:next|the \d|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*|starting|beginning|as of|come (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)|in (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*|for the next \d+ months|schedul\w*|park\w*|end of (?:this|the) month)\b/i;
 
+// What another tool owns: a rate, their own details, or ending and undoing.
+const OWN_TOOL = /%|\bpercent|\bfees?\b|\badd[\s-]?ons?\b|\brates?\b|post\s*code|\bdoor\b|\bbank\b|\baccount\b|sort\s*code|\bphone\b|postals?\b|\b(?:stop|end|terminate|delete|remove|resume|restart|reopen|undo|revert|roll\s*back|answer|review|rename|close|archive)\b/i;
+
+/**
+ * ===============================
+ * * EVERY FIELD THEY NAMED IS IN THE CALL, OR NOTHING IS WRITTEN
+ * ===============================
+ * Clone 2026-10-06: "paddy payable days 28, notes sweep five, label SWEEP5,
+ * monthly 13800, payment method bank, mark paid" wrote five and dropped
+ * "paid" without a word. Each field they name by its own word must be in
+ * the one deal call, as a value or an add.
+ */
+const NAMED_FIELDS = [
+  [['paid', 'overridePaid'], /\bmark(?:ed)?\s+(?:\w+\s+){0,2}(?:as\s+)?(?:un)?paid\b|\b(?:unpaid|not\s+paid)\b/i],
+  [['notes'], /\bnotes?\b/i],
+  [['label'], /\blabel\b/i],
+  [['payableDays'], /\bpayable\s+days\b|\b\d+\s+days\b|\bdays\s+(?:to\s+)?\d/i],
+  [['monthlyAmount'], /\bmonthly\b[^,.;?]{0,20}\d/i],
+  [['payableAmount'], /\bpayable\s+amount\b[^,.;?]{0,20}\d/i],
+  [['paymentMethod'], /\bpayment\s+method\b/i],
+  [['currency'], /\bcurrency\b/i],
+  [['presetOn'], /\bpreset\b/i],
+  [['endOn'], /\bend\s+date\b/i],
+  [['assignedOn'], /\bappointment\b/i],
+  [['paymentStartOn'], /\bpayment\s+start\b/i],
+  [['feePercent', 'feePercentDelta'], /\bfee\b/i],
+  [['addonPercent', 'addonPercentDelta'], /\badd[\s-]?on\b/i],
+];
+function fieldsLeftOut(said, args = {}) {
+  const sent = new Set([...Object.keys(args), ...Object.keys(args.add ?? {})]);
+  return NAMED_FIELDS.filter(([keys, words]) => words.test(String(said ?? '')) && !keys.some((k) => sent.has(k)))
+    .map(([keys]) => keys[0]);
+}
+
+/**
+ * ===============================
+ * * THE LIGHT MODEL FOR THE PLAIN TURNS, THE FULL ONE FOR THE REST
+ * ===============================
+ * The admin's call 2026-10-06: basic reads and one plain edit on one deal
+ * go to the mini model; bulk, several people, rates, dates, scheduling,
+ * stopping, undo, new deals, three or more fields, a typo, or an answer to
+ * her own question go to the full one. Anything not plainly light is full.
+ * AI_MODEL_LIGHT=off keeps every turn on the full model.
+ */
+const LIGHT_MODEL = (process.env.AI_MODEL_LIGHT ?? 'gpt-4.1-mini').trim();
+const RISKY_FIELDS = new Set(['presetOn', 'endOn', 'assignedOn', 'paymentStartOn', 'currency', 'paymentMethod', 'feePercent', 'addonPercent']);
+function lightTurn(asked, lastAnswer, { named, routedTool }) {
+  const text = String(asked ?? '').trim();
+  // A FEW WORDS ARE A FOLLOW UP ("both", "the indigo one"), read off what came before.
+  const words = text.split(/\s+/).length;
+  if (!text || words > 25 || /\n/.test(text) || (words <= 3 && !/\?\s*$/.test(text))) return false;
+  if (/\?\s*$/.test(String(lastAnswer ?? '').trim())) return false;
+  if (verbSlippedAnywhere(text) || LATER_MONTH.test(text) || OWN_TOOL.test(text)) return false;
+  if (/\b(?:park\w*|schedul\w*|cancel|forecast|project\w*|export)\b/i.test(text)) return false;
+  if (!isSetInstruction(text)) return true;
+  if (routedTool && routedTool !== 'update_master_sheet_row') return false;
+  if (named !== 1 || EVERY_DEAL.test(text)) return false;
+  if (/\b(?:new|another|create|open)\b|\badd(?:ing)?\s+(?:a\s+|an\s+)?(?:\w+\s+)?deal\b/i.test(text)) return false;
+  const fields = NAMED_FIELDS.filter(([, words]) => words.test(text)).map(([keys]) => keys[0]);
+  return fields.length <= 2 && !fields.some((f) => RISKY_FIELDS.has(f));
+}
+
 const EVERY_DEAL_EDIT = {
   test: (said) => {
     const text = String(said ?? '');
@@ -145,7 +207,7 @@ const FORCED_ROUTES = [
   // however messy it is. 2026-10-04.
   [{
     test: (said, history = []) => /^To add .+ I still need\b|(?:is not a group on the sheet\. )?Which group is it/.test(lastAssistantAnswer(history) ?? '')
-      && !/\?\s*$/.test(String(said)) && !CALLED_OFF_ADD.test(String(said)),
+      && !/\?\s*$/.test(String(said)) && !CALLED_OFF_ADD.test(String(said)) && !NEW_REQUEST.test(String(said)),
   }, 'add_deal'],
   // AND A SHORT CORRECTION WHILE THE NEW DEAL IS SHOWN for a yes ("actually
   // make it corvid") is the same add, changed. 2026-10-04.
@@ -272,6 +334,9 @@ function changeAgain(said, history) {
 }
 // "NO FORGET IT" after "To add X I still need ..." calls the add off: it
 // was sent back to add_deal, which answered "it has not moved". 2026-10-04.
+// A DIFFERENT REQUEST ends the new deal questions. "delete sweep tester deal"
+// was answered "Which group is it?" twice. Clone 2026-10-06.
+const NEW_REQUEST = /^\s*(?:delete|remove|stop|end|undo|revert|show|list|how|what|who|why|set|change|update|raise|deduct|mark|give|cancel|from next)\b/i;
 const CALLED_OFF_ADD = /^\s*(?:no|nah|nope|cancel|stop|scrap|forget|never ?mind|leave it|don'?t)\b|\bforget (?:it|about it)\b|\bdon'?t add\b/i;
 const ORDINAL_IN_SENTENCE = /\bthe\s+(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|last)\s+(?:one|person|deal|row|guy|lady)\b/i;
 
@@ -339,13 +404,13 @@ const { checkRateDirection } = require('./checkRateDirection');
 const { checkPointed, DISABLED } = require('./disabledTools');
 const { bypassAttempt, BYPASS_REPLY } = require('./blockBypass');
 const { asksUndoPlainly } = require('./undoIntent');
-const { fold, personMentionedIn } = require('./tools/resolvePerson');
+const { fold, personMentionedIn, within } = require('./tools/resolvePerson');
 const { PROMPT_PLACEHOLDERS } = require('./promptPlaceholders');
 const { rankAskedIn } = require('./tools/masterSheet');
 // A tool's own orders, read out to the admin. See checkLeak.js.
 const { checkLeak } = require('./checkLeak');
 const {
-  answeredWithoutWriting, correctionFor, isSetInstruction, verbSlipped, KEEPS_REVIEW,
+  answeredWithoutWriting, correctionFor, isSetInstruction, verbSlipped, verbSlippedAnywhere, KEEPS_REVIEW,
 } = require('./setIntent');
 
 /**
@@ -1545,7 +1610,58 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
       } catch { /* a guard that cannot read companies leaves the call alone */ }
     }
   }
+  /**
+   * ===============================
+   * * "DEDUCT 500" IS THE MONTHLY, UNLESS THEY SAID PAYABLE
+   * ===============================
+   * The admin's call 2026-10-06. "deduct 500 to paddy" went on the payable, so the
+   * monthly stood and the next pro-rata put the 500 straight back. The
+   * monthly is the rate and the payable follows it (recomputePayable); a
+   * payable moves by hand only when they named it. Here, before the call is
+   * remembered, so the preview and its "yes" are the same change. A
+   * confirmed replay is the change already agreed and is not read again.
+   */
+  if (!args.confirmed && !/\bpay\s*able\b/i.test(recentSaid(history))) {
+    const onMonthly = (add) => {
+      if (add?.payableAmount === undefined || add.monthlyAmount !== undefined) return add;
+      const { payableAmount, ...rest } = add;
+      return { ...rest, monthlyAmount: payableAmount };
+    };
+    if (args.add) args = { ...args, add: onMonthly(args.add) };
+    if (Array.isArray(args.perPerson)) {
+      args = { ...args, perPerson: args.perPerson.map((e) => (e?.add ? { ...e, add: onMonthly(e.add) } : e)) };
+    }
+  }
+  /**
+   * "BOTH" AFTER ONE DEAL GOES ON THE DEALS THAT DID NOT GET IT, whatever
+   * she sends. Clone 2026-10-06: told the ids, she sent the person alone and
+   * the 100 landed on INDIGO a second time. See runAgentTurn.
+   */
+  const others = turn?.otherDeals;
+  if (others && name === 'update_master_sheet_row') {
+    const id = args.id == null ? null : Number(args.id);
+    const next = others.rest.includes(id) ? id : others.rest[0];
+    if (next != null) {
+      const { targetPerson: _p, targetGroup: _g, targetCompany: _c, ...rest } = args;
+      args = { ...rest, id: next };
+      others.rest = others.rest.filter((r) => r !== next);
+      others.done.push(next);
+    } else if (id == null || others.done.includes(id)) {
+      return { summary: 'NOTHING HAS BEEN CHANGED. Every one of their deals already has this change. Say what was done.' };
+    }
+  }
   const modelArgs = { ...args };
+
+  // WHAT SHE SENT TO A WRITE, kept. "deduct 500 to paddy" wrote 13,505 and
+  // nothing on record said what she had called. 2026-10-06.
+  if (tool.writes) {
+    captureLog({
+      source: 'agent',
+      level: 'info',
+      message: `Diane called ${name}`,
+      detail: { tool: name, args: modelArgs, model: turn?.model },
+    });
+  }
 
   const refusal = unknownArgs(tool, args);
   if (refusal) {
@@ -1725,9 +1841,61 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
         turn.sheetNames = await rowsRepo.knownSpellings().then((k) => k.people ?? []).catch(() => []);
       }
       const named = namedSomeoneElse(args.said, writeTarget(modelArgs), turn?.sheetNames ?? []);
-      if (named) {
+      /**
+       * THE ONE THEY NAMED, NOT A REFUSAL. "paddy notes sweep one" was sent
+       * for Drew, refused, and she told the admin Paddy had no live deal.
+       * Clone 2026-10-06. With no row id picked, the name is all she got
+       * wrong, so the call goes to the person they named.
+       */
+      if (named && args.id == null) {
+        logger.warn({ tool: name, named, target: writeTarget(modelArgs) }, 'diane: sent another name, put back to the one they named');
+        const key = ['targetPerson', 'person', 'personName'].find((k) => String(args[k] ?? '').trim() === writeTarget(modelArgs));
+        args = { ...args, [key]: named };
+        // What a later "yes" replays, so it is the right person too.
+        modelArgs[key] = named;
+      } else if (named) {
         logger.warn({ tool: name, named, target: writeTarget(modelArgs) }, 'diane: refused a change for someone they did not name');
         return { summary: refusalFor(named, writeTarget(modelArgs)) };
+      }
+    }
+    /**
+     * "ADD 100 TO JOHNNY NOBODY" IS AN AMOUNT, NOT A NEW DEAL. Clone 2026-10-06:
+     * nobody by that name, so she opened the new deal checklist for him.
+     */
+    /**
+     * A NAME THEY NEVER SAID IS A GUESS. Clone 2026-10-06: "add 100 to johnny
+     * nobody" matched nobody, she offered Johnathon, and the guard that keeps
+     * her acting pushed her into adding 100 to him. A write goes to a person
+     * whose first name they said in their last four messages, one slip allowed. A
+     * message that names nobody ("add 100 to him") points at the screen.
+     */
+    const aimedAt = writeTarget(modelArgs);
+    if (tool.writes && aimedAt && args.said && args.confirmed !== true && !turn?.applyingHeld && !/\b(?:him|her|them|his|hers|their|that|this|it|same|one)\b/i.test(lastSaid(history))) {
+      const first = fold(aimedAt.split(/\s+/)[0]);
+      const heard = recentSaid(history, 4).split(/[^a-z0-9]+/i).map(fold).filter(Boolean);
+      if (first && !heard.some((w) => w === first || (first.length >= 4 && within(w, first, 1)))) {
+        logger.warn({ tool: name, target: aimedAt }, 'diane: a write for a name they never said');
+        return {
+          summary: `NOTHING HAS BEEN CHANGED. They never named ${aimedAt}. If the name they said matches `
+            + 'nobody on the sheet, say so in one line and ask who they meant. Never pick a similar name.',
+        };
+      }
+    }
+    if (name === 'add_deal' && /\badd\s+[£$€]?\d[\d,.]*\s*k?\s*(?:aed|gbp|usd|eur)?\s+(?:to|on|for)\b/i.test(String(args.said ?? ''))
+      && !/\b(?:deal|new|create|hire|onboard)\b/i.test(String(args.said ?? ''))) {
+      return {
+        summary: `NOTHING HAS BEEN CHANGED. They asked to add an AMOUNT to ${modelArgs.personName ?? 'someone'}, `
+          + 'not for a new deal, and nobody by that name is on the sheet. Say so in one line and ask who they meant.',
+      };
+    }
+    if (name === 'update_master_sheet_row' && modelArgs.confirmed !== true) {
+      const missing = fieldsLeftOut(args.said, modelArgs);
+      if (missing.length > 0) {
+        logger.warn({ tool: name, missing }, 'diane: left out a field they named');
+        return {
+          summary: `NOTHING HAS BEEN CHANGED. They also named ${missing.join(', ')}, which this call left out. `
+            + 'Call update_master_sheet_row again with EVERY field they named in this message.',
+        };
       }
     }
     if (tool.writes && asksRateCheck(args.said)) {
@@ -1901,13 +2069,37 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
         }
       } catch { reachesMany = true; }
     }
-    if (!guessed && !reachesMany && couldSkip(name, tool) && await autoConfirmOn(turn)) {
+    // OR THEY SPELLED IT OUT: every deal of a person they named. See
+    // `spelledOut`. An answer to her own question
+    // ("which group, or both?") counts the message it answers too.
+    const answering = /\?\s*$/.test(String(lastAssistantAnswer(history) ?? '').trim());
+    const mayStillSkip = !couldSkip(name, tool)
+      && spelledOut(name, tool, modelArgs, answering ? recentSaid(history) : lastSaid(history));
+    if (!guessed && !reachesMany && (couldSkip(name, tool) || mayStillSkip) && await autoConfirmOn(turn)) {
       logger.info({ tool: name }, 'diane: auto mode, no confirmation asked');
       args.confirmed = true;
       if (turn) turn.wrote.set('__auto', true);
     }
 
-    const { result, wrote } = await watchWrites(() => tool.handler(args));
+    let { result, wrote } = await watchWrites(() => tool.handler(args));
+
+    /**
+     * A HAND OVER THEY SPELLED OUT LANDS TOO. "both", to her own "which
+     * group, or both?", is built into the per person preview inside the one
+     * deal tool, so the check above never saw it. Clone 2026-10-06, auto on:
+     * it still asked "shall I go ahead?". Same rule, applied to the call the
+     * preview stands for, through that tool's own handler and every guard.
+     */
+    const handed = result?.pending && result.redirect ? tools.find((t) => t.name === result.redirect.name) : null;
+    if (handed && !guessed && !wrote
+      && spelledOut(handed.name, handed, result.redirect.args, answering ? recentSaid(history) : lastSaid(history))
+      && await autoConfirmOn(turn)) {
+      logger.info({ tool: handed.name }, 'diane: auto mode, a spelled out hand over, no confirmation asked');
+      ({ result, wrote } = await watchWrites(() => handed.handler({
+        ...result.redirect.args, confirmed: true, said: args.said, saidRecent: args.saidRecent, turn: args.turn,
+      })));
+      if (turn) turn.wrote.set('__auto', true);
+    }
 
     // IT WROTE, so a later bare agreement cannot repeat it. A pending, a
     // question back or a refusal wrote nothing and is never "already done".
@@ -2435,8 +2627,9 @@ async function runAgentTurn(history, contextName, onEvent) {
         + 'first and without asking which deal or which group: for ONE person, perPerson '
         + '[{ person: <the name as they said it>, allDeals: true, set: {...} or add: {...} }]; for '
         + 'several named people, `people`. A percentage on the monthly is raiseMonthlyPercent with '
-        + '`people` [name]. "add/deduct N" with no field named is the payable amount (add, negative '
-        + 'to take off). Their own details (postcode, door number, bank, account, sort code, phone, '
+        + '`people` [name]. "add/deduct N" with no field named is the MONTHLY amount (add: '
+        + '{ monthlyAmount }, negative to take off); the payable follows it. payableAmount only when '
+        + 'they said payable. Their own details (postcode, door number, bank, account, sort code, phone, '
         + 'accepting postals) go in that person\'s set too. If they named a GROUP, a company or '
         + '"everyone" rather than people, use those filters instead of perPerson. Do NOT use '
         + 'update_master_sheet_row.',
@@ -2881,9 +3074,135 @@ async function runAgentTurn(history, contextName, onEvent) {
       });
     }
   }
-  const routedTool = forcedTool ?? (severalExisting ? 'bulk_update_master_sheet' : null) ?? (yesToTalkedEdit
+  /**
+   * ===============================
+   * * ONE PERSON AND AN EDIT IS THE ONE DEAL TOOL, FIRST
+   * ===============================
+   * The admin's call 2026-10-06. "deduct 100 from zayn" went three rounds of
+   * her own "which deal?", each caught (an ambiguity no tool reported, an
+   * instruction answered with a lookup), before she called anything, and one
+   * named a group Zayn is not in. The tool asks which deal itself, from the
+   * rows, so the first round is the tool. A rate or their own details is
+   * update_person, and every deal or a later month already go elsewhere.
+   */
+  let oneExisting = false;
+  if (!forcedTool && !severalExisting && heldCalls.length === 0 && isSetInstruction(asked)
+    && !LATER_MONTH.test(asked) && !EVERY_DEAL.test(asked) && !OWN_TOOL.test(asked)
+    && !/\b(?:new|another|second|extra|create|open)\b|\badd(?:ing)?\s+(?:a\s+|an\s+)?(?:\w+\s+)?deal\b/i.test(asked)
+    && context.tools.some((t) => t.name === 'update_master_sheet_row')) {
+    const everyone = (await require('../repos/people.repo').filterOptions().catch(() => null))?.people ?? [];
+    oneExisting = new Set(everyone.map((p) => p.name).filter((n) => personMentionedIn(asked, n))).size === 1;
+  }
+
+  /**
+   * ===============================
+   * * "BOTH" AFTER A CHANGE THAT WENT ON ONE DEAL
+   * ===============================
+   * Clone 2026-10-06: "deduct 100 from zayn" landed on INDIGO, then "both",
+   * and she answered "there's only one Zayn on the sheet" without looking.
+   * He has two. "Both" there is the same change on the deals that did not
+   * get it, so they are handed over by id, and the one already changed is
+   * named as done so it is not changed twice.
+   */
+  let bothAfterOne = false;
+  const lastAnswer = lastAssistantAnswer(history) ?? '';
+  if (!forcedTool && !severalExisting && !oneExisting
+    && /^\s*(?:both|all|both of them|all of them|both deals|all (?:of )?(?:his|her|their) deals|the other(?: one)? too|everywhere)\s*[.!]*\s*$/i.test(asked)
+    && !/\?\s*$/.test(lastAnswer.trim())) {
+    const before = recentSaid(history, 2).split('\n')[1] ?? '';
+    const everyone = isSetInstruction(before)
+      ? (await require('../repos/people.repo').filterOptions().catch(() => null))?.people ?? [] : [];
+    const named = [...new Set(everyone.map((p) => p.name).filter((n) => personMentionedIn(before, n)))];
+    if (named.length === 1) {
+      const rows = ((await require('../repos/masterSheetRows.repo').findAll({ q: named[0], pageSize: 50 }).catch(() => null))?.rows ?? [])
+        .filter((r) => !r.stopped_on && fold(r.person_name) === fold(named[0]));
+      const done = rows.filter((r) => r.group_name && fold(lastAnswer).includes(fold(`in ${r.group_name}`)));
+      const rest = rows.filter((r) => !done.includes(r));
+      if (done.length > 0 && rest.length > 0) {
+        bothAfterOne = true;
+        turnState.otherDeals = { done: done.map((r) => Number(r.id)), rest: rest.map((r) => Number(r.id)) };
+        messages.push({
+          role: 'system',
+          content: `"${asked}" MEANS THEIR LAST REQUEST ("${before}") ON ${named[0]}'s OTHER DEALS TOO. `
+            + `Already done, do NOT change again: ${done.map((r) => `#${r.id} (${r.group_name})`).join(', ')}. `
+            + `Call update_master_sheet_row once for each of these, by id, with the same change: `
+            + `${rest.map((r) => `#${r.id} (${r.company}${r.group_name ? ` in ${r.group_name}` : ''})`).join(', ')}.`,
+        });
+      }
+    }
+  }
+
+  /**
+   * ===============================
+   * * "NO, I MEANT INDIGO" PUTS THE LAST CHANGE BACK, THEN DOES IT THERE
+   * ===============================
+   * Clone 2026-10-06: "add 100 to zayn milkman", then "no I meant indigo",
+   * added 100 to INDIGO and left MILKMAN's 100 in place. A correction names
+   * which change is wrong, the one she reported a moment ago, so that one is
+   * put back here, and only when the newest change on the sheet is hers on
+   * the deal that answer named. Anything else is left to ask.
+   */
+  if (!forcedTool && heldCalls.length === 0
+    && /^\s*(?:no+|nope|sorry|oops|wait|actually)\b[,!.\s]*(?:,?\s*)(?:i\s+)?(?:meant|mean|wanted)\b/i.test(asked)
+    && /\bupdated\b|^Done\b/i.test(lastAnswer)) {
+    try {
+      const db = require('../../configs/db');
+      const newest = (await db.query(
+        `SELECT c.id, c.row_id, m.person_name, m.group_name FROM tb_mastersheet_changes c
+           JOIN tb_mastersheet m ON m.id = c.row_id
+          WHERE c.reverted_at IS NULL AND c.changed_via = 'diane' AND c.changed_at > now() - interval '15 minutes'
+            AND c.changed_at = (SELECT max(changed_at) FROM tb_mastersheet_changes WHERE reverted_at IS NULL)`,
+      ))?.rows ?? [];
+      const ours = newest.length > 0 && newest.every((c) => fold(lastAnswer).includes(fold(c.person_name))
+        && (!c.group_name || fold(lastAnswer).includes(fold(`in ${c.group_name}`))));
+      if (ours) {
+        const { done } = await require('../repos/masterSheetRows.repo')
+          .revertChangeBatch(newest.map((c) => c.id), null, { via: 'diane', batchId: require('crypto').randomUUID() });
+        const before = recentSaid(history, 2).split('\n')[1] ?? '';
+        const where = `${newest[0].person_name}${newest[0].group_name ? ` in ${newest[0].group_name}` : ''}`;
+        logger.info({ reverted: done.length, where }, 'diane: a correction, the last change put back');
+        messages.push({
+          role: 'system',
+          content: `THEY CORRECTED THE LAST CHANGE. It has been PUT BACK on ${where} already, do not undo anything. `
+            + `Now make their earlier request ("${before}") on what they name now ("${asked}"), and in the reply `
+            + `say both: that ${where} is back as it was, and what changed instead.`,
+        });
+      }
+    } catch (err) {
+      logger.warn({ err: err.message }, 'diane: a correction could not put the last change back');
+    }
+  }
+
+  const routedTool = forcedTool ?? (severalExisting ? 'bulk_update_master_sheet' : null)
+    ?? (oneExisting || bothAfterOne ? 'update_master_sheet_row' : null) ?? (yesToTalkedEdit
     || (yesToName && EVERY_DEAL_EDIT.test(askedBefore)) ? 'bulk_update_master_sheet' : null);
   if (routedTool && !roundTools.some((t) => t.function?.name === routedTool)) roundTools = openAITools;
+  /**
+   * AN INSTRUCTION IS ANSWERED BY A TOOL, FIRST. Clone 2026-10-06: "stop
+   * paddy deal", "delete sweep tester deal", "add 100 to johnny nobody" each
+   * opened with her own question or lookup in words, the checks threw it out
+   * ("answered an instruction with a lookup", "invented an ambiguity") and
+   * she went again: three rounds, paid for, before anything was looked at.
+   * The tools ask the real question from the rows. `say` is a tool, so a
+   * line of her own is still open to her.
+   */
+  const mustAct = !routedTool && heldCalls.length === 0 && isSetInstruction(asked) && !CALLED_OFF_ADD.test(asked);
+
+  // Which model this turn starts on. See `lightTurn`.
+  let namedCount = 0;
+  if (isSetInstruction(asked)) {
+    const everyone = (await require('../repos/people.repo').filterOptions().catch(() => null))?.people ?? [];
+    namedCount = new Set(everyone.map((p) => p.name).filter((n) => personMentionedIn(asked, n))).size;
+  }
+  const light = env.aiProvider === 'openai' && LIGHT_MODEL && LIGHT_MODEL !== 'off'
+    && LIGHT_MODEL !== env.openaiModel && heldCalls.length === 0 && !severalExisting && !bothAfterOne
+    && !turnState.otherDeals && lightTurn(asked, lastAnswer, { named: namedCount, routedTool });
+  let turnModel = light ? LIGHT_MODEL : env.openaiModel;
+  turnState.model = turnModel;
+  logger.info({ model: turnModel }, 'diane: model for this turn');
+  // A RETRY GOES TO THE FULL MODEL: a round that answered in words and was
+  // sent round again by a check is the light model out of its depth.
+  let lastHadTools = true;
 
   /**
    * A TOTAL TAKEN BEFORE A CHANGE IN THE SAME MESSAGE IS STALE. "make felix
@@ -2895,6 +3214,11 @@ async function runAgentTurn(history, contextName, onEvent) {
   let staleTotalPending = false;
   let staleTotalNudged = false;
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    if (round > 0 && !lastHadTools && turnModel !== env.openaiModel) {
+      turnModel = env.openaiModel;
+      turnState.model = turnModel;
+      logger.info({ model: turnModel, round }, 'diane: a retry, so the full model');
+    }
     if (staleTotalPending && !staleTotalNudged) {
       staleTotalNudged = true;
       staleTotalPending = false;
@@ -2911,7 +3235,7 @@ async function runAgentTurn(history, contextName, onEvent) {
     try {
       if (forceNextTool && !roundTools.some((t) => t.function?.name === forceNextTool)) roundTools = openAITools;
       completion = await streamCompletion(openai, {
-        model: env.openaiModel,
+        model: turnModel,
         temperature: 0.2,
         // Real incident: with no cap, one reply degenerated into the same
         // filler sentence repeated 50+ times with no line breaks — a
@@ -2940,7 +3264,8 @@ async function runAgentTurn(history, contextName, onEvent) {
         // looks smooth, no flags" having looked at nothing, with 29 findings
         // on the sheet. The first round is made to call it. 2026-09-30.
         ...((round === 0 && routedTool) || forceNextTool
-          ? { tool_choice: { type: 'function', function: { name: forceNextTool ?? routedTool } } } : {}),
+          ? { tool_choice: { type: 'function', function: { name: forceNextTool ?? routedTool } } }
+          : (round === 0 && mustAct ? { tool_choice: 'required' } : {})),
       });
       forceNextTool = null;
     } catch (err) {
@@ -3005,6 +3330,7 @@ async function runAgentTurn(history, contextName, onEvent) {
     }
 
     const choice = completion.choices[0]?.message;
+    lastHadTools = (choice?.tool_calls ?? []).length > 0;
     if (!choice) throw new AppError(502, "Something came back garbled on my end, sweetie. Try me once more?");
 
     const finishReason = completion.choices[0]?.finish_reason;
@@ -4587,7 +4913,7 @@ async function runAgent(history, contextName, onEvent) {
 }
 
 module.exports = {
-  runAgent, streamCompletion, getClient, withExportReminder, turnsSinceReminder, REMINDER_GAP,
+  runAgent, lightTurn, streamCompletion, getClient, withExportReminder, turnsSinceReminder, REMINDER_GAP,
   // Exported so the claim detectors can be pinned directly rather than
   // through a live model call.
   wantsPanelAct, asksWrongExportStep,

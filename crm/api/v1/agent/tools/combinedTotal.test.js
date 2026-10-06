@@ -56,7 +56,10 @@ const ROWS = [
   deal(93, 'Gloria difference', 'ALL GROUPS', 'AED', 150),
 ];
 
-const SAID = 'combine gloria and gloria difference total for september and show me percentages they have.';
+// THE MONTH IN WORDS IS THE CURRENT ONE. A hard "september" sent every
+// call to `compare_months` (and the database) from 1 October. 2026-10-06.
+const MONTH_WORD = new Date(`${MONTH}-01T00:00:00Z`).toLocaleString('en-GB', { month: 'long', timeZone: 'UTC' }).toLowerCase();
+const SAID = `combine gloria and gloria difference total for ${MONTH_WORD} and show me percentages they have.`;
 
 // EXPLICIT, or these assert what month it is rather than the arithmetic.
 // The fixtures are marked for September, so a run in any other month would
@@ -162,7 +165,7 @@ test('THE PERCENTAGES ARE THERE, one line per person', async () => {
 
 test('one person alone is unaffected', async () => {
   await withRepos(async () => {
-    const out = await total.handler({ person: 'Gloria', said: 'what is gloria owed for september', month: MONTH });
+    const out = await total.handler({ person: 'Gloria', said: `what is gloria owed for ${MONTH_WORD}`, month: MONTH });
     assert.deepEqual(out.total, { GBP: 2000 });
   });
 });

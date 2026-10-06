@@ -77,6 +77,14 @@ const SINGULAR_BY_DESIGN = new Set([
   // several groups at once is the widest possible unrecoverable act.
   'delete_master_sheet_row:group',
   'delete_master_sheet_row:company',
+  // ONE TRANSCRIPT IS SHOWN (2026-10-04): the filters only find the one
+  // conversation, so several people or months is a recall question.
+  'show_past_conversation:person',
+  'show_past_conversation:month',
+  // A DELETE FOR GOOD, scoped the same way: the preview lists every
+  // conversation it would remove, and before/after already span months.
+  'delete_past_conversations:person',
+  'delete_past_conversations:month',
 ]);
 
 /**

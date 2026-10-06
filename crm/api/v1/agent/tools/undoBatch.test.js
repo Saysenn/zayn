@@ -158,10 +158,15 @@ test('A GROUP NOT IN THE CHANGE REFUSES, and says which were', async () => {
 });
 
 test('EXCEPT holds a person back, and names them', async () => {
+  // PREVIEW, THEN YES, as the admin does it. The yes reverts what the
+  // preview pinned, so a bare confirmed call inherited an earlier test's pin.
   let seen = null;
-  const out = await call({ except: ['Dewell'], confirmed: true }, {
+  const over = {
     revertChangeBatch: async (ids) => { seen = ids; return { done: ids.map((id) => ({ ok: true, id })), failed: [] }; },
-  });
+  };
+  await call({ except: ['Dewell'] }, over);
+  assert.equal(seen, null, 'the preview wrote');
+  const out = await call({ except: ['Dewell'], confirmed: true }, over);
 
   assert.deepEqual(seen, [292, 293, 296, 297], "it put back a row it was told to leave");
   assert.match(out.summary, /Dewell left as it was/);
@@ -254,10 +259,18 @@ test('WITHOUT `batch` it is still the single row undo', async () => {
   assert.match(out.summary, /Abe/);
 });
 
-test('a single row undo with NO id asks for one rather than guessing', async () => {
-  const out = await undo.handler({});
-  assert.match(out.summary, /needs its change id/);
-  assert.match(out.summary, /batch true/);
+// NO ID IS "UNDO THAT": the most recent change, PREVIEWED, never written.
+// It used to ask for an id; "undo that" then ended on a list. 2026-10-03.
+test('an undo with NO id and no batch flag previews the latest change, never guesses a row', async () => {
+  let wrote = false;
+  const out = await withRepo({
+    peekFieldChange: async () => { throw new Error('it guessed a change id'); },
+    findChangeBatches: async () => [BATCH],
+    revertChangeBatch: async () => { wrote = true; return { done: [], failed: [] }; },
+  }, () => undo.handler({}));
+  assert.equal(wrote, false, 'an undo with no id wrote before it was confirmed');
+  assert.match(out.summary, /NOTHING HAS BEEN CHANGED YET/);
+  assert.match(out.summary, /3 deals/);
 });
 
 // ===============================
@@ -275,10 +288,13 @@ test('a named person reaches past a newer change they are not in', async () => {
     people: ['Dov'],
   };
   let reverted = null;
-  const out = await call({ people: ['Drew'], confirmed: true }, {
+  const over = {
     findChangeBatches: async () => [NEWER, BATCH],
     revertChangeBatch: async (ids) => { reverted = ids; return { done: ids.map((id) => ({ ok: true, id })), failed: [] }; },
-  });
+  };
+  // Preview, then yes: the yes reverts exactly what the preview pinned.
+  await call({ people: ['Drew'] }, over);
+  const out = await call({ people: ['Drew'], confirmed: true }, over);
   assert.deepEqual(reverted, [296, 297], `it answered: ${out.summary}`);
 });
 

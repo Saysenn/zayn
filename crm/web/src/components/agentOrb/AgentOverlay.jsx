@@ -133,6 +133,37 @@ function forgetExport() {
   try { sessionStorage.removeItem(EXPORT_KEY); } catch { /* nothing to do */ }
 }
 
+/**
+ * THE CONVERSATION SURVIVES A REFRESH, in this tab. A refresh closed her and
+ * started over, mid task. 2026-10-06. The export card is left out: it has
+ * its own key above and is put back from there.
+ */
+const CONVERSATION_KEY = 'diane.conversation';
+
+function conversationFromStorage() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(CONVERSATION_KEY) ?? 'null');
+    return Array.isArray(saved) && saved.length > 0 ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberConversation(history) {
+  try {
+    sessionStorage.setItem(CONVERSATION_KEY, JSON.stringify(history.filter((m) => !m.exportSession)));
+  } catch { /* storage unavailable or full: a refresh starts over, as before */ }
+}
+
+// Signed out: the transcript AND its id, or the next sign in in this tab
+// would carry on, and file over, the last admin's conversation.
+function forgetConversation() {
+  try {
+    sessionStorage.removeItem(CONVERSATION_KEY);
+    sessionStorage.removeItem('diane.conversationId');
+  } catch { /* nothing to do */ }
+}
+
 // Shown the instant a message sends, replaced once the real reply lands —
 // user's own ask: a bare "…" doesn't tell you Diane's actually doing
 // something, versus stuck. Picked once per send (not re-rolled every
@@ -318,9 +349,10 @@ const RESTING_PHRASES = [
 export default function AgentOverlay({ open, onClose }) {
   const { context, recheckAi } = useDiane();
   const [history, setHistory] = useState(() => [
-    { role: 'assistant', content: GREETING },
+    ...(conversationFromStorage() ?? [{ role: 'assistant', content: GREETING }]),
     ...openExportFromStorage(),
   ]);
+  useEffect(() => { rememberConversation(history); }, [history]);
   // Saves the conversation when it ends, never while it is happening.
   // Closing the orb is a save point rather than an end, because the
   // transcript deliberately survives a close and reopen.
@@ -435,6 +467,7 @@ export default function AgentOverlay({ open, onClose }) {
 
   useEffect(() => {
     if (!signedOut) return;
+    forgetConversation();
     tts.cancel();
     if (stt.listening) stt.stop();
     setIsSending(false);

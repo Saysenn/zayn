@@ -39,6 +39,8 @@
  * today, and adding one is a decision somebody makes on purpose here.
  */
 
+const { fold, personMentionedIn } = require('./tools/resolvePerson');
+
 const MAY_SKIP = Object.freeze([
   // One deal, named. Every field it writes is logged and undoable.
   'update_master_sheet_row',
@@ -105,4 +107,40 @@ function autoConfirmOffer({ on, tool, name, replayed }) {
   return { kind: 'autoConfirm', tool: name };
 }
 
-module.exports = { mayAutoConfirm, couldSkip, autoConfirmOffer, MAY_SKIP };
+/**
+ * ===============================
+ * * A CHANGE THEY SPELLED OUT IN FULL
+ * ===============================
+ * The admin's call 2026-10-06, auto mode on: "add 50 to all zayn deals"
+ * still asked "shall I go ahead?". It names what moves in their own words,
+ * and it is undoable from History. So the per person change skips the
+ * preview when every person in it is named here and it says all, both,
+ * every or each of their deals, or names the company. A group, a company
+ * filter or "everyone" still asks.
+ *
+ * AN UNDO ALWAYS ASKS which changes it puts back, their call the same day:
+ * skipped, "undo the last 2 changes" put back all seven of the session.
+ *
+ * A bare "both" names nobody, so it still asks: it may mean the deal that
+ * already changed a moment ago, and a preview is what stops it twice.
+ */
+const EVERY_OF_THEIRS = /\b(?:all|both|every|each)\b/i;
+// A key that ends, stops or reviews a deal is never skipped, whatever was said.
+const ENDS_A_DEAL = /stop|end|status|close|delete|archive|review/i;
+const PER_PERSON_ONLY = new Set(['perPerson', 'confirmed', 'said', 'saidRecent', 'turn', 'onProgress', 'priorAnswer']);
+
+function spelledOut(name, tool, args, said) {
+  if (tool?.stops || !tool?.parameters?.properties?.confirmed) return false;
+  const text = String(said ?? '');
+  if (name !== 'bulk_update_master_sheet') return false;
+  const entries = args?.perPerson;
+  if (!Array.isArray(entries) || entries.length === 0) return false;
+  if (Object.keys(args).some((k) => !PER_PERSON_ONLY.has(k))) return false;
+  return entries.every((e) => e?.person && personMentionedIn(text, e.person)
+    && Object.keys(e.set ?? {}).every((k) => !ENDS_A_DEAL.test(k))
+    && (e.company ? fold(text).includes(fold(e.company)) : e.allDeals === true && EVERY_OF_THEIRS.test(text)));
+}
+
+module.exports = {
+  mayAutoConfirm, couldSkip, spelledOut, autoConfirmOffer, MAY_SKIP,
+};

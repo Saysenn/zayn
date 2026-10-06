@@ -193,10 +193,14 @@ test('asked for bank details nobody has, she says so in a sentence', async () =>
   assert.match(out.summary, /Do not list\s+the rows/);
 });
 
+// A CARD ONLY WHEN THEY ASK TO SEE ONE (his rule, 2026-10-03), so every
+// test that expects a card says so the way the admin would.
+const SHOW_ME = "show me Gloria's card";
+
 test('a real account number still gets its card', async () => {
   // Guards the guard: the test above passes trivially if cards never come
   // back. Gloria's first row has Barclays and an account number on it.
-  const out = await load()('find_and_show_details').handler({ name: 'Gloria', show: 'bank' });
+  const out = await load()('find_and_show_details').handler({ name: 'Gloria', show: 'bank', said: SHOW_ME });
   assert.ok(Array.isArray(out.cards) && out.cards.length > 0, 'a bank row must still show');
 });
 
@@ -216,7 +220,7 @@ test('a SENTINEL is not a bank detail', async () => {
 const labelsOf = (card) => card.groups.flatMap((g) => g.cells.map((c) => c.label));
 
 test('`show: bank` returns the bank fields and drops the rest', async () => {
-  const out = await load()('find_and_show_details').handler({ name: 'Gloria', show: 'bank' });
+  const out = await load()('find_and_show_details').handler({ name: 'Gloria', show: 'bank', said: SHOW_ME });
   const labels = labelsOf(out.cards[0]);
 
   for (const want of ['Company', 'Phone', 'Payable', 'Bank', 'Account', 'Sort code']) {
@@ -229,7 +233,7 @@ test('`show: bank` returns the bank fields and drops the rest', async () => {
 
 test('the NAME survives every narrowing, because a nameless card is dangerous', async () => {
   for (const show of ['bank', 'cash', 'expensing']) {
-    const out = await load()('find_and_show_details').handler({ name: 'Gloria', show });
+    const out = await load()('find_and_show_details').handler({ name: 'Gloria', show, said: SHOW_ME });
     assert.equal(out.cards[0].name, 'Gloria', show);
   }
 });
@@ -240,7 +244,7 @@ test('it SAYS it narrowed, so nobody reads a short card as the whole row', async
 });
 
 test('no `show` is the FULL card, unchanged', async () => {
-  const out = await load()('find_and_show_details').handler({ name: 'Gloria' });
+  const out = await load()('find_and_show_details').handler({ name: 'Gloria', said: SHOW_ME });
   const labels = labelsOf(out.cards[0]);
   for (const want of ['Appointment', 'Preset', 'Bank', 'Monthly', 'Postcode']) {
     assert.ok(labels.includes(want), want);
@@ -701,7 +705,7 @@ test('"Gloria Difference" now resolves rather than listing candidates', async ()
   ];
   // Typed with a capital D, stored lowercase: an exact match either way.
   const out = await load({ rows })('find_and_show_details')
-    .handler({ name: 'Gloria Difference', show: 'bank' });
+    .handler({ name: 'Gloria Difference', show: 'bank', said: "show me Gloria Difference's card" });
 
   assert.equal(out.cards.length, 1, 'one person, one deal, no question');
   assert.equal(out.cards[0].name, 'Gloria Difference');
