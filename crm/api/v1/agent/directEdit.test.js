@@ -84,3 +84,17 @@ test('TWO LETTERS SWAPPED is one typo: "zyan indgo" is Zayn in INDIGO', () => {
     { person: 'Zayn', group: 'INDIGO', allDeals: false, field: 'monthlyAmount', op: 'add', value: 100 });
   assert.equal(read('add 100 to nayz'), null, 'more than one typo is not a guess it makes');
 });
+
+test('"SAME FOR PADDY" repeats the last edit on someone else; "what about paddy?" does not', () => {
+  const { sameFor } = require('./directEdit');
+  const done = 'Done. Zayn: monthly 3,800 → 3,300.';
+  const want = { person: 'Paddy', group: null, allDeals: false, field: 'monthlyAmount', op: 'add', value: -500 };
+  assert.deepEqual(sameFor('same for paddy', 'deduct 500 to zayn', done, roster), want);
+  assert.deepEqual(sameFor('paddy too', 'deduct 500 to zayn', done, roster), want);
+  assert.deepEqual(sameFor('do the same for paddy', 'deduct 500 to zayn', done, roster), want);
+  assert.deepEqual(sameFor('and paddi as well', 'deduct 500 to zayn', done, roster), want, 'one slip in the name');
+  assert.equal(sameFor('what about paddy?', 'deduct 500 to zayn', done, roster), null, 'could be a question');
+  assert.equal(sameFor('same for nobody', 'deduct 500 to zayn', done, roster), null, 'not on the sheet');
+  assert.equal(sameFor('same for paddy', 'how much is zayn owed', done, roster), null, 'nothing to repeat');
+  assert.equal(sameFor('same for paddy', 'deduct 500 to zayn', 'Which deal: INDIGO or MILKMAN?', roster), null, 'she was asking');
+});

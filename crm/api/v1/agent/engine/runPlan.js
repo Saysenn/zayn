@@ -72,6 +72,8 @@ function planPrompt(groups) {
     '"N days" is payableDays. Paid/unpaid is overridePaid "true"/"false". Dates as YYYY-MM-DD. Money as plain numbers.',
     'group: only if they named one. Known groups: ' + groups.join(', ') + '.',
     'allDeals: true only if they said all/both/every of that person\'s deals.',
+    'A WHOLE GROUP ("every MANBAT deal", "everyone in Indigo", "all of milkman"): ONE update step with person "*",',
+    'group = that group, allDeals true. "Everyone" with no group named: person "*", group "".',
     'when: "YYYY-MM" ONLY if they said a later month ("from next month", "in november"); this month is ' + currentMonth() + '. Otherwise "".',
     'source: the exact words of their message this step came from.',
     'Never invent a person, a value or a step they did not ask for. If a value is missing, leave value "".',
@@ -131,7 +133,7 @@ async function checkSteps(steps, { groups, said }) {
       lines: [],
       question: null,
     };
-    const ask = (q) => { step.question = `Step ${step.n}: ${q}`; };
+    const ask = (q) => { step.question = q; };
     const missing = step.changes.filter((c) => NOT_GIVEN(c.value));
     const group = step.group ? groupFrom(step.group, groups) : null;
     if (step.group && !group) ask(`${step.group} is not a group on the sheet. Which group: ${groups.join(', ')}?`);
@@ -143,6 +145,43 @@ async function checkSteps(steps, { groups, said }) {
       continue;
     }
     if (NOT_GIVEN(step.person)) { ask('who is this for?'); out.push(step); continue; }
+
+    /**
+     * A WHOLE GROUP, as one step over every live deal in it, shown deal by
+     * deal like any other. Only update: stopping or adding a whole group is
+     * not something one sentence should do.
+     */
+    if (step.person === '*') {
+      if (step.action !== 'update') { ask('I can only change figures or details for a whole group, not stop or add one. Name the people instead.'); out.push(step); continue; }
+      if (!group) { ask(`which group: ${groups.join(', ')}?`); out.push(step); continue; }
+      if (missing.length || !step.changes.length) { ask(`what should change for every ${group} deal?`); out.push(step); continue; }
+      // eslint-disable-next-line no-await-in-loop
+      const all = ((await rowsRepo.findAll({ page: 1, pageSize: 5000 }))?.rows ?? []).filter((r) => !r.stopped_on && r.group_name === group);
+      if (!all.length) { ask(`${group} has no live deals.`); out.push(step); continue; }
+      step.group = group;
+      step.person = `every ${group} deal`;
+      step.groupWide = true;
+      step.ids = all.map((r) => r.id);
+      step.before = Object.fromEntries(all.map((r) => [r.id, Object.fromEntries(step.changes.map((c) => [c.field, r[FIELDS[c.field].column] ?? null]))]));
+      step.deals = all.map((r) => ({ id: r.id, person: r.person_name, company: r.company, group: r.group_name }));
+      step.lines = all.map((r) => {
+        const fields = {};
+        const bits = step.changes.map((c) => {
+          const meta = FIELDS[c.field];
+          const after = c.mode === 'add' ? Math.round(((Number(r[meta.column]) || 0) + valueFor(c.field, c.value)) * 100) / 100 : valueFor(c.field, c.value);
+          fields[c.field] = after;
+          return changeLine(r, c, after);
+        });
+        if (fields.payableAmount === undefined) {
+          const probe = { ...fields };
+          recomputePayable(r, probe);
+          if (probe.payableAmount !== undefined && Number(probe.payableAmount) !== Number(r.payable_amount)) bits.push(changeLine(r, { field: 'payableAmount' }, probe.payableAmount));
+        }
+        return { id: r.id, name: r.person_name, where: `${r.group_name} · ${r.company ?? ''}`, detail: bits.join(' · ') };
+      });
+      out.push(step);
+      continue;
+    }
 
     if (step.action === 'add_deal') {
       const need = ['roleLabel', 'monthlyAmount'].filter((f) => !step.changes.some((c) => c.field === f && !NOT_GIVEN(c.value)));
@@ -190,6 +229,8 @@ async function checkSteps(steps, { groups, said }) {
     }
     if (!step.question) {
       step.ids = rows.map((r) => r.id);
+      step.before = Object.fromEntries(rows.map((r) => [r.id, Object.fromEntries(step.changes
+        .filter((c) => FIELDS[c.field]).map((c) => [c.field, r[FIELDS[c.field].column] ?? null]))]));
       step.deals = rows.map((r) => ({ id: r.id, person: r.person_name, company: r.company, group: r.group_name }));
       step.lines = rows.map((r) => {
         const where = `${r.group_name ?? ''} · ${r.company ?? ''}`;
@@ -233,17 +274,121 @@ async function makePlan(text, { groups, said, previous = null }) {
   };
 }
 
+// A LONG LIST OF QUESTIONS stays in the card: the chat names the first few.
+const fewOf = (list) => (list.length <= 5 ? list.join('\n')
+  : `${list.slice(0, 5).join('\n')}\n…and ${list.length - 5} more, at the top of the card.`);
+
 function previewReply(plan) {
   if (plan.status === 'empty') return null;
   if (plan.status === 'asking') {
-    const qs = plan.steps.filter((s) => s.question).map((s) => s.question);
+    const qs = plan.steps.filter((s) => s.question).map((s) => `${s.n}. ${s.question}`);
     return `Got it, ${plan.steps.length} ${plan.steps.length === 1 ? 'change' : 'changes'}. `
-      + `${qs.length === 1 ? 'One thing' : `${qs.length} things`} to check first:\n${qs.join('\n')}`;
+      + `${qs.length === 1 ? 'One thing' : `${qs.length} things`} to check first:\n${fewOf(qs)}`;
   }
   const stops = plan.steps.filter((s) => s.action === 'stop' && !s.skipped).length;
   const live = plan.steps.filter((s) => !s.skipped).length;
+  // The hint uses THIS plan's numbers: "skip 2" on a one-step plan was wrong.
+  const last = plan.steps.filter((s) => !s.skipped).at(-1)?.n;
   return `Here's the plan, ${live} ${live === 1 ? 'change' : 'changes'}${stops ? `, ${stops} of them ending a deal` : ''}. `
-    + 'Nothing has changed yet. Shall I do it? You can say "skip 2" or "make step 1 4600".';
+    + `Nothing has changed yet. Shall I do it?${live > 1 && last ? ` Say "skip ${last}" to leave one out.` : ''}`;
+}
+
+/**
+ * WHAT THEY ASKED FOR DECIDES WHAT IS OFFERED. Their call 2026-10-06: "only
+ * add the new ones", "don't stop anyone"; and live the same day, "crosscheck
+ * this if there are new deals" was answered with all 96 differences. A
+ * question about the new ones, the missing ones or the moved ones is
+ * answered with those. What is left out is said, never silently dropped.
+ */
+function narrowPlan(plan, said) {
+  const words = String(said ?? '').toLowerCase();
+  const only = (re) => new RegExp(`\\b(?:only|just)\\b[^.]*${re}`).test(words);
+  const everything = /\b(?:all|every|everything|full)\b/.test(words);
+  const asksNew = /\bnew (?:deals?|ones|people|rows|entries|hires?|joiners?|starters?)\b|\bany(?:one|body)? new\b|\bwho'?s new\b|\b(?:joined|joiners?|newcomers?|starters?)\b|\bnot (?:yet )?(?:in|on) (?:the |our )?(?:crm|sheet|system)\b/.test(words);
+  const asksMissing = /\bmissing\b|\bnot in (?:the |my |this |that )?(?:file|sheet)\b|\b(?:who|which|anyone|anybody)\b[^.]*\b(?:left|gone|leaving|dropped|removed)\b|\bleavers?\b|\bwho'?s gone\b/.test(words);
+  const asksMoved = /\bmoved?\b|\bchanged groups?\b/.test(words);
+  let keep = null;
+  if (only('\\b(?:add|new)') || (asksNew && !everything)) keep = ['add_deal'];
+  else if (only('\\b(?:update|change|fix)')) keep = ['update', 'move_deal'];
+  else if (only('\\brenam')) keep = ['rename_group'];
+  else if (asksMissing && !everything) keep = ['stop'];
+  else if (asksMoved && !everything) keep = ['move_deal'];
+  const noStops = /\b(?:don'?t|do not|never|no)\s+(?:stop|remove|end|delete)\w*/.test(words) || only('\\b(?:add|update|change|fix|renam)');
+  const kindOf = (x) => (['rename_group', 'move_deal'].includes(x.kind) ? x.kind : x.action);
+  const before = plan.steps.length;
+  plan.steps = plan.steps.filter((x) => (keep ? keep.includes(kindOf(x)) : true) && !(noStops && x.action === 'stop'))
+    .map((x, i) => ({ ...x, n: i + 1, question: x.question ? x.question.replace(/^Step \d+/, `Step ${i + 1}`) : null }));
+  const left = before - plan.steps.length;
+  if (left > 0) {
+    plan.notes = [...(plan.notes ?? []).filter((x) => x.label !== 'Left out, as you asked'),
+      { label: 'Left out, as you asked', rows: [{ name: `${left} other ${left === 1 ? 'change' : 'changes'}`, detail: 'found but not offered: ask for "all of them" to see everything' }] }];
+  }
+  return left;
+}
+
+const ANSWERS = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['answers'],
+  properties: {
+    answers: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['step', 'field', 'value'],
+        properties: {
+          step: { type: 'integer' },
+          field: { type: 'string', enum: ['group', 'company', 'roleLabel', 'monthlyAmount', 'currency', 'paymentMethod'] },
+          value: { type: 'string' },
+        },
+      },
+    },
+  },
+};
+
+/** The values they gave for the steps that asked, read by the light model. */
+async function fillAnswers(said, asking, client = null) {
+  const openai = client ?? getClient();
+  if (!openai) return [];
+  const res = await openai.chat.completions.create({
+    model: process.env.AI_MODEL_LIGHT && process.env.AI_MODEL_LIGHT !== 'off' ? process.env.AI_MODEL_LIGHT : 'gpt-4.1-mini',
+    temperature: 0,
+    messages: [
+      {
+        role: 'system',
+        content: 'These steps of a plan are waiting on missing details. Read ONLY the values the admin gives for them. '
+          + 'Never invent one; a step they do not mention gets nothing. Money as a plain number.\n'
+          + asking.map((x) => `Step ${x.n}: new deal for ${x.person}, missing ${x.need.join(', ')}`).join('\n'),
+      },
+      { role: 'user', content: String(said) },
+    ],
+    response_format: { type: 'json_schema', json_schema: { name: 'answers', strict: true, schema: ANSWERS } },
+  });
+  return (JSON.parse(res.choices?.[0]?.message?.content ?? '{"answers":[]}').answers ?? []).filter((a) => String(a.value).trim());
+}
+
+/** One step with the answers given for it, and what it still lacks. */
+function applyAnswers(step, answers) {
+  if (!answers.length) return step;
+  const next = { ...step, changes: [...(step.changes ?? [])] };
+  for (const a of answers) {
+    if (a.field === 'group') next.group = a.value;
+    else if (a.field === 'company') next.company = a.value;
+    else {
+      next.changes = next.changes.filter((c) => c.field !== a.field);
+      next.changes.push({ field: a.field, mode: 'set', value: a.value });
+    }
+  }
+  const has = (f) => (f === 'group' ? next.group : f === 'company' ? next.company : next.changes.some((c) => c.field === f && String(c.value).trim()));
+  next.need = ['group', 'company', 'roleLabel', 'monthlyAmount'].filter((f) => !has(f));
+  next.question = next.need.length ? `New deal for ${next.person}${next.line ? ` (line ${next.line})` : ''} still needs: ${next.need.join(', ')}.` : null;
+  next.lines = [{
+    name: next.person,
+    where: [next.group, next.company].filter(Boolean).join(' · '),
+    detail: next.changes.map((c) => `${FIELDS[c.field]?.label ?? c.field} ${c.value}`).join(' · ') || 'new deal',
+  }];
+  return next;
 }
 
 /** Every deal of a group onto its new name, all or none. */
@@ -265,6 +410,30 @@ async function renameGroup({ ids, to, from }) {
   }
 }
 
+const sameValue = (a, b) => {
+  if (a == null || a === '') return b == null || b === '';
+  const n = Number(a);
+  if (Number.isFinite(n) && Number.isFinite(Number(b))) return Math.abs(n - Number(b)) < 0.005;
+  const day = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v ?? '').slice(0, 10));
+  if (/^\d{4}-\d{2}-\d{2}/.test(String(a)) || a instanceof Date) return day(a) === day(b);
+  return fold(a) === fold(b ?? '');
+};
+/** Why a step's deals are no longer as shown, or null when they are. */
+async function changedSince(step) {
+  for (const [id, fields] of Object.entries(step.before ?? {})) {
+    // eslint-disable-next-line no-await-in-loop
+    const row = await rowsRepo.findById(Number(id)).catch(() => null);
+    if (!row) return 'that deal is no longer on the sheet';
+    for (const [field, was] of Object.entries(fields)) {
+      const column = field === 'groupName' ? 'group_name' : FIELDS[field]?.column;
+      if (column && !sameValue(was, row[column])) {
+        return `${FIELDS[field]?.label ?? field} changed to ${row[column] ?? 'nothing'} since you saw this, so it was left alone`;
+      }
+    }
+  }
+  return null;
+}
+
 /** What a step can move, counted, so "done" is checked rather than claimed. */
 async function footprint() {
   const { rows } = await db.query(
@@ -281,13 +450,52 @@ async function footprint() {
  * stamped on every change it wrote, so one undo puts the whole plan back.
  */
 async function runSteps(plan, invoke) {
+  /**
+   * CHECKED FIRST, WRITTEN AFTER, ALL OR NOTHING. Every step is checked
+   * against the sheet as it is now before a single write: one deal that moved
+   * since the preview stops the whole plan, so a "yes" never leaves it half
+   * done for that reason. They are told which, and can skip it.
+   */
+  const stale = [];
+  for (const step of plan.steps) {
+    if (step.skipped) continue;
+    // eslint-disable-next-line no-await-in-loop
+    const why = await changedSince(step);
+    if (why) stale.push({ n: step.n, why });
+  }
+  if (stale.length) {
+    return {
+      ...plan,
+      status: 'preview',
+      stale,
+      steps: plan.steps.map((x) => {
+        const hit = stale.find((t) => t.n === x.n);
+        return hit ? { ...x, lines: (x.lines ?? []).map((l) => ({ ...l, detail: `${l.detail} · ⚠ ${hit.why.replace(/, so it was left alone$/, '')}` })) } : x;
+      }),
+    };
+  }
   const before = Number((await db.query('SELECT coalesce(max(id), 0) AS id FROM tb_mastersheet_changes')).rows[0]?.id ?? 0);
   const steps = [];
   for (const step of plan.steps) {
     if (step.skipped) { steps.push(step); continue; }
     const reasons = [];
     let ok = true;
-    const calls = step.kind === 'rename_group' ? [{ name: '__rename_group', args: { ids: step.ids, to: step.to, from: step.from } }] : callsFor(step);
+    /**
+     * NOT ON A DEAL THAT MOVED SINCE THEY LOOKED. A plan shown at ten and
+     * agreed at three would otherwise write ten o'clock's values over
+     * whatever changed in between. Each deal is read again; a field that is
+     * no longer what the plan showed leaves the step alone, and says so.
+     */
+    // eslint-disable-next-line no-await-in-loop
+    const moved = await changedSince(step);
+    if (moved) {
+      steps.push({ ...step, result: { ok: false, why: moved } });
+      continue;
+    }
+    // A group rename and a deal moved to another group are the same act: the
+    // group on those deals, and their sync keys, in one go.
+    const calls = ['rename_group', 'move_deal'].includes(step.kind)
+      ? [{ name: '__rename_group', args: { ids: step.ids, to: step.to, from: step.from } }] : callsFor(step);
     for (const call of calls) {
       // DONE IS WHAT THE DATABASE SAYS, not what the tool said. A "which
       // deal?" read as success once and the plan reported a write that never
@@ -326,6 +534,13 @@ async function runSteps(plan, invoke) {
   return { ...plan, status: 'done', steps };
 }
 
+function staleReply(plan) {
+  const list = plan.stale.map((t) => `${t.n}. ${plan.steps.find((x) => x.n === t.n)?.person ?? ''}: ${t.why.replace(/, so it was left alone$/, '')}`);
+  return `Nothing was done: ${plan.stale.length === 1 ? 'one deal has' : `${plan.stale.length} deals have`} changed since you saw this plan.\n`
+    + `${list.join('\n')}\n\nSay "skip ${plan.stale.map((t) => t.n).join(' and ')}" to go ahead without ${plan.stale.length === 1 ? 'it' : 'them'}, `
+    + `or ${plan.source === 'sheet' ? 'send the file again to check afresh' : 'ask again with the new figures'}.`;
+}
+
 function doneReply(plan) {
   const ran = plan.steps.filter((s) => !s.skipped);
   const good = ran.filter((s) => s.result?.ok);
@@ -356,22 +571,96 @@ async function planTurn({ said, pending, groups, invoke }) {
     }
     if (pending.status === 'preview' && answer.kind === 'all') {
       const plan = await runSteps(pending, invoke);
-      return { reply: doneReply(plan), card: planCard(plan) };
+      return { reply: plan.stale ? staleReply(plan) : doneReply(plan), card: planCard(plan) };
     }
     if (pending.status === 'preview' && answer.kind === 'skip') {
       const plan = { ...pending, steps: pending.steps.map((s) => (answer.steps.includes(s.n) ? { ...s, skipped: true } : s)) };
       if (answer.run) {
         const ran = await runSteps(plan, invoke);
-        return { reply: doneReply(ran), card: planCard(ran) };
+        return { reply: ran.stale ? staleReply(ran) : doneReply(ran), card: planCard(ran) };
       }
       return { reply: previewReply(plan), card: planCard(plan) };
+    }
+    if (answer.kind === 'view') {
+      // The same plan, shown again, still waiting. Steps for anyone they named lead the reply.
+      const words = String(said).toLowerCase();
+      const about = pending.steps.filter((x) => (x.person || x.company) && words.includes(String(x.person || x.company).toLowerCase().split(/\s+/)[0]));
+      const live = pending.steps.filter((x) => !x.skipped).length;
+      const reply = about.length
+        ? `${about.map((x) => `${x.n}. ${x.person || x.company}: ${x.question ?? x.lines?.map((l) => l.detail).join('; ')}`).join('\n')}\nNothing has changed; the plan is still waiting.`
+        : `Here ${live === 1 ? 'is the 1 change' : `are all ${live} changes`} again. Nothing has changed: say "yes"${live > 1 ? `, "skip ${pending.steps.filter((x) => !x.skipped).at(-1)?.n}"` : ''} or "cancel".`;
+      return { reply, card: planCard(pending) };
     }
     if (pending.status === 'preview' && answer.kind === 'value') {
       const steps = pending.steps.map((s) => (s.n === answer.step
         ? { ...s, changes: [{ ...s.changes[0], value: String(answer.value) }] } : s));
+      // A STEP ALREADY TIED TO ITS DEAL keeps it: only the figure changes.
+      if (steps.every((x) => x.ids?.length || x.action === 'add_deal' || x.question)) {
+        const plan = {
+          ...pending,
+          steps: steps.map((x) => (x.n === answer.step ? { ...x, lines: x.lines.map((l) => ({ ...l, detail: `${FIELDS[x.changes[0].field]?.label ?? x.changes[0].field} → ${answer.value} (changed by you)` })) } : x)),
+        };
+        return { reply: previewReply(plan), card: planCard(plan) };
+      }
       const checked = await checkSteps(steps, { groups, said: pending.request });
       const plan = { ...pending, steps: checked, status: checked.some((s) => s.question) ? 'asking' : 'preview' };
       return { reply: previewReply(plan), card: planCard(plan) };
+    }
+    /**
+     * A FILE CHECK IS NEVER REWRITTEN BY THE MODEL: its steps are tied to
+     * exact deals, and a rewrite of 96 of them lost every one. What they ask
+     * is applied in code ("only the new ones", "don't stop anyone"), or they
+     * are told what can be said.
+     */
+    // A FILE PLAN, including one made before files were marked as such.
+    if (pending.source === 'sheet' || pending.checked) {
+      const plan = { ...pending, steps: [...pending.steps], notes: [...(pending.notes ?? [])] };
+      /**
+       * "RESUME LOUIS" (or "resume them") brings back a stopped deal that is
+       * still in their file: the card offers it, so the plan must take it.
+       */
+      const resumeAsk = /\b(?:resume|bring (?:back|\w+ back)|reopen|restart|reactivate)\b/i.test(said);
+      if (resumeAsk && plan.stoppedHere?.length) {
+        const words = String(said).toLowerCase();
+        const all = /\b(?:all|them|those|every|both)\b/.test(words);
+        const picked = plan.stoppedHere.filter((d) => all || words.includes(String(d.person).toLowerCase().split(/\s+/)[0]));
+        const already = new Set(plan.steps.filter((x) => x.action === 'resume').map((x) => x.deals?.[0]?.id));
+        const fresh = picked.filter((d) => !already.has(d.id));
+        if (fresh.length) {
+          plan.steps = [...plan.steps, ...fresh.map((d, i) => ({
+            n: plan.steps.length + i + 1, action: 'resume', person: d.person, deals: [d], ids: [d.id], changes: [],
+            lines: [{ id: d.id, name: d.person, where: `${d.group} · ${d.company}`, detail: 'bring this stopped deal back' }],
+          }))];
+          plan.stoppedHere = plan.stoppedHere.filter((d) => !fresh.includes(d));
+          plan.notes = plan.notes.map((x) => (/^Stopped here, still in your file/.test(x.label)
+            ? { ...x, label: x.label.replace(/· \d+$/, `· ${plan.stoppedHere.length}`), rows: x.rows.filter((r) => !fresh.some((d) => d.id === r.id)) } : x))
+            .filter((x) => !/^Stopped here, still in your file/.test(x.label) || x.rows.length);
+          plan.status = plan.steps.some((x) => x.question) ? 'asking' : 'preview';
+          return { reply: `Added ${fresh.map((d) => d.person).join(', ')} to bring back.\n\n${previewReply(plan)}`, card: planCard(plan) };
+        }
+      }
+      // THEIR ANSWERS TO HER QUESTIONS fill those gaps and nothing else: a
+      // small call reads the values, code puts them on the steps that asked.
+      if (plan.steps.some((x) => x.need?.length)) {
+        const filled = await fillAnswers(said, plan.steps.filter((x) => x.need?.length)).catch(() => []);
+        if (filled.length) {
+          plan.steps = plan.steps.map((x) => applyAnswers(x, filled.filter((a) => a.step === x.n)));
+          plan.status = plan.steps.some((x) => x.question) ? 'asking' : 'preview';
+          const left = plan.steps.filter((x) => x.question).map((x) => `${x.n}. ${x.question}`);
+          return {
+            reply: left.length ? `Got it. Still to check:\n${fewOf(left)}` : previewReply(plan),
+            card: planCard(plan),
+          };
+        }
+      }
+      if (narrowPlan(plan, said) > 0 && plan.steps.length) {
+        plan.status = plan.steps.some((x) => x.question) ? 'asking' : 'preview';
+        return { reply: previewReply(plan), card: planCard(plan) };
+      }
+      return {
+        reply: `I can do all of it ("yes"), leave some out ("skip ${pending.steps.at(-1)?.n ?? 1}", "only the new ones", "don't stop anyone"), or "cancel". Nothing has changed.`,
+        card: planCard(pending),
+      };
     }
     const plan = await makePlan(said, { groups, said: `${pending.request}\n${said}`, previous: pending });
     if (plan.status === 'empty') return { reply: 'Okay, nothing left to do. Nothing changed.', card: planCard({ ...pending, status: 'cancelled' }) };
@@ -412,6 +701,21 @@ async function sheetTurn({
   step('Working out what each column means', 1);
   const layouts = await understand(got.tables, { groups, client });
   const { byKind, readout, skipped } = sheet.fromLayout(got.tables, layouts);
+  /**
+   * A FILE ABOUT ANOTHER AREA is said to be one. An expenses sheet sent in
+   * the master sheet area has no deals in it, and checking it as deals would
+   * find every row "new". The admin's contexts: one area at a time.
+   */
+  const mine = ['deals', 'people', 'companies'].some((k) => byKind[k]?.rows.length);
+  const elsewhere = Object.entries(byKind).filter(([k, v]) => !['deals', 'people', 'companies'].includes(k) && v.rows.length);
+  if (!mine && elsewhere.length && !(got.text && got.text.trim())) {
+    const what = elsewhere.map(([k, v]) => `${v.rows.length} rows of ${k}`).join(' and ');
+    return {
+      reply: `This file looks like ${what}, not master sheet deals, so I haven't checked it against the master sheet. `
+        + 'Nothing has changed. Checking that kind of file belongs to its own area, which is coming soon.',
+      card: { kind: 'report', title: `Read ${what}`, note: 'Not checked here', sections: [], footer: sheet.readoutLines(readout).join('\n') },
+    };
+  }
   const read = byKind.deals ?? { rows: [], unread: [], headerLines: [] };
   if (got.text && got.text.trim()) {
     const messy = await sheet.readMessy(got.text, groups, (n, of) => step(`Reading your text (${n} of ${of})`, 1), client);
@@ -421,7 +725,11 @@ async function sheetTurn({
   read.unread.push(...skipped.filter((x) => x.why !== 'a total row').map((x) => ({ ...x, text: x.sheet ?? '' })));
 
   step('Comparing with the master sheet', 2);
-  const deals = givenDeals ?? (await rowsRepo.findAll({ page: 1, pageSize: 5000 }))?.rows ?? [];
+  // THE ARCHIVE TOO, so a stopped deal in their file is not taken for a new one.
+  const deals = givenDeals ?? [
+    ...((await rowsRepo.findAll({ page: 1, pageSize: 5000 }))?.rows ?? []),
+    ...((await db.query('SELECT * FROM tb_mastersheet WHERE stopped_on IS NOT NULL').catch(() => ({ rows: [] }))).rows ?? []),
+  ].filter((d, i, all) => all.findIndex((x) => x.id === d.id) === i);
   const found = sheet.compare(read, deals, groups);
   const how = sheet.readoutLines(readout);
 
@@ -431,7 +739,9 @@ async function sheetTurn({
    * no extra call; anything else is read as a question and answered by code
    * (answer.js) over every row and the same comparison.
    */
-  const wantsCheck = /\b(?:check|cross ?check|compare|wrong|issues?|problems?|discrepanc\w*|updat\w*|sync\w*|fix\w*|match\w*|import\w*|apply|differ\w*|correct\w*)\b/i.test(said ?? '');
+  // "Anyone joined?", "who left?", "what moved?" are the check, narrowed.
+  const focused = narrowPlan({ steps: [{ action: 'add_deal' }, { action: 'stop' }, { action: 'update', kind: 'move_deal' }, { action: 'update' }] }, said) > 0;
+  const wantsCheck = focused || /\b(?:check|cross ?check|compare|wrong|issues?|problems?|discrepanc\w*|updat\w*|sync\w*|fix\w*|match\w*|import\w*|apply|differ\w*|correct\w*)\b/i.test(said ?? '');
   if (!wantsCheck && String(said ?? '').trim()) {
     // eslint-disable-next-line global-require
     const { readQuestion, answer } = require('./answer');
@@ -446,7 +756,8 @@ async function sheetTurn({
           kind: 'report',
           title: got2.reply.slice(0, 80),
           note: `From ${found.read} rows of your file`,
-          sections: [...got2.sections, ...(how.length ? [{ label: 'How I read your file', rows: how.map((l) => ({ name: l })) }] : [])],
+          sections: got2.sections,
+          footer: how.join('\n'),
         },
       };
     }
@@ -454,8 +765,10 @@ async function sheetTurn({
 
   step('Working out the fixes', 3);
   const plan = sheet.toPlan(found, said);
+  plan.source = 'sheet';
   // HOW IT READ THE FILE, first on the card, so a misread is seen before anything is done.
-  if (how.length) plan.notes = [{ label: 'How I read your file', rows: how.map((l) => ({ name: l })) }, ...(plan.notes ?? [])];
+  // HOW IT WAS READ goes under the card in small print, not among the changes.
+  plan.readout = how;
   const totals = skipped.filter((x) => x.why === 'a total row').length;
   if (totals) plan.notes.push({ label: 'Total rows', rows: [{ name: `${totals} total ${totals === 1 ? 'row' : 'rows'} skipped`, detail: 'they add up rows already checked' }] });
   /**
@@ -481,40 +794,65 @@ async function sheetTurn({
   if (others.length) {
     plan.notes.push({ label: 'Read, not changed here', rows: others.map(([k, v]) => ({ name: `${v.rows.length} rows of ${k}`, detail: 'checking these belongs to their own area' })) });
   }
-  /**
-   * WHAT THEY TYPED WITH IT DECIDES WHAT IS OFFERED. Their call 2026-10-06:
-   * the file comes with an instruction. "only add the new ones", "just
-   * update", "don't stop anyone", "rename the groups only". What is left
-   * out is said, never silently dropped.
-   */
-  const words = String(said ?? '').toLowerCase();
-  const only = (re) => new RegExp(`\\b(?:only|just)\\b[^.]*${re}`).test(words);
-  const keep = only('\\b(?:add|new)') ? ['add_deal'] : only('\\b(?:update|change|fix)') ? ['update'] : only('\\brenam') ? ['rename_group'] : null;
-  const noStops = /\b(?:don'?t|do not|never|no)\s+(?:stop|remove|end|delete)\w*/.test(words) || only('\\b(?:add|update|change|fix|renam)');
   const before = plan.steps.length;
-  plan.steps = plan.steps.filter((x) => (keep ? keep.includes(x.kind === 'rename_group' ? 'rename_group' : x.action) : true) && !(noStops && x.action === 'stop'))
-    .map((x, i) => ({ ...x, n: i + 1, question: x.question ? x.question.replace(/^Step \d+/, `Step ${i + 1}`) : null }));
-  if (plan.steps.length < before) {
-    plan.notes = [...(plan.notes ?? []), { label: 'Left out, as you asked', rows: [{ name: `${before - plan.steps.length} ${before - plan.steps.length === 1 ? 'change' : 'changes'}`, detail: 'found but not offered' }] }];
-  }
+  narrowPlan(plan, said);
   if (plan.steps.length === 0 && plan.status !== 'clean') plan.status = 'nothing';
   else if (plan.status !== 'clean') plan.status = plan.steps.some((x) => x.question) ? 'asking' : 'preview';
   logger.info({ plan: plan.id, read: found.read, steps: plan.steps.length, unread: found.unread.length }, 'diane: a sheet checked');
-  const head = `${sheet.summary(found)}.`;
+  /**
+   * A REPLY THEY CAN READ AT A GLANCE. Their call 2026-10-06: one sentence
+   * of names in brackets and semicolons was hard to read. What they asked
+   * about first, one per line; the rest of what was found, one per line; the
+   * month note on its own; the question last.
+   */
+  const narrowed = plan.steps.length < before || focused;
+  const where = (x) => (x.lines?.[0]?.where ? ` · ${x.lines[0].where}` : '');
+  const bullets = (list) => list.slice(0, 10).map((x) => `• ${x.person || x.company || x.group}${where(x)}`).join('\n')
+    + (list.length > 10 ? `\n…and ${list.length - 10} more in the card` : '');
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const found2 = [
+    found.mismatched.length && plural(found.mismatched.length, 'deal different from ours', 'deals different from ours'),
+    found.moved?.length && plural(found.moved.length, 'deal moved to another group', 'deals moved to another group'),
+    found.renamed.length && plural(found.renamed.length, 'group renamed', 'groups renamed'),
+    found.notOnSheet.length && plural(found.notOnSheet.length, 'new deal', 'new deals'),
+    found.stoppedHere?.length && plural(found.stoppedHere.length, 'stopped here but still in your file', 'stopped here but still in your file'),
+    found.missing.length && plural(found.missing.length, 'of ours not in your file', 'of ours not in your file'),
+    found.others && plural(found.others, 'person or company to update', 'people or companies to update'),
+    found.unmatched.length && plural(found.unmatched.length, 'row I could not match for sure', 'rows I could not match for sure'),
+    found.unread.length && plural(found.unread.length, 'line I could not read', 'lines I could not read'),
+  ].filter(Boolean);
+  const monthNote = found.month
+    ? `\nNote: your file is ${sheet.monthName(found.month.file)}'s sheet and the CRM is on ${sheet.monthName(found.month.crm)}, so preset dates, payable days and payable amounts were not compared.`
+    : '';
+  let body;
+  if (narrowed && plan.steps.length) {
+    const kind = plan.steps[0].action === 'add_deal' ? plural(plan.steps.length, 'new deal', 'new deals')
+      : plan.steps[0].action === 'stop' ? plural(plan.steps.length, 'deal of ours is not in your file', 'deals of ours are not in your file')
+        : plural(plan.steps.length, 'change', 'changes');
+    const rest = found2.filter((l) => !(plan.steps[0].action === 'add_deal' && /new deal/.test(l)) && !(plan.steps[0].action === 'stop' && /not in your file/.test(l)));
+    body = `${kind}:\n${bullets(plan.steps)}${rest.length ? `\n\nAlso in the file (not shown): ${rest.join(', ')}.` : ''}`;
+  } else {
+    body = `Checked ${plural(found.read, 'row', 'rows')}.${found2.length ? `\n${found2.map((l) => `• ${l}`).join('\n')}` : ''}`;
+  }
+  body += monthNote;
+  const ask = narrowed ? 'Do these?' : 'Make ours match?';
   if (plan.status === 'clean') {
-    return { reply: `${head} Everything I could read matches ours.`, card: planCard(plan) };
+    return { reply: `${body}\n\nEverything I could read matches ours.`, card: planCard(plan) };
   }
   if (plan.status === 'nothing') {
-    return { reply: `${head} With what you asked for, there's nothing to change; the other ${before} ${before === 1 ? 'change is' : 'changes are'} left out.`, card: planCard(plan) };
+    return { reply: `${body}\n\nWith what you asked for, there is nothing to change.`, card: planCard(plan) };
   }
   if (plan.status === 'asking') {
-    const qs = plan.steps.filter((x) => x.question).map((x) => x.question);
-    return { reply: `${head} To make ours match, I'd need a few things first:\n${qs.join('\n')}`, card: planCard(plan) };
+    const qs = plan.steps.filter((x) => x.question).map((x) => `${x.n}. ${x.question}`);
+    return { reply: `${body}\n\nFirst I need:\n${fewOf(qs)}`, card: planCard(plan) };
   }
   return {
-    reply: `${head} Nothing has changed. Want me to make ours match? Say "yes", or "skip 3" to leave one out.`,
+    reply: `${body}\n\nNothing has changed yet. ${ask} Reply "yes"${plan.steps.length > 1 ? `, or "skip ${plan.steps.at(-1).n}" to leave one out` : ''}.`,
     card: planCard(plan),
   };
 }
 
-module.exports = { planTurn, sheetTurn, makePlan, checkSteps, runSteps, doneReply, previewReply };
+
+module.exports = {
+  planTurn, sheetTurn, makePlan, checkSteps, runSteps, doneReply, previewReply, applyAnswers,
+};

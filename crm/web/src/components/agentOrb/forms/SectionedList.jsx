@@ -27,6 +27,40 @@ export default function SectionedList({ list, onOpen }) {
   const all = (list.sections ?? []).reduce((n, s) => n + s.rows.length, 0);
   const shown = sections.reduce((n, s) => n + s.rows.length, 0);
 
+  /**
+   * A PLAN IS READ, NOT SEARCHED. Their call 2026-10-06: the search box and
+   * the inner scroll box around a plan were clutter. Its sections sit in the
+   * conversation as they are; a long list elsewhere keeps both.
+   */
+  const bare = list.kind === 'plan';
+  const body = sections.map((s, i) => (
+    <Section
+      key={`${s.label}-${i}`}
+      label={s.label}
+      count={s.count}
+      shown={s.rows.length}
+      wrap={bare}
+      rows={s.rows.map((r, j) => ({
+        key: r.id ?? `${i}-${j}`,
+        who: r.name,
+        where: r.where,
+        detail: r.detail,
+        title: [r.name, r.where, r.detail].filter(Boolean).join(' · '),
+        onClick: onOpen && r.id ? () => onOpen({ id: r.id }) : undefined,
+      }))}
+    />
+  ));
+  if (bare) {
+    return (
+      <section aria-label={list.title}>
+        <Caption>{list.title}</Caption>
+        {list.note && <p className="m-0 mb-2 whitespace-pre-line px-0.5 text-[11px] leading-snug text-white/55">{list.note}</p>}
+        {body}
+        {list.footer && <p className="m-0 mt-3 whitespace-pre-line px-0.5 text-[10px] leading-snug text-white/35">{list.footer}</p>}
+      </section>
+    );
+  }
+
   return (
     <section aria-label={list.title}>
       <Caption aside={all > 4 && <LineSearch value={query} onChange={setQuery} placeholder="Find" label="Find in this list" />}>
@@ -36,26 +70,12 @@ export default function SectionedList({ list, onOpen }) {
 
       <div className="relative">
         <div ref={scrollRef} className="agent-scroll max-h-[55vh] overflow-y-auto pr-1">
-          {sections.map((s, i) => (
-            <Section
-              key={`${s.label}-${i}`}
-              label={s.label}
-              count={s.count}
-              shown={s.rows.length}
-              rows={s.rows.map((r, j) => ({
-                key: r.id ?? `${i}-${j}`,
-                who: r.name,
-                where: r.where,
-                detail: r.detail,
-                title: [r.name, r.where, r.detail].filter(Boolean).join(' · '),
-                onClick: onOpen && r.id ? () => onOpen({ id: r.id }) : undefined,
-              }))}
-            />
-          ))}
+          {body}
           {shown === 0 && <p className="m-0 py-2 text-[10px] text-white/45">Nothing matches</p>}
         </div>
         {all > 8 && <ScrollMore targetRef={scrollRef} label={`${shown} rows`} watch={shown} />}
       </div>
+      {list.footer && <p className="m-0 mt-2 whitespace-pre-line px-0.5 text-[10px] leading-snug text-white/35">{list.footer}</p>}
     </section>
   );
 }

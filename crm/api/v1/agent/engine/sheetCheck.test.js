@@ -169,3 +169,11 @@ test('A EURO IS A EURO whichever way it is written: EUR, EURO, € and Euro are 
   const found = compare({ rows: [{ line: 2, person: 'Euro Boss', group: 'MANBAT', company: 'Gab', currency: 'GBP' }], unread: [] }, euroDeal, GROUPS);
   assert.equal(found.mismatched.length, 1, 'a real change of currency is still found');
 });
+
+test('NICKNAMES: "Jim" in their file is our "James" in the same company, never a new deal and a stop', () => {
+  const s = require('./sheetCheck');
+  assert.ok(s.nickname('Jim', 'James'));
+  assert.ok(s.nickname('Bob Hale', 'Robert Hale'));
+  assert.ok(!s.nickname('Jim Brown', 'James Smith'), 'the surname still has to match');
+  assert.ok(!s.nickname('James', 'James'), 'the same name is not a nickname');
+});

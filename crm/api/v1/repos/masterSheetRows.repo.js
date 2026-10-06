@@ -1433,7 +1433,8 @@ async function findChangeBatches({ hours = 24, limit = 20000 } = {}) {
             -- person back without asking the database a second time. One
             -- mass edit is a couple of hundred small objects, not a table.
             jsonb_agg(jsonb_build_object(
-              'id', id, 'rowId', row_id, 'person', person_name, 'group', group_name, 'field', field
+              'id', id, 'rowId', row_id, 'person', person_name, 'group', group_name, 'field', field,
+              'value', new_value, 'was', old_value
             ) ORDER BY id) AS changes,
             -- Per field, because one batch can set three of them and a
             -- flat list of values reads as "set to 1000, 2026-09-01, 30".

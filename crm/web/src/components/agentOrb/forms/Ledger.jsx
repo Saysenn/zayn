@@ -69,12 +69,13 @@ export function SectionLabel({ label, count }) {
  *
  * A row is { key, who, where, detail, title, onClick, trailing }.
  */
-export function Rows({ rows }) {
+export function Rows({ rows, wrap = false }) {
   return (
     // minmax, not a bare max-content: a long name pushed the right column
     // off the card and cut "Will never be bank" mid word. The left column
     // truncates, the right one keeps at least 40% and wraps. 2026-09-30.
-    <div className="mt-1 grid gap-x-4 gap-y-0.5 sm:grid-cols-[minmax(0,max-content)_minmax(40%,1fr)]">
+    // WRAP, for a plan: every word of who and where is read, nothing is cut.
+    <div className={`mt-1 grid gap-x-4 gap-y-0.5 ${wrap ? 'sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]' : 'sm:grid-cols-[minmax(0,max-content)_minmax(40%,1fr)]'}`}>
       {rows.map((row) => {
         const Tag = row.onClick ? 'button' : 'div';
         return (
@@ -86,7 +87,7 @@ export function Rows({ rows }) {
             // and a clickable row inherited it, so its detail could never wrap.
             className="contents min-h-0 whitespace-normal border-0 bg-transparent p-0 text-left"
           >
-            <span className={`truncate py-0.5 text-[10.5px] leading-snug text-white/85 ${row.onClick ? 'hover:text-diane-signal' : ''}`}>
+            <span className={`${wrap ? 'break-words' : 'truncate'} py-0.5 text-[10.5px] leading-snug text-white/85 ${row.onClick ? 'hover:text-diane-signal' : ''}`}>
               <span className="text-white/35">●{' '}</span>
               {row.who}
               {row.where && <span className="text-white/40">{SEP}{row.where}</span>}
@@ -103,11 +104,11 @@ export function Rows({ rows }) {
 }
 
 /** One labelled block of rows, and the cut said out loud when there is one. */
-export function Section({ label, count, rows, shown = rows.length }) {
+export function Section({ label, count, rows, shown = rows.length, wrap = false }) {
   return (
     <div className="mt-3 first:mt-0">
       {label && <SectionLabel label={label} count={count} />}
-      <Rows rows={rows} />
+      <Rows rows={rows} wrap={wrap} />
       {count > shown && (
         <p className="m-0 mt-1 px-0.5 text-[10px] text-white/30">showing {shown} of {count}</p>
       )}

@@ -1,5 +1,6 @@
 const env = require('../../../configs/env');
 const { getClient } = require('../chatClient');
+const { fold } = require('../tools/resolvePerson');
 
 /**
  * ***************************************************
@@ -81,27 +82,55 @@ function brief(table) {
  * @param {{ groups?: string[], client?: object }} opts `client` is for tests
  * @returns {Promise<Map<string, { kind, groupFrom, fields: string[] }>>} per table id
  */
+/**
+ * FASTER ON BIG WORKBOOKS, 2026-10-06 (9 to 15 s on many tabs):
+ *   - tabs laid out the same (same headers) are asked about ONCE, and the
+ *     answer is copied to the rest: MANBAT, INDIGO and MILKMAN tabs are one
+ *     question, not three;
+ *   - a layout seen before (the same file sent again) is remembered, so a
+ *     re-check costs no AI call at all.
+ */
+const seen = new Map();
+const LIMIT = 200;
+const shapeOf = (t) => fold(`${t.headers.join('|')}`);
+
 async function understand(tables, { groups = [], client = null } = {}) {
   const out = new Map();
   if (!tables.length) return out;
-  const openai = client ?? getClient();
-  if (!openai) throw new Error('no AI key');
-  const res = await openai.chat.completions.create({
-    model: env.openaiModel,
-    temperature: 0,
-    messages: [
-      { role: 'system', content: `${PROMPT}\nGroups in this CRM: ${groups.join(', ')}.` },
-      { role: 'user', content: JSON.stringify(tables.map(brief)) },
-    ],
-    response_format: { type: 'json_schema', json_schema: { name: 'layout', strict: true, schema: SCHEMA } },
-  });
-  const parsed = JSON.parse(res.choices?.[0]?.message?.content ?? '{"tables":[]}');
-  for (const t of parsed.tables ?? []) {
-    const table = tables.find((x) => x.id === t.id);
-    if (!table) continue;
-    const fields = table.headers.map(() => 'other');
-    for (const c of t.columns ?? []) if (c.index >= 0 && c.index < fields.length) fields[c.index] = c.field;
-    out.set(t.id, { kind: t.kind, groupFrom: t.groupFrom, fields });
+  // A test's stand-in model is never remembered for the real one.
+  const groupKey = `${client ? `test${Math.random()}` : 'live'}|${groups.join('|')}`;
+  const byShape = new Map();
+  for (const t of tables) {
+    const key = `${groupKey}::${shapeOf(t)}`;
+    if (!byShape.has(key)) byShape.set(key, []);
+    byShape.get(key).push(t);
+  }
+  const ask = [...byShape.entries()].filter(([key]) => !seen.has(key)).map(([, ts]) => ts[0]);
+  if (ask.length) {
+    const openai = client ?? getClient();
+    if (!openai) throw new Error('no AI key');
+    const res = await openai.chat.completions.create({
+      model: env.openaiModel,
+      temperature: 0,
+      messages: [
+        { role: 'system', content: `${PROMPT}\nGroups in this CRM: ${groups.join(', ')}.` },
+        { role: 'user', content: JSON.stringify(ask.map(brief)) },
+      ],
+      response_format: { type: 'json_schema', json_schema: { name: 'layout', strict: true, schema: SCHEMA } },
+    });
+    const parsed = JSON.parse(res.choices?.[0]?.message?.content ?? '{"tables":[]}');
+    for (const t of parsed.tables ?? []) {
+      const table = ask.find((x) => x.id === t.id);
+      if (!table) continue;
+      const fields = table.headers.map(() => 'other');
+      for (const c of t.columns ?? []) if (c.index >= 0 && c.index < fields.length) fields[c.index] = c.field;
+      if (seen.size >= LIMIT) seen.delete(seen.keys().next().value);
+      seen.set(`${groupKey}::${shapeOf(table)}`, { kind: t.kind, groupFrom: t.groupFrom, fields });
+    }
+  }
+  for (const [key, ts] of byShape) {
+    const got = seen.get(key);
+    if (got) for (const t of ts) out.set(t.id, { ...got, fields: [...got.fields] });
   }
   return out;
 }

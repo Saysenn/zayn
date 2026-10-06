@@ -198,4 +198,26 @@ function followUp(said, previous, lastAnswer, roster) {
   return group ? { ...before, allDeals: false, group } : null;
 }
 
-module.exports = { parseEdit, callFor, followUp };
+/**
+ * "SAME FOR PADDY", "PADDY TOO", "DO THE SAME FOR PADDY": the edit they
+ * just made, on someone else. Only these clear forms; "what about paddy?"
+ * could as well be a question, so it stays with her. The name must be one
+ * person on the sheet (one slip allowed), and the edit before must be one
+ * this file reads, so nothing is guessed.
+ */
+function sameFor(said, previous, lastAnswer, roster) {
+  if (/\?\s*$/.test(String(lastAnswer ?? ''))) return null;
+  const before = parseEdit(previous, roster);
+  if (!before) return null;
+  const text = String(said ?? '').toLowerCase().replace(/[!.]+\s*$/, '').trim();
+  const m = /^(?:(?:and|also|ok|okay|cool|great|thanks)[,\s]+)?(?:(?:do |apply )?(?:the )?same (?:thing )?(?:for|to|with|on) (.+?)(?: (?:too|as well|also))?|(?:do (?:it|that|this) (?:for|to|on) )(.+?)(?: (?:too|as well|also))?|(?:and )?(.+?) (?:too|as well|also))$/.exec(text);
+  const name = (m?.[1] ?? m?.[2] ?? m?.[3] ?? '').replace(/^(?:for|to)\s+/, '').trim();
+  if (!name || name.split(/\s+/).length > 3) return null;
+  const people = roster.people ?? [];
+  const exact = people.filter((p) => fold(p) === fold(name));
+  const close = exact.length ? exact : people.filter((p) => fold(name).length >= 4 && (within(fold(p), fold(name), 1) || oneTypo(fold(p), fold(name))));
+  if (close.length !== 1 || fold(close[0]) === fold(before.person)) return null;
+  return { ...before, person: close[0], group: null, allDeals: false };
+}
+
+module.exports = { parseEdit, callFor, followUp, sameFor };

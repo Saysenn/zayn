@@ -10379,14 +10379,29 @@ async function undoBatch(args) {
     .filter(Boolean);
   const named = everyone.slice(0, NAMES_SHOWN);
 
+  /**
+   * EACH PERSON WITH THEIR OWN CHANGE. A plan that set Zayn's monthly and
+   * Paddy's days read back as "monthly ..., payable days ..., on Zayn and
+   * Paddy", and she paired them the wrong way round when she worded it.
+   * A few people: every one named with exactly what goes back for them.
+   */
+  const reverting = picked.filter((c) => !heldIds.has(c.id));
+  const perPerson = everyone.length > 1 && everyone.length <= NAMES_SHOWN && reverting.every((c) => 'value' in c)
+    ? everyone.map((who) => {
+      const own = reverting.filter((c) => c.person === who);
+      const bits = [...new Map(own.map((c) => [c.field, `${FIELD_LABELS[c.field] ?? c.field} from "${c.value ?? 'blank'}" back to "${c.was || 'blank'}"`])).values()];
+      return `${who}: ${bits.join(', ')}`;
+    }).join('; ')
+    : null;
+
   const pending = confirmFirst(args.confirmed, {
     // "and the rest" only when there IS a rest. The names are capped, so on
     // a small batch that phrase invents rows that do not exist.
     // PEOPLE against PEOPLE: two names holding three deals is everyone.
     // NAMED PEOPLE ARE A PART too: "for Bram only" read "the whole change".
     act: `undo ${wantGroup ? `the ${wantGroup} part of `
-      : namedOnly.length > 0 ? `${listOf(named)}'s part of ` : 'the whole '}change: ${values}, `
-      + `on ${listOf(named)}${named.length < everyone.length ? ' and the rest' : ''}`,
+      : namedOnly.length > 0 ? `${listOf(named)}'s part of ` : 'the whole '}change: `
+      + (perPerson ?? `${values}, on ${listOf(named)}${named.length < everyone.length ? ' and the rest' : ''}`),
     count: deals,
     noun: 'deal',
     // WHO AND WHICH FIELDS, never the time: "1m ago" moved between two calls,
@@ -10400,6 +10415,7 @@ async function undoBatch(args) {
       + (heldPeople.length > 0
         ? `HELD BACK, staying as they are: ${listOf(heldPeople)}. You MUST name every one of them. `
         : '')
+      + (perPerson ? 'READ EACH PERSON\'S CHANGE BACK EXACTLY AS LISTED, with their own name: never move a field to another person. ' : '')
       + 'SAY THE COUNT AND THE FIELDS when you ask. Each row goes back to the value it had '
       + 'before that edit, which is not the same value for every row.',
   });

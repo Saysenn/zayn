@@ -418,7 +418,7 @@ const { checkPointed, DISABLED } = require('./disabledTools');
 const { bypassAttempt, BYPASS_REPLY } = require('./blockBypass');
 const { asksUndoPlainly } = require('./undoIntent');
 const { fold, personMentionedIn, within, oneTypo } = require('./tools/resolvePerson');
-const { parseEdit, callFor, followUp } = require('./directEdit');
+const { parseEdit, callFor, followUp, sameFor } = require('./directEdit');
 const { looksMultiStep, pendingPlan } = require('./engine/planSteps');
 const { route: routeMessage, asEdit } = require('./engine/router');
 const { planTurn, sheetTurn } = require('./engine/runPlan');
@@ -2872,7 +2872,19 @@ async function runAgentTurn(history, contextName, onEvent) {
   // A FILE THEY DROPPED IN rides on their message; a pasted sheet is the message.
   const attachment = [...history].reverse().find((m) => m.role === 'user')?.attachment ?? null;
   const attached = attachment ? (attachment.text || attachment.tables?.length ? true : null) : null;
-  const sheetGiven = !pending && (attached || looksLikeSheet(asked));
+  /**
+   * A NEW FILE, OR A NEW ASK ABOUT THE LAST ONE, IS A FRESH CHECK. Live
+   * 2026-10-06: "crosscheck this if there are new deals", sent while an old
+   * file plan was waiting, went to that plan and was rewritten the old way.
+   * A file on this message, or a check asked of the file already sent, reads
+   * the file again; anything else to a waiting plan answers the plan.
+   */
+  const earlierFile = !attachment && [...history].reverse().find((m) => m.role === 'user' && m.attachment)?.attachment;
+  const asksCheck = /\b(?:check|cross ?check|compare|discrepanc\w*|new deals?|missing|what'?s wrong|differ\w*)\b/i.test(asked)
+    && !/^(?:show|list|see|view|what about|why)\b/i.test(asked.trim());
+  const recheck = Boolean(earlierFile && asksCheck);
+  const fileNow = attachment ?? (recheck ? earlierFile : null);
+  const sheetGiven = Boolean(fileNow) || (!pending && looksLikeSheet(asked));
 
   /**
    * ===============================
@@ -2932,16 +2944,17 @@ async function runAgentTurn(history, contextName, onEvent) {
     }
   }
   const toEngine = routed
-    ? routed.sure && (routed.kind === 'multi_step' || (routed.kind === 'bulk_edit' && routed.person && !routed.group))
+    // A whole group goes to the engine too: one preview, every deal listed.
+    ? routed.sure && (routed.kind === 'multi_step' || routed.kind === 'bulk_edit')
     : looksMultiStep(asked);
-  if ((pending || sheetGiven || toEngine) && editsHere) {
+  if (((pending && !sheetGiven) || sheetGiven || toEngine) && editsHere) {
     try {
       const roster = await require('../repos/people.repo').filterOptions().catch(() => null);
       turnState.model = env.openaiModel;
       const turn = sheetGiven
         ? await sheetTurn({
-          text: attachment ? (attachment.text ?? '') : asked,
-          tables: attachment?.tables ?? null,
+          text: fileNow ? (fileNow.text ?? '') : asked,
+          tables: fileNow?.tables ?? null,
           said: asked,
           groups: roster?.groups ?? [],
           onEvent,
@@ -3377,6 +3390,8 @@ async function runAgentTurn(history, contextName, onEvent) {
     const names = { people: (roster?.people ?? []).map((p) => p.name), groups: roster?.groups ?? [] };
     const edit = parseEdit(asked, names)
       ?? followUp(asked, recentSaid(history, 2).split('\n')[1] ?? '', lastAnswer, names)
+      // "SAME FOR PADDY": the last edit, on someone else.
+      ?? recentSaid(history, 5).split('\n').slice(1).map((m) => sameFor(asked, m, lastAnswer, names)).find(Boolean)
       // THE ROUTER'S single edit, sure and on a real person, takes the same road.
       ?? routerEdit;
     if (edit) {

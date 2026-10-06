@@ -97,10 +97,8 @@ function Bubble({ text, onOpenDeal }) {
 
 export default function Messages({
   history, isSending, workingText, progress = null, streamingReply = '', onFormSubmit, onCellEdit,
-  onExportPause, onOpenDeal, onRetry, onOffer, onQuickReply,
+  onExportPause, onOpenDeal, onRetry, onOffer,
 }) {
-  // ONLY THE NEWEST PLAN TAKES A TAP: an older one was answered already.
-  const lastPlan = history.reduce((at, m, i) => (m.list?.kind === 'plan' ? i : at), -1);
   return (
     <>
       {history.map((m, i) => (
@@ -170,28 +168,6 @@ export default function Messages({
                 : m.list.kind === 'review' || m.list.kind === 'report' || m.list.kind === 'plan'
                   ? <SectionedList list={m.list} onOpen={onOpenDeal} />
                   : <DealList list={m.list} onOpen={onOpenDeal} />}
-            {/* A PLAN WAITING ON A YES gets the two answers as buttons.
-                Typing still works: "skip 2", "make step 1 4600". */}
-            {m.list.kind === 'plan' && m.list.plan?.status === 'preview' && i === lastPlan && i >= history.length - 2 && (
-              <div className="mt-2 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  disabled={isSending}
-                  onClick={() => onQuickReply?.('yes, do it')}
-                  className="min-h-0 rounded-full border border-diane-signal/60 bg-diane-signal/15 px-3 py-1 text-[11px] font-semibold text-diane-signal hover:bg-diane-signal/25 disabled:opacity-40"
-                >
-                  Do it
-                </button>
-                <button
-                  type="button"
-                  disabled={isSending}
-                  onClick={() => onQuickReply?.('cancel')}
-                  className="min-h-0 rounded-full border border-diane-line/40 bg-transparent px-3 py-1 text-[11px] text-diane-dim hover:border-diane-line hover:text-white/80 disabled:opacity-40"
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
           </div>
         ) : m.card ? (
           <div key={i} className="self-start w-full max-w-[95%]">

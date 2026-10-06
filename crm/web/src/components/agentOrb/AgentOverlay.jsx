@@ -1873,7 +1873,6 @@ export default function AgentOverlay({ open, onClose }) {
                 onOpenDeal={setOpenDeal}
                 onRetry={retryLastTurn}
                 onOffer={answerOffer}
-                onQuickReply={(text) => sendMessage(text)}
               />
             </div>
 

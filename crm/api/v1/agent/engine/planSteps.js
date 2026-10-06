@@ -85,6 +85,13 @@ function readReply(said, plan) {
     return { kind: 'cancel' };
   }
   const agreed = /^(?:y|ya|yes|yep|yeah|yup|ok|okay|sure|go|go ahead|do it|do all|do them|confirm\w*|proceed|all good|looks good)\b/.test(text);
+  // A QUESTION ABOUT THE PLAN SHOWS IT, and never changes it. Live
+  // 2026-10-06: "show me all discrepancies" was taken as a change to the
+  // plan, rewritten by the model, and came back as 39 "which deal?" questions.
+  if (!agreed && (/^(?:show|list|see|view|display|what|which|why|how|who|where|tell me|can you (?:show|list|tell)|give me|explain)\b/.test(text) || /\?\s*$/.test(text))
+    && !/\b(?:skip|except|instead|change|make|set|resume|bring|reopen|restart|only|don'?t)\b/.test(text)) {
+    return { kind: 'view' };
+  }
   const skipWords = /\b(?:skip|except|but not|but|without|leave out|don'?t do|not)\b/;
   if (skipWords.test(text)) {
     let skip = [];
@@ -177,6 +184,40 @@ function callsFor(step) {
   }
 }
 
+/**
+ * A FILE CHECK, GROUPED BY WHAT KIND OF CHANGE. Their call 2026-10-06: 95
+ * numbered steps in one column was hard to read. What needs an answer comes
+ * first, then new, moved, renamed, not in the file, changed. Each row keeps
+ * its #number so "skip #12" still works.
+ */
+function groupedSections(plan) {
+  const kindOf = (s) => {
+    if (s.question) return 'Needs your answer';
+    if (s.kind === 'move_deal') return 'Moved to another group';
+    if (s.kind === 'rename_group') return 'Groups renamed';
+    // MID-MONTH JOINERS AND LEAVERS: only the days, and the payable that
+    // follows them, moved. Real changes, read apart from the rest.
+    if (s.action === 'update' && s.changes?.length && s.changes.every((c) => ['payableDays', 'payableAmount'].includes(c.field))) return 'Days changed';
+    return {
+      add_deal: 'New deals', stop: 'Not in your file (stop)', resume: 'Bring back', person: 'People', company: 'Companies',
+    }[s.action] ?? 'Changed';
+  };
+  const ORDER = ['Needs your answer', 'New deals', 'Bring back', 'Moved to another group', 'Groups renamed', 'Not in your file (stop)', 'Changed', 'Days changed', 'People', 'Companies'];
+  const groups = new Map(ORDER.map((k) => [k, []]));
+  for (const s of plan.steps) groups.get(kindOf(s)).push(s);
+  const state = (s) => (s.skipped ? ' · skipped' : s.result ? (s.result.ok ? ' · ✅' : ' · ❌') : '');
+  return [...groups.entries()].filter(([, list]) => list.length).map(([label, list]) => ({
+    label: `${label} · ${list.length}`,
+    rows: list.flatMap((s) => (s.lines?.length ? s.lines : [{ name: s.person ?? s.company ?? '' }]).map((l, i) => ({
+      id: l.id,
+      // "3.", not "#3": a # in her words is read as a link to deal 3.
+      name: `${s.n}. ${l.name ?? s.person ?? ''}${i === 0 ? state(s) : ''}`,
+      where: l.where,
+      detail: s.question ?? (s.result && !s.result.ok ? `${l.detail} · ${s.result.why}` : l.detail),
+    }))),
+  }));
+}
+
 /** The card the plan is drawn as, with the plan itself carried inside it. */
 function planCard(plan) {
   const icon = { stop: '⛔', resume: '↩︎', add_deal: '➕', rename_company: '✎', rate: '%', update: '' };
@@ -193,16 +234,23 @@ function planCard(plan) {
         : plan.status === 'clean' ? `Checked ${plan.checked} rows: everything matches`
           : plan.status === 'nothing' ? `Checked ${plan.checked} rows: nothing to change for that`
           : `${plan.checked ? `Checked ${plan.checked} rows · ` : ''}${plan.steps.length} ${plan.steps.length === 1 ? 'change' : 'changes'}`,
-    note: done ? '' : plan.status === 'asking' ? 'A few things to check first' : 'Nothing has changed yet',
-    sections: [...plan.steps.map((s) => ({
-      label: `${s.n} · ${icon[s.action] ? `${icon[s.action]} ` : ''}${verb[s.action] ?? s.action}${s.when ? ` · 📅 from ${monthLabel(s.when)}` : ''}`
+    // A NOTE ABOUT THE WHOLE FILE is a sentence under the title, so it wraps
+    // rather than being cut off as a row.
+    note: [done ? '' : plan.status === 'asking' ? 'A few things to check first' : 'Nothing has changed yet',
+      ...(plan.notes ?? []).filter((x) => /^Another month/.test(x.label)).flatMap((x) => x.rows.map((r) => `${r.name}: ${r.detail}.`))]
+      .filter(Boolean).join('\n'),
+    sections: [
+      ...(plan.source === 'sheet' || plan.checked ? groupedSections(plan) : plan.steps.map((s) => ({
+      // A WHOLE GROUP says so, with its count: "1 · Change" hid six deals.
+      label: `${s.n} · ${icon[s.action] ? `${icon[s.action]} ` : ''}${s.groupWide ? `Every ${s.group} deal · ${s.ids?.length ?? 0}` : verb[s.action] ?? s.action}${s.when ? ` · 📅 from ${monthLabel(s.when)}` : ''}`
         + `${s.skipped ? ' · skipped' : ''}${s.result ? (s.result.ok ? ' · ✅ done' : ' · ❌ not done') : ''}`,
       rows: (s.lines?.length ? s.lines : [{ name: s.person ?? s.company ?? '', detail: s.question ?? '' }]).map((l) => ({
         id: l.id, name: l.name, where: l.where, detail: s.result && !s.result.ok ? `${l.detail} · ${s.result.why}` : l.detail,
       })),
-    })),
+    }))),
     // WHAT COULD NOT BE A STEP, listed under the plan so nothing is hidden.
-    ...(plan.notes ?? [])],
+    ...(plan.notes ?? []).filter((x) => !/^Another month/.test(x.label))],
+    footer: (plan.readout ?? []).join('\n'),
     plan,
   };
 }

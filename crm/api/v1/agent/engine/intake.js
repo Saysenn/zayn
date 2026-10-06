@@ -1,6 +1,7 @@
 const ExcelJS = require('exceljs');
 const JSZip = require('jszip');
 const { findTables } = require('../../calculator/readSheets');
+const { fold } = require('../tools/resolvePerson');
 
 /**
  * ***************************************************
@@ -33,12 +34,59 @@ function cellOf(v) {
   return typeof v === 'string' ? v.trim() : v;
 }
 
+/**
+ * A BAND ROW folded into the header under it. A merged "Bank details" over
+ * "Account" and "Sort code" reads as the same label in side by side cells;
+ * left as it is, the table finder takes the band for the header and loses
+ * every other column. Only a row of labels that each spread over two or more
+ * columns, sitting over a wider row of labels, counts.
+ */
+function foldBands(grid) {
+  const out = grid.map((row) => [...(row ?? [])]);
+  const label = (v) => (!blank(v) && typeof v === 'string' && !/\d/.test(v) ? String(v).trim() : '');
+  for (let r = 0; r < out.length - 1; r += 1) {
+    const row = out[r];
+    const next = out[r + 1];
+    const cells = row.map((v, i) => [label(v), i]).filter(([v]) => v);
+    if (cells.length < 2 || row.some((v) => !blank(v) && !label(v))) continue;
+    const spread = cells.every(([v, i]) => label(row[i - 1]) === v || label(row[i + 1]) === v);
+    const below = next.filter((v) => !blank(v));
+    if (!spread || below.length <= cells.length || below.some((v) => !label(v))) continue;
+    out[r + 1] = next.map((v, i) => (label(row[i]) && label(v) && fold(label(row[i])) !== fold(label(v)) ? `${label(row[i])} ${label(v)}` : v));
+    out[r] = row.map(() => null);
+  }
+  return out;
+}
+
+/**
+ * SUB-LABELS ON THE ROW BELOW ("Monthly" over "Amount" / "Currency"): a
+ * first row with no figure in it that fills a blank header is the second
+ * header row, not a deal. The headers with it folded in, or null.
+ */
+function subLabels(headers, below) {
+  const text = (v) => (!blank(v) && typeof v === 'string' ? String(v).trim() : '');
+  const fills = below.filter((v, i) => text(v) && !headers[i]).length;
+  const labels = below.filter((v) => text(v)).length;
+  if (!(fills >= 1 && labels >= 2 && below.every((v) => blank(v) || (typeof v === 'string' && !/\d/.test(v))))) return null;
+  return headers.map((h, i) => (text(below[i]) ? (h && fold(h) !== fold(text(below[i])) ? `${h} ${text(below[i])}` : text(below[i])) : h));
+}
+
 /** The tables in one grid (rows of cells), each row with its line number. */
-function tablesIn(grid, sheet) {
+function tablesIn(rawGrid, sheet) {
+  const grid = foldBands(rawGrid);
   return findTables(grid).map((t, k) => {
-    const headers = (grid[t.headerRow] ?? []).slice(t.firstCol, t.lastCol + 1).map((h) => (blank(h) ? '' : String(h).trim()));
+    // A HEADER OVER TWO ROWS ("Monthly" above "Amount", or a merged label
+    // with blanks under it): a blank header takes the label above it.
+    const above = (grid[t.headerRow - 1] ?? []).slice(t.firstCol, t.lastCol + 1);
+    const text = (v) => (!blank(v) && typeof v === 'string' ? String(v).trim() : '');
+    let headers = (grid[t.headerRow] ?? []).slice(t.firstCol, t.lastCol + 1)
+      .map((h) => (blank(h) ? '' : String(h).trim()))
+      .map((h, i) => h || text(above[i]));
+    let first = t.headerRow + 1;
+    const split = subLabels(headers, (grid[first] ?? []).slice(t.firstCol, t.lastCol + 1));
+    if (split) { headers = split; first += 1; }
     const rows = [];
-    for (let r = t.headerRow + 1; r <= t.lastRow; r += 1) {
+    for (let r = first; r <= t.lastRow; r += 1) {
       const raw = (grid[r] ?? []).slice(t.firstCol, t.lastCol + 1);
       if (raw.every(blank)) continue;
       rows.push({ line: r + 1, cells: raw.map((c) => (blank(c) ? null : c)) });
@@ -136,8 +184,12 @@ async function intake({ buffer = null, filename = '', text = null }) {
   if (grid) {
     const at = grid.findIndex((r) => r.filter((c) => !blank(c)).length >= 2);
     if (at >= 0) {
-      const headers = grid[at].map((h) => (blank(h) ? '' : String(h).trim()));
-      const rows = grid.slice(at + 1).map((cells, i) => ({ line: at + i + 2, cells: headers.map((_, k) => (blank(cells[k]) ? null : cells[k])) }))
+      let headers = grid[at].map((h) => (blank(h) ? '' : String(h).trim()));
+      // The same two-row header as in a spreadsheet (a CSV has them too).
+      const split = subLabels(headers, grid[at + 1] ?? []);
+      if (split) headers = split;
+      const skip = split ? 1 : 0;
+      const rows = grid.slice(at + 1 + skip).map((cells, i) => ({ line: at + i + 2 + skip, cells: headers.map((_, k) => (blank(cells[k]) ? null : cells[k])) }))
         .filter((r) => r.cells.some((c) => !blank(c)));
       if (rows.length && headers.filter(Boolean).length >= 2) tables = [{ id: 'text#1', sheet: null, headerLine: at + 1, headers, rows }];
     }
