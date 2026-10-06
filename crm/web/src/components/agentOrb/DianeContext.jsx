@@ -20,14 +20,24 @@ import AiLockedDialog from '../modals/AiLockedDialog';
 const DianeCtx = createContext(null);
 
 /**
- * ONE WORKSPACE, so nothing picks it.
- *
- * There was a `WORKSPACES` list and a panel to choose from it, and the
- * list has only ever had one entry. A chooser with one option is furniture,
- * so the panel went and the value is fixed here. A second workspace means
- * a list again, and `setContext` is kept for that day.
+ * WHAT SHE IS FOCUSED ON, one major area at a time so figures never mix.
+ * The admin's call 2026-10-06: the master sheet now (deals, people,
+ * companies: everything she does today), expenses and debts to come. The
+ * two not built yet are shown, greyed, as coming soon.
  */
-const ONLY_CONTEXT = 'master-sheet';
+export const CONTEXTS = Object.freeze([
+  { key: 'master-sheet', label: 'Master sheet' },
+  { key: 'expenses', label: 'Expenses', soon: true },
+  { key: 'debts', label: 'Debts', soon: true },
+]);
+const DEFAULT_CONTEXT = 'master-sheet';
+const CONTEXT_KEY = 'diane.context';
+function savedContext() {
+  try {
+    const saved = sessionStorage.getItem(CONTEXT_KEY);
+    return CONTEXTS.some((c) => c.key === saved && !c.soon) ? saved : DEFAULT_CONTEXT;
+  } catch { return DEFAULT_CONTEXT; }
+}
 
 const OPEN_KEY = 'diane-open';
 function wasOpen() {
@@ -35,7 +45,13 @@ function wasOpen() {
 }
 
 export function DianeProvider({ children }) {
-  const [context, setContext] = useState(ONLY_CONTEXT);
+  const [context, setContextState] = useState(savedContext);
+  // Only an area that is built can be picked; the choice stays for the tab.
+  const setContext = (key) => {
+    if (!CONTEXTS.some((c) => c.key === key && !c.soon)) return;
+    setContextState(key);
+    try { sessionStorage.setItem(CONTEXT_KEY, key); } catch { /* storage off: it resets on refresh */ }
+  };
   // A REFRESH KEEPS HER OPEN. It dropped the admin back on the page
   // underneath, mid conversation. Per tab, like the conversation itself.
   const [open, setOpen] = useState(wasOpen);

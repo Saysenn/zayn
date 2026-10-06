@@ -183,6 +183,80 @@ export const WRITES = [
       },
     ],
   },
+  // ---- 2026-10-06, the live session: every one of these broke in front of him ----
+  // "add 5 days" was SET to 5, "both" applied it twice (5 to 10 to 15).
+  {
+    name: 'add N days moves every deal BY N, once, and undo puts them back',
+    turns: [
+      { say: 'add 5 days to kiran vale payable days' },
+      { say: 'all of them' },
+      {
+        say: 'yes',
+        expect: { db: async (db) => {
+          const days = (await db.query("SELECT payable_days d FROM tb_mastersheet WHERE person_name = 'Kiran Vale' AND stopped_on IS NULL ORDER BY id")).rows.map((r) => Number(r.d));
+          const before = (await db.query("SELECT old_value v FROM tb_mastersheet_changes WHERE person_name = 'Kiran Vale' AND field = 'payableDays' AND reverted_at IS NULL ORDER BY id")).rows.map((r) => Number(r.v));
+          const moved = (await db.query("SELECT count(*)::int n FROM tb_mastersheet_changes WHERE person_name = 'Kiran Vale' AND field = 'payableDays' AND reverted_at IS NULL")).rows[0].n;
+          return moved === 3 && days.every((d, i) => d === before[i] + 5) ? null : `${moved} day changes, days now ${days.join('/')}`;
+        } },
+      },
+      { say: 'undo that' },
+      {
+        say: 'yes',
+        expect: { db: async (db) => ((await db.query("SELECT count(*)::int n FROM tb_mastersheet_changes WHERE person_name = 'Kiran Vale' AND field = 'payableDays' AND reverted_at IS NULL AND changed_via = 'diane' AND new_value::numeric > old_value::numeric")).rows[0].n === 0 ? null : 'the days were not put back') },
+      },
+    ],
+  },
+  // "show me zayns deals" after "which group?" was taken as "both".
+  {
+    name: 'a new ask after "which group?" is not an answer to it',
+    turns: [
+      { say: 'add 100 to kiran vale' },
+      {
+        say: 'show me kiran vales deals',
+        expect: { db: async (db) => {
+          const m = (await db.query("SELECT monthly_amount m FROM tb_mastersheet WHERE person_name = 'Kiran Vale' ORDER BY id")).rows.map((r) => Number(r.m));
+          return m.join('/') === '3000/2500/6000' ? null : `monthlies moved: ${m.join('/')}`;
+        } },
+      },
+    ],
+  },
+  // "deduct 500 to paddy" went on the payable; the monthly is the rate.
+  {
+    name: 'deduct with no field named is the monthly, and the payable follows it',
+    turns: [
+      { say: 'deduct 100 from otto fenn' },
+      {
+        say: 'yes',
+        expect: { db: async (db) => { const r = await deal(db, 'Otto Fenn', 'Ironleaf'); return Number(r.monthly_amount) === 1400 ? null : `monthly ${r.monthly_amount} payable ${r.payable_amount}`; } },
+      },
+      { say: 'undo that' },
+      {
+        say: 'yes',
+        expect: { db: async (db) => (Number((await deal(db, 'Otto Fenn', 'Ironleaf')).monthly_amount) === 1500 ? null : 'not put back') },
+      },
+    ],
+  },
+  // "no I meant indigo" left the first deal changed.
+  {
+    name: 'a correction puts the last change back and makes it where they meant',
+    turns: [
+      { say: 'add 100 to kiran vale corvid' },
+      { say: 'yes' },
+      {
+        say: 'no I meant otter',
+        expect: { db: async (db) => {
+          const corvid = Number((await deal(db, 'Kiran Vale', 'Ironleaf')).monthly_amount);
+          return corvid === 2500 ? null : `corvid still ${corvid}`;
+        } },
+      },
+      { say: 'yes' },
+      { say: 'undo that' },
+      {
+        say: 'yes',
+        expect: { db: async (db) => { const o = Number((await deal(db, 'Kiran Vale', 'Harbor Nine')).monthly_amount); return o === 6000 ? null : `otter left at ${o}`; } },
+      },
+    ],
+  },
 ];
 
 

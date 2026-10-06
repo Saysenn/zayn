@@ -958,6 +958,46 @@ router.post('/master-sheet/bulk-delete', async (req, res, next) => {
 // workspace's tools are absent from the request entirely (see
 // agent/contexts.js). An unknown or missing value falls back to the
 // master sheet rather than erroring, so a stale tab still works.
+/**
+ * A FILE FOR DIANE: .xlsx, .csv or .txt, turned into text she checks
+ * against the sheet (agent/engine/sheetCheck.js). Nothing is written here.
+ * Its own upload, because the import's only takes .xlsx.
+ */
+const attachUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  fileFilter(req, file, cb) {
+    if (!/\.(xlsx|csv|txt|tsv|json|docx)$/i.test(file.originalname)) {
+      return cb(new AppError(400, `Diane can read Excel, CSV, text, JSON or Word files, not ${file.originalname}.`));
+    }
+    cb(null, true);
+  },
+});
+router.post('/master-sheet/agent/attach', (req, res, next) => {
+  attachUpload.single('file')(req, res, async (err) => {
+    if (err) return next(err instanceof AppError ? err : new AppError(400, err.message));
+    try {
+      if (!req.file) return next(new AppError(400, messages.noFile));
+      // ANY FILE: cut into its tables and its free text (agent/engine/intake.js).
+      // What the columns mean is worked out when they say what they want.
+      // eslint-disable-next-line global-require
+      const { intake } = require('./agent/engine/intake');
+      const got = await intake({ buffer: req.file.buffer, filename: req.file.originalname });
+      const rows = got.tables.reduce((n, t) => n + t.rows.length, 0);
+      res.json({
+        filename: req.file.originalname,
+        tables: got.tables,
+        text: got.text,
+        lines: rows + got.text.split(/\r?\n/).filter((l) => l.trim()).length,
+      });
+    } catch (e) {
+      // In words they can act on; the reason itself goes to the server log.
+      req.log?.warn?.({ err: e.message }, 'diane: an attached file could not be read');
+      next(new AppError(400, `I couldn't read ${req.file?.originalname ?? 'that file'}. If it's open in Excel, save it and try again, or send it as a CSV.`));
+    }
+  });
+});
+
 router.post('/master-sheet/agent', async (req, res, next) => {
   try {
     const { history, context } = req.body || {};

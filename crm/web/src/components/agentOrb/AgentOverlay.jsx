@@ -8,7 +8,7 @@ import { useOpenaiSpeech } from './useOpenaiSpeech';
 import { useFollowScroll } from './useFollowScroll';
 import { apiService } from '../../configs/api.config';
 import { saveBlob } from '../../helpers/api.helper';
-import { useDiane } from './DianeContext';
+import { useDiane, CONTEXTS } from './DianeContext';
 import { useSession } from '../../hooks/useAuth';
 import { useSettings, useUpdateSettings } from '../../hooks/useSettings';
 import { useUpdateMasterSheetRow } from '../../hooks/useMasterSheet';
@@ -33,8 +33,9 @@ import { orbStateFor } from './orbStateFor';
 import { useOrbSlot } from './particlesOrb/useOrbSlot';
 import {
   MicIcon, SpeakerMuteIcon, SendIcon, WaveformIcon, ExpandIcon,
-  DownloadIcon, ResetIcon,
+  DownloadIcon, ResetIcon, PaperclipIcon,
 } from '../icons';
+import { BASE_URL } from '../../helpers/api.helper';
 
 // THE PARTICLES ORB, here and on the welcome page (his calls 2026-09-27 and
 // 2026-09-28). The loading screen keeps the particle field.
@@ -139,6 +140,28 @@ function forgetExport() {
  * its own key above and is put back from there.
  */
 const CONVERSATION_KEY = 'diane.conversation';
+
+/**
+ * THE SERVER NOT ANSWERING IS RETRIED, not shown. A restart of the API is a
+ * few seconds of "Failed to fetch", and the browser says it before the
+ * request ever reached the server, so asking again cannot do anything
+ * twice. Only that: an answer that came back as an error is never retried.
+ */
+const SERVER_DOWN = 'I can\'t reach the CRM server right now. It may be restarting: give it a moment and ask again.';
+// ONLY the browser's own "never got there". A TypeError from our code is a
+// bug, not a dead server, and retrying it re-sent a message three times.
+const unreachable = (err) => err instanceof TypeError
+  && /^(?:failed to fetch|load failed|networkerror when attempting to fetch resource\.?)$/i.test(String(err?.message ?? '').trim());
+async function whenReachable(call, waits = [1000, 2000, 4000]) {
+  for (let i = 0; ; i += 1) {
+    try {
+      return await call();
+    } catch (err) {
+      if (!unreachable(err) || i >= waits.length) throw err;
+      await new Promise((r) => setTimeout(r, waits[i]));
+    }
+  }
+}
 
 function conversationFromStorage() {
   try {
@@ -347,7 +370,7 @@ const RESTING_PHRASES = [
  * Nothing here talks to master_sheet_rows directly.
  */
 export default function AgentOverlay({ open, onClose }) {
-  const { context, recheckAi } = useDiane();
+  const { context, setContext, recheckAi } = useDiane();
   const [history, setHistory] = useState(() => [
     ...(conversationFromStorage() ?? [{ role: 'assistant', content: GREETING }]),
     ...openExportFromStorage(),
@@ -848,11 +871,11 @@ export default function AgentOverlay({ open, onClose }) {
    * from this render, so a `setHistory` in the same tick has not landed and
    * the retry would send the very pair it just dropped.
    */
-  async function sendMessage(text, base = history) {
+  async function sendMessage(text, base = history, extra = null) {
     const trimmed = text.trim();
     if (!trimmed || isSending) return;
 
-    const nextHistory = [...base, { role: 'user', content: trimmed }];
+    const nextHistory = [...base, { role: 'user', content: trimmed, ...(extra ?? {}) }];
     // They just spoke, so they are reading the bottom: follow the answer.
     stuckRef.current = true;
     setHistory(nextHistory);
@@ -891,7 +914,7 @@ export default function AgentOverlay({ open, onClose }) {
       // and a half-finished sentence must never end up in it.
       const {
         reply, claims = [], offer = null, spoken = null,
-      } = await apiService.masterSheet.agentTurn(
+      } = await whenReachable(() => apiService.masterSheet.agentTurn(
         nextHistory,
         context,
         (event) => {
@@ -1063,19 +1086,23 @@ export default function AgentOverlay({ open, onClose }) {
           }
 
           if (event.type === 'list' && event.list) {
+            // A PLAN carries its rows inside its sections, not as `rows`.
+            const listRows = event.list.rows ?? (event.list.sections ?? []).flatMap((x) => x.rows ?? []);
             // A COMPANY LIST names companies, not people or rows.
             const companies = event.list.kind === 'companies';
             if (!companies) {
-              for (const r of event.list.rows) noteTouched({
+              for (const r of listRows) noteTouched({
                 row: r.id, person: r.name, group: r.group, company: r.company,
               });
             }
             const entry = {
               role: 'assistant',
               content: companies
-                ? `[listed ${event.list.rows.length} companies: ${event.list.rows.map((r) => r.name).join(', ')}]`
-                : `[listed ${event.list.rows.length} deals: ${
-                  event.list.rows.map((r) => `#${r.id} ${r.name}`).join(', ')
+                ? `[listed ${listRows.length} companies: ${listRows.map((r) => r.name).join(', ')}]`
+                : event.list.kind === 'plan'
+                  ? `[plan: ${event.list.title}]`
+                  : `[listed ${listRows.length} deals: ${
+                    listRows.map((r) => `#${r.id} ${r.name}`).join(', ')
                 }]`,
               list: event.list,
             };
@@ -1141,7 +1168,7 @@ export default function AgentOverlay({ open, onClose }) {
             });
           }
         },
-      );
+      ));
       // Signed out while this was in flight — drop it on the floor rather
       // than speaking a reply to someone who has already left.
       if (signedOutRef.current) return;
@@ -1223,7 +1250,9 @@ export default function AgentOverlay({ open, onClose }) {
         return;
       }
 
-      const excuse = RESTING_PHRASES[Math.floor(Math.random() * RESTING_PHRASES.length)];
+      // THE SERVER NOT THERE says so plainly: "I didn't catch that" sent
+      // them to reword a message that never left the browser.
+      const excuse = unreachable(err) ? SERVER_DOWN : RESTING_PHRASES[Math.floor(Math.random() * RESTING_PHRASES.length)];
       setHistory([...nextHistory, { role: 'assistant', content: excuse, failed: true }]);
       if (!muted) tts.speak(excuse);
     } finally {
@@ -1239,7 +1268,16 @@ export default function AgentOverlay({ open, onClose }) {
 
   function handleSubmit(e) {
     e.preventDefault();
-    sendMessage(input);
+    sendTyped();
+  }
+
+  // Their words, and the file if one is held: the transcript shows its name.
+  function sendTyped() {
+    if (!attached) return sendMessage(input);
+    if (!input.trim() || isSending) return undefined;
+    const file = attached;
+    setAttached(null);
+    return sendMessage(`📎 ${file.filename}\n${input.trim()}`, history, { attachment: { filename: file.filename, text: file.text, tables: file.tables } });
   }
 
   /**
@@ -1315,6 +1353,37 @@ export default function AgentOverlay({ open, onClose }) {
    * a session whose questions and answers are no longer on screen, which
    * is why the confirm names it.
    */
+  /**
+   * A FILE FOR HER, held until THEY say what to do with it. Their call
+   * 2026-10-06: picking a file sent "check this against the sheet" on its
+   * own. Now it is read and shown as a chip by the input, and goes with
+   * the next message they type. Nothing is sent by choosing a file.
+   */
+  const fileRef = useRef(null);
+  const [attaching, setAttaching] = useState(false);
+  const [attached, setAttached] = useState(null);
+  async function attachFile(file) {
+    if (!file || isSending || attaching) return;
+    setAttaching(true);
+    try {
+      const body = new FormData();
+      body.append('file', file);
+      const res = await whenReachable(() => fetch(`${BASE_URL}/api/v1/master-sheet/agent/attach`, { method: 'POST', credentials: 'include', body }));
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || data.message || `I couldn't open ${file.name}. Is it an Excel, CSV or text file?`);
+      setAttached({
+        filename: data.filename, text: data.text ?? '', lines: data.lines, tables: data.tables ?? [],
+      });
+      inputRef.current?.focus?.();
+    } catch (err) {
+      // In words, never the browser's own: "Failed to fetch" was shown raw.
+      setHistory((h) => [...h, { role: 'assistant', content: unreachable(err) ? SERVER_DOWN : err.message }]);
+    } finally {
+      setAttaching(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  }
+
   function resetConversation() {
     endConversation();
     forgetExport();
@@ -1535,6 +1604,33 @@ export default function AgentOverlay({ open, onClose }) {
             <p className="hidden sm:block text-[0.58rem] tracking-[0.26em] text-diane-dim uppercase mt-2">
               AI Agent · Command Center
             </p>
+          </div>
+          {/* WHAT SHE IS FOCUSED ON. One area at a time, so figures never mix. */}
+          <div role="radiogroup" aria-label="What Diane focuses on" className="hidden md:flex items-center gap-1 ml-4 rounded-full border border-diane-line/40 p-1">
+            {CONTEXTS.map((c) => {
+              const on = c.key === context;
+              return (
+                <button
+                  key={c.key}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  disabled={c.soon || isSending}
+                  onClick={() => { if (!on) { setContext(c.key); resetConversation(); } }}
+                  title={c.soon ? `${c.label}: coming soon` : `Focus on the ${c.label.toLowerCase()}`}
+                  className={`min-h-0 rounded-full px-3 py-1 text-[11px] tracking-wide transition-colors border ${
+                    on
+                      ? 'border-diane-signal/60 bg-diane-signal/15 text-diane-signal font-semibold'
+                      : c.soon
+                        ? 'border-transparent bg-transparent text-white/25 cursor-not-allowed'
+                        : 'border-transparent bg-transparent text-diane-dim hover:text-white/80'
+                  }`}
+                >
+                  {c.label}
+                  {c.soon && <span className="ml-1.5 text-[9px] uppercase tracking-wider text-white/25">soon</span>}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -1777,6 +1873,7 @@ export default function AgentOverlay({ open, onClose }) {
                 onOpenDeal={setOpenDeal}
                 onRetry={retryLastTurn}
                 onOffer={answerOffer}
+                onQuickReply={(text) => sendMessage(text)}
               />
             </div>
 
@@ -1856,13 +1953,32 @@ export default function AgentOverlay({ open, onClose }) {
               onToggle={() => toggleAutoConfirm()}
             />
           <form onSubmit={handleSubmit}>
+            {attached && (
+              <div className="mb-2 flex items-center gap-2">
+                <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-diane-signal/50 bg-diane-signal/10 px-3 py-1 text-[11px] text-diane-signal">
+                  <PaperclipIcon width={12} height={12} />
+                  <span className="truncate max-w-[16rem]">{attached.filename}</span>
+                  <span className="text-white/40">· {attached.lines} lines</span>
+                  <button
+                    type="button"
+                    onClick={() => setAttached(null)}
+                    className="ml-1 min-h-0 border-0 bg-transparent p-0 text-white/50 hover:text-white"
+                    aria-label={`Remove ${attached.filename}`}
+                    title="Remove this file"
+                  >
+                    ✕
+                  </button>
+                </span>
+                <span className="text-[10px] text-white/40">Tell her what to do with it, then send.</span>
+              </div>
+            )}
             {/* RichInput owns both rows and the pill's own outline: the
                 formatting toolbar has to sit OUTSIDE that outline, and only
                 whatever draws it can say where the edge is. */}
             <RichInput
               ref={inputRef}
               onChange={setInput}
-              onSubmit={() => sendMessage(input)}
+              onSubmit={() => sendTyped()}
               disabled={isSending}
               placeholder={placeholder}
               maxHeight="6rem"
@@ -1887,6 +2003,23 @@ export default function AgentOverlay({ open, onClose }) {
               }
               after={
                 <>
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept=".xlsx,.csv,.txt,.tsv,.json,.docx"
+                    className="hidden"
+                    onChange={(e) => attachFile(e.target.files?.[0])}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileRef.current?.click()}
+                    disabled={isSending || attaching || Boolean(attached)}
+                    className="shrink-0 w-11 h-11 rounded-full flex items-center justify-center border min-h-0 p-0 transition-colors disabled:opacity-30 border-diane-line/60 bg-transparent text-diane-signal hover:border-diane-signal"
+                    aria-label="Attach a sheet for Diane to check"
+                    title="Attach a sheet (.xlsx, .csv, .txt) to check against the CRM"
+                  >
+                    <PaperclipIcon width={17} height={17} />
+                  </button>
                   {/* NO LEVEL METER AND NO KEY HINT. The meter said what the
                       vitals panel's SIGNAL and the orb itself already say,
                       and the hint was a permanent line of text inside a box

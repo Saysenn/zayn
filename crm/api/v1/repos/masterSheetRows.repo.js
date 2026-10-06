@@ -1914,6 +1914,19 @@ async function update(id, fields, changedVia = 'admin', { derived = [], batchId 
    */
   if ('endOn' in fields && fields.endOn) sets.push('end_note = NULL');
 
+  /**
+   * A NEW GROUP IS A NEW FIRST PART OF THE IDENTITY. The sync key starts
+   * with the group ("manbat|kp|kp|-|gary"), and a group changed on the row
+   * but not in the key made the next import of the renamed sheet a second
+   * copy of every deal. Rewritten here, so a rename, an edit and the undo of
+   * either all leave the two in step. 2026-10-06.
+   */
+  if (typeof fields.groupName === 'string' && fields.groupName.trim()) {
+    params.push(fields.groupName.trim().toLowerCase());
+    sets.push(`sync_key = CASE WHEN position('|' in sync_key) > 0
+      THEN $${params.length} || substring(sync_key from position('|' in sync_key)) ELSE sync_key END`);
+  }
+
   if (sets.length === 0) return findById(id);
 
   const client = await pool.connect();

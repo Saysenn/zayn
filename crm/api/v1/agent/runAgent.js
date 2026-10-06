@@ -157,6 +157,17 @@ function lightTurn(asked, lastAnswer, { named, routedTool }) {
   return fields.length <= 2 && !fields.some((f) => RISKY_FIELDS.has(f));
 }
 
+/** JSON with keys sorted at every level, so two spellings of one call compare equal. */
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).filter((k) => value[k] !== undefined).sort()
+      .map((k) => `${JSON.stringify(k)}:${stableJson(value[k])}`).join(',')}}`;
+  }
+  // "zayn" and "Zayn" are one person to her and to the sheet.
+  return JSON.stringify(typeof value === 'string' ? value.trim().toLowerCase() : value);
+}
+
 const EVERY_DEAL_EDIT = {
   test: (said) => {
     const text = String(said ?? '');
@@ -187,7 +198,9 @@ const FORCED_ROUTES = [
   // deal: "the umbrella one" was a lookup and the 900 was lost. 2026-10-04.
   [{
     test: (said, history = []) => /\bhas \d+ deals\. Which \w+ should get\b/.test(lastAssistantAnswer(history) ?? '')
-      && String(said).trim().split(/\s+/).length <= 6 && !/\?\s*$/.test(String(said)),
+      && String(said).trim().split(/\s+/).length <= 6 && !/\?\s*$/.test(String(said))
+      // "show me zayns deals" is a new ask, not "both". Live 2026-10-06.
+      && !NEW_REQUEST.test(String(said)),
   }, 'update_master_sheet_row'],
   // "THE QUICKEARN ONE" after a PROFILE preview narrows it to that deal:
   // it was answered with rates and the question asked again. 2026-10-04.
@@ -405,6 +418,10 @@ const { checkPointed, DISABLED } = require('./disabledTools');
 const { bypassAttempt, BYPASS_REPLY } = require('./blockBypass');
 const { asksUndoPlainly } = require('./undoIntent');
 const { fold, personMentionedIn, within } = require('./tools/resolvePerson');
+const { parseEdit, callFor, followUp } = require('./directEdit');
+const { looksMultiStep, pendingPlan } = require('./engine/planSteps');
+const { planTurn, sheetTurn } = require('./engine/runPlan');
+const { looksLikeSheet } = require('./engine/sheetCheck');
 const { PROMPT_PLACEHOLDERS } = require('./promptPlaceholders');
 const { rankAskedIn } = require('./tools/masterSheet');
 // A tool's own orders, read out to the admin. See checkLeak.js.
@@ -1366,7 +1383,10 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
    * live deals must be one they pointed at: its company or group said, or
    * the one card on screen. Otherwise it is dropped, and the tool asks which.
    */
-  if (tool.writes && (props.targetPerson || props.id)) {
+  // NOT ON A CHANGE ALREADY AGREED: a plan step or a replay carries the
+  // exact deal it was shown with, and "yes" names nothing. Clone 2026-10-06:
+  // the plan's deal ids were swapped for the name and nothing was written.
+  if (tool.writes && (props.targetPerson || props.id) && !turn?.applyingHeld) {
     const heard = fold(recentSaid(history, 3));
     // Whole, or one whole word of 4+ letters: "on harbor" is Harbor Nine.
     const heardWords = new Set(recentSaid(history, 3).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4));
@@ -1648,6 +1668,23 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
       others.done.push(next);
     } else if (id == null || others.done.includes(id)) {
       return { summary: 'NOTHING HAS BEEN CHANGED. Every one of their deals already has this change. Say what was done.' };
+    }
+  }
+  /**
+   * "ADD 5 DAYS" MOVES THE DAYS BY 5, it does not make them 5. Live
+   * 2026-10-06: "add 5 days to zayn payable days" came as payableDays 5, a
+   * preview of "5 to 5" on deals already at 5. Their words moved it BY a
+   * number and never said "to" one, so the set becomes an add.
+   */
+  if (!args.confirmed && args.payableDays != null && args.add?.payableDays === undefined) {
+    // Two turns, so "both" to "which group?" keeps the add it answers.
+    const heard = recentSaid(history);
+    const by = heard.match(/\b(add|plus|another|extra|deduct|minus|take\s+off|remove)\s+(\d+)\s+(?:more\s+|extra\s+)?(?:payable\s+)?days?\b|\b(\d+)\s+more\s+days?\b/i);
+    const n = Number(by?.[2] ?? by?.[3]);
+    if (by && n === Number(args.payableDays) && !/\bto\s+\d/i.test(heard)) {
+      const less = /deduct|minus|take|remove/i.test(by[1] ?? '');
+      const { payableDays: _d, ...rest } = args;
+      args = { ...rest, add: { ...(args.add ?? {}), payableDays: less ? -n : n } };
     }
   }
   const modelArgs = { ...args };
@@ -2081,6 +2118,17 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
       if (turn) turn.wrote.set('__auto', true);
     }
 
+    /**
+     * ONE CHANGE IS WRITTEN ONCE A TURN. Live 2026-10-06: "both" to "add 5
+     * days to zayn" came as two calls with the same arguments in a different
+     * order, the round's own fingerprint missed it, and both deals went 5 to
+     * 10 to 15. Keyed on the arguments sorted, so order cannot hide it.
+     */
+    const sameChange = tool.writes ? `${name}:${stableJson({ ...modelArgs, confirmed: undefined })}` : null;
+    if (sameChange && turn?.writtenChanges?.has(sameChange)) {
+      logger.warn({ tool: name }, 'diane: the same change twice in one turn, the second not written');
+      return { summary: 'ALREADY DONE in this turn, and NOT done again. Say once what was changed.' };
+    }
     let { result, wrote } = await watchWrites(() => tool.handler(args));
 
     /**
@@ -2101,6 +2149,7 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
       if (turn) turn.wrote.set('__auto', true);
     }
 
+    if (wrote && sameChange && turn) (turn.writtenChanges ??= new Set()).add(sameChange);
     // IT WROTE, so a later bare agreement cannot repeat it. A pending, a
     // question back or a refusal wrote nothing and is never "already done".
     if (tool.writes && wrote) completed(name, modelArgs, result);
@@ -2803,6 +2852,58 @@ async function runAgentTurn(history, contextName, onEvent) {
     }
   }
 
+  /**
+   * ===============================
+   * * SEVERAL CHANGES IN ONE MESSAGE ARE A PLAN, and a reply to a plan is read by it
+   * ===============================
+   * See engine/. Ahead of the held calls, so a "yes" to a plan is the plan's.
+   * A plan that cannot be made (no AI, nothing understood) hands back to her.
+   */
+  const pending = pendingPlan(history);
+  // A FILE THEY DROPPED IN rides on their message; a pasted sheet is the message.
+  const attachment = [...history].reverse().find((m) => m.role === 'user')?.attachment ?? null;
+  const attached = attachment ? (attachment.text || attachment.tables?.length ? true : null) : null;
+  const sheetGiven = !pending && (attached || looksLikeSheet(asked));
+  if ((pending || sheetGiven || looksMultiStep(asked)) && context.tools.some((t) => t.name === 'update_master_sheet_row')) {
+    try {
+      const roster = await require('../repos/people.repo').filterOptions().catch(() => null);
+      turnState.model = env.openaiModel;
+      const turn = sheetGiven
+        ? await sheetTurn({
+          text: attachment ? (attachment.text ?? '') : asked,
+          tables: attachment?.tables ?? null,
+          said: asked,
+          groups: roster?.groups ?? [],
+          onEvent,
+        })
+        : await planTurn({
+        said: asked,
+        pending,
+        groups: roster?.groups ?? [],
+        invoke: async (name, args) => {
+          turnState.applyingHeld = true;
+          try {
+            return await invokeTool(context.tools, name, JSON.stringify(args), history, onEvent, turnState);
+          } finally {
+            turnState.applyingHeld = false;
+          }
+        },
+      });
+      if (turn) {
+        onEvent?.({ type: 'list', list: turn.card });
+        const ran = turn.card.plan?.status === 'done' ? turn.card.plan.steps.filter((x) => x.result?.ok) : [];
+        return {
+          reply: turn.reply,
+          changedRowIds: [...new Set(ran.flatMap((x) => x.ids ?? []))],
+          context: context.key,
+          claims: [],
+        };
+      }
+    } catch (err) {
+      logger.warn({ err: err.message }, 'diane: a plan could not be made, she takes it');
+    }
+  }
+
   const heldCalls = recallAll(lastSaid(history), prior);
   // A plain yes to the ONE thing held, when her question lost its details. See onlyHeld.
   if (heldCalls.length === 0 && agreed(lastSaid(history)) && /^\s*(?:y|ya|yes|yep|yeah|yup|ok|okay|sure|go ahead|do it|confirm\w*)[.!\s]*$/i.test(lastSaid(history))) {
@@ -3187,6 +3288,47 @@ async function runAgentTurn(history, contextName, onEvent) {
    * line of her own is still open to her.
    */
   const mustAct = !routedTool && heldCalls.length === 0 && isSetInstruction(asked) && !CALLED_OFF_ADD.test(asked);
+
+  /**
+   * ===============================
+   * * THE EVERYDAY EDIT IS READ IN CODE, not by the model
+   * ===============================
+   * See directEdit.js. Read exactly, then handed to the tool she would have
+   * called, through invokeTool, so every guard, preview, auto mode rule and
+   * the "yes" that follows are the same as hers. A finished sentence from
+   * the tool ends the turn with no model round at all; anything else is
+   * handed to her to word.
+   */
+  if (!forcedTool && heldCalls.length === 0 && !turnState.otherDeals && !bothAfterOne
+    && context.tools.some((t) => t.name === 'update_master_sheet_row')) {
+    const roster = await require('../repos/people.repo').filterOptions().catch(() => null);
+    const names = { people: (roster?.people ?? []).map((p) => p.name), groups: roster?.groups ?? [] };
+    const edit = parseEdit(asked, names)
+      ?? followUp(asked, recentSaid(history, 2).split('\n')[1] ?? '', lastAnswer, names);
+    if (edit) {
+      const call = callFor(edit);
+      turnState.model = 'code';
+      logger.info({ edit, tool: call.name }, 'diane: an everyday edit, read in code');
+      const result = await invokeTool(context.tools, call.name, JSON.stringify(call.args), history, onEvent, turnState);
+      onEvent?.({ type: 'tool-result', name: call.name, result });
+      if (result?.list?.rows?.length) onEvent?.({ type: 'list', list: result.list });
+      for (const r of result?.rows ?? []) changedRowIds.add(r.id);
+      if (typeof result?.reply === 'string' && result.reply.trim()) {
+        return {
+          reply: result.reply,
+          changedRowIds: [...changedRowIds],
+          context: context.key,
+          claims: [],
+          offer: turnState.wrote.get('__offer') ?? null,
+        };
+      }
+      messages.push({
+        role: 'system',
+        content: `THIS WAS ALREADY CALLED FOR THEM, as ${call.name} ${JSON.stringify(call.args)}. It answered:\n`
+          + `${result?.summary ?? ''}\nTell them what it says, in your own short words. Do not call it again.`,
+      });
+    }
+  }
 
   // Which model this turn starts on. See `lightTurn`.
   let namedCount = 0;
