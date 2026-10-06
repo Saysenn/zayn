@@ -46,6 +46,18 @@ const fold = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
  * it can never pick between two people. "gloria - diference" is one letter
  * from "Gloria difference" and nothing else.
  */
+/**
+ * ONE TYPO, the way a person reads one: a letter off, added, dropped, or two
+ * letters next to each other swapped ("zyan" for "zayn"). The swap counted
+ * as two edits, and "add 100 to zyan indgo" found nobody. 2026-10-06.
+ */
+function oneTypo(a, b) {
+  if (within(a, b, 1)) return true;
+  if (a.length !== b.length) return false;
+  const diff = [...a].map((ch, i) => (ch === b[i] ? -1 : i)).filter((i) => i >= 0);
+  return diff.length === 2 && diff[1] === diff[0] + 1 && a[diff[0]] === b[diff[1]] && a[diff[1]] === b[diff[0]];
+}
+
 function within(a, b, max) {
   if (Math.abs(a.length - b.length) > max) return false;
   let prev = [...Array(b.length + 1).keys()];
@@ -409,5 +421,5 @@ function saidFor(names, said) {
 }
 
 module.exports = {
-  resolvePerson, personKey, fold, mentionedIn, personMentionedIn, within, peopleIn, saidFor,
+  resolvePerson, personKey, fold, mentionedIn, personMentionedIn, within, oneTypo, peopleIn, saidFor,
 };

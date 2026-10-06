@@ -307,8 +307,12 @@ async function runSteps(plan, invoke) {
         || (call.name === 'rename_company' && !result?.pending && !/^NOTHING\b/i.test(String(result?.summary ?? '')));
       if (!moved) {
         ok = false;
-        const said = String(result?.reply ?? result?.summary ?? '');
-        reasons.push(said.replace(/^NOTHING[^.]*\.\s*/i, '').split(/(?<=[.?])\s/)[0].slice(0, 140) || 'nothing changed');
+        // IN WORDS FOR THEM: her finished sentence if the tool gave one, never
+        // a guard's own capitals ("THAT WOULD OVERWRITE, NOT ADD").
+        const first = String(result?.summary ?? '').replace(/^NOTHING[^.]*\.\s*/i, '').split(/(?<=[.?])\s/)[0];
+        const why = result?.reply ? String(result.reply)
+          : first && first !== first.toUpperCase() ? first : 'a safety check stopped it, so nothing was changed';
+        reasons.push(why.slice(0, 140));
       }
     }
     steps.push({ ...step, result: { ok, why: reasons.join('; ') } });

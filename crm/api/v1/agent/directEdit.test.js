@@ -78,3 +78,9 @@ test('"BOTH" OR A GROUP ANSWERS HER QUESTION with the edit asked a moment ago', 
   assert.equal(followUp('show me zayns deals', 'add 5 days to zayn payable days', asked, roster), null);
   assert.equal(followUp('both', 'add 5 days to zayn payable days', 'Done.', roster), null, 'only after her question');
 });
+
+test('TWO LETTERS SWAPPED is one typo: "zyan indgo" is Zayn in INDIGO', () => {
+  assert.deepEqual(read('add 100 to zyan indgo'),
+    { person: 'Zayn', group: 'INDIGO', allDeals: false, field: 'monthlyAmount', op: 'add', value: 100 });
+  assert.equal(read('add 100 to nayz'), null, 'more than one typo is not a guess it makes');
+});

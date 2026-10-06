@@ -159,3 +159,13 @@ test('FIVE KNOWN EDITS come back as exactly those five', async () => {
   const plan = toPlan(found, 'check');
   assert.equal(plan.steps.find((s) => s.action === 'stop').deals[0].group, 'BATMAN', 'the stop finds Smurf under the group as renamed');
 });
+
+test('A EURO IS A EURO whichever way it is written: EUR, EURO, € and Euro are the same', () => {
+  const euroDeal = [deal(9, 'Euro Boss', 'MANBAT', 'Gab', 1000, { currency: 'EURO' })];
+  for (const written of ['EUR', 'EURO', '€', 'Euro']) {
+    const found = compare({ rows: [{ line: 2, person: 'Euro Boss', group: 'MANBAT', company: 'Gab', currency: written }], unread: [] }, euroDeal, GROUPS);
+    assert.equal(found.mismatched.length, 0, written);
+  }
+  const found = compare({ rows: [{ line: 2, person: 'Euro Boss', group: 'MANBAT', company: 'Gab', currency: 'GBP' }], unread: [] }, euroDeal, GROUPS);
+  assert.equal(found.mismatched.length, 1, 'a real change of currency is still found');
+});

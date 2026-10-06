@@ -1,4 +1,4 @@
-const { fold, within } = require('./tools/resolvePerson');
+const { fold, within, oneTypo } = require('./tools/resolvePerson');
 
 /**
  * ***************************************************
@@ -61,7 +61,7 @@ function fieldIn(words) {
  * they took. One slip allowed on a word of four letters or more.
  */
 function whoIn(words, { people = [], groups = [] }) {
-  const near = (a, b) => a === b || (b.length >= 4 && within(a, b, 1));
+  const near = (a, b) => a === b || (b.length >= 4 && oneTypo(a, b));
   const takeName = (name) => {
     const parts = String(name).split(/\s+/).map(fold).filter(Boolean);
     if (parts.length === 0) return null;

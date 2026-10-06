@@ -249,8 +249,12 @@ function looksLikeSheet(text) {
 const DATES = new Set(['presetOn', 'endOn', 'assignedOn', 'paymentStartOn']);
 const NUMBERS = new Set(['monthlyAmount', 'payableAmount', 'payableDays', 'addonPercent', 'feePercent']);
 const asDay = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v ?? '').slice(0, 10));
+// ONE NAME PER CURRENCY on both sides: the CRM writes EURO, a file may say
+// EUR, € or Euro. Compared raw, every euro deal read as different. 2026-10-06.
+const currencyKey = (v) => fold(currencyIn(v) ?? v).replace(/^euro?$/, 'eur');
 const same = (field, theirs, ours) => {
   if (theirs === undefined) return true;
+  if (field === 'currency') return currencyKey(theirs) === currencyKey(ours ?? '');
   if (NUMBERS.has(field)) return Math.abs(Number(theirs) - Number(ours ?? 0)) < 0.005;
   if (DATES.has(field)) return asDay(ours) === asDay(theirs);
   return fold(theirs) === fold(ours ?? '');

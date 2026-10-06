@@ -417,9 +417,10 @@ const { checkRateDirection } = require('./checkRateDirection');
 const { checkPointed, DISABLED } = require('./disabledTools');
 const { bypassAttempt, BYPASS_REPLY } = require('./blockBypass');
 const { asksUndoPlainly } = require('./undoIntent');
-const { fold, personMentionedIn, within } = require('./tools/resolvePerson');
+const { fold, personMentionedIn, within, oneTypo } = require('./tools/resolvePerson');
 const { parseEdit, callFor, followUp } = require('./directEdit');
 const { looksMultiStep, pendingPlan } = require('./engine/planSteps');
+const { route: routeMessage, asEdit } = require('./engine/router');
 const { planTurn, sheetTurn } = require('./engine/runPlan');
 const { looksLikeSheet } = require('./engine/sheetCheck');
 const { PROMPT_PLACEHOLDERS } = require('./promptPlaceholders');
@@ -1758,6 +1759,14 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
     // name: a follow up like "double check" must not drop the conversion
     // they asked for one line earlier. See `recentSaid`.
     args.saidRecent = recentSaid(history);
+    // A PLAN STEP IS NOT READ AGAINST THEIR WORDS AGAIN: it was read once,
+    // checked, shown and agreed. Clone 2026-10-06: "add 100 to zayn indigo,
+    // set paddy days to 31" had its second step refused as "an overwrite,
+    // not an add", from the "add" in the first. The values stand as shown.
+    if (turn?.planRun) {
+      args.said = '';
+      args.saidRecent = '';
+    }
     if (['exchange_rate', 'undo_master_sheet_change', 'show_past_conversation', 'delete_past_conversations', 'add_deal'].includes(name)) args.priorAnswer = lastAssistantAnswer(history);
     // DEALS WHOSE "pay this month anyway?" was already answered on screen, so
     // the next edit does not ask it a second time. 2026-10-03.
@@ -1910,7 +1919,7 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
     if (tool.writes && aimedAt && args.said && args.confirmed !== true && !turn?.applyingHeld && !/\b(?:him|her|them|his|hers|their|that|this|it|same|one)\b/i.test(lastSaid(history))) {
       const first = fold(aimedAt.split(/\s+/)[0]);
       const heard = recentSaid(history, 4).split(/[^a-z0-9]+/i).map(fold).filter(Boolean);
-      if (first && !heard.some((w) => w === first || (first.length >= 4 && within(w, first, 1)))) {
+      if (first && !heard.some((w) => w === first || (first.length >= 4 && oneTypo(w, first)))) {
         logger.warn({ tool: name, target: aimedAt }, 'diane: a write for a name they never said');
         return {
           summary: `NOTHING HAS BEEN CHANGED. They never named ${aimedAt}. If the name they said matches `
@@ -2864,7 +2873,68 @@ async function runAgentTurn(history, contextName, onEvent) {
   const attachment = [...history].reverse().find((m) => m.role === 'user')?.attachment ?? null;
   const attached = attachment ? (attachment.text || attachment.tables?.length ? true : null) : null;
   const sheetGiven = !pending && (attached || looksLikeSheet(asked));
-  if ((pending || sheetGiven || looksMultiStep(asked)) && context.tools.some((t) => t.name === 'update_master_sheet_row')) {
+
+  /**
+   * ===============================
+   * * THE FRONT DOOR: one small call decides the path. See engine/router.js.
+   * ===============================
+   * Not for what is already decided for free: a reply to a plan, a file, an
+   * everyday edit the parser reads whole, or a short answer to her own
+   * question ("yes", "both", "indigo"). Without an answer from it (no AI,
+   * an error) the old keyword guesses decide, as before.
+   */
+  const editsHere = context.tools.some((t) => t.name === 'update_master_sheet_row');
+  let routed = null;
+  let routerEdit = null;
+  const shortAnswer = /\?\s*$/.test(String(lastAssistantAnswer(history) ?? '').trim()) && asked.trim().split(/\s+/).length <= 4;
+  if (!pending && !sheetGiven && editsHere && !shortAnswer && !agreed(asked)) {
+    const rosterNow = await require('../repos/people.repo').filterOptions().catch(() => null);
+    const namesNow = { people: (rosterNow?.people ?? []).map((p) => p.name), groups: rosterNow?.groups ?? [] };
+    if (!parseEdit(asked, namesNow)) {
+      routed = await routeMessage(asked, {
+        lastAnswer: lastAssistantAnswer(history),
+        groups: namesNow.groups,
+        model: LIGHT_MODEL && LIGHT_MODEL !== 'off' && env.aiProvider === 'openai' ? LIGHT_MODEL : null,
+      }).catch((err) => { logger.warn({ err: err.message }, 'diane: the router could not be asked'); return null; });
+      if (routed) {
+        logger.info({ route: routed }, 'diane: routed');
+        captureLog({ source: 'agent', level: 'info', message: `Diane routed: ${routed.kind}${routed.sure ? '' : ' (unsure)'}`, detail: { said: asked, route: routed } });
+        // A PERSON IT NAMED MUST BE ON THE SHEET, by the same reading as everywhere.
+        const edit = asEdit(routed);
+        // ONE TYPO FROM TWO PEOPLE IS A QUESTION, never a pick. Clone
+        // 2026-10-06: "zyan" is one slip from Zayn AND Ryan; the first in the
+        // list was taken, and it could as easily have been the other's pay.
+        // A GROUP GLUED TO THE NAME ("zyan indgo") is taken off it first, typos
+        // allowed, the way the parser and the tools split them.
+        if (edit) {
+          const words = String(edit.person).split(/\s+/);
+          const g = words.map((w) => namesNow.groups.find((x) => fold(x) === fold(w) || (fold(w).length >= 4 && oneTypo(fold(w), fold(x))))).find(Boolean);
+          if (g && words.length > 1) {
+            edit.person = words.filter((w) => !(fold(w) === fold(g) || (fold(w).length >= 4 && oneTypo(fold(w), fold(g))))).join(' ');
+            edit.group = edit.group || g;
+          }
+        }
+        const exact = edit && namesNow.people.find((n) => fold(n) === fold(edit.person) || personMentionedIn(edit.person, n));
+        const close = edit && !exact
+          ? namesNow.people.filter((n) => n.split(/\s+/).some((w) => fold(w).length >= 4 && oneTypo(fold(edit.person), fold(w))))
+          : [];
+        if (!exact && close.length > 1) {
+          return {
+            reply: `Did you mean ${close.slice(0, -1).join(', ')} or ${close[close.length - 1]}? Nothing has changed.`,
+            changedRowIds: [],
+            context: context.key,
+            claims: [],
+          };
+        }
+        const real = exact ?? (close.length === 1 ? close[0] : null);
+        if (real) routerEdit = { ...edit, person: real };
+      }
+    }
+  }
+  const toEngine = routed
+    ? routed.sure && (routed.kind === 'multi_step' || (routed.kind === 'bulk_edit' && routed.person && !routed.group))
+    : looksMultiStep(asked);
+  if ((pending || sheetGiven || toEngine) && editsHere) {
     try {
       const roster = await require('../repos/people.repo').filterOptions().catch(() => null);
       turnState.model = env.openaiModel;
@@ -2882,10 +2952,12 @@ async function runAgentTurn(history, contextName, onEvent) {
         groups: roster?.groups ?? [],
         invoke: async (name, args) => {
           turnState.applyingHeld = true;
+          turnState.planRun = true;
           try {
             return await invokeTool(context.tools, name, JSON.stringify(args), history, onEvent, turnState);
           } finally {
             turnState.applyingHeld = false;
+            turnState.planRun = false;
           }
         },
       });
@@ -3304,7 +3376,9 @@ async function runAgentTurn(history, contextName, onEvent) {
     const roster = await require('../repos/people.repo').filterOptions().catch(() => null);
     const names = { people: (roster?.people ?? []).map((p) => p.name), groups: roster?.groups ?? [] };
     const edit = parseEdit(asked, names)
-      ?? followUp(asked, recentSaid(history, 2).split('\n')[1] ?? '', lastAnswer, names);
+      ?? followUp(asked, recentSaid(history, 2).split('\n')[1] ?? '', lastAnswer, names)
+      // THE ROUTER'S single edit, sure and on a real person, takes the same road.
+      ?? routerEdit;
     if (edit) {
       const call = callFor(edit);
       turnState.model = 'code';
@@ -3338,7 +3412,9 @@ async function runAgentTurn(history, contextName, onEvent) {
   }
   const light = env.aiProvider === 'openai' && LIGHT_MODEL && LIGHT_MODEL !== 'off'
     && LIGHT_MODEL !== env.openaiModel && heldCalls.length === 0 && !severalExisting && !bothAfterOne
-    && !turnState.otherDeals && lightTurn(asked, lastAnswer, { named: namedCount, routedTool });
+    && !turnState.otherDeals && (routed
+      ? routed.sure && ['question', 'chat'].includes(routed.kind)
+      : lightTurn(asked, lastAnswer, { named: namedCount, routedTool }));
   let turnModel = light ? LIGHT_MODEL : env.openaiModel;
   turnState.model = turnModel;
   logger.info({ model: turnModel }, 'diane: model for this turn');

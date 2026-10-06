@@ -123,8 +123,10 @@ function answer(query, { rows, found }) {
   if (query.measure === 'count') {
     return { reply: `${list.length}.`, sections: [{ label: `${list.length} rows`, rows: list.map((r) => ({ name: label(r), where: r.line ? `line ${r.line}` : '' })) }] };
   }
+  // THE NAMES, not just a count, when they fit in a sentence.
+  const names = list.slice(0, 8).map(label).join('; ');
   return {
-    reply: list.length ? `${list.length} ${list.length === 1 ? 'row' : 'rows'}.` : 'None.',
+    reply: list.length ? `${list.length} ${list.length === 1 ? 'row' : 'rows'}: ${names}${list.length > 8 ? `, and ${list.length - 8} more (all listed below)` : ''}.` : 'None.',
     sections: [{ label: `${list.length} rows`, rows: list.map((r) => ({ name: label(r), where: r.line ? `line ${r.line}` : 'in the CRM', detail: r.differs ?? '' })) }],
   };
 }
