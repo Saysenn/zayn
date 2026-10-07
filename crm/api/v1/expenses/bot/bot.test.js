@@ -347,3 +347,12 @@ test('A COPY IN ONE PREVIEW, worded two ways, is still a copy (his report 2026-1
   assert.match(items[1].doubts.join(), /same as 1/);
   assert.doesNotMatch(items[2].doubts.join(), /same as/, 'another payee and other words is another expense');
 });
+
+test('SEVERAL TO REMOVE IN ONE MESSAGE: typed, with days, or the list copied back (his report 2026-10-07)', () => {
+  const { targetsIn } = require('./find');
+  const strip = (list) => list.map(({ said, ...t }) => t);
+  assert.deepEqual(strip(targetsIn('Yes and remove taxi al barsha to DIFC oct 5 also', 2026)), [{ date: '2026-10-05', words: 'taxi al barsha to DIFC' }]);
+  assert.deepEqual(strip(targetsIn('remove the cleaner and the petrol', 2026)).map((t) => t.words), ['cleaner', 'petrol']);
+  assert.deepEqual(strip(targetsIn('Remove\n• Cleaner payment · AED 250.00 · 07 Oct · Ahmed (cleaner) · by Zayn', 2026)), [{ words: 'Cleaner payment', amount: '250.00', date: '2026-10-07' }]);
+  assert.deepEqual(targetsIn('remove both', 2026), [], '"both" names nothing new');
+});

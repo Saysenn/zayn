@@ -81,6 +81,50 @@ async function findTarget(group, target, { today, lastIds = [] } = {}) {
   return scored.filter((x) => x.hits === want.length).map((x) => x.r);
 }
 
+/**
+ * SEVERAL EXPENSES NAMED IN ONE MESSAGE (his report 2026-10-07): "yes and
+ * remove the taxi to DIFC on 5 Oct too", "remove the cleaner and the petrol",
+ * or the list they copied back ("• Cleaner payment · AED 250.00 · 07 Oct ·
+ * …"). Each part becomes a target: its words, and a day and an amount when
+ * said. Pure; the words that only say "remove" are dropped.
+ */
+const MON = 'jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?';
+const DAY_MONTH = new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(${MON})\\b\\.?`, 'i');
+const MONTH_DAY = new RegExp(`\\b(${MON})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`, 'i');
+const FILLER = /\b(?:yes|yeah|yep|ok(?:ay)?|sure|please|pls|and|also|too|as well|plus|remove|remo[a-z]{0,3}|delete|drop|take out|the|that|this|those|these|one|ones|lets|let's|on|of|it|them|both|all|expenses?|by \w+)\b/gi;
+
+function targetsIn(text, year) {
+  const { dayOf } = require('./extract');
+  const parts = String(text ?? '').split(/\n+|\s*•\s*|\s*;\s*|,\s*(?=(?:and\s+)?(?:also\s+)?(?:remove|delete|the)\b)|\s+and\s+(?:also\s+)?(?:remove|delete)\s+|\s+(?:and\s+)?also\s+(?:remove\s+|delete\s+)?|\s+and\s+(?=the\b)/i);
+  const out = [];
+  for (const raw of parts) {
+    let part = String(raw ?? '').trim();
+    if (!part) continue;
+    const t = {};
+    // a line copied from a list: "Cleaner payment · AED 250.00 · 07 Oct · Ahmed · by Zayn"
+    if (part.includes('·')) {
+      const segs = part.split('·').map((x) => x.trim());
+      t.words = segs[0].replace(FILLER, ' ');
+      for (const seg of segs.slice(1)) {
+        const money = /^(?:[A-Z]{3}|£|€|\$)?\s*([\d,]+(?:\.\d+)?)$/.exec(seg);
+        if (money) t.amount = money[1].replace(/,/g, '');
+        const d = dayOf(seg, year);
+        if (d) t.date = d;
+      }
+    } else {
+      const dm = DAY_MONTH.exec(part);
+      const md = !dm && MONTH_DAY.exec(part);
+      if (dm) { t.date = dayOf(`${dm[1]} ${dm[2]}`, year); part = part.replace(dm[0], ' '); }
+      if (md) { t.date = dayOf(`${md[2]} ${md[1]}`, year); part = part.replace(md[0], ' '); }
+      const money = /(?:\b(?:aed|gbp|eur|usd)|[£€$])\s*(\d+(?:\.\d+)?)|\b(\d+(?:\.\d+)?)\s*(?:aed|gbp|dhs?)\b/i.exec(part);
+      if (money) { t.amount = money[1] ?? money[2]; part = part.replace(money[0], ' '); }
+      t.words = part.replace(FILLER, ' ').replace(/\s+/g, ' ').trim();
+    }
+    if (wordsOf(t.words).length || t.date) out.push({ ...t, said: String(raw).trim() });
+  }
+  return out;
+}
+
 /** The latest few, when nothing matched, so they can point at one. */
 async function latest(group, today, n = 5) {
   return (await between(group, minus(today, 62), today)).slice(0, n).map(asItem);
@@ -177,5 +221,5 @@ async function answer(scopeGroup, query, { today, out = null }) {
 }
 
 module.exports = {
-  findTarget, latest, answer, between, asItem, iso, ALL,
+  findTarget, latest, answer, between, asItem, iso, ALL, targetsIn, wordsOf,
 };

@@ -15,6 +15,7 @@ const { broadcast } = require('./sockets/index');
 const { currentMonth } = require('./shared/presetMonth.helper');
 const { sessionUser } = require('./shared/session.helper');
 const spender = require('./expenses/spender');
+const receipts = require('./expenses/bot/receipts');
 
 // ***************************************************
 // * /expenses
@@ -315,8 +316,11 @@ router.patch('/expenses/:id', async (req, res, next) => {
 
 router.delete('/expenses/:id', async (req, res, next) => {
   try {
+    // the page has no undo: the receipt goes with the expense
+    const row = await expensesRepo.findById(req.params.id);
     const removed = await expensesRepo.remove(req.params.id);
     if (!removed) return next(new AppError(404, messages.notFound.expense));
+    await receipts.forget(row);
 
     broadcast(null, EVENT, { action: 'deleted', id: removed.id });
     res.json({ deleted: removed.id });
@@ -354,8 +358,14 @@ router.post('/expenses/bulk-delete', async (req, res, next) => {
     const deleted = [];
     for (const id of ids) {
       // eslint-disable-next-line no-await-in-loop
+      const row = await expensesRepo.findById(id);
+      // eslint-disable-next-line no-await-in-loop
       const removed = await expensesRepo.remove(id);
-      if (removed) deleted.push(removed.id);
+      if (removed) {
+        deleted.push(removed.id);
+        // eslint-disable-next-line no-await-in-loop
+        await receipts.forget(row);
+      }
     }
     broadcast(null, EVENT, { action: 'bulk-deleted', ids: deleted });
     res.json({ deleted });

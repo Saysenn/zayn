@@ -84,6 +84,33 @@ async function keep(receipt, expense) {
   return rel;
 }
 
+/**
+ * AN EXPENSE TAKEN BACK TAKES ITS RECEIPT WITH IT (his call 2026-10-07):
+ * the file is deleted and its fingerprint forgotten, so the same receipt
+ * can be sent again as new. `row` is the expense as it was (needs id and
+ * receipt_path). Never throws: a file already gone is fine.
+ */
+async function forget(row) {
+  if (!row?.id) return;
+  if (row.receipt_path) {
+    const full = path.join(ROOT, row.receipt_path);
+    if (full.startsWith(ROOT)) await fs.rm(full, { force: true }).catch(() => null);
+  }
+  await pool.query('DELETE FROM tb_receipt_prints WHERE expense_id = $1', [row.id]).catch(() => null);
+}
+
+/**
+ * A REMOVED EXPENSE BROUGHT BACK (undo) gets its receipt back: the file was
+ * kept for that, and its fingerprint moves to the new row. A file cleared
+ * since (3 months) stays cleared.
+ */
+async function reattach(oldId, newId, receiptPath) {
+  await pool.query('UPDATE tb_receipt_prints SET expense_id = $2 WHERE expense_id = $1', [oldId, newId]);
+  if (!receiptPath) return;
+  const exists = await fs.stat(path.join(ROOT, receiptPath)).then(() => true, () => false);
+  if (exists) await pool.query('UPDATE tb_expenses SET receipt_path = $1 WHERE id = $2', [receiptPath, newId]);
+}
+
 /** The receipt file of a saved expense: { buffer, mime, filename } or why not. */
 async function fileOf(expenseId) {
   const { rows } = await pool.query('SELECT receipt_path, receipt_cleared_at FROM tb_expenses WHERE id = $1', [expenseId]);
@@ -178,5 +205,5 @@ function startReceiptsKeeper() {
 }
 
 module.exports = {
-  hold, seenBefore, keep, fileOf, heldFile, clearOld, backupCopy, startReceiptsKeeper, fingerprint, monthsKept, ROOT,
+  hold, seenBefore, keep, forget, reattach, fileOf, heldFile, clearOld, backupCopy, startReceiptsKeeper, fingerprint, monthsKept, ROOT,
 };
