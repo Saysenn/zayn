@@ -258,16 +258,23 @@ export default function AddExpense({
             placeholder="Any group"
           />
 
-          <Select
-            label="Spent by"
-            size="form"
-            searchable
-            allowCustom
-            value={form.spentBy}
-            onChange={(v) => set('spentBy', v ?? '')}
-            options={asList(options?.spentBy ?? [])}
-            placeholder="Who fronted it"
-          />
+          <div>
+            <Select
+              label="Spent by"
+              size="form"
+              searchable
+              allowCustom
+              value={form.spentBy}
+              onChange={(v) => set('spentBy', v ?? '')}
+              options={asList(options?.spentBy ?? [])}
+              placeholder="Who spent it"
+            />
+            {/* A NAME NOBODY ON THE MASTER SHEET HAS is kept as typed, and
+                nobody sees it on WhatsApp: said here, before saving */}
+            {form.spentBy && options?.people && !options.people.some((n) => n.toLowerCase() === form.spentBy.trim().toLowerCase()) && (
+              <p className="mt-1 text-[11px] text-text-faint">Not on the master sheet, so they won&apos;t see it on WhatsApp.</p>
+            )}
+          </div>
         </div>
 
         {/* NOT A FIELD. It is computed from the two above it, and the

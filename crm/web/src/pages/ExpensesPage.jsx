@@ -21,6 +21,7 @@ import {
 import {
   useExpenses, useExpenseOptions, useCreateExpense, useExpenseCellEdit,
   useImportExpenses, useExportExpenses, useExpenseExportOptions,
+  useExpensePeople, useExpenseMonths,
 } from '../hooks/useExpenses';
 import { useStickyState, useClearSticky } from '../hooks/useStickyState';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
@@ -41,9 +42,10 @@ import {
 // * Expenses, THIS MONTH AND NOTHING ELSE
 // ***************************************************
 //
-// A standalone ledger, one month at a time. There is no month picker: the
-// server decides which month from the business's clock, so two people in
-// two zones read the same ledger at a boundary.
+// A standalone ledger, one month at a time. THIS month by default (the
+// server decides which month that is, from the business's clock); an
+// earlier one only when picked in the month filter, his call 2026-10-07.
+// Never sticky: the page always opens on this month.
 //
 // Every row's AED comes from its own stored rate, so nothing here reads the
 // Settings rates panel. See docs/expense.md.
@@ -104,6 +106,10 @@ export default function ExpensesPage() {
   const [groups, setGroups] = useStickyState(`${STICKY}.groups`, []);
   const [currencies, setCurrencies] = useStickyState(`${STICKY}.currencies`, []);
   const [amount, setAmount] = useStickyState(`${STICKY}.amount`, {});
+  const [savedBy, setSavedBy] = useStickyState(`${STICKY}.savedBy`, []);
+  const [linked, setLinked] = useStickyState(`${STICKY}.linked`, '');
+  // '' is this month; not sticky, so a visit never opens on an old month
+  const [viewMonth, setViewMonth] = useState('');
   const forget = useClearSticky(STICKY);
 
   // The box types faster than the server answers, so the request follows
@@ -118,6 +124,9 @@ export default function ExpensesPage() {
     amountField: amount.field || undefined,
     amountMin: amount.min || undefined,
     amountMax: amount.max || undefined,
+    savedBy,
+    linked: linked || undefined,
+    month: viewMonth || undefined,
     page,
     pageSize: PAGE_SIZE,
   };
@@ -126,6 +135,11 @@ export default function ExpensesPage() {
     data: rows, total, aedTotal, missingRate, month, isLoading, error, refetch,
   } = useExpenses(filters);
   const options = useExpenseOptions();
+  const { people } = useExpensePeople();
+  const { months } = useExpenseMonths();
+  // "Spent by" offers the master sheet's people first, then names used before
+  const peopleNames = useMemo(() => people.map((p) => p.name), [people]);
+  const spenderOptions = useMemo(() => unionOptions(peopleNames, options.spentBy), [peopleNames, options.spentBy]);
   const create = useCreateExpense();
   const cellEdit = useExpenseCellEdit();
   const importer = useImportExpenses();
@@ -137,12 +151,12 @@ export default function ExpensesPage() {
   const when = month ? monthLabel(month) : null;
 
   const filterCount = [
-    groups.length, currencies.length, amount.field ? 1 : 0,
+    groups.length, currencies.length, amount.field ? 1 : 0, savedBy.length, linked ? 1 : 0, viewMonth ? 1 : 0,
   ].reduce((a, b) => a + (b ? 1 : 0), 0);
 
   // Clear FORGETS as well as resets, or the old values come back next visit.
   function clearFilters() {
-    setGroups([]); setCurrencies([]);
+    setGroups([]); setCurrencies([]); setSavedBy([]); setLinked(''); setViewMonth('');
     setAmount({}); setQ(''); setSearchField(SEARCH_ANY);
     setPage(1);
     forget();
@@ -279,8 +293,28 @@ export default function ExpensesPage() {
 
       <Toolbar
         storageKey={STICKY}
-        count={isLoading ? undefined : total}
-        countLabel="expenses"
+        // HOW MANY, beside the filter button that narrows it; WHAT THEY COME
+        // TO, on the right where the eye ends (his call 2026-10-07)
+        inline={!isLoading && (
+          <span className="text-xs tabular-nums text-text-faint">{countOf(total, 'expense')}</span>
+        )}
+        actions={(
+          <span className="inline-flex items-center gap-1.5 text-xs">
+            {/* The total is of the LIVE, FILTERED set and says so, because
+                a figure that ignores the filters reads as a bug. */}
+            <span className="font-semibold tabular-nums text-text">{formatMoney(aedTotal, AED)}</span>
+            <span className="text-text-muted">
+              {when ?? 'this month'}
+              {filterCount > 0 || q ? ', filtered' : ''}
+            </span>
+            {missingRate > 0 && (
+              <CellInfo tone="warning" label="Rows with no rate">
+                {missingRate} {missingRate === 1 ? 'row has' : 'rows have'} no exchange rate, so
+                {missingRate === 1 ? ' it is' : ' they are'} not in this total. Set a rate on the row.
+              </CellInfo>
+            )}
+          </span>
+        )}
         filtersActive={filterCount > 0}
         filtersCount={filterCount}
         onClearFilters={clearFilters}
@@ -330,29 +364,41 @@ export default function ExpensesPage() {
               onChange={onFilter(setAmount)}
               placeholder="Any amount"
             />
+            {/* AN EARLIER MONTH, only when picked: the page opens on this one */}
+            <Select
+              size="sm"
+              className="w-40"
+              value={viewMonth}
+              onChange={(v) => { setViewMonth(v && v !== months[0] ? v : ''); setPage(1); }}
+              options={months.map((m, i) => ({ value: i === 0 ? '' : m, label: i === 0 ? `This month (${monthLabel(m)})` : monthLabel(m, true) }))}
+              placeholder="This month"
+            />
+            <Select
+              size="sm"
+              className="w-40"
+              multiple
+              value={savedBy}
+              onChange={onFilter(setSavedBy)}
+              options={[...asList(options.savedBy), { value: '(blank)', label: 'Not recorded' }]}
+              placeholder="Saved by anyone"
+            />
+            <Select
+              size="sm"
+              className="w-40"
+              value={linked}
+              onChange={(v) => { setLinked(v ?? ''); setPage(1); }}
+              options={[
+                { value: '', label: 'Linked or not' },
+                { value: 'yes', label: 'Linked to a person' },
+                { value: 'no', label: 'Not linked' },
+              ]}
+              placeholder="Linked or not"
+            />
           </>
         )}
       />
 
-      {/* The total is of the LIVE, FILTERED set and says so, because a
-          figure that ignores the filters above it reads as a bug. */}
       <ErrorState error={error} title="Couldn't load expenses" onRetry={refetch} />
-
-      <div className="flex flex-wrap items-center gap-2 text-xs text-text-muted">
-        <span className="font-semibold text-text">
-          {formatMoney(aedTotal, AED)}
-        </span>
-        <span>
-          {when ?? 'this month'}
-          {filterCount > 0 || q ? ', matching these filters' : ''}
-        </span>
-        {missingRate > 0 && (
-          <CellInfo tone="warning" label="Rows with no rate">
-            {missingRate} {missingRate === 1 ? 'row has' : 'rows have'} no exchange rate, so
-            {missingRate === 1 ? ' it is' : ' they are'} not in this total. Set a rate on the row.
-          </CellInfo>
-        )}
-      </div>
 
       <div className="table-wrap">
         <table className="w-full min-w-[900px] text-sm">
@@ -369,12 +415,13 @@ export default function ExpensesPage() {
               <th className="th text-right tabular-nums">AED amount</th>
               <th className="th">Group</th>
               <th className="th">Spent by</th>
+              <th className="th">Saved by</th>
               <th className="th">Last updated</th>
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
-              <TableSkeleton columns={12} />
+              <TableSkeleton columns={13} />
             ) : rows?.length ? rows.map((row) => (
               <tr
                 key={row.id}
@@ -477,18 +524,33 @@ export default function ExpensesPage() {
                   value={row.group_name}
                   onSave={(v) => saveCell(row, 'groupName', v)}
                 />
-                <EditableCell
-                  type="suggest"
-                  suggestions={options.spentBy}
-                  value={row.spent_by}
-                  onSave={(v) => saveCell(row, 'spentBy', v)}
-                />
+                {/* WHO SPENT IT, and whether it is linked to a master sheet
+                    person: only a linked one can be seen by them on WhatsApp */}
+                <td className="td">
+                  <span className="inline-flex items-center gap-1">
+                    <EditableCell
+                      as="div"
+                      className="!border-0 !p-0"
+                      type="suggest"
+                      suggestions={spenderOptions}
+                      value={row.spent_by}
+                      onSave={(v) => saveCell(row, 'spentBy', v)}
+                    />
+                    {row.spent_by && !row.spent_by_person_id && !row.spent_by_phone && (
+                      <CellInfo tone="warning" label="Not linked to a person">
+                        Not matched to anyone on the master sheet, so nobody sees it on WhatsApp.
+                        Pick their name from the list to link it.
+                      </CellInfo>
+                    )}
+                  </span>
+                </td>
+                <td className="td whitespace-nowrap text-text-muted">{row.saved_by ?? NO_VALUE}</td>
                 <td className="td text-text-faint">{formatDate(row.updated_at)}</td>
               </tr>
             )) : !error && (
               <EmptyState
                 asRow
-                colSpan={12}
+                colSpan={13}
                 icon={ReceiptIcon}
                 title={filterCount > 0 || q ? 'No expense matches these filters' : 'Nothing here yet'}
                 hint={filterCount > 0 || q ? undefined : `Nothing recorded for ${when ?? 'this month'} yet.`}
@@ -504,7 +566,7 @@ export default function ExpensesPage() {
 
       {(adding || editingRow) && (
         <AddExpense
-          options={options}
+          options={{ ...options, spentBy: spenderOptions, people: peopleNames }}
           expense={editingRow}
           busy={create.isPending || cellEdit.isPending}
           onClose={() => { setAdding(false); setEditingRow(null); }}
@@ -532,7 +594,7 @@ export default function ExpensesPage() {
           busy={exporter.busy}
           month={when}
           onClose={() => setExporting(false)}
-          onExport={(choices) => exporter.download(choices).then(() => setExporting(false))}
+          onExport={(choices) => exporter.download({ ...choices, month: viewMonth || undefined }).then(() => setExporting(false))}
         />
       )}
 
@@ -548,7 +610,7 @@ export default function ExpensesPage() {
       {bulkEditing && (
         <BulkEditExpenses
           count={sel.count}
-          options={{ groups: options.groups, spentBy: options.spentBy, currencies: currencyOptions }}
+          options={{ groups: options.groups, spentBy: spenderOptions, currencies: currencyOptions }}
           onClose={() => setBulkEditing(false)}
           onApply={bulkEdit}
         />

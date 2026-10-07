@@ -64,11 +64,60 @@ agent.get('/style', async (req, res, next) => {
   }
 });
 
-/** The registered admins, for WhatBot's guard. Phones and groups only. */
+/**
+ * The registered admins, for WhatBot's guard. Phones and groups only. With
+ * them, his switch for people seeing their own expenses (Settings →
+ * Whatbot), so WhatBot reads both in the one call it already makes.
+ */
 agent.get('/admins', async (req, res, next) => {
   try {
     const rows = await store.listAdmins();
-    res.json({ admins: rows.filter((r) => r.active).map((r) => ({ phone: r.phone, group: r.group_name })) });
+    // eslint-disable-next-line global-require
+    const employeeView = await require('./repos/settings.repo').employeeExpenses();
+    res.json({ admins: rows.filter((r) => r.active).map((r) => ({ phone: r.phone, group: r.group_name })), employeeView });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * ===============================
+ * * MY EXPENSES, FOR ONE PERSON ON WHATSAPP
+ * ===============================
+ * His calls 2026-10-07: what they SPENT, in THIS group, THIS month, read
+ * only. WhatBot sends the person its verified phone already is; this
+ * checks it again here before reading anything:
+ *   - his switch is on (Settings → Whatbot);
+ *   - that phone IS that person on the master sheet, in that group;
+ *   - or the phone is an active admin of that group (an admin's own,
+ *     linked by phone when they are not on the master sheet).
+ * Anything else reads nothing.
+ */
+agent.get('/mine', async (req, res, next) => {
+  try {
+    // eslint-disable-next-line global-require
+    const settingsRepo = require('./repos/settings.repo');
+    if (!(await settingsRepo.employeeExpenses())) return res.status(403).json({ off: true });
+    const phone = String(req.query.phone ?? '').trim();
+    const group = String(req.query.group ?? '').trim();
+    const personId = String(req.query.personId ?? '').trim() || null;
+    if (!/^\+\d{7,15}$/.test(phone) || !group) return res.status(400).json({ error: 'phone and group are required' });
+    const digits = phone.replace(/\D/g, '');
+    const onSheet = personId ? (await pool.query(
+      `SELECT 1 FROM tb_mastersheet
+        WHERE person_id = $1 AND upper(group_name) = upper($2) AND regexp_replace(phone, '\\D', '', 'g') = $3 LIMIT 1`,
+      [personId, group, digits],
+    )).rows.length > 0 : false;
+    const asAdmin = await store.adminFor(phone, group);
+    if (!onSheet && !asAdmin) return res.status(404).json({ error: 'not found' });
+    // eslint-disable-next-line global-require
+    const { currentMonth } = require('./shared/presetMonth.helper');
+    const month = currentMonth();
+    // eslint-disable-next-line global-require
+    const rows = await require('./repos/expenses.repo').spentByPerson(
+      { personId: onSheet ? personId : null, phone: asAdmin ? asAdmin.phone : null, group, month },
+    );
+    res.json({ month, rows });
   } catch (err) {
     next(err);
   }
@@ -183,7 +232,7 @@ const keepImage = (image, caption) => require('./pictures/store').keepImage(Buff
  * thing they said (and the file with it, by id) to the expense brain, for
  * every group and with no spender assumed. A preview goes out as a card.
  */
-async function dianeTurn(history, send) {
+async function dianeTurn(history, send, { user = null } = {}) {
   const last = [...history].reverse().find((m) => m.role === 'user') ?? {};
   const text = String(last.content ?? '').replace(/^📎 [^\n]*\n?/, '').trim();
   // SEVERAL FILES IN ONE MESSAGE (the paperclip takes up to 20): one turn,
@@ -194,7 +243,7 @@ async function dianeTurn(history, send) {
   if (gone.length) {
     return { reply: `I no longer have ${gone.join(', ')} (files are kept for an hour). Attach ${gone.length === 1 ? 'it' : 'them'} again.` };
   }
-  const out = await brain.turn({ text, attachments: atts.map((a) => a.file) }, { channel: 'diane' });
+  const out = await brain.turn({ text, attachments: atts.map((a) => a.file) }, { channel: 'diane', user });
   if (out.card) send({ type: 'list', list: out.card });
   // A RECEIPT ASKED FOR: a photo shows in her chat (and Attachments); a PDF
   // or sheet is opened from the Expenses page

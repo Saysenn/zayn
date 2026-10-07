@@ -247,6 +247,8 @@ export default function SettingsPage() {
   // Defaults ON, like whatbotWrites and for the same reason: the point of
   // the briefing is that nobody has to remember to look at the queue.
   const loginBriefing = data?.loginBriefing ?? true;
+  // off unless the server said on: revealing expenses is never the default
+  const employeeExpenses = data?.employeeExpenses === true;
   // Defaults OFF, unlike the two above, and that is the point: a write that
   // skips its preview is one nobody read before it happened, so an
   // unreadable or missing value must never read as permission.
@@ -469,6 +471,26 @@ export default function SettingsPage() {
               description="Who may send expenses to WhatBot, and on which group's number. Only these numbers can save, change or remove expenses, and only for that group: anyone else is ignored. The bot shows what it read and saves nothing until they reply yes."
             >
               <ExpenseAdmins />
+            </Card>
+          )}
+
+          {section === 'whatbot' && (
+            <Card
+              title="People see their own expenses"
+              description="Lets anyone on the master sheet ask WhatBot for their own expenses: only what they spent, only this month, only on that group's number, as a picture with the list. Never someone else's and never a receipt. An expense shows only when its Spent by is linked to them. Turn it off and WhatBot stops at once (within a minute) and never mentions it. Admins can always see their group's expenses."
+            >
+              {isLoading ? (
+                <Skeleton className="h-9 w-32" />
+              ) : (
+                <SettingSwitch
+                  label="People see their own expenses"
+                  checked={employeeExpenses}
+                  disabled={isPending}
+                  onChange={(v) => update({ employeeExpenses: v })}
+                  on="People can ask WhatBot for their own expenses"
+                  off="WhatBot shows expenses to admins only"
+                />
+              )}
             </Card>
           )}
 

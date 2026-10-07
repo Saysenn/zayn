@@ -9,6 +9,7 @@ import {
 import * as employees from "../employee/access.js";
 import { LlmUnavailableError, runAgent } from "../agent/askModel.js";
 import { answerQuick } from "../payments/quick.js";
+import { answerMyExpenses } from "../expenses/myExpenses.js";
 import { answerByReader } from "../payments/reader.js";
 import { CLARIFY_PROMPT, UNKNOWN_SENDER } from "../agent/prompt.js";
 import {
@@ -450,7 +451,9 @@ async function answerAsEmployee(input) {
     // EVERYDAY QUESTIONS IN CODE first, no model (payments/quick.js)
     // then the small reader (one small call, no rules or schemas sent),
     // then the full agent for anything they could not place
-    reply = (await answerQuick(ctx, question))
+    // THEIR OWN EXPENSES, read only, when his switch is on (expenses/myExpenses.js)
+    reply = (await answerMyExpenses(ctx, phone, question))
+      ?? (await answerQuick(ctx, question))
       ?? (await answerByReader(ctx, question))
       ?? (await runAgent(ctx, question, history));
   } catch (err) {

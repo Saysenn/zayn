@@ -95,6 +95,8 @@ export function useExpenses(filters = {}) {
     // The server's month, never the browser's: the two disagree for ten
     // hours at every boundary.
     month: query.data?.month ?? null,
+    // this month, so the page can say when it is showing another one
+    current: query.data?.current ?? null,
     // How many rows in this view have no rate, so the page can say so
     // rather than showing a column of blanks with no explanation.
     missingRate: query.data?.missingRate ?? 0,
@@ -119,8 +121,33 @@ export function useExpenseOptions() {
     currencies: query.data?.currencies ?? [],
     payees: query.data?.payees ?? [],
     spentBy: query.data?.spentBy ?? [],
+    savedBy: query.data?.savedBy ?? [],
     lastRateByCurrency: query.data?.lastRateByCurrency ?? {},
   };
+}
+
+/**
+ * WHO "SPENT BY" CAN BE: the master sheet's people. A name picked from here
+ * is linked on save, so that person can see it on WhatsApp (his call
+ * 2026-10-07); any other name is kept as typed and seen by nobody.
+ */
+export function useExpensePeople() {
+  const query = useQuery({
+    queryKey: ['expense-people'],
+    queryFn: () => apiService.expenses.people(),
+    staleTime: 5 * 60_000,
+  });
+  return { ...query, people: query.data?.people ?? [] };
+}
+
+/** The months there are expenses for, newest first, this month always in. */
+export function useExpenseMonths() {
+  const query = useQuery({
+    queryKey: ['expense-months'],
+    queryFn: () => apiService.expenses.months(),
+    staleTime: 60_000,
+  });
+  return { ...query, months: query.data?.months ?? [], current: query.data?.current ?? null };
 }
 
 export function useCreateExpense() {

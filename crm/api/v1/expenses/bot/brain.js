@@ -5,12 +5,15 @@ const logger = require('../../../configs/logger');
 const store = require('./store');
 const format = require('./format');
 const { extract } = require('./extract');
-const { normalise, duplicates, ready, currencyOf, num, exactCopy } = require('./check');
+const {
+  normalise, duplicates, ready, currencyOf, num, exactCopy, ME,
+} = require('./check');
 const { readReply } = require('./reply');
 const { route, revise } = require('./understand');
 const find = require('./find');
 const { liveRates } = require('./rates');
 const receipts = require('./receipts');
+const spender = require('../spender');
 const { readIntent, summaryOf } = require('./intent');
 const { renderCards } = require('./card');
 const { renderTable, worthAPicture } = require('../../pictures/table');
@@ -47,6 +50,8 @@ const minus = (day, n) => new Date(Date.parse(`${day}T00:00:00Z`) - n * 86400000
 const SNAP = (r) => ({
   spentOn: iso(r.spent_on ?? r.spentOn), description: r.description, payee: r.payee, rawAmount: Number(r.raw_amount ?? r.rawAmount), currency: r.currency,
   exchangeRate: r.exchange_rate ?? r.exchangeRate ?? null, groupName: r.group_name ?? r.groupName, spentBy: r.spent_by ?? r.spentBy,
+  // the link goes back with the name on undo (migration 077)
+  spentByPersonId: r.spent_by_person_id ?? r.spentByPersonId ?? null, spentByPhone: r.spent_by_phone ?? r.spentByPhone ?? null,
 });
 const same = (a, b) => JSON.stringify(SNAP(a)) === JSON.stringify(SNAP(b));
 
@@ -70,6 +75,7 @@ const ALREADY = 'Those were all already in your preview, so nothing was added. H
 // went to the pay side and came back "I can't find your number")
 const SHOW_PREVIEW = /^(?:(?:can you |could you |pls |please )?(?:show|send|resend|re-send|give)(?: me)?(?: it| them)?(?: the| my| that)?\s*(?:image|picture|pic|photo|preview|list|expenses|it|them|again)(?: to me| for me)?(?: again| please| pls)?|(?:where(?:'s| is) )?(?:the |my )?(?:image|picture|preview)\??)[!.? ]*$/i;
 const RECEIPT_ASK = /\b(?:show|send|see|view|give|open|where(?:'s| is))\b[^?]*\breceipts?\b/i;
+const MY_EXPENSES = /\bmy(?: own)? expenses\b|\b(?:what|how much) (?:did|have) i (?:spend|spent)\b|\bwhat i (?:spent|spend)\b/i;
 const UNDO = /^(?:undo(?: (?:that|it|this|last|the last one))?|take (?:it|that|them) back|put (?:it|that) back|revert(?: that| it)?)[!. ]*$/i;
 
 /**
@@ -88,11 +94,11 @@ function showAgain(ctx) {
   return again ? `Just to be sure, this is still waiting:\n\n${again}` : 'Okay.';
 }
 
-async function turn(msg, { client = null, today = currentDay(), channel = 'whatsapp' } = {}) {
+async function turn(msg, { client = null, today = currentDay(), channel = 'whatsapp', user = null } = {}) {
   // 1. THE GUARD. Before anything is read. The command center has its own:
   // the admin's signed-in session, every group, and no spender assumed.
   const admin = channel === 'diane'
-    ? { name: null, phone: 'diane', group_name: find.ALL }
+    ? { name: user ?? null, phone: 'diane', group_name: find.ALL }
     : await store.adminFor(msg.phone, msg.group);
   if (!admin) return { registered: false };
   const phone = admin.phone;
@@ -115,7 +121,7 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
 
   let reply;
   // what the open preview held before this message, to see if it changed
-  const heldBefore = state.pending?.kind === 'add' ? JSON.stringify(state.pending.items.map(({ n, spentOn, rawAmount, currency, payee, description, skipped, ok, replaceId, category }) => [n, spentOn, rawAmount, currency, payee, description, skipped, ok, replaceId, category])) : null;
+  const heldBefore = state.pending?.kind === 'add' ? JSON.stringify(state.pending.items.map(({ n, spentOn, rawAmount, currency, payee, description, skipped, ok, replaceId, category, spentBy, groupName, exchangeRate }) => [n, spentOn, rawAmount, currency, payee, description, skipped, ok, replaceId, category, spentBy, groupName, exchangeRate])) : null;
   try {
     reply = await answerTurn(said, files, ctx);
     /**
@@ -123,7 +129,7 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
      * typed while their preview is open re-showed it as if new. Now it says
      * so. Only for a message with figures in it, never "yes" or "show it".
      */
-    const heldAfter = state.pending?.kind === 'add' ? JSON.stringify(state.pending.items.map(({ n, spentOn, rawAmount, currency, payee, description, skipped, ok, replaceId, category }) => [n, spentOn, rawAmount, currency, payee, description, skipped, ok, replaceId, category])) : null;
+    const heldAfter = state.pending?.kind === 'add' ? JSON.stringify(state.pending.items.map(({ n, spentOn, rawAmount, currency, payee, description, skipped, ok, replaceId, category, spentBy, groupName, exchangeRate }) => [n, spentOn, rawAmount, currency, payee, description, skipped, ok, replaceId, category, spentBy, groupName, exchangeRate])) : null;
     const unchanged = heldBefore && heldBefore === heldAfter && !files.length
       && /_Not saved yet_/.test(String(reply ?? '')) && !/^Just to be sure/.test(String(reply ?? '')) && !String(reply ?? '').startsWith(ALREADY) && !SHOW_PREVIEW.test(said);
     if (unchanged && /\d/.test(said) && said.split(/\s+/).length >= 3) {
@@ -309,6 +315,13 @@ async function answerTurn(said, files, ctx) {
 
   // 3. THE ROUTER.
   const lastReply = state.history?.at(-1)?.reply ?? '';
+  /**
+   * "MY EXPENSES" from an admin (his call 2026-10-07): what THEY spent, read
+   * as their name. They see their whole group anyway; this only narrows it.
+   */
+  if (!pending && admin?.name && MY_EXPENSES.test(said)) {
+    said = said.replace(MY_EXPENSES, `expenses spent by ${admin.name}`);
+  }
   const r = await route(said, { today, pending: pending?.kind === 'add', lastReply, client: ctx.client, groups: ctx.groups });
   logger.info({ group, kind: r.kind, sure: r.sure }, 'expense bot: routed');
   switch (r.kind) {
@@ -442,7 +455,39 @@ async function recheck(items, ctx) {
       x.flag = true;
     }
   }
-  return checked;
+  return link(checked, ctx);
+}
+
+/**
+ * WHO SPENT IT, AS A MASTER SHEET PERSON (his calls 2026-10-07): people see
+ * their own expenses on WhatsApp, so each "spent by" is linked here, before
+ * the preview, by spender.js's one rule. Two people with that name is a
+ * question; a name on nobody is saved as typed and never shown to anyone.
+ */
+async function link(items, ctx) {
+  const list = await spender.people().catch((err) => { logger.warn({ err: err.message }, 'expense bot: people could not be read'); return null; });
+  for (const x of items) {
+    x.spentById = null;
+    x.spentByPhone = null;
+    if (x.skipped || !x.spentBy || !list) continue;
+    // eslint-disable-next-line no-await-in-loop
+    const l = await spender.linkSpender({
+      name: x.spentBy, me: x.spentMe, admin: ctx.admin, group: x.groupName ?? ctx.group, list,
+    });
+    x.spentById = l.personId;
+    x.spentByPhone = l.phone;
+    if (l.status === 'linked' && l.spentBy && l.spentBy !== x.spentBy) {
+      // "Ahmed" is the master sheet's Ahmed Khan: said back in full
+      x.notes.push(`spent by ${x.spentBy}, read as ${l.spentBy} (master sheet)`);
+      x.spentBy = l.spentBy;
+    }
+    if (l.status === 'ambiguous' && !x.ok) {
+      x.doubts.push(`which ${x.spentBy}? ${l.choices.slice(0, 4).join(' or ')}`);
+      x.flag = true;
+    }
+    if (l.status === 'none' && !x.spentMe) x.notes.push(`${x.spentBy} is not on the master sheet, so it is not shown to anyone on WhatsApp`);
+  }
+  return items;
 }
 
 async function addFrom(msg, ctx) {
@@ -582,6 +627,8 @@ async function saveAdd(ctx, { readyOnly = false } = {}) {
   const fieldsOf = (x) => ({
     spentOn: x.spentOn, description: x.description, payee: x.payee, currency: x.currency, rawAmount: x.rawAmount,
     exchangeRate: x.exchangeRate, groupName: x.groupName ?? ctx.group, spentBy: x.spentBy, category: x.category ?? null,
+    // who spent it, linked (link() above), and who sent it in: never asked
+    spentByPersonId: x.spentById ?? null, spentByPhone: x.spentByPhone ?? null, savedBy: ctx.admin?.name ?? null,
   });
   /**
    * REPLACE THE SAVED ONE (his call 2026-10-07): the same receipt, its saved
@@ -702,19 +749,20 @@ async function onReply(r, ctx) {
   if (r.kind === 'skip') for (const n of r.which) items.find((x) => x.n === n).skipped = true;
   // "KEEP 6": back in AND accepted as a new one (a lookalike they know is real)
   if (r.kind === 'unskip') for (const n of r.which) { const x = items.find((i) => i.n === n); x.skipped = false; x.ok = true; x.modelDoubt = null; }
-  // 1 / 2 / 3 FOR THE SAME RECEIPTS: skip them, save again, or replace the saved ones
-  if (r.kind === 'repeats') {
-    for (const n of r.which) {
+  // SKIP, SAVE OR REPLACE, for all of them or one by one ("Please check")
+  if (r.kind === 'choices') {
+    for (const n of r.skip) items.find((x) => x.n === n).skipped = true;
+    for (const n of r.keep) {
       const x = items.find((i) => i.n === n);
-      if (r.choice === 'skip') x.skipped = true;
-      if (r.choice === 'keep') { x.ok = true; x.replaceId = null; }
-      if (r.choice === 'replace') { x.ok = true; x.replaceId = x.repeatOf; }
+      Object.assign(x, { skipped: false, ok: true, replaceId: null, modelDoubt: null });
+    }
+    for (const n of r.replace) {
+      const x = items.find((i) => i.n === n);
+      // only one that IS a saved one again; anything else is just kept
+      Object.assign(x, { skipped: false, ok: true, modelDoubt: null, replaceId: x.repeatOf ?? x.lookalikeOf ?? null });
     }
   }
-  if (r.kind === 'mixed') {
-    for (const n of r.skip) items.find((x) => x.n === n).skipped = true;
-    for (const n of r.keep) { const x = items.find((i) => i.n === n); x.skipped = false; x.ok = true; x.modelDoubt = null; }
-  }
+
   if (r.kind === 'only') for (const x of items) x.skipped = !r.which.includes(x.n);
   if (r.kind === 'fix') {
     for (const part of r.parts) applyFix(items, part, ctx.today);
@@ -764,10 +812,14 @@ async function startEdit(r, ctx) {
 }
 
 function editPreviewFor(row, changes, ctx) {
+  // "SPENT BY ME": the admin, by name in the preview and linked on save
+  const me = changes.spentBy != null && ME.test(String(changes.spentBy).trim());
+  if (me && ctx.admin?.name) changes = { ...changes, spentBy: ctx.admin.name };
+  else if (me) return 'Who should it be spent by? Send their name.';
   const before = SNAP(row);
   const fields = Object.fromEntries(Object.entries(changes).filter(([f, v]) => String(before[f] ?? '') !== String(v)));
   if (!Object.keys(fields).length) { ctx.state.pending = null; return 'It already says that, so nothing needs changing.'; }
-  ctx.state.pending = { kind: 'edit', id: row.id, before, fields };
+  ctx.state.pending = { kind: 'edit', id: row.id, before, fields, me: me && 'spentBy' in fields };
   return format.editPreview(find.asItem(row), fields, { group: ctx.group === find.ALL });
 }
 
@@ -779,10 +831,17 @@ async function stale(id, before) {
 }
 
 async function saveEdit(ctx) {
-  const { id, before, fields } = ctx.state.pending;
+  const { id, before, fields, me } = ctx.state.pending;
   const why = await stale(id, before);
   if (why) { ctx.state.pending = null; return `Nothing was changed: ${why}. Ask again and I'll show it as it is now.`; }
-  const after = await expensesRepo.update(id, fields);
+  // a new spender is linked: "me" here by the admin's phone, any other name
+  // by the repo's own relink
+  let link = {};
+  if (me) {
+    const l = await spender.linkSpender({ name: fields.spentBy, me: true, admin: ctx.admin, group: before.groupName ?? ctx.group });
+    link = { spentByPersonId: l.personId, spentByPhone: l.phone };
+  }
+  const after = await expensesRepo.update(id, { ...fields, ...link });
   const check = await expensesRepo.findById(id);
   if (!after || !check) return '⚠️ The change could not be confirmed. Please check the Expenses page.';
   await store.recordAction(require('../../../configs/db'), {

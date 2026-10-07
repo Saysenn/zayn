@@ -13,6 +13,8 @@ const { AppError } = require('./middlewares/errors');
 const { messages } = require('./shared/messages');
 const { broadcast } = require('./sockets/index');
 const { currentMonth } = require('./shared/presetMonth.helper');
+const { sessionUser } = require('./shared/session.helper');
+const spender = require('./expenses/spender');
 
 // ***************************************************
 // * /expenses
@@ -63,7 +65,44 @@ function filtersFrom(query) {
     amountField: query.amountField || undefined,
     amountMin: query.amountMin,
     amountMax: query.amountMax,
+    savedBy: query.savedBy,
+    linked: ['yes', 'no'].includes(query.linked) ? query.linked : undefined,
   };
+}
+
+/**
+ * THE MONTH SHOWN (his call 2026-10-07): this month unless another is
+ * picked in the month filter. THE SERVER still decides which month "this"
+ * is; a picked month is only ever one already over, never one ahead.
+ */
+function viewMonth(asked) {
+  const now = currentMonth();
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(String(asked ?? '')) && String(asked) <= now ? String(asked) : now;
+}
+
+/**
+ * WHAT A BODY MAY SAY ABOUT WHO (migration 077). "Saved by" is the
+ * signed-in user, never typed. The person spent by is a picked master sheet
+ * person (checked here), or worked out from the name by the repo; a phone
+ * link is the expense bot's alone.
+ */
+async function whoFrom(body, req, { creating = false } = {}) {
+  const { savedBy, spentByPhone, spentByPersonId, ...rest } = body ?? {};
+  const out = { ...rest };
+  if (creating) out.savedBy = sessionUser(req);
+  if (spentByPersonId !== undefined) {
+    if (spentByPersonId === null || spentByPersonId === '') {
+      out.spentByPersonId = null;
+      out.spentByPhone = null;
+    } else {
+      const person = await expensesRepo.personById(spentByPersonId);
+      if (!person) throw new AppError(400, 'That person is not on the master sheet.');
+      out.spentByPersonId = person.person_id;
+      out.spentByPhone = null;
+      if (out.spentBy === undefined) out.spentBy = person.display_name;
+    }
+  }
+  return out;
 }
 
 /**
@@ -78,13 +117,13 @@ function filtersFrom(query) {
 router.get('/expenses', async (req, res, next) => {
   try {
     const { page, pageSize } = parsePagination(req.query);
-    const month = currentMonth();
+    const month = viewMonth(req.query.month);
     const result = await expensesRepo.findAll({
       ...filtersFrom(req.query), month, page, pageSize,
     });
     // NAMED in the response, so the page can say which month it is showing
-    // rather than leaving the reader to work it out.
-    res.json({ ...result, month, page, pageSize });
+    // rather than leaving the reader to work it out; `current` is this month.
+    res.json({ ...result, month, current: currentMonth(), page, pageSize });
   } catch (err) {
     next(err);
   }
@@ -150,7 +189,7 @@ const safeName = (value) => String(value ?? '').replace(/[^A-Za-z0-9 _-]+/g, '')
  */
 router.get('/expenses/download', async (req, res, next) => {
   try {
-    const month = currentMonth();
+    const month = viewMonth(req.query.month);
     const columns = asArray(req.query.columns);
     const palette = req.query.palette;
     const groups = asArray(req.query.groups);
@@ -238,7 +277,8 @@ router.post('/expenses/import/commit', async (req, res, next) => {
     const accepted = Array.isArray(req.body?.accepted) ? req.body.accepted : [];
     if (accepted.length === 0) return next(new AppError(400, messages.nothingMatches));
 
-    const made = await expensesRepo.createMany(accepted);
+    const who = await Promise.all(accepted.map((row) => whoFrom(row, req, { creating: true })));
+    const made = await expensesRepo.createMany(who);
     broadcast(null, EVENT, { action: 'imported', count: made.length });
     res.json({ imported: made.length });
   } catch (err) {
@@ -253,7 +293,7 @@ router.post('/expenses', async (req, res, next) => {
       return next(new AppError(400, `${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} required`));
     }
 
-    const expense = await expensesRepo.create(req.body);
+    const expense = await expensesRepo.create(await whoFrom(req.body, req, { creating: true }));
     broadcast(null, EVENT, { action: 'created', id: expense.id });
     res.status(201).json({ expense });
   } catch (err) {
@@ -263,7 +303,7 @@ router.post('/expenses', async (req, res, next) => {
 
 router.patch('/expenses/:id', async (req, res, next) => {
   try {
-    const expense = await expensesRepo.update(req.params.id, req.body);
+    const expense = await expensesRepo.update(req.params.id, await whoFrom(req.body, req));
     if (!expense) return next(new AppError(404, messages.notFound.expense));
 
     broadcast(null, EVENT, { action: 'updated', id: expense.id });
@@ -294,7 +334,7 @@ function bulkIds(body) {
 router.post('/expenses/bulk-update', async (req, res, next) => {
   try {
     const ids = bulkIds(req.body);
-    const fields = req.body?.fields || {};
+    const fields = await whoFrom(req.body?.fields || {}, req);
     const updated = [];
     for (const id of ids) {
       // eslint-disable-next-line no-await-in-loop
@@ -324,4 +364,28 @@ router.post('/expenses/bulk-delete', async (req, res, next) => {
   }
 });
 
-module.exports = { router };
+/**
+ * THE PEOPLE "SPENT BY" CAN BE (the page's picker): master sheet people,
+ * with their groups. A name not here can still be typed; it stays unlinked.
+ */
+router.get('/expenses/people', async (req, res, next) => {
+  try {
+    const list = await spender.people();
+    res.json({ people: list.sort((a, b) => a.name.localeCompare(b.name)) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** The months there are expenses for, newest first, with this month always in. */
+router.get('/expenses/months', async (req, res, next) => {
+  try {
+    const now = currentMonth();
+    const months = [...new Set([now, ...(await expensesRepo.monthsWithExpenses()).filter((m) => m <= now)])].sort().reverse();
+    res.json({ months, current: now });
+  } catch (err) {
+    next(err);
+  }
+});
+
+module.exports = { router, viewMonth };

@@ -54,7 +54,7 @@ function rules(today, groups = []) {
     'station number. From the receipt header or "paid to/at/from X".',
     'rawAmount: the number only, no symbols or commas ("1250.50"). For a receipt, the final total paid.',
     'currency: ONLY if said or printed (AED, GBP, EUR, USD, £, €, $, "dirhams"). "" if not shown.',
-    'spentBy: only if they say someone else spent it ("Ali paid", "spent by Sara"). "" otherwise.',
+    'spentBy: who spent it, only if they say ("Ali paid", "spent by Sara"); "me" if they say they paid it themselves ("I paid", "mine"). "" otherwise, never guessed.',
     'source: where it came from: "message", "photo 1", "photo 2", "pdf 1", "pdf 2", exactly as labelled.',
     'category: fuel (petrol, ENOC, ADNOC), travel (taxi, Careem, parking, Salik, train, flight, hotel), food (meals, coffee, groceries),',
     'office (stationery, ink, furniture, equipment, software), bills (electricity, water, internet, phone, rent), else other.',

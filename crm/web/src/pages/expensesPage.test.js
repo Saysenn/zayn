@@ -40,7 +40,9 @@ test('the table shows a SKELETON while loading, not an empty state', () => {
 });
 
 test('the header count is undefined while loading, never a flash of 0', () => {
-  assert.match(page, /count=\{isLoading \? undefined : total\}/);
+  // beside the filter button now (his call 2026-10-07), and still only once loaded
+  assert.match(page, /inline=\{!isLoading && \(/);
+  assert.match(page, /countOf\(total, 'expense'\)/);
 });
 
 test('the empty state waits for the load to finish', () => {
@@ -130,9 +132,10 @@ test('people are searched, not filtered, so there is one way to ask', () => {
  * picking its own would put two people on two different ledgers at a
  * boundary, with neither looking wrong.
  */
-test('there is NO month picker, and no month in the request', () => {
-  assert.doesNotMatch(page, /month:/, 'the page never sends a month');
-  assert.doesNotMatch(page, /MonthPicker|setMonth\(/);
+test('THIS MONTH by default; an earlier one only when picked, and never sticky (his call 2026-10-07)', () => {
+  assert.match(page, /const \[viewMonth, setViewMonth\] = useState\(''\)/, 'opens on this month every visit');
+  assert.match(page, /month: viewMonth \|\| undefined/, 'no month sent unless one was picked');
+  assert.doesNotMatch(page, /useStickyState\(`\$\{STICKY\}\.month/);
 });
 
 test('the month it is showing is NAMED, never left as "this month"', () => {

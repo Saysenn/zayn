@@ -216,6 +216,27 @@ function setExpenseStyle(style) {
     .then((res) => res.rows[0]?.expense_style ?? 'sheet');
 }
 
+/**
+ * PEOPLE SEE THEIR OWN EXPENSES ON WHATSAPP (migration 077), his switch in
+ * Settings → Whatbot. OFF by default, and off when the column is missing:
+ * showing expenses is never the fallback.
+ */
+async function employeeExpenses() {
+  try {
+    const { rows } = await pool.query('SELECT whatbot_employee_expenses FROM tb_settings WHERE id = 1');
+    return rows[0]?.whatbot_employee_expenses === true;
+  } catch (err) {
+    if (err?.code === '42703') return false;
+    throw err;
+  }
+}
+
+function setEmployeeExpenses(on) {
+  return pool
+    .query('UPDATE tb_settings SET whatbot_employee_expenses = $1, updated_at = now() WHERE id = 1 RETURNING whatbot_employee_expenses', [on === true])
+    .then((res) => res.rows[0]?.whatbot_employee_expenses === true);
+}
+
 function setColorUsesEndDate(on) {
   return pool
     .query(
@@ -276,6 +297,7 @@ module.exports = {
   loginBriefing, setLoginBriefing,
   agentAutoConfirm, setAgentAutoConfirm,
   expenseStyle, setExpenseStyle,
+  employeeExpenses, setEmployeeExpenses,
   cryptoPercent, setCryptoPercent, CRYPTO_DEFAULT,
   setDashboardHistoryMonths, DEFAULT_DASHBOARD_HISTORY,
   exportTabStyle, setExportTabStyle,

@@ -176,10 +176,11 @@ router.get('/settings', async (req, res, next) => {
     // A new column in get()'s SELECT would take down every other reader
     // on a deploy that forgot the migration.
     // Auto mode is its own query too, and for the same reason.
-    const [row, loginBriefing, agentAutoConfirm, expenseStyle] = await Promise.all([
+    const [row, loginBriefing, agentAutoConfirm, expenseStyle, employeeExpenses] = await Promise.all([
       settingsRepo.get(), settingsRepo.loginBriefing(), settingsRepo.agentAutoConfirm(), settingsRepo.expenseStyle(),
+      settingsRepo.employeeExpenses(),
     ]);
-    res.json({ ...toSettings(row), loginBriefing, agentAutoConfirm, expenseStyle });
+    res.json({ ...toSettings(row), loginBriefing, agentAutoConfirm, expenseStyle, employeeExpenses });
   } catch (err) {
     next(err);
   }
@@ -198,13 +199,13 @@ router.patch('/settings', async (req, res, next) => {
     const {
       devMode, whatbotWrites, localLocations, colorUsesEndDate,
       cryptoPercent, dashboardHistoryMonths: historyMonths, loginBriefing,
-      agentAutoConfirm, expenseStyle,
+      agentAutoConfirm, expenseStyle, employeeExpenses,
     } = req.body || {};
     if (devMode === undefined && whatbotWrites === undefined
       && localLocations === undefined && colorUsesEndDate === undefined
       && cryptoPercent === undefined && historyMonths === undefined
       && loginBriefing === undefined && agentAutoConfirm === undefined
-      && expenseStyle === undefined) {
+      && expenseStyle === undefined && employeeExpenses === undefined) {
       return res.status(400).json({ error: 'nothing to change' });
     }
 
@@ -313,12 +314,22 @@ router.patch('/settings', async (req, res, next) => {
       await settingsRepo.setExpenseStyle(expenseStyle);
     }
 
+    // People seeing their own expenses on WhatsApp: a boolean or refused,
+    // since it decides what WhatBot reveals.
+    if (employeeExpenses !== undefined) {
+      if (typeof employeeExpenses !== 'boolean') {
+        return res.status(400).json({ error: 'employeeExpenses must be a boolean' });
+      }
+      await settingsRepo.setEmployeeExpenses(employeeExpenses);
+    }
+
     // Same reason as the GET: each flag is its own query.
     res.json({
       ...toSettings(row ?? (await settingsRepo.get())),
       loginBriefing: await settingsRepo.loginBriefing(),
       agentAutoConfirm: await settingsRepo.agentAutoConfirm(),
       expenseStyle: await settingsRepo.expenseStyle(),
+      employeeExpenses: await settingsRepo.employeeExpenses(),
     });
   } catch (err) {
     next(err);

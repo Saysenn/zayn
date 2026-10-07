@@ -24,7 +24,7 @@ import { logger } from "../system/logger.js";
 // ---- the guard ----
 
 const CACHE_MS = 60_000;
-let cache = { at: 0, keys: new Set() };
+let cache = { at: 0, keys: new Set(), employeeView: false };
 
 const key = (phone, group) =>
   `${String(phone).replace(/[^\d+]/g, "")}|${String(group).toLowerCase()}`;
@@ -43,8 +43,10 @@ async function admins() {
       signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) throw new Error(`status ${res.status}`);
-    const { admins: list } = await res.json();
-    cache = { at: Date.now(), keys: new Set(list.map((a) => key(a.phone, a.group))) };
+    const { admins: list, employeeView } = await res.json();
+    // his switch (CRM → Settings → Whatbot), read with the admins: only an
+    // explicit true turns it on
+    cache = { at: Date.now(), keys: new Set(list.map((a) => key(a.phone, a.group))), employeeView: employeeView === true };
   } catch (err) {
     logger.warn({ err: err.message }, "expense admins: could not refresh, keeping the last list");
     cache.at = Date.now() - CACHE_MS + 10_000;
@@ -76,9 +78,18 @@ export async function isExpenseAdmin(phone, group) {
   return (await admins()).has(key(phone, group));
 }
 
+/**
+ * PEOPLE MAY SEE THEIR OWN EXPENSES: his switch in the CRM, refreshed with
+ * the admin list (a minute at most). Off when the CRM never said on.
+ */
+export async function employeeExpensesOn() {
+  await admins();
+  return cache.employeeView === true;
+}
+
 /** for tests: forget the list */
 export const resetAdminCache = () => {
-  cache = { at: 0, keys: new Set() };
+  cache = { at: 0, keys: new Set(), employeeView: false };
 };
 
 // ---- media ----

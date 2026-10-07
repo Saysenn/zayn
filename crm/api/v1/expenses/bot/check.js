@@ -10,7 +10,9 @@ const { currentDay } = require('../../shared/presetMonth.helper');
 //     spent by, paid to;
 //   - a currency nobody said is AED;
 //   - the group is the bot's number, never read from the message;
-//   - spent by is the admin who sent it, unless the message says another.
+//   - spent by is WHO SPENT IT, asked when nobody is named (his call
+//     2026-10-07: it used to fall back to the admin, which was wrong every
+//     time an admin saved for someone else). "me" is the admin.
 // MISSING blocks saving (it is asked). A DOUBT is shown and does not block:
 // they have seen it, and "yes" means yes.
 
@@ -75,11 +77,12 @@ function canonical(value, known = []) {
   return shorter.length === 1 ? shorter[0] : v;
 }
 
+const ME = /^(?:me|myself|i|mine|my self|by me|i did|i paid|i spent it)$/i;
 /** "me", "myself": the admin who sent it, if there is one. A sentence is no name. */
 function spenderOf(value, admin, known) {
   const v = clean(value);
   if (!v) return null;
-  if (/^(?:me|myself|i|mine|my self)$/i.test(v)) return admin?.name ?? null;
+  if (ME.test(v)) return admin?.name ?? null;
   if (v.split(/\s+/).length > 4 || /[,;]/.test(v)) return null;
   return canonical(v, known);
 }
@@ -115,7 +118,13 @@ function normalise(raw, { admin, group, groups = [], rates = {}, live = {}, know
     rawAmount: num(raw.rawAmount),
     currency: said ?? 'AED',
     groupName: anyGroup ? groupOf(raw.groupName, groups) : group,
-    spentBy: spenderOf(raw.spentBy, admin, known.spentBy ?? []) ?? admin?.name ?? null,
+    spentBy: spenderOf(raw.spentBy, admin, known.spentBy ?? []),
+    // "ME": the admin themselves, linked by their own phone (spender.js).
+    // Kept while the name is still theirs; another name ends it.
+    spentMe: ME.test(clean(raw.spentBy) ?? '') || (Boolean(raw.spentMe) && Boolean(admin?.name) && fold(raw.spentBy ?? '') === fold(admin.name)),
+    // the master sheet person it is linked to, worked out by brain.link()
+    spentById: raw.spentById ?? null,
+    spentByPhone: raw.spentByPhone ?? null,
     source: raw.source ?? null,
     category: CATEGORIES.includes(raw.category) ? raw.category : categoryOf(raw),
     // the receipt it came from, held until "yes" (receipts.js)
@@ -184,6 +193,8 @@ function duplicates(items, saved = []) {
     if (x.ok || x.skipped) continue;
     const twin = saved.find((s) => sameSpend(x, { spentOn: s.spent_on instanceof Date ? s.spent_on.toISOString() : s.spent_on, rawAmount: s.raw_amount, currency: s.currency }));
     if (twin) {
+      // the saved one it looks like, so "replace" can update it
+      x.lookalikeOf = twin.id;
       x.doubts.push(`looks already saved: ${twin.description} on ${require('./format').day(String(twin.spent_on instanceof Date ? twin.spent_on.toISOString() : twin.spent_on).slice(0, 10))}`);
     }
     // SAME PAYEE, SAME DAY, ANOTHER AMOUNT: maybe new, maybe a change to the
@@ -202,5 +213,5 @@ function duplicates(items, saved = []) {
 const ready = (items) => items.filter((x) => !x.skipped).every((x) => x.missing.length === 0);
 
 module.exports = {
-  normalise, duplicates, ready, currencyOf, groupOf, canonical, spenderOf, REQUIRED, num, iso, exactCopy, CATEGORIES, categoryOf,
+  normalise, duplicates, ready, currencyOf, groupOf, canonical, spenderOf, REQUIRED, num, iso, exactCopy, CATEGORIES, categoryOf, ME,
 };

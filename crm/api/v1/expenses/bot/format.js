@@ -106,51 +106,86 @@ function ranges(ns) {
 }
 
 const QUESTIONS_SHOWN = 6;
+// up to this many expenses to check are listed ONE PER LINE, by number
+const ONE_BY_ONE = 8;
+
+/** A doubt as the short reason it is listed for. */
+function reasonOf(d) {
+  const receipt = /^same receipt as one saved on (\d{1,2} \w{3})/.exec(d);
+  if (receipt) return `same receipt as one saved on ${receipt[1]}`;
+  const alike = /^looks already saved:\s*(.+)$/.exec(d);
+  if (alike) return `looks like one already saved (${alike[1]}), different receipt`;
+  const copy = /^same as (\d+)/.exec(d);
+  if (copy) return `a copy of No. ${copy[1]}`;
+  const which = /^which (.+?)\? (.+)$/.exec(d);
+  if (which) return `which ${which[1]}? *${which[2].split(' or ').join('* or *')}*`;
+  if (/^another .+: new, or a change/.test(d)) return d.replace(/^another (.+?) on .*$/, 'another $1 that day: new, or a change to that one?');
+  return `_${d}_`;
+}
+
+/** Can it be skipped, saved again or replaced? A repeat, a lookalike, a copy. */
+const CHOICE = /^same receipt as one saved|^looks already saved|^same as \d+/;
 
 /**
- * WHAT NEEDS AN ANSWER, GROUPED: one line per kind of question with the
- * numbers it covers, never one line per expense (his call 2026-10-07: a
- * caption of 60 "No. 57: same as 14" lines). Copies and already-saved ones
- * each get a one-word way out.
+ * WHAT NEEDS AN ANSWER (his call 2026-10-07, "Please check"): a few are
+ * listed ONE PER LINE by number with why, so each gets its own answer; many
+ * are grouped by kind with their numbers as runs, never 60 lines.
  */
 function questions(live) {
+  const flagged = live.filter((x) => (x.missing ?? []).length || (x.doubts ?? []).length);
+  if (flagged.length && flagged.length <= ONE_BY_ONE) {
+    return flagged.map((x) => {
+      const why = [
+        ...(x.missing ?? []).map((f) => (f === 'exchangeRate' ? `1 ${x.currency} to AED is?` : ASK[f] ?? `${LABEL[f] ?? f}?`)),
+        ...(x.doubts ?? []).map(reasonOf),
+      ];
+      const what = x.payee || x.description || 'no description';
+      return `${x.n}. ${what} · ${x.rawAmount == null ? '?' : money(x.currency, x.rawAmount)}: ${why.join('; ')}`;
+    });
+  }
   const by = new Map();
   const put = (key, n) => by.set(key, [...(by.get(key) ?? []), n]);
   for (const x of live) {
     for (const f of x.missing ?? []) put(f === 'exchangeRate' ? `1 ${x.currency} to AED is?` : ASK[f] ?? `${LABEL[f] ?? f}?`, x.n);
     for (const d of x.doubts ?? []) {
-      if (/^same as \d+/.test(d)) put('§copies', x.n);
-      // a lookalike is asked ONE BY ONE: two same taxis on a day can be real
-      else if (/^looks already saved/.test(d)) put(`§saved:${x.n}:${d.replace(/^looks already saved:\s*/, '')}`, x.n);
-      // the same receipt FILE is a resend: one choice for all of them
-      else if (/^same receipt as one saved/.test(d)) put('§receipt', x.n);
+      if (/^same as \d+/.test(d)) put('copies of earlier ones', x.n);
+      else if (/^looks already saved/.test(d)) put('look like ones already saved (same shop, amount and day), different receipts', x.n);
+      else if (/^same receipt as one saved/.test(d)) put('the same receipts you already saved', x.n);
       else if (/^another .+: new, or a change/.test(d)) put('another expense to the same payee that day: new, or a change to that one?', x.n);
-      else put(`_${d}_`, x.n);
+      else put(reasonOf(d), x.n);
     }
   }
-  // LOOKALIKES: one by one when there are a few, one line when there are many
-  const alike = [...by.keys()].filter((q) => q.startsWith('§saved:'));
-  if (alike.length > 3) {
-    const ns = alike.flatMap((q) => by.get(q));
-    for (const q of alike) by.delete(q);
-    by.set('§savedMany', ns);
-  }
-  const lines = [...by].map(([q, ns]) => {
-    if (q === '§savedMany') return `• No. ${ranges(ns)}: look like ones already saved (same shop, amount and day). *keep ${ns[0]}* for any that's new, or *skip saved* for all`;
-    const nums = `No. ${ranges(ns)}`;
-    if (q === '§copies') return `• ${nums}: ${ns.length === 1 ? 'a copy of an earlier one' : 'copies of earlier ones'} (reply *skip copies*)`;
-    if (q.startsWith('§saved:')) {
-      const [, n, what] = /^§saved:(\d+):(.*)$/.exec(q);
-      return `• No. ${n}: looks like one already saved (_${what}_): *keep ${n}* if it's a new one, or *skip ${n}*`;
-    }
-    if (q === '§receipt') {
-      return `• ${nums}: ${ns.length === 1 ? 'the same receipt you already saved' : 'the same receipts you already saved'}. Reply *1* skip ${ns.length === 1 ? 'it' : 'them'} · *2* save again · *3* replace the saved ${ns.length === 1 ? 'one' : 'ones'}`;
-    }
-    return `• ${nums}: ${q}`;
-  });
+  const lines = [...by].map(([q, ns]) => `• No. ${ranges(ns)}: ${q}`);
   return lines.length > QUESTIONS_SHOWN
     ? [...lines.slice(0, QUESTIONS_SHOWN), `• _…and ${lines.length - QUESTIONS_SHOWN} more, see the tinted cells_`]
     : lines;
+}
+
+/**
+ * HOW TO ANSWER, with their own numbers: one word for all of them, or one
+ * line each ("1 skip", "2 replace", "3 save", "4 me").
+ */
+function howToAnswer(live) {
+  const choice = live.filter((x) => (x.doubts ?? []).some((d) => CHOICE.test(d)));
+  const replaceable = choice.filter((x) => x.repeatOf || x.lookalikeOf);
+  const spender = live.filter((x) => (x.missing ?? []).includes('spentBy'));
+  const out = [];
+  if (choice.length) out.push(`For all of them: *skip all* · *save all*${replaceable.length ? ' · *replace all*' : ''}`);
+  const examples = [];
+  for (const x of choice) {
+    if (examples.length >= 3) break;
+    const verb = (x.repeatOf || x.lookalikeOf) && !examples.some((e) => /replace/.test(e)) ? 'replace' : examples.some((e) => /skip/.test(e)) ? 'save' : 'skip';
+    examples.push(`${x.n} ${verb}`);
+  }
+  if (spender.length) {
+    examples.push(spender.length > 1 ? `${ranges(spender.slice(0, -1).map((x) => x.n))} Ahmed` : `${spender[0].n} me`);
+    if (spender.length > 1) examples.push(`${spender.at(-1).n} me`);
+  }
+  if (examples.length) {
+    out.push(choice.length ? 'Or one by one, like:' : 'Reply like:', ...examples.slice(0, 4).map((e) => `*${e}*`));
+    if (spender.length) out.push('_*me* is you; a name is who spent it._');
+  }
+  return out;
 }
 
 /**
@@ -172,14 +207,16 @@ function addPreview(items, group) {
   const missing = live.filter((x) => x.missing?.length);
   const doubts = live.filter((x) => !x.missing?.length && x.doubts?.length);
   if (missing.length || doubts.length) {
-    out.push('', missing.length ? '⚠️ *Needs an answer*' : '⚠️ *Please check*', ...questions(live));
+    out.push('', '⚠️ *Please check*', ...questions(live));
+    const how = howToAnswer(live);
+    if (how.length) out.push('', ...how);
   }
-  const m = missing[0];
-  const example = m && (m.missing.includes('exchangeRate') ? `*1 ${m.currency.toLowerCase()} to aed is 4.85*` : m.missing.includes('groupName') ? `*${m.n} is MANBAT*` : m.missing.includes('spentBy') ? `*${m.n} by Gary*`
+  const m = missing.find((x) => !x.missing.includes('spentBy') || x.missing.length > 1);
+  const example = m && (m.missing.includes('exchangeRate') ? `*1 ${m.currency.toLowerCase()} to aed is 4.85*` : m.missing.includes('groupName') ? `*${m.n} is MANBAT*`
     : m.missing.includes('spentOn') ? `*${m.n} is 5 Oct*` : m.missing.includes('payee') ? `*${m.n} paid to Careem*`
       : m.missing.includes('rawAmount') ? `*${m.n} is 150*` : `*${m.n} is taxi*`);
   out.push('', missing.length
-    ? `Reply with the answers (like ${example}) · *modify* · *cancel*`
+    ? `Reply with the answers${example ? ` (like ${example})` : ''} · *modify* · *cancel*`
     : doubts.length
       ? 'Reply *yes* to save as shown · *modify* to change · *cancel*'
       : 'Reply *yes* to save · *modify* to change · *cancel*');
@@ -301,7 +338,9 @@ function caption(items, group, { saved = false } = {}) {
   const missing = live.filter((x) => x.missing?.length);
   const doubts = live.filter((x) => !x.missing?.length && x.doubts?.length);
   if (missing.length || doubts.length) {
-    out.push('', missing.length ? '⚠️ *Needs an answer*' : '⚠️ *Please check*', ...questions(live));
+    out.push('', '⚠️ *Please check*', ...questions(live));
+    const how = howToAnswer(live);
+    if (how.length) out.push('', ...how);
   }
   // the same last line as the text preview
   out.push('', addPreview(items, group).split('\n').at(-1));
@@ -309,6 +348,6 @@ function caption(items, group, { saved = false } = {}) {
 }
 
 module.exports = {
-  HELP_DIANE, SEP, ratesBubble, caption, ranges, questions,
+  HELP_DIANE, SEP, ratesBubble, caption, ranges, questions, howToAnswer,
   day, dayFull, amount, money, totals, line, block, addPreview, editPreview, removePreview, pickList, undoPreview, saved, changed, removed, HELP, LABEL,
 };

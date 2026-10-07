@@ -22,6 +22,10 @@ const COLUMN_FOR = {
   createdAt: 'created_at',
   updatedAt: 'updated_at',
   syncKey: 'sync_key',
+  // who sent it in, and the master sheet person who spent it (migration 077)
+  savedBy: 'saved_by',
+  spentByPersonId: 'spent_by_person_id',
+  spentByPhone: 'spent_by_phone',
 };
 
 // What a create or an update may set. `aed_amount` is generated and
@@ -31,6 +35,9 @@ const WRITABLE = [
   'rawAmount', 'exchangeRate', 'groupName', 'spentBy',
   // fuel, travel, food, office, bills or other (migration 075)
   'category',
+  // set by the SERVER only (routes and the expense brain, via
+  // expenses/spender.js), never taken from a body as sent (migration 077)
+  'savedBy', 'spentByPersonId', 'spentByPhone',
 ];
 
 // ===============================
@@ -106,7 +113,7 @@ function numberOrNull(value) {
  */
 function buildWhere({
   month, q, searchField, groups, currencies,
-  amountField, amountMin, amountMax,
+  amountField, amountMin, amountMax, savedBy, linked,
 } = {}) {
   const params = [];
   const where = [];
@@ -122,6 +129,17 @@ function buildWhere({
     params.push(groupList);
     where.push(`group_name = ANY($${params.length}::text[])`);
   }
+
+  // WHO SENT IT IN; '(blank)' is the ones from before migration 077
+  const savedList = asList(savedBy);
+  if (savedList.length) {
+    params.push(savedList.filter((v) => v !== '(blank)'));
+    where.push(`(saved_by = ANY($${params.length}::text[])${savedList.includes('(blank)') ? ' OR saved_by IS NULL' : ''})`);
+  }
+
+  // LINKED TO A PERSON or not: the "not linked" ones are his to pick
+  if (linked === 'yes') where.push('(spent_by_person_id IS NOT NULL OR spent_by_phone IS NOT NULL)');
+  if (linked === 'no') where.push("(spent_by_person_id IS NULL AND spent_by_phone IS NULL AND spent_by IS NOT NULL AND btrim(spent_by) <> '')");
 
   const currencyList = asList(currencies).map(upperCurrency).filter(Boolean);
   if (currencyList.length) {
@@ -219,7 +237,9 @@ async function options() {
          ARRAY(SELECT DISTINCT payee      FROM tb_expenses
                 WHERE payee IS NOT NULL AND btrim(payee) <> '' ORDER BY 1)          AS payees,
          ARRAY(SELECT DISTINCT spent_by   FROM tb_expenses
-                WHERE spent_by IS NOT NULL AND btrim(spent_by) <> '' ORDER BY 1)    AS spent_by`,
+                WHERE spent_by IS NOT NULL AND btrim(spent_by) <> '' ORDER BY 1)    AS spent_by,
+         ARRAY(SELECT DISTINCT saved_by   FROM tb_expenses
+                WHERE saved_by IS NOT NULL AND btrim(saved_by) <> '' ORDER BY 1)    AS saved_by`,
     ),
     // THE MOST RECENTLY ENTERED RATE PER CURRENCY, dated by created_at
     // because that is when the rate was current. Never today's rate from
@@ -246,6 +266,7 @@ async function options() {
     currencies: l.currencies ?? [],
     payees: l.payees ?? [],
     spentBy: l.spent_by ?? [],
+    savedBy: l.saved_by ?? [],
     lastRateByCurrency,
   };
 }
@@ -266,6 +287,23 @@ function writableValues(fields = {}) {
   return out;
 }
 
+/**
+ * A NEW "SPENT BY" IS LINKED AGAIN, whoever wrote it (his call 2026-10-07):
+ * a name changed on the page, by Diane or by WhatBot must never leave the
+ * old person's link behind, or the old person would still see it. A write
+ * that sets the link itself (the expense brain, the page's picker) is left
+ * as it is. The typed name is never changed here.
+ */
+async function relink(values, current = null, list = null) {
+  if (!('spent_by' in values) || 'spent_by_person_id' in values || 'spent_by_phone' in values) return values;
+  // eslint-disable-next-line global-require
+  const spender = require('../expenses/spender');
+  const l = await spender.linkSpender({ name: values.spent_by, group: values.group_name ?? current?.group_name ?? null, list });
+  values.spent_by_person_id = l.status === 'linked' ? l.personId : null;
+  values.spent_by_phone = null;
+  return values;
+}
+
 /** The match key, rebuilt from whatever the row will hold after this write. */
 function keyFor(fields) {
   return expenseKey({
@@ -278,7 +316,7 @@ function keyFor(fields) {
 }
 
 async function create(fields = {}) {
-  const values = writableValues(fields);
+  const values = await relink(writableValues(fields));
   values.sync_key = keyFor(values);
 
   const columns = Object.keys(values);
@@ -304,6 +342,7 @@ async function update(id, fields = {}) {
 
   const current = await findById(id);
   if (!current) return null;
+  await relink(values, current);
   values.sync_key = keyFor({ ...current, ...values });
 
   const columns = Object.keys(values);
@@ -326,12 +365,20 @@ async function update(id, fields = {}) {
  */
 async function createMany(list = []) {
   if (list.length === 0) return [];
+  // the people read ONCE for a whole import, not once per row
+  // eslint-disable-next-line global-require
+  const people = list.some((f) => f.spentBy !== undefined && f.spentByPersonId === undefined && f.spentByPhone === undefined)
+    ? await require('../expenses/spender').people() : null;
+  const prepared = [];
+  for (const fields of list) {
+    // eslint-disable-next-line no-await-in-loop
+    prepared.push(await relink(writableValues(fields), null, people));
+  }
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const made = [];
-    for (const fields of list) {
-      const values = writableValues(fields);
+    for (const values of prepared) {
       values.sync_key = keyFor(values);
       const columns = Object.keys(values);
       const { rows } = await client.query(
@@ -365,6 +412,42 @@ function findForMonth(month) {
     .then((r) => r.rows);
 }
 
+/**
+ * ONE PERSON'S OWN EXPENSES, for WhatsApp (his call 2026-10-07): what they
+ * SPENT (never what they only saved), in ONE group, ONE month. By the id
+ * their verified phone is, or an admin's own phone; never by a name.
+ */
+async function spentByPerson({ personId = null, phone = null, group, month }) {
+  if (!group || (!personId && !phone)) return [];
+  const bounds = monthBounds(month);
+  const { rows } = await pool.query(
+    `SELECT id, spent_on, description, payee, currency, raw_amount, exchange_rate, aed_amount, category, group_name, spent_by
+       FROM tb_expenses
+      WHERE archived_at IS NULL
+        AND upper(group_name) = upper($1)
+        AND spent_on >= $2 AND spent_on < $3
+        AND ((spent_by_person_id IS NOT NULL AND spent_by_person_id = $4)
+          OR (spent_by_phone IS NOT NULL AND spent_by_phone = $5))
+      ORDER BY spent_on, id`,
+    [group, bounds.from, bounds.to, personId, phone],
+  );
+  return rows;
+}
+
+/** A master sheet person by id, for the page's picker (migration 077). */
+function personById(personId) {
+  return pool
+    .query('SELECT person_id, display_name FROM tb_people WHERE person_id = $1', [String(personId)])
+    .then((r) => r.rows[0] ?? null);
+}
+
+/** The months there are live expenses in, newest first ('YYYY-MM'). */
+function monthsWithExpenses() {
+  return pool
+    .query("SELECT DISTINCT to_char(spent_on, 'YYYY-MM') AS m FROM tb_expenses WHERE archived_at IS NULL ORDER BY 1 DESC LIMIT 36")
+    .then((r) => r.rows.map((row) => row.m));
+}
+
 async function remove(id) {
   const { rows } = await pool.query(
     'DELETE FROM tb_expenses WHERE id = $1 RETURNING id',
@@ -374,7 +457,7 @@ async function remove(id) {
 }
 
 module.exports = {
-  findAll, findById, findForMonth, options, create, createMany, update, remove,
+  findAll, findById, findForMonth, options, create, createMany, update, remove, spentByPerson, personById, monthsWithExpenses,
   COLUMN_FOR, SEARCH_COLUMNS, AMOUNT_COLUMNS, WRITABLE,
   // Pure, and the part worth pinning: the month scope, the allow lists and
   // what a blank bound means. Exported so they can be tested with no

@@ -139,12 +139,19 @@ test('the export writes the columns the parser reads, one list', () => {
   assert.match(parser, /require\('\.\/expenseColumns'\)/);
 });
 
-test('THE MONTH IS THE SERVER\'S, never the query string\'s', () => {
-  // The admin's clock and the server's are ten hours apart. A browser
-  // sending its own month would put two people on two different ledgers at
-  // every boundary, and neither would look wrong.
+test('THIS MONTH IS THE SERVER\'S; an earlier one only when picked, never one ahead', () => {
+  // The admin's clock and the server's are ten hours apart, so which month
+  // is THIS one is the server's call. His call 2026-10-07: another month
+  // can be picked in the month filter, but only one already over.
   const route = codeOf(read(api, 'expenses.js'));
-  assert.match(route, /const month = currentMonth\(\)/);
-  assert.doesNotMatch(route, /query\.month/, 'the month is not a parameter');
+  assert.match(route, /const month = viewMonth\(req\.query\.month\)/);
   assert.match(route, /res\.json\(\{ \.\.\.result, month/, 'and the page is told which one');
+  // eslint-disable-next-line global-require
+  const { viewMonth } = require('../expenses');
+  // eslint-disable-next-line global-require
+  const now = require('../shared/presetMonth.helper').currentMonth();
+  assert.equal(viewMonth(undefined), now);
+  assert.equal(viewMonth('2026-01'), '2026-01');
+  assert.equal(viewMonth('2999-01'), now, 'never a month ahead');
+  assert.equal(viewMonth('junk'), now);
 });

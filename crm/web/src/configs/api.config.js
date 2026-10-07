@@ -68,6 +68,9 @@ export const apiService = {
     // Dropdowns and the rate suggestion in one call, so opening the page or
     // the add form is not five round trips.
     options: () => api.get(`${apiPath}/expenses/options`),
+    // master sheet people "spent by" can be, and the months with expenses
+    people: () => api.get(`${apiPath}/expenses/people`),
+    months: () => api.get(`${apiPath}/expenses/months`),
     create: (fields) => api.post(`${apiPath}/expenses`, fields),
     update: (id, fields) => api.patch(`${apiPath}/expenses/${id}`, fields),
     remove: (id) => api.delete(`${apiPath}/expenses/${id}`),

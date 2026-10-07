@@ -1,7 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { readReply } = require('./reply');
-const { normalise, duplicates, ready } = require('./check');
+const { normalise: checkOne, duplicates, ready } = require('./check');
+
+// Most tests here are about other fields: their expenses were spent by the
+// admin ("me"). Who spent it is asked when nobody says (tested below).
+const normalise = (raw, c) => checkOne({ spentBy: 'me', ...raw }, c);
 const format = require('./format');
 const { dayOf, moneyOf } = require('./extract');
 const { e164 } = require('./store');
@@ -35,13 +39,17 @@ test('ANSWERS TO A PREVIEW are read in code, all of it or none of it', () => {
   assert.equal(readReply('3', { kind: 'pick', choices: [7, 8] }), null);
 });
 
-test('EVERY FIELD REQUIRED; AED when no currency is said; the group is the bot\'s; spent by the admin', () => {
-  const x = normalise({ n: 1, spentOn: '2026-10-06', description: 'Taxi', payee: '', rawAmount: '45', currency: '' }, ctx);
+test('EVERY FIELD REQUIRED; AED when no currency is said; the group is the bot\'s; WHO SPENT IT is asked, "me" is the admin', () => {
+  const x = checkOne({ n: 1, spentOn: '2026-10-06', description: 'Taxi', payee: '', rawAmount: '45', currency: '' }, ctx);
   assert.equal(x.currency, 'AED');
   assert.equal(x.exchangeRate, 1);
   assert.equal(x.groupName, 'MANBAT');
-  assert.equal(x.spentBy, 'Gary Test');
-  assert.deepEqual(x.missing, ['payee']);
+  assert.equal(x.spentBy, null, 'never the admin by default (his call 2026-10-07)');
+  assert.deepEqual(x.missing, ['payee', 'spentBy']);
+  const mine = checkOne({ n: 1, spentOn: '2026-10-06', description: 'Taxi', payee: 'Careem', rawAmount: '45', spentBy: 'me' }, ctx);
+  assert.equal(mine.spentBy, 'Gary Test');
+  assert.equal(mine.spentMe, true);
+  assert.equal(checkOne({ ...mine, spentBy: 'Ahmed' }, ctx).spentMe, false, 'another name ends "me"');
   assert.ok(!ready([x]));
   const y = normalise({ n: 2, spentOn: '', description: 'Lunch', payee: 'Zuma', rawAmount: '120', currency: 'dirhams', spentBy: 'Ali' }, ctx);
   assert.deepEqual(y.missing, ['spentOn']);
@@ -80,7 +88,7 @@ test('THE PREVIEW is WhatsApp formatting written by code: a field per line, sepa
   assert.match(text, /\*1\. Taxi\*\n• Amount: \*AED 45\.00\*\n• Date: 06 Oct 2026\n• Paid to: Careem\n• Spent by: Gary Test/);
   assert.match(text, /\*2\. Ink\* ⚠️\n• Amount: \*AED 180\.00\*\n• Date: ❓ _missing_/);
   assert.match(text, /\*TOTAL:\* \*AED 225\.00\*/);
-  assert.match(text, /⚠️ \*Needs an answer\*\n• No\. 2: what date\?/);
+  assert.match(text, /⚠️ \*Please check\*\n2\. Amazon · AED 180\.00: what date\?/);
   assert.match(text, /Reply with the answers \(like \*2 is 5 Oct\*\) · \*modify\* · \*cancel\*$/);
   assert.doesNotMatch(text, /is 150\* to fix/, 'yes, modify, cancel: never "1 is 150 to fix"');
   assert.ok(!/\*\*|^#/m.test(text), 'never Markdown');
@@ -183,7 +191,7 @@ test('THE RATE TO AED: market rate filled in, their own wins, missing is asked, 
   const text = format.addPreview([x], 'MANBAT');
   assert.match(text, /• Rate: 1 GBP = 4\.86 AED _\(hourly market rate\)_\n• In AED: \*AED 419\.90\*/);
   assert.match(format.ratesBubble([x]), /💱 \*RATES TO AED\*[\s\S]*1 GBP = \*4\.86 AED\*/);
-  assert.match(format.addPreview([none], 'MANBAT'), /No\. 1: 1 JPY to AED is\?/);
+  assert.match(format.addPreview([none], 'MANBAT'), /\n1\. X · JPY 100\.00: 1 JPY to AED is\?/);
 });
 
 test('THEIR OWN RATE, in the ways people say it', () => {
@@ -207,7 +215,7 @@ test('THE PICTURE: a PNG drawn by code, and a short caption that can still be an
   assert.ok(png.length > 5000, 'a real picture');
   const cap = format.caption(items, 'MANBAT');
   assert.match(cap, /^\*2 EXPENSES · MANBAT\* _\(not saved yet\)_\n\*TOTAL:\* \*AED 225\.00\*/);
-  assert.match(cap, /• No\. 2: what date\?/);
+  assert.match(cap, /⚠️ \*Please check\*\n2\. Amazon · AED 180\.00: what date\?/);
   assert.match(cap, /Reply with the answers/);
   assert.match(format.caption(items, 'MANBAT', { saved: true }), /^✅ \*SAVED · 2 expenses · MANBAT\*[\s\S]*Reply \*undo\*/);
 });
@@ -222,8 +230,8 @@ test('A BIG PREVIEW READS SHORT: questions grouped by kind, numbers as runs', ()
   const q = format.questions(items);
   assert.deepEqual(q, [
     '• No. 3, 10: paid to whom?'.replace('paid to whom?', q[0].split(': ')[1]),
-    '• No. 21–35: copies of earlier ones (reply *skip copies*)',
-    '• No. 36–40: look like ones already saved (same shop, amount and day). *keep 36* for any that\'s new, or *skip saved* for all',
+    '• No. 21–35: copies of earlier ones',
+    '• No. 36–40: look like ones already saved (same shop, amount and day), different receipts',
   ]);
 });
 
@@ -279,18 +287,52 @@ test('THE REPLY READER sees a one line summary, never an expense', () => {
   assert.doesNotMatch(line, /SECRET/);
 });
 
-test('THE SAME RECEIPTS AGAIN: one choice for all; lookalikes one by one', () => {
+test('PLEASE CHECK (his call 2026-10-07): one per line by number, then skip, save or replace for all or one by one', () => {
   const items = [
-    { n: 1, missing: [], doubts: ['same receipt as one saved on 04 Oct (Carrefour, AED 139.91)'] },
-    { n: 2, missing: [], doubts: ['same receipt as one saved on 05 Oct (Careem, AED 45.00)'] },
-    { n: 3, missing: [], doubts: ['looks already saved: Taxi on 05 Oct'] },
+    { n: 1, payee: 'Carrefour', currency: 'AED', rawAmount: 139.91, missing: [], doubts: ['same receipt as one saved on 04 Oct (Carrefour, AED 139.91)'], repeatOf: 11 },
+    { n: 2, payee: 'Careem', currency: 'AED', rawAmount: 45, missing: [], doubts: ['looks already saved: Taxi on 05 Oct'], lookalikeOf: 12 },
+    { n: 3, payee: 'ENOC', currency: 'AED', rawAmount: 120, missing: ['spentBy'], doubts: [] },
   ];
-  const q = format.questions(items);
-  assert.equal(q[0], '• No. 1, 2: the same receipts you already saved. Reply *1* skip them · *2* save again · *3* replace the saved ones');
-  assert.equal(q[1], "• No. 3: looks like one already saved (_Taxi on 05 Oct_): *keep 3* if it's a new one, or *skip 3*");
+  assert.deepEqual(format.questions(items), [
+    '1. Carrefour · AED 139.91: same receipt as one saved on 04 Oct',
+    '2. Careem · AED 45.00: looks like one already saved (Taxi on 05 Oct), different receipt',
+    '3. ENOC · AED 120.00: who spent it?',
+  ]);
+  const how = format.howToAnswer(items).join('\n');
+  assert.match(how, /^For all of them: \*skip all\* · \*save all\* · \*replace all\*\nOr one by one, like:\n\*1 replace\*\n\*2 skip\*\n\*3 me\*/);
   const pending = { kind: 'add', items };
-  assert.deepEqual(readReply('1', pending), { kind: 'repeats', choice: 'skip', which: [1, 2] });
-  assert.deepEqual(readReply('replace them', pending), { kind: 'repeats', choice: 'replace', which: [1, 2] });
-  assert.deepEqual(readReply('skip 1-2, keep 3', pending), { kind: 'mixed', skip: [1, 2], keep: [3] });
-  assert.deepEqual(readReply('keep 3', pending), { kind: 'unskip', which: [3] });
+  assert.deepEqual(readReply('skip all', pending), { kind: 'choices', skip: [1, 2], keep: [], replace: [] }, '"all" is the listed ones');
+  assert.deepEqual(readReply('replace all', pending), { kind: 'choices', skip: [], keep: [], replace: [1, 2] });
+  assert.deepEqual(readReply('1 skip, 2 replace', pending), { kind: 'choices', skip: [1], keep: [], replace: [2] });
+  assert.deepEqual(readReply('1. yes\n2. no', pending), { kind: 'choices', skip: [2], keep: [1], replace: [] });
+  assert.deepEqual(readReply('skip 1-2, keep 3', pending), { kind: 'choices', skip: [1, 2], keep: [3], replace: [] });
+  assert.deepEqual(readReply('keep 2', pending), { kind: 'unskip', which: [2] });
+  assert.equal(readReply('1', pending), null, 'a bare number is no longer a code');
+});
+
+test('WHO SPENT IT: "me", a name, or runs of both; a name is only read where it was asked', () => {
+  const items = [{ n: 1, missing: ['spentBy'], doubts: [] }, { n: 2, missing: ['spentBy'], doubts: [] }, { n: 3, missing: [], doubts: [] }];
+  const pending = { kind: 'add', items };
+  assert.deepEqual(readReply('me', pending).parts, [{ which: [1, 2], fixes: [{ field: 'spentBy', value: 'me' }] }]);
+  assert.deepEqual(readReply('1-2 Ahmed', pending).parts, [{ which: [1, 2], fixes: [{ field: 'spentBy', value: 'Ahmed' }] }]);
+  assert.deepEqual(readReply('1 Ahmed Khan, 2 me', pending).parts.map((p) => p.fixes[0].value), ['Ahmed Khan', 'me']);
+  assert.deepEqual(readReply('1 me\n2 Leo', pending).parts.map((p) => p.fixes[0].value), ['me', 'Leo']);
+  assert.equal(readReply('3 Ahmed', pending), null, 'nothing asked who spent 3');
+});
+
+test('A NAME TO ONE MASTER SHEET PERSON: exact, a first name, the group, never a guess', () => {
+  const { matchName } = require('../spender');
+  const list = [
+    { personId: 'abe', name: 'Abe', groups: ['NEXUS'] }, { personId: 'abel', name: 'Abe Lincoln', groups: ['INDIGO'] },
+    { personId: 'ak', name: 'Ahmed Khan', groups: ['MILKMAN'] }, { personId: 'aa', name: 'Ahmed Ali', groups: ['INDIGO'] },
+    { personId: 'dc', name: 'Dean Cole', groups: ['MILKMAN'] },
+  ];
+  assert.equal(matchName('abe', list).personId, 'abe', 'an exact name wins over a first name');
+  assert.equal(matchName('Dean', list).personId, 'dc');
+  assert.equal(matchName('Dean', list).firstName, true);
+  assert.deepEqual(matchName('Ahmed', list), { status: 'ambiguous', choices: ['Ahmed Ali', 'Ahmed Khan'] });
+  assert.equal(matchName('Ahmed', list, 'MILKMAN').personId, 'ak', 'the group decides between two');
+  assert.equal(matchName('Gloria difference', [{ personId: 'g', name: 'Gloria', groups: [] }]).personId, 'g');
+  assert.deepEqual(matchName('Ahmed (cleaner)', list), { status: 'none' });
+  assert.deepEqual(matchName('Sara', list), { status: 'none' });
 });

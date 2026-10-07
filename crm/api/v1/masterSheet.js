@@ -1082,7 +1082,9 @@ router.post('/master-sheet/agent', async (req, res, next) => {
         }));
       };
       const result = elsewhere
-        ? await elsewhere(trimmed, (e) => { if (open) send(e); })
+        // who is signed in: "me" and "saved by" in the expense brain
+        // eslint-disable-next-line global-require
+        ? await elsewhere(trimmed, (e) => { if (open) send(e); }, { user: require('./shared/session.helper').sessionUser(req) })
         : await runAgent(trimmed, context, sendAndDraw);
       await Promise.all(drawing);
       // The canonical reply, whole and post-processed. The client replaces
