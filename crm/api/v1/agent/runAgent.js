@@ -39,6 +39,11 @@ const { saidAlready } = require('./notTwice');
 // Said ABOVE a recomputed block, never instead of it. The figures are the
 // answer; this only says they were looked at again.
 const LOOKED_AGAIN = 'I ran it again and it has not moved.';
+const WHAT_MONTH = /^(?:\s*(?:so|ok(?:ay)?|wait|hey|diane)[,\s]+)*(?:which|what)\s+(?:month|date|day)\s+(?:is\s+it|are\s+we(?:\s+in|\s+on)?|is\s+(?:it\s+)?today|is\s+this)(?:\s+(?:now|today|again))?\s*\??\s*$|^\s*what(?:'?s|\s+is)\s+(?:the\s+|today'?s\s+)?(?:date|month)(?:\s+(?:today|now))?\s*\??\s*$/i;
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const monthName = (ym) => `${MONTH_NAMES[Number(String(ym).slice(5, 7)) - 1]} ${String(ym).slice(0, 4)}`;
+const nextMonthOf = (ym) => { const y = Number(ym.slice(0, 4)); const m = Number(ym.slice(5, 7)); return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`; };
+const calendarDay = (iso) => { const d = new Date(`${iso}T12:00:00Z`); return `${d.toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'UTC' })} ${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCFullYear()}`; };
 // "we good?", "any issues?", "is everything ok": a question about the sheet's
 // health, answered only by looking. Whole message, so "are we good on zayn's
 // payable" (a narrower question) is left to her.
@@ -2633,7 +2638,17 @@ async function runAgentTurn(history, contextName, onEvent) {
     savedTokens: Math.round((schemaBytes - openingBytes) / 4),
   }, 'diane: turn opened');
 
-  const messages = [{ role: 'system', content: context.prompt }, ...trimHistory(history)];
+  /**
+   * TODAY, SAID. Her instructions never carried the date, so asked "which
+   * month is it?" she guessed August (old presets on the sheet) in October,
+   * then listed all 90 deals to check. Live 2026-10-07.
+   */
+  const { currentDay: todayIs, currentMonth: monthIs } = require('../shared/presetMonth.helper');
+  const messages = [
+    { role: 'system', content: context.prompt },
+    { role: 'system', content: `Today is ${calendarDay(todayIs())}. This month is ${monthName(monthIs())}; next month is ${monthName(nextMonthOf(monthIs()))}. Never look this up.` },
+    ...trimHistory(history),
+  ];
   if (reschedules(lastSaid(history), history)) {
     messages.push({
       role: 'system',
@@ -2895,6 +2910,18 @@ async function runAgentTurn(history, contextName, onEvent) {
    * question ("yes", "both", "indigo"). Without an answer from it (no AI,
    * an error) the old keyword guesses decide, as before.
    */
+  /**
+   * "WHICH MONTH IS IT?" IS ANSWERED HERE, from the CRM's own clock, never
+   * guessed and never looked up. Live 2026-10-07: "August", then all 90 deals.
+   */
+  if (WHAT_MONTH.test(asked)) {
+    const { currentDay: d, currentMonth: m } = require('../shared/presetMonth.helper');
+    turnState.model = 'code';
+    return {
+      reply: `It's ${monthName(m())}. Today is ${calendarDay(d())}, and next month is ${monthName(nextMonthOf(m()))}.`,
+      changedRowIds: [], context: context.key, claims: [],
+    };
+  }
   const editsHere = context.tools.some((t) => t.name === 'update_master_sheet_row');
   let routed = null;
   let routerEdit = null;
@@ -5060,7 +5087,9 @@ async function runAgentTurn(history, contextName, onEvent) {
       // back as "I ran it again and it has not moved." over the question.
       // NOR A WRITE: "make it 13700" saved, and read as a repeat of the 13600
       // line it was told "it has not moved". Clone 2026-10-05.
-      const checked = terminalComputed && !terminalWrote && saidAlready(terminalReply, history) && !/\?\s*$/.test(terminalReply)
+      // ONLY WHEN THEY DOUBTED IT: "what's the change about?" re-ran the
+      // list and was told "it has not moved". Live 2026-10-07.
+      const checked = terminalComputed && !terminalWrote && askedToCheck(lastSaid(history)) && saidAlready(terminalReply, history) && !/\?\s*$/.test(terminalReply)
         ? `${LOOKED_AGAIN}\n${terminalReply}`
         : terminalReply;
       return {

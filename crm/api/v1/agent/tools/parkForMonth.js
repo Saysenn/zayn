@@ -226,6 +226,17 @@ const parkForMonth = {
     const plans = rowsNow.map((row) => {
       const { ids: _ids, ...base } = args;
       const one = { ...base, ...(check.spec.idField === 'id' ? { id: row.id } : {}) };
+      /**
+       * "ADD 500 NEXT MONTH" can arrive as `add: { monthlyAmount: 500 }` (the
+       * everyday edit's shape). Read as a Delta, so it is shown and stored
+       * as the FINISHED value, "monthly amount 4000 → 4500". Left as `add` it
+       * was shown as "update master sheet deal" and never said what it
+       * changed. Live 2026-10-07.
+       */
+      if (one.add && typeof one.add === 'object') {
+        for (const [field, by] of Object.entries(one.add)) one[`${field}Delta`] = Number(by);
+        delete one.add;
+      }
       for (const key of Object.keys(one)) {
         if (!key.endsWith('Delta')) continue;
         const field = key.slice(0, -'Delta'.length);
@@ -360,6 +371,7 @@ const listParked = {
     if (rows.length === 0) {
       return { summary: `Nothing is parked for a later month.${ranBlock}\n\nAnswer what they asked in one or two sentences.` };
     }
+    rows.forEach((r) => { r.said = whatItDoes(r); });
     const lines = rows.map((r) => `  ${monthLabel(r.due_month)}: ${r.said}`);
     /**
      * THE LIST IS THE ANSWER. Asked "what have I got scheduled?" she said
@@ -530,6 +542,30 @@ const cancelParked = {
   },
 };
 
+/**
+ * WHAT A PARKED CHANGE DOES, in words, from what it will write. One saved
+ * before 2026-10-07 can read only "update master sheet deal": asked "what's
+ * the change about?" she listed it again, word for word. The stored values
+ * say it, so they are read back.
+ */
+const SKIP_ARGS = new Set(['id', 'ids', 'confirmed', 'when', 'targetPerson', 'targetCompany', 'targetGroup', 'said', 'handedOver']);
+function whatItDoes(row) {
+  const said = String(row.said ?? '');
+  if (/→|stop the deal/.test(said)) return said;
+  const args = typeof row.args === 'string' ? JSON.parse(row.args) : (row.args ?? {});
+  const label = (f) => f.replace(/Delta$/, '').replace(/([A-Z])/g, ' $1').toLowerCase();
+  const bits = [];
+  for (const [k, v] of Object.entries(args)) {
+    if (SKIP_ARGS.has(k) || v == null) continue;
+    if (k === 'add' && typeof v === 'object') {
+      for (const [f, by] of Object.entries(v)) bits.push(`${label(f)} ${Number(by) >= 0 ? '+' : ''}${by} (on its value then)`);
+    } else if (/Delta$/.test(k)) bits.push(`${label(k)} ${Number(v) >= 0 ? '+' : ''}${v} (on its value then)`);
+    else if (typeof v !== 'object') bits.push(`${label(k)} → ${v}`);
+  }
+  const who = said.split(':')[0];
+  return bits.length ? `${who}: ${bits.join(', ')}` : said;
+}
+
 module.exports = {
-  parkForMonth, listParked, cancelParked, monthsFor, monthLabel, withWhen, dealIdFor, scheduledTools: [parkForMonth, listParked, cancelParked],
+  parkForMonth, listParked, cancelParked, monthsFor, monthLabel, withWhen, dealIdFor, whatItDoes, scheduledTools: [parkForMonth, listParked, cancelParked],
 };
