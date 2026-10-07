@@ -144,6 +144,14 @@ const EnvSchema = z
       .transform((v) => v === "true"),
     // The expense bot's previews as a picture with a caption (his call
     // 2026-10-07). Off sends the same preview as text.
+    // The pay breakdown as a picture (his call 2026-10-07). Off: text only.
+    FEATURE_PAY_IMAGES: z
+      .enum(["true", "false"])
+      .default("true")
+      .transform((v) => v === "true"),
+    // The picture look when the CRM cannot be asked: sheet, notebook,
+    // receipt, ledger or chalkboard.
+    PICTURE_STYLE: z.string().default("sheet"),
     FEATURE_EXPENSE_IMAGES: z
       .enum(["true", "false"])
       .default("true")

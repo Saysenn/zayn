@@ -1,5 +1,15 @@
-const path = require('path');
-const { Resvg } = require('@resvg/resvg-js');
+/**
+ * A COPY of crm/api/v1/pictures/table.js, kept here on purpose (his call
+ * 2026-10-07): WhatBot draws its own pictures, so it still works when moved
+ * out of this repo. Change both together.
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { Resvg } from '@resvg/resvg-js';
+import { measure, wrapTo, fitColumns } from './measure.js';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 // ***************************************************
 // * A LONG RESULT AS A PICTURE: ONE TABLE, ANY CONTEXT
@@ -17,11 +27,10 @@ const { Resvg } = require('@resvg/resvg-js');
 // every bundled face (open licences, beside them): the notebook's Caveat,
 // the receipt's IBM Plex Mono, the ledger's Libre Baskerville, the
 // chalkboard's Patrick Hand. Bundled so the PC draws what this Mac draws.
-const FONT_DIR = path.join(__dirname, '../../assets/fonts');
-const FONT_FILES = require('fs').readdirSync(FONT_DIR).filter((f) => f.endsWith('.ttf')).map((f) => path.join(FONT_DIR, f));
+const FONT_DIR = path.join(HERE, '../../assets/fonts');
+const FONT_FILES = fs.readdirSync(FONT_DIR).filter((f) => f.endsWith('.ttf')).map((f) => path.join(FONT_DIR, f));
 const STYLES = ['sheet', 'notebook', 'receipt', 'ledger', 'chalkboard'];
 const WIDTH = 1000;
-const { measure, wrapTo, fitColumns } = require('./measure');
 const MIN_ROWS = 4;
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const cut = (s, n) => { const v = String(s ?? ''); return n > 1 && v.length > n ? `${v.slice(0, n - 1)}…` : v; };
@@ -461,4 +470,4 @@ function renderTable(spec) {
   });
 }
 
-module.exports = { renderTable, worthAPicture, rowCount, MIN_ROWS, STYLES, FONT_FILES };
+export { renderTable, worthAPicture, rowCount, MIN_ROWS, STYLES, FONT_FILES };

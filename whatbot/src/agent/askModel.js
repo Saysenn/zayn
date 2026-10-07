@@ -67,6 +67,8 @@ export async function runAgent(ctx, question, history) {
    * in the chat list, which is the version they would open.
    */
   let attachment;
+  /** a tool's picture (the pay breakdown), the first one wins */
+  let image;
   /** same tool + same arguments = reuse the answer instead of running it again */
   const seenCalls = new Map();
   /** we push back exactly once when it answers from memory instead of looking */
@@ -162,6 +164,7 @@ export async function runAgent(ctx, question, history) {
           subjectCount: subjects.size,
           offer,
           attachment,
+          image,
         };
       }
 
@@ -212,6 +215,8 @@ export async function runAgent(ctx, question, history) {
     // ---- it asked for tools. run them. ----
     messages.push(choice); // keep its request in the conversation or the next call breaks
 
+    // did every tool this round write its own answer? (see below)
+    let allDisplayed = calls.length > 0;
     for (const call of calls) {
       if (call.type !== "function") continue;
 
@@ -230,8 +235,10 @@ export async function runAgent(ctx, question, history) {
         ctx,
       );
       if (result.display) displayByTool.set(call.function.name, result.display); // real figures, kept back
+      else allDisplayed = false;
       if (result.offer) offer = result.offer;
       if (result.attachment && !attachment) attachment = result.attachment;
+      if (result.image && !image) image = result.image;
       for (const code of result.subjects ?? []) subjects.add(code);
       seenCalls.set(key, result.summary);
 
@@ -244,6 +251,29 @@ export async function runAgent(ctx, question, history) {
         content: result.summary,
       });
     }
+
+    /**
+     * ===============================
+     * * EVERY TOOL ANSWERED: DONE, NO SECOND CALL
+     * ===============================
+     * The reply is the tools' own displays and the model's wording is thrown
+     * away (above), so asking it again only to write a sentence nobody reads
+     * doubled every answer's cost and time (measured 2026-10-07: 2 calls,
+     * $0.0020 and ~2.3s per question). When each tool this round wrote its
+     * display, that IS the answer. A tool that only explained something (a
+     * month it does not hold, a company it could not place) still goes back
+     * to the model to be said in words.
+     */
+    if (allDisplayed && displayByTool.size > 0) {
+      return {
+        text: [...displayByTool.values()].join("\n\n"),
+        hadDisplay: true,
+        subjectCount: subjects.size,
+        offer,
+        attachment,
+        image,
+      };
+    }
   }
 
   // 4 rounds and still asking for tools. give back whatever we collected.
@@ -255,6 +285,7 @@ export async function runAgent(ctx, question, history) {
       hadDisplay: true,
       subjectCount: subjects.size,
       attachment,
+      image,
     };
   }
   return {

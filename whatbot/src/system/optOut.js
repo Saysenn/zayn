@@ -3,8 +3,15 @@ import { logger } from "./logger.js";
 
 const KEY = "optout";
 
-const STOP = /^(stop|unsubscribe|cancel|end|quit|stopall)\b/i;
-const START = /^(start|unstop|resume|subscribe)\b/i;
+/**
+ * THE WHOLE MESSAGE, never its first word. Matching "end" at the start of
+ * any sentence meant "end date of my contract?" opted them OUT, and "start
+ * dates for my companies" opted them back in with a "Welcome back" (found
+ * by the payments eval, 2026-10-07). A word or two of politeness is fine.
+ */
+const TAIL = String.raw`(?:\s+(?:please|pls|now|it|all|messages|texting|texting me|messaging me|again|thanks|thank you))*[.!\s]*$`;
+const STOP = new RegExp(String.raw`^(stop|unsubscribe|cancel|end|quit|stopall)${TAIL}`, "i");
+const START = new RegExp(String.raw`^(start|unstop|resume|subscribe)${TAIL}`, "i");
 
 /** run before anything else, so STOP is never treated as a question */
 export function optOutIntent(text) {

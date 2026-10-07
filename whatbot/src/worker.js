@@ -30,6 +30,9 @@ import { sendText } from "./whatsapp/sendMessage.js";
 import { sendDocument } from "./whatsapp/sendDocument.js";
 import { sendImage } from "./whatsapp/sendImage.js";
 import { keepTyping, typingOnce } from "./whatsapp/typing.js";
+
+/** The numbered menu at the end of a reply ("What next? 1. ... 2. ..."), if it has one. */
+const menuOf = (text) => /\n\n((?:Want more|What next|Anything else)[^\n]*\n[\s\S]*)$/.exec(String(text ?? ""))?.[1] ?? "";
 import { startConnections, closeConnections } from "./whatsapp/connection.js";
 import { receiveMessage } from "./whatsapp/receiveMessage.js";
 import { buildAdminReplyApp } from "./http/adminReplyApp.js";
@@ -119,8 +122,10 @@ const messageWorker = new Worker(
 
     // reply FROM the number they messaged, or it shows up as a different chat
     // THE EXPENSE PREVIEW AS A PICTURE, its text as the caption.
-    if (reply.image && features.expenseImages) {
-      await sendImage(from, to, { content: Buffer.from(reply.image.base64, "base64"), caption: reply.text, mimetype: reply.image.mime });
+    if (reply.image && features[reply.image.feature ?? "expenseImages"]) {
+      // a pay breakdown: its one line caption, then whatever menu followed it
+      const caption = reply.caption ? [reply.caption, menuOf(reply.text)].filter(Boolean).join("\n\n") : reply.text;
+      await sendImage(from, to, { content: Buffer.from(reply.image.base64, "base64"), caption, mimetype: reply.image.mime });
       // a long report's further pages, in order
       for (const page of reply.moreImages ?? []) {
         await sendImage(from, to, { content: Buffer.from(page.base64, "base64"), caption: "", mimetype: page.mime });

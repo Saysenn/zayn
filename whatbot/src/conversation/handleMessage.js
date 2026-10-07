@@ -8,6 +8,8 @@ import {
 } from "../system/optOut.js";
 import * as employees from "../employee/access.js";
 import { LlmUnavailableError, runAgent } from "../agent/askModel.js";
+import { answerQuick } from "../payments/quick.js";
+import { answerByReader } from "../payments/reader.js";
 import { CLARIFY_PROMPT, UNKNOWN_SENDER } from "../agent/prompt.js";
 import {
   appendTurn,
@@ -28,6 +30,7 @@ import {
   reopenCheck,
 } from "../payday/records.js";
 import { pushOutcome } from "../payday/crmOutbox.js";
+import { readPaydayAnswer } from "../payday/readAnswer.js";
 import {
   AMOUNT_WRONG,
   CHOICE_NO,
@@ -253,7 +256,9 @@ async function answerAsEmployee(input) {
   // answering one must not close the other.
   const openPeriod = await openCheckFor(channelGroup, phone);
   if (openPeriod) {
-    const answer = paydayAnswer(text);
+    // the numbers and code first; any other wording, a small reader, when sure
+    let answer = paydayAnswer(text);
+    if (answer === "other") answer = (await readPaydayAnswer(text)) ?? "other";
 
     // Option 3 = STOP. An opt-out that half works is worse than none.
     // The check stays open: they said stop asking, not whether they were paid.
@@ -442,7 +447,12 @@ async function answerAsEmployee(input) {
 
   let reply;
   try {
-    reply = await runAgent(ctx, question, history);
+    // EVERYDAY QUESTIONS IN CODE first, no model (payments/quick.js)
+    // then the small reader (one small call, no rules or schemas sent),
+    // then the full agent for anything they could not place
+    reply = (await answerQuick(ctx, question))
+      ?? (await answerByReader(ctx, question))
+      ?? (await runAgent(ctx, question, history));
   } catch (err) {
     if (err instanceof LlmUnavailableError) {
       await setState(phone, "idle");
@@ -469,13 +479,14 @@ async function answerAsEmployee(input) {
     // remember what each number will run, or the menu is decoration
     await setPendingOffer(phone, reply.offer.choices);
     if (send.menuJustShown)
-      return { text: reply.text, attachment: reply.attachment };
+      return { text: reply.text, attachment: reply.attachment, ...extras(reply) };
     return {
       text: `${reply.text}\n\n${choicesBlock(
         reply.offer.prompt,
         reply.offer.choices.map((c) => c.label),
       )}`,
       attachment: reply.attachment,
+      ...extras(reply),
     };
   }
 
@@ -488,5 +499,13 @@ async function answerAsEmployee(input) {
     ]);
   }
 
-  return { text: reply.text, attachment: reply.attachment };
+  return { text: reply.text, attachment: reply.attachment, ...extras(reply) };
 }
+
+/** A breakdown's picture, and which tools answered (for the eval), carried through. */
+const extras = (reply) => ({
+  // the picture's one line caption leads; the menu, if any, stays under it
+  ...(reply.image?.caption ? { caption: reply.image.caption } : {}),
+  ...(reply.image ? { image: reply.image } : {}),
+  ...(reply.tools?.length ? { tools: reply.tools } : {}),
+});

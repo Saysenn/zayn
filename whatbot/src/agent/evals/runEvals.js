@@ -1,156 +1,79 @@
-import { readFile } from "node:fs/promises";
-import OpenAI from "openai";
-import { openaiConfig } from "../../config/index.js";
-import { redis } from "../../system/redis.js";
-import { syncSheet } from "../../sheet/syncSheet.js";
-import * as employees from "../../employee/access.js";
-import * as repo from "../../employee/storage.js";
-import { toOpenAITools } from "../toolRunner.js";
-import { tools } from "../../tools/index.js";
-import { systemPrompt } from "../prompt.js";
-
-const client = new OpenAI({
-  apiKey: openaiConfig.apiKey,
-  baseURL: openaiConfig.baseURL,
-  timeout: openaiConfig.requestTimeoutMs,
-});
-
-const cases = JSON.parse(
-  await readFile(new URL("./cases.json", import.meta.url), "utf8"),
-);
-
-await syncSheet();
-const all = await repo.findAll();
-
 /**
- * Pick which assignment to run a test case as.
+ * HOW WELL THE PAYMENTS SIDE ANSWERS: right tool, cost, speed, which path.
+ * Run by a person: `npm run eval`. Rewritten 2026-10-07; the old set asked
+ * for a get_my_pay tool and a "courier" role that no longer exist.
  *
- * If the question mentions a company, the person we pick has to actually hold
- * it on that thread — otherwise it isn't in their allowed list, the API rejects
- * the call, and the test fails for a completely unrelated reason.
+ * It runs every question through the REAL handler (handleMessage), as one
+ * employee from the FAKE sheet, against a THROWAWAY Redis. It must never
+ * point at the live bot's Redis: loading the sheet would overwrite the
+ * live roster. So it refuses to run unless DATA_SOURCE=fake and REDIS_URL
+ * is set to something other than .env's:
  *
- * Always picks the first match, so two runs are comparable. And it searches
- * rather than hardcoding names, so regenerating the sample data doesn't quietly
- * break the whole suite.
+ *   docker run -d --rm --name whatbot-test-redis -p 6391:6379 redis:7-alpine
+ *   DATA_SOURCE=fake REDIS_URL=redis://127.0.0.1:6391 npm run eval
+ *
+ * "want" is the tool(s) that answer it right, `a|b` for either, "none" for
+ * a message no pay tool should touch. A question answered IN CODE (no
+ * model) counts as right when the code path names the wanted tool.
  */
-async function pickBy(role, needsCompany) {
-  const candidates = all.filter(
-    (a) => a.role === role && a.status === "active" && a.phone,
-  );
+import { readFile } from "node:fs/promises";
+import { Completions } from "openai/resources/chat/completions";
 
-  if (!needsCompany) {
-    const found = candidates[0];
-    if (!found)
-      throw new Error(`no active ${role} with a phone in the fixture`);
-    return found;
-  }
-
-  for (const c of candidates) {
-    const ctx = await employees.identify(c.phone, c.group);
-    if (!ctx) continue;
-    const companies = await employees.companiesInScope(ctx);
-    if (companies.includes(needsCompany)) return c;
-  }
-  throw new Error(
-    `no active ${role} holds "${needsCompany}" — fix the case or the fixture`,
-  );
+if (process.env.DATA_SOURCE !== "fake" || !process.env.REDIS_URL || /:6390\b/.test(process.env.REDIS_URL)) {
+  process.stderr.write("refusing: run with DATA_SOURCE=fake and a throwaway REDIS_URL (not the live bot's)\n");
+  process.exit(1);
 }
 
-/** free tiers cap requests per minute. slow down and retry instead of dying halfway. */
-const PACE_MS = Number(process.env.EVAL_PACE_MS ?? 7000);
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const { redis } = await import("../../system/redis.js");
+const { syncSheet } = await import("../../sheet/syncSheet.js");
+const { handleMessage, NO_REPLY } = await import("../../conversation/handleMessage.js");
 
-async function withRetry(fn, attempts = 4) {
-  for (let i = 0; ; i++) {
-    try {
-      return await fn();
-    } catch (err) {
-      const status = err.status;
-      // only retry rate limits. a 400 means we sent something wrong — retrying
-      // sends the same wrong thing again.
-      if (status !== 429 || i >= attempts - 1) throw err;
-      const wait = 20_000 * (i + 1);
-      console.log(`     rate limited, waiting ${wait / 1000}s…`);
-      await sleep(wait);
-    }
-  }
-}
+// every model call, counted: tokens, cost, and the tools it asked for
+const PRICE = { "gpt-4.1-mini": [0.4, 1.6], "gpt-4.1": [2, 8], "gpt-4.1-nano": [0.1, 0.4] };
+let calls = [];
+const create = Completions.prototype.create;
+Completions.prototype.create = async function counted(body, ...rest) {
+  const res = await create.call(this, body, ...rest);
+  const [pin, pout] = PRICE[body.model] ?? [2, 8];
+  const u = res.usage ?? {};
+  calls.push({
+    model: body.model,
+    usd: ((u.prompt_tokens ?? 0) * pin + (u.completion_tokens ?? 0) * pout) / 1e6,
+    tools: (res.choices?.[0]?.message?.tool_calls ?? []).map((t) => t.function?.name),
+  });
+  return res;
+};
 
-let passed = 0;
-const failures = [];
+const cases = JSON.parse(await readFile(new URL("./cases.json", import.meta.url), "utf8"));
+await syncSheet();
+const PHONE = process.env.EVAL_PHONE ?? "+447100000918";
+const GROUP = process.env.EVAL_GROUP ?? "INDIGO";
 
+let right = 0;
+let usd = 0;
+let ms = 0;
+const paths = {};
 for (const [i, c] of cases.entries()) {
-  const me = await pickBy(
-    c.as,
-    typeof c.args?.company === "string" ? c.args.company : undefined,
-  );
-  // identify on THEIR group — the thread decides which companies are in play
-  const ctx = await employees.identify(me.phone, me.group);
-  if (!ctx)
-    throw new Error(`could not identify ${me.personName} (${me.group})`);
-
-  const messages = [
-    { role: "system", content: systemPrompt(ctx) },
-    { role: "user", content: c.ask },
-  ];
-  const await_tools = await toOpenAITools(tools, ctx);
-
-  if (i > 0) await sleep(PACE_MS);
-
-  let completion;
-  try {
-    completion = await withRetry(() =>
-      client.chat.completions.create({
-        model: openaiConfig.model,
-        temperature: openaiConfig.temperature,
-        messages,
-        tools: await_tools,
-      }),
-    );
-  } catch (err) {
-    // one broken case shouldn't take down the whole run
-    const detail = err.error?.message ?? String(err);
-    const label = `[${String(i + 1).padStart(2)}] ${c.as.padEnd(8)} "${c.ask}"`;
-    console.log(
-      `  \u274c ${label}\n       provider error: ${detail.slice(0, 120)}`,
-    );
-    failures.push(`${label} — provider error`);
-    continue;
-  }
-
-  const call = completion.choices[0]?.message.tool_calls?.[0];
-  const gotTool = call && call.type === "function" ? call.function.name : null;
-  const gotArgs =
-    call && call.type === "function"
-      ? JSON.parse(call.function.arguments || "{}")
-      : {};
-
-  const allowed = Array.isArray(c.tool) ? c.tool : [c.tool];
-  const toolOk = allowed.includes(gotTool);
-  const argsOk =
-    !c.args || Object.entries(c.args).every(([k, v]) => gotArgs[k] === v);
-
-  const label = `[${String(i + 1).padStart(2)}] ${c.as.padEnd(8)} "${c.ask}"`;
-
-  if (toolOk && argsOk) {
-    passed++;
-    console.log(`  ✅ ${label}`);
-  } else {
-    const detail = !toolOk
-      ? `expected ${allowed.map((t) => t ?? "no tool").join(" or ")}, got ${gotTool ?? "no tool"}`
-      : `args expected ${JSON.stringify(c.args)}, got ${JSON.stringify(gotArgs)}`;
-    console.log(`  ❌ ${label}\n       ${detail}`);
-    failures.push(`${label} — ${detail}`);
-  }
+  calls = [];
+  // a fresh minute for each question: the per minute limit is not under test
+  // and a fresh conversation, so each question stands alone
+  for (const k of [...await redis.keys("rl:*"), ...await redis.keys("conv:*")]) await redis.del(k);
+  const t0 = Date.now();
+  const reply = await handleMessage({ phone: PHONE, channelGroup: GROUP, text: c.ask, messageId: `eval-${Date.now()}-${i}` });
+  const took = Date.now() - t0;
+  const used = [...new Set([...calls.flatMap((x) => x.tools), ...(reply?.tools ?? [])])];
+  const want = c.want.split("|");
+  // "none" in the list: answering in words with no tool is right too
+  const ok = (want.includes("none") && used.length === 0) || (used.length > 0 && used.every((t) => want.includes(t)));
+  const cost = calls.reduce((n, x) => n + x.usd, 0);
+  const path = calls.length === 0 ? "code" : `${calls.length} model call${calls.length > 1 ? "s" : ""}`;
+  paths[path] = (paths[path] ?? 0) + 1;
+  if (ok) right += 1;
+  usd += cost;
+  ms += took;
+  const text = reply === NO_REPLY ? "(no reply)" : String(reply.text ?? "").replace(/\s+/g, " ").slice(0, 90);
+  process.stdout.write(`${ok ? "✅" : "❌"} [${String(i + 1).padStart(2)}] ${c.ask.padEnd(46)} ${path.padEnd(14)} $${cost.toFixed(4)} ${String(took).padStart(5)}ms  ${ok ? "" : `want ${c.want}, used ${used.join(",") || "nothing"}`}\n     → ${text}${reply?.image ? "  [+ picture]" : ""}\n`);
 }
-
-const pct = Math.round((passed / cases.length) * 100);
-console.log(`\n${passed}/${cases.length} passed (${pct}%)\n`);
-
-if (failures.length > 0) {
-  console.log("Failures:");
-  for (const f of failures) console.log(`  ${f}`);
-}
-
+process.stdout.write(`\n${right}/${cases.length} right · total $${usd.toFixed(4)} · avg $${(usd / cases.length).toFixed(5)} per question · avg ${Math.round(ms / cases.length)}ms · paths ${JSON.stringify(paths)}\n`);
 await redis.quit();
-process.exit(failures.length > 0 ? 1 : 0);
+process.exit(0);

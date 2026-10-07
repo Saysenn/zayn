@@ -54,6 +54,16 @@ agent.get('/pending', async (req, res, next) => {
   }
 });
 
+/** The picture style picked in Settings, for WhatBot's own pay pictures. */
+agent.get('/style', async (req, res, next) => {
+  try {
+    // eslint-disable-next-line global-require
+    res.json({ style: await require('./repos/settings.repo').expenseStyle() });
+  } catch (err) {
+    next(err);
+  }
+});
+
 /** The registered admins, for WhatBot's guard. Phones and groups only. */
 agent.get('/admins', async (req, res, next) => {
   try {

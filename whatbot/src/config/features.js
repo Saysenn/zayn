@@ -42,6 +42,13 @@ export const features = {
    * lands in the phone's gallery. Off: the same preview as text.
    */
   expenseImages: env.FEATURE_EXPENSE_IMAGES,
+
+  /**
+   * The pay breakdown as a picture, with a one line caption (his call
+   * 2026-10-07: every breakdown). Built in code from the same figures as
+   * the text. Off: the text breakdown, as before.
+   */
+  payImages: env.FEATURE_PAY_IMAGES,
 };
 
 /** settings that only matter when `voice` is on */
