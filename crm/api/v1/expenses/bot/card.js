@@ -13,7 +13,8 @@ const format = require('./format');
 // A field that needs review is tinted ON ITS OWN CELL, never the whole row.
 // Drawn by code from these templates (no model), SVG to PNG.
 
-const STYLES = ['sheet', 'notebook', 'text'];
+const STYLES = ['sheet', 'notebook', 'receipt', 'ledger', 'chalkboard'];
+const { renderTable } = require('../../pictures/table');
 const FONT_FILE = path.join(__dirname, '../../../assets/fonts/Caveat.ttf');
 const W = 1000;
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -205,6 +206,9 @@ const draw = (svg, style) => new Resvg(svg, {
  */
 function renderCards(items, { group, saved = false, style = 'sheet', today = new Date().toISOString().slice(0, 10) } = {}) {
   if (style === 'text') return [];
+  // THE RECEIPT, LEDGER AND CHALKBOARD (his call 2026-10-07) are the shared
+  // table's looks: the preview as a table spec, the review cells tinted.
+  if (['receipt', 'ledger', 'chalkboard'].includes(style)) return renderTable(asTable(items, { group, saved, today, style }));
   const all = items.filter((x) => !x.skipped);
   const chunks = [];
   for (let i = 0; i < all.length; i += PER_PAGE) chunks.push(all.slice(i, i + PER_PAGE));
@@ -214,6 +218,39 @@ function renderCards(items, { group, saved = false, style = 'sheet', today = new
     const svg = style === 'notebook' ? notebook(chunk, { group, saved, today, page }) : sheet(chunk, { group, saved, today, page });
     return draw(svg, style);
   });
+}
+
+/** The preview as a table for pictures/table.js. */
+function asTable(items, { group, saved, today, style }) {
+  const live = items.filter((x) => !x.skipped);
+  const all = group === '*';
+  const keys = ['n', ...(all ? ['group'] : []), 'what', 'payee', 'date', 'by', 'amount'];
+  const tot = totals(live);
+  return {
+    style,
+    title: `Expenses${all ? '' : ` · ${group}`}`,
+    subtitle: `${format.dayFull(today)} · ${live.length} ${live.length === 1 ? 'item' : 'items'}`,
+    status: saved ? { text: 'Saved', tone: 'ok' } : { text: 'Not saved yet', tone: 'pending' },
+    columns: [
+      { label: 'No.', weight: 0.5 }, ...(all ? [{ label: 'Group', weight: 1.1 }] : []),
+      { label: 'What', weight: 2.6 }, { label: 'Paid to', weight: 1.6 }, { label: 'Date', weight: 1 }, { label: 'Spent by', weight: 1.2 }, { label: 'Amount', weight: 1.8, align: 'right' },
+    ],
+    sections: [{
+      rows: live.map((x, i) => {
+        const rv = saved ? {} : reviewOf(x);
+        const v = {
+          n: String(x.n ?? i + 1), group: x.groupName ?? '', what: x.description ?? '', payee: x.payee ?? '', date: x.spentOn ? format.day(x.spentOn) : '', by: x.spentBy ?? '', amount: x.rawAmount == null ? '' : format.money(x.currency, x.rawAmount),
+        };
+        return {
+          cells: keys.map((k) => v[k] || (k === 'n' ? '' : 'missing')),
+          tint: keys.map((k, c) => (rv[k] || !v[k] ? c : -1)).filter((c) => c > 0),
+          ...(aedLine(x) ? { sub: aedLine(x) } : {}),
+        };
+      }),
+    }],
+    total: { value: tot.text, ...(tot.aed ? { sub: `≈ ${tot.aed}` } : {}) },
+    ...(saved ? {} : { footer: 'Reply yes · modify · cancel' }),
+  };
 }
 
 /** One picture, for a short preview and the Settings samples. */

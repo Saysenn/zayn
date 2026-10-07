@@ -5,35 +5,21 @@ import { Skeleton } from '../display/Skeleton';
 /**
  * HOW AN EXPENSE PREVIEW LOOKS, on WhatsApp and in Diane's chat.
  *
- * His call 2026-10-07: a clean sheet in the master sheet export's Blue white,
- * or a handwritten note, or plain text. Each card shows the real picture,
+ * His calls 2026-10-07: a clean sheet in the master sheet export's Blue
+ * white, a handwritten note, a receipt, a ledger or a chalkboard. Each card shows the real picture,
  * drawn by the CRM from the same sample expenses, so what is picked here is
  * exactly what an admin receives.
  */
 const STYLES = [
   { key: 'sheet', label: 'Clean sheet', note: 'A table like the master sheet export' },
   { key: 'notebook', label: 'Notebook', note: 'A handwritten note on ruled paper' },
-  { key: 'text', label: 'Plain text', note: 'No picture, one field per line' },
+  { key: 'receipt', label: 'Receipt', note: 'One plain typewriter face, like a till slip' },
+  { key: 'ledger', label: 'Ledger', note: 'An old accounts book, serif on cream paper' },
+  { key: 'chalkboard', label: 'Chalkboard', note: 'Chalk handwriting on a slate board' },
 ];
 
-const TEXT_SAMPLE = `*4 EXPENSES · MANBAT*
-_Not saved yet_
-==================
-*1.* Taxi to office
-• Date: Mon 6 Oct 2026
-• Amount: *AED 45.00*
-• Paid to: Careem
-• Spent by: Sara K
-…
-*TOTAL:* *AED 2,465.00* + *GBP 86.40*
-
-Reply *yes* to save · *modify* · *cancel*`;
-
 function Preview({ style }) {
-  const { url, isLoading, isError } = useImageBlob(['expense-style-preview', style], () => apiService.expenseStyle.preview(style), { enabled: style !== 'text' });
-  if (style === 'text') {
-    return <pre className="h-full overflow-hidden whitespace-pre-wrap bg-surface p-3 font-sans text-[10px] leading-snug text-text-muted">{TEXT_SAMPLE}</pre>;
-  }
+  const { url, isLoading, isError } = useImageBlob(['expense-style-preview', style], () => apiService.expenseStyle.preview(style));
   if (isError) return <p className="p-3 text-xs text-text-muted">Preview unavailable.</p>;
   if (isLoading || !url) return <Skeleton className="h-full w-full" />;
   return <img src={url} alt="" className="h-full w-full object-cover object-top" />;
@@ -42,7 +28,7 @@ function Preview({ style }) {
 export default function ExpenseStyle({ value, onChange, disabled, isLoading }) {
   if (isLoading) return <Skeleton className="h-48 w-full" />;
   return (
-    <div className="grid gap-3 sm:grid-cols-3" role="radiogroup" aria-label="Expense message style">
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" role="radiogroup" aria-label="Picture style">
       {STYLES.map((s) => {
         const active = (value ?? 'sheet') === s.key;
         return (

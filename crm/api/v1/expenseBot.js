@@ -142,7 +142,7 @@ admin.post('/expenses/agent/attach', (req, res, next) => {
 admin.get('/expense-style/preview/:style', (req, res, next) => {
   try {
     const { style } = req.params;
-    if (!STYLES.includes(style) || style === 'text') throw new AppError(404, 'No picture for that style.');
+    if (!STYLES.includes(style)) throw new AppError(404, 'No picture for that style.');
     const png = renderCard(SAMPLE, { group: 'MANBAT', style });
     res.set({ 'Content-Type': 'image/png', 'Cache-Control': 'private, max-age=300' }).send(png);
   } catch (err) {

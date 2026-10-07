@@ -2740,6 +2740,24 @@ const shorten = (spec) => {
 };
 const FILTER_PARAMS_SHORT = Object.fromEntries(Object.entries(FILTER_PARAMS).map(([k, v]) => [k, shorten(v)]));
 
+/**
+ * "CASH PAID DEALS" IS HOW THEY ARE PAID, not whether they are paid. Live
+ * 2026-10-07: "show me cash paid deals in mlkman" was filtered to cash AND
+ * marked paid, found none, and said MILKMAN had no cash deals (it has 24).
+ * When the paid word sits with a method ("cash paid", "paid in cash", "paid
+ * by bank") and nothing says paid OUT ("already paid", "marked paid",
+ * "unpaid", "not paid", "been paid"), the paid filter is dropped.
+ */
+function paidMeansMethod(args) {
+  const said = String(args?.said ?? '');
+  if (args?.paid === undefined || args.paid === null) return args;
+  const methodWord = /\b(?:cash|bank|crypto|transfer)[\s-]+paid\b|\bpaid\s+(?:in|by|via|with|through)\s+(?:cash|bank|crypto|transfer)/i.test(said);
+  const paidOut = /\b(?:already|marked|been|got|were|was|not|un|still)[\s-]*paid\b|\bunpaid\b|\bpaid (?:this|last) month\b|\bpaid yet\b/i.test(said);
+  if (!methodWord || paidOut) return args;
+  const { paid, ...rest } = args;
+  return rest;
+}
+
 /** Narrowed by a single payment method and nothing else but a group. */
 function onlyMethod(args) {
   const f = filtersIn(args);
@@ -3072,6 +3090,7 @@ const filterRows = {
   },
   async handler(args) {
     args = await groupOutOfOwnName(args);
+    args = paidMeansMethod(args);
     /**
      * ===============================
      * * LOWEST, HIGHEST, SMALLEST, BIGGEST: ORDERED IN CODE

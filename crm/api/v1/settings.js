@@ -307,8 +307,8 @@ router.patch('/settings', async (req, res, next) => {
     }
     // How WhatBot and Diane show an expense preview (Settings → Whatbot).
     if (expenseStyle !== undefined) {
-      if (!['sheet', 'notebook', 'text'].includes(expenseStyle)) {
-        return res.status(400).json({ error: 'expenseStyle must be sheet, notebook or text' });
+      if (!['sheet', 'notebook', 'receipt', 'ledger', 'chalkboard'].includes(expenseStyle)) {
+        return res.status(400).json({ error: 'expenseStyle must be sheet, notebook, receipt, ledger or chalkboard' });
       }
       await settingsRepo.setExpenseStyle(expenseStyle);
     }
