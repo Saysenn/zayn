@@ -63,6 +63,12 @@ function stripPetNames(text) {
  */
 function easeOffPetNames(reply, history = []) {
   if (!reply || !hasPetName(reply)) return reply;
+  // NEVER ON BAD NEWS: "I can't find that, darling" reads as mocking. And at
+  // most one in any three of her replies (test sweep 2026-10-07: "darling",
+  // "honey", "sweetheart" nearly every turn).
+  if (/\b(?:can'?t|cannot|couldn'?t|could not|not able|unable|sorry|no such|isn'?t|nothing (?:was|has been) changed|expired|failed|wrong)\b/i.test(reply)) return stripPetNames(reply);
+  const recent = history.filter((m) => m?.role === 'assistant').slice(-2);
+  if (recent.some((m) => hasPetName(m.content))) return stripPetNames(reply);
 
   for (let i = history.length - 1; i >= 0; i -= 1) {
     const turn = history[i];

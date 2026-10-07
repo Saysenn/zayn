@@ -95,8 +95,14 @@ function readReply(said, plan) {
   const skipWords = /\b(?:skip|except|but not|but|without|leave out|don'?t do|not)\b/;
   if (skipWords.test(text)) {
     let skip = [];
-    const listed = /\b(?:steps?|number|no\.?|#)?\s*(\d+(?:\s*(?:,|and|&)\s*\d+)*)\s*$/.exec(text.split(skipWords).pop() ?? '');
-    if (listed) skip = NUMS(listed[1]);
+    const tail = text.split(skipWords).pop() ?? '';
+    // "skip 3 to 6", "skip 3-6", "skip 3 4 5 6": ranges and plain lists too
+    // (test sweep 2026-10-07: only the 6 was skipped).
+    const range = /\b(\d+)\s*(?:to|-|–|through|thru|till|until)\s*(\d+)\s*$/.exec(tail);
+    const listed = /\b(?:steps?|number|no\.?|#)?\s*(\d+(?:\s*(?:,|and|&|\s)\s*\d+)*)\s*$/.exec(tail);
+    if (range && Number(range[2]) >= Number(range[1]) && Number(range[2]) - Number(range[1]) < 200) {
+      skip = Array.from({ length: Number(range[2]) - Number(range[1]) + 1 }, (_, i) => Number(range[1]) + i);
+    } else if (listed) skip = NUMS(listed[1]);
     if (skip.length === 0) {
       // "skip the stop", "except the removal", "not paddy"
       const after = text.split(skipWords).pop() ?? '';
@@ -256,14 +262,27 @@ function planCard(plan) {
 }
 
 /** The plan still waiting on them, from the card drawn last, if any. */
+/**
+ * A QUESTION IS NOT AN ANSWER TO THE PLAN. "wait whats gary owed first" was
+ * read as a change to the plan, and the yes after it found no plan at all
+ * (test sweep 2026-10-07). A question asked while a plan waits is answered
+ * on its own, and the plan waits through up to two of them.
+ */
+const QUESTION = /\?\s*$|^(?:\s*(?:wait|hang on|hold on|before that|first|ok|okay|so)[,\s]+)*(?:what|whats|what's|how|who|whos|who's|which|when|where|why|is|are|does|do|did|can you tell|tell me|show me|list)\b/i;
+const isQuestion = (text) => QUESTION.test(String(text ?? '').trim()) && !/\b(?:skip|yes|cancel|go ahead|do it|step\s*\d)\b/i.test(String(text ?? ''));
+
 function pendingPlan(history = []) {
   let lastUser = -1;
   for (let i = history.length - 1; i >= 0; i -= 1) {
     if (history[i]?.role === 'user') { lastUser = i; break; }
   }
+  let questionsPassed = 0;
   for (let i = lastUser - 1; i >= 0; i -= 1) {
     const m = history[i];
-    if (m?.role === 'user') return null;
+    if (m?.role === 'user') {
+      if (isQuestion(m.content) && questionsPassed < 2) { questionsPassed += 1; continue; }
+      return null;
+    }
     const plan = m?.list?.kind === 'plan' ? m.list.plan : null;
     if (plan) return ['preview', 'asking'].includes(plan.status) ? plan : null;
   }
@@ -271,5 +290,6 @@ function pendingPlan(history = []) {
 }
 
 module.exports = {
+  isQuestion,
   FIELDS, ACTIONS, looksMultiStep, readReply, changeLine, callsFor, planCard, pendingPlan, monthLabel, valueFor, fold,
 };

@@ -57,7 +57,34 @@ function groupOf(value, groups = []) {
   return groups.find((g) => fold(g) === v) ?? groups.find((g) => fold(g).startsWith(v) && v.length >= 3) ?? null;
 }
 
-function normalise(raw, { admin, group, groups = [], rates = {}, live = {}, today = currentDay() }) {
+/**
+ * A NAME AS IT IS ALREADY WRITTEN. "sara" and "Sara K", "Amazon.ae" and
+ * "Amazon" were saved side by side and split every total (test sweep
+ * 2026-10-07). A name that is the start of exactly one known name, or that
+ * one known name starts, is that name. Never a guess between two.
+ */
+function canonical(value, known = []) {
+  const v = clean(value);
+  if (!v) return v;
+  const f = fold(v);
+  const exact = known.find((k) => fold(k) === f);
+  if (exact) return exact;
+  const longer = known.filter((k) => f.length >= 3 && fold(k).startsWith(f));
+  if (longer.length === 1) return longer[0];
+  const shorter = known.filter((k) => fold(k).length >= 3 && f.startsWith(fold(k)));
+  return shorter.length === 1 ? shorter[0] : v;
+}
+
+/** "me", "myself": the admin who sent it, if there is one. A sentence is no name. */
+function spenderOf(value, admin, known) {
+  const v = clean(value);
+  if (!v) return null;
+  if (/^(?:me|myself|i|mine|my self)$/i.test(v)) return admin?.name ?? null;
+  if (v.split(/\s+/).length > 4 || /[,;]/.test(v)) return null;
+  return canonical(v, known);
+}
+
+function normalise(raw, { admin, group, groups = [], rates = {}, live = {}, known = {}, today = currentDay() }) {
   const said = currencyOf(raw.currency);
   // FROM THE COMMAND CENTER ('*'): no bot number says the group and no
   // admin is the spender, so both are read from their words or asked.
@@ -66,11 +93,11 @@ function normalise(raw, { admin, group, groups = [], rates = {}, live = {}, toda
     n: raw.n,
     spentOn: iso(raw.spentOn),
     description: clean(raw.description),
-    payee: clean(raw.payee),
+    payee: canonical(raw.payee, known.payees ?? []),
     rawAmount: num(raw.rawAmount),
     currency: said ?? 'AED',
     groupName: anyGroup ? groupOf(raw.groupName, groups) : group,
-    spentBy: clean(raw.spentBy) ?? admin?.name ?? null,
+    spentBy: spenderOf(raw.spentBy, admin, known.spentBy ?? []) ?? admin?.name ?? null,
     source: raw.source ?? null,
     skipped: Boolean(raw.skipped),
     ok: Boolean(raw.ok),
@@ -143,5 +170,5 @@ function duplicates(items, saved = []) {
 const ready = (items) => items.filter((x) => !x.skipped).every((x) => x.missing.length === 0);
 
 module.exports = {
-  normalise, duplicates, ready, currencyOf, groupOf, REQUIRED, num, iso,
+  normalise, duplicates, ready, currencyOf, groupOf, canonical, spenderOf, REQUIRED, num, iso,
 };

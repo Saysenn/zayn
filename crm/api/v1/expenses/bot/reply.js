@@ -137,6 +137,19 @@ function readReply(said, pending, { year = new Date().getUTCFullYear(), groups =
   // THEIR RATE: before the fixes, so "1 gbp to aed is 4.85" is never "item 1".
   const rate = readRates(text);
   if (rate) return { kind: 'rate', ...rate };
+  // "KEEP 2 AFTER ALL": a skipped one comes back (test sweep 2026-10-07:
+  // "There is no expense 2").
+  const back = /^(?:(?:oh\s+)?(?:wait|actually)[,\s]+)?(?:keep|bring back|unskip|put back|restore|add back|include)\s+(?:#|no\.?\s*|number\s+)?([\d\s,&and]+?)(?:\s+(?:after all|back|again|too))?$/i.exec(bare);
+  if (back) {
+    const which = nums(back[1]);
+    return which.length && which.every((n) => n >= 1 && n <= count) ? { kind: 'unskip', which } : null;
+  }
+  // "skip 3 to 6" / "skip 3-6": a range is every number in it.
+  const span = /^(?:skip|drop|remove|delete|without|leave out|not)\s+(?:#|no\.?\s*|numbers?\s+)?(\d+)\s*(?:to|-|–|through|thru|till)\s*(\d+)$/i.exec(bare);
+  if (span && Number(span[2]) >= Number(span[1])) {
+    const which = Array.from({ length: Number(span[2]) - Number(span[1]) + 1 }, (_, i) => Number(span[1]) + i);
+    return which.every((n) => n >= 1 && n <= count) ? { kind: 'skip', which } : null;
+  }
   const skip = /^(?:skip|drop|remove|delete|without|leave out|not)\s+(?:#|no\.?\s*|number\s+)?([\d\s,&and]+)$/i.exec(bare);
   if (skip) {
     const which = nums(skip[1]);

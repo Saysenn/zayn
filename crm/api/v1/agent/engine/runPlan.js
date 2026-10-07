@@ -197,7 +197,9 @@ async function checkSteps(steps, { groups, said }) {
     }
 
     if (step.action === 'add_deal') {
-      const need = ['roleLabel', 'monthlyAmount'].filter((f) => !step.changes.some((c) => c.field === f && !NOT_GIVEN(c.value)));
+      // CURRENCY AND METHOD ARE ASKED, never assumed: a new deal came out as
+      // GBP and cash nobody said (test sweep 2026-10-07).
+      const need = ['roleLabel', 'monthlyAmount', 'currency', 'paymentMethod'].filter((f) => !step.changes.some((c) => c.field === f && !NOT_GIVEN(c.value)));
       if (!group) need.unshift('group');
       if (!step.company) need.push('company');
       if (need.length) ask(`for the new deal for ${step.person} I still need: ${need.join(', ')}.`);

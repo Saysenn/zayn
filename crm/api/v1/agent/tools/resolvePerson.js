@@ -110,7 +110,25 @@ function personMentionedIn(said, name) {
       .split(/[^A-Za-z0-9]+/)
       .some((word) => fold(word) === wanted);
   }
-  return mentionedIn(fold(said), wanted);
+  /**
+   * A NAME STARTS WHERE A WORD STARTS. "jonathan owed?" holds the letters
+   * "nathan" and was answered for Nathan instead of Johnathon (test sweep
+   * 2026-10-07). The name, or a slip of it, must begin at a word.
+   */
+  const words = String(said ?? '').split(/[^A-Za-z0-9]+/).filter(Boolean);
+  const heard = words.map(fold).join('');
+  const starts = [];
+  let at = 0;
+  for (const w of words) { starts.push(at); at += fold(w).length; }
+  if (starts.some((i) => heard.startsWith(wanted, i))) return true;
+  const slack = TYPO_LIMIT(wanted);
+  if (slack === 0) return false;
+  for (const i of starts) {
+    for (let len = wanted.length - slack; len <= wanted.length + slack; len += 1) {
+      if (i + len <= heard.length && within(heard.slice(i, i + len), wanted, slack)) return true;
+    }
+  }
+  return false;
 }
 
 const wordsOf = (s) => String(s ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);

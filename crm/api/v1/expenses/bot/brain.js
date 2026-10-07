@@ -224,12 +224,19 @@ async function rates() {
   return (await expensesRepo.options().catch(() => ({ lastRateByCurrency: {} }))).lastRateByCurrency ?? {};
 }
 
+/** The payees and spenders already used, so new ones are matched to them. */
+async function knownNames() {
+  const o = await expensesRepo.options().catch(() => ({}));
+  return { payees: o.payees ?? [], spentBy: o.spentBy ?? [] };
+}
+
 /** Check every item again: fields, defaults, duplicates against what is saved. */
 async function recheck(items, ctx) {
   const r = await rates();
   // Today's market rate for every other currency in the batch.
   const live = await liveRates(items.map((x) => currencyOf(x.currency) ?? 'AED'));
-  const out = items.map((x) => normalise({ ...x, doubt: x.modelDoubt }, { admin: ctx.admin, group: ctx.group, groups: ctx.groups, rates: r, live, today: ctx.today }))
+  const known = await knownNames();
+  const out = items.map((x) => normalise({ ...x, doubt: x.modelDoubt }, { admin: ctx.admin, group: ctx.group, groups: ctx.groups, rates: r, live, known, today: ctx.today }))
     .map((x, i) => ({ ...x, modelDoubt: items[i].modelDoubt ?? null }));
   const dates = out.map((x) => x.spentOn).filter(Boolean).sort();
   const saved = dates.length ? await find.between(ctx.group, minus(dates[0], 1), dates.at(-1)) : [];
@@ -365,6 +372,7 @@ async function onReply(r, ctx) {
     for (const x of items) if (given[x.currency] > 0) x.rateGiven = given[x.currency];
   }
   if (r.kind === 'skip') for (const n of r.which) items.find((x) => x.n === n).skipped = true;
+  if (r.kind === 'unskip') for (const n of r.which) items.find((x) => x.n === n).skipped = false;
   if (r.kind === 'only') for (const x of items) x.skipped = !r.which.includes(x.n);
   if (r.kind === 'fix') {
     for (const part of r.parts) applyFix(items, part, ctx.today);

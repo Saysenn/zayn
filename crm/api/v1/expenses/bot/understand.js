@@ -78,6 +78,8 @@ function routePrompt(today, pending, groups = []) {
     'changes (edit only): each field and its NEW value. rawAmount as a plain number; spentOn as YYYY-MM-DD.',
     'query (question only): from/to = the dates asked about (this month = first of the month to today; "" if none),',
     'groupBy = how to split it, measure = list | total | count | biggest, words = a filter on what it was for or who was paid, or "".',
+    'A FOLLOW-UP QUESTION ("and august?", "what about sara?") keeps everything from the bot\'s last answer it does not change:',
+    'the same group, words, measure and split, with only the new part swapped in.',
     'Use "" and false for anything not given. sure: false if unclear or it could mean two things.',
   ].join('\n');
 }

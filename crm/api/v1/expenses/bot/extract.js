@@ -57,6 +57,7 @@ function rules(today, groups = []) {
     'source: where it came from: "message", "photo 1", "photo 2", "pdf".',
     'doubt: "" or a short note when something is unclear or hard to read ("total hard to read", "two totals on receipt").',
     'NEVER invent a value. Anything not given is "". If it is not an expense at all, return no expenses.',
+    'A payroll list, salaries, a master sheet of deals or a list of staff and their monthly pay is NOT expenses: return none.',
   ].join('\n');
 }
 
@@ -176,6 +177,7 @@ async function fromTables(tables, { today, client, groups = [] } = {}) {
     name: 'expense_columns',
     system: [
       'You read the LAYOUT of tables from a file of business expenses. For each table say if it lists expenses',
+      '(a payroll or master sheet of people, roles, companies and monthly or payable pay is NOT expenses: isExpenses false)',
       '(isExpenses), and what each column means: groupName (company group / team), spentOn (date), description (what for), payee (paid to / vendor /',
       'merchant), rawAmount (amount / cost / total), currency, spentBy (who spent / paid by / staff), or other.',
       'currency: the currency the whole table is in if a header or title says so ("Amount (AED)"), else "".',

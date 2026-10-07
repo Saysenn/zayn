@@ -69,6 +69,32 @@ export const PAYMENT_METHODS = ["cash", "bank", "crypto"];
 /** The sheet writes `EURO` and `Euro` for the same currency. Normalised on the way in. */
 export const CURRENCIES = ["GBP", "AED", "EUR", "USD"];
 
+/**
+ * THE MASTER SHEET'S NUMBER, MADE A REAL ONE. His rule 2026-10-07: someone
+ * asking about their pay is known ONLY by the number the master sheet holds
+ * for them. The sheet writes it many ways ("+44 7700 900123", "07700900123",
+ * "0044…"), and every one of those was rejected, taking the whole deal out
+ * of the roster: 35 of 90. Spaces and dashes go, a UK 07 becomes +447, a 00
+ * becomes +. Anything still not a number ("Handled internally") is blank:
+ * the deal stays in every total, and nobody is recognised by it.
+ */
+export function phoneOf(value) {
+  let v = String(value ?? "").replace(/[\s().-]/g, "");
+  if (!v) return "";
+  if (/^00\d/.test(v)) v = `+${v.slice(2)}`;
+  if (/^07\d{9}$/.test(v)) v = `+44${v.slice(1)}`;
+  if (/^447\d{9}$/.test(v)) v = `+${v}`;
+  if (/^05\d{8}$/.test(v)) v = `+971${v.slice(1)}`;
+  if (/^9715\d{8}$/.test(v)) v = `+${v}`;
+  return /^\+[1-9]\d{7,14}$/.test(v) ? v : "";
+}
+
+/** EURO, Euro, € → EUR; the sheet's own words for the four we pay in. */
+export function currencyCode(value) {
+  const v = String(value ?? "").trim().toUpperCase();
+  return { EURO: "EUR", EUROS: "EUR", "€": "EUR", "£": "GBP", POUNDS: "GBP", $: "USD", DOLLARS: "USD", DHS: "AED", DIRHAM: "AED", DIRHAMS: "AED" }[v] ?? v;
+}
+
 /** "2026-07-01", or null where the sheet leaves it blank. Never a Date — these get JSON'd into Redis. */
 const IsoDate = z
   .string()
@@ -102,10 +128,10 @@ export const AssignmentSchema = z.object({
    * An assignment with no phone still counts in every total — it just cannot
    * be identified from an incoming message, and is never messaged.
    */
-  phone: z
-    .string()
-    .regex(/^(\+[1-9]\d{7,14})?$/, "must be E.164 or empty")
-    .default(""),
+  phone: z.preprocess(
+    phoneOf,
+    z.string().regex(/^(\+[1-9]\d{7,14})?$/, "must be E.164 or empty").default(""),
+  ),
 
   role: z.enum(ROLES),
   /** `Mid 2` -> 2. null where the sheet just says `Mid`. */
@@ -135,7 +161,7 @@ export const AssignmentSchema = z.object({
   /** what is actually owed this month: monthlyAmount pro-rated by payableDays */
   payableAmount: z.number().nonnegative().default(0),
 
-  currency: z.enum(CURRENCIES).default("GBP"),
+  currency: z.preprocess((v) => (v == null || v === "" ? undefined : currencyCode(v)), z.enum(CURRENCIES).default("GBP")),
   paymentMethod: z.enum(PAYMENT_METHODS).default("cash"),
   location: z.string().default(""),
 

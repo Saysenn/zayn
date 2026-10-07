@@ -73,13 +73,16 @@ test('GUARDS THE GUARD: the check is stateless', () => {
   }
 });
 
-test('only the MOST RECENT reply decides', () => {
-  // Coming back to a warm word after a few exchanges is ordinary. Doing it
-  // every single time is the fault, so only the last turn counts.
+test('a warm word comes back only after two plain replies, and never on bad news', () => {
+  // At most one in three replies (test sweep 2026-10-07: nearly every turn).
   const history = [
     { role: 'assistant', content: 'Morning, lovely!' },
     { role: 'user', content: 'what is Gloria owed' },
     { role: 'assistant', content: 'Gloria is owed 2,000 for August.' },
+    { role: 'user', content: 'and paddy' },
+    { role: 'assistant', content: 'Paddy is owed AED 14,175.' },
   ];
   assert.equal(easeOffPetNames('All set, honey!', history), 'All set, honey!');
+  assert.doesNotMatch(easeOffPetNames('All set, honey!', history.slice(0, 3)), /honey/, 'one plain reply is not enough');
+  assert.doesNotMatch(easeOffPetNames("I can't find that, darling.", history), /darling/);
 });

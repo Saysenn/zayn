@@ -450,7 +450,7 @@ const { bypassAttempt, BYPASS_REPLY } = require('./blockBypass');
 const { asksUndoPlainly } = require('./undoIntent');
 const { fold, personMentionedIn, within, oneTypo } = require('./tools/resolvePerson');
 const { parseEdit, callFor, followUp, sameFor } = require('./directEdit');
-const { looksMultiStep, pendingPlan } = require('./engine/planSteps');
+const { looksMultiStep, pendingPlan, isQuestion } = require('./engine/planSteps');
 const { route: routeMessage, asEdit } = require('./engine/router');
 const { planTurn, sheetTurn } = require('./engine/runPlan');
 const { looksLikeSheet } = require('./engine/sheetCheck');
@@ -2712,6 +2712,20 @@ async function runAgentTurn(history, contextName, onEvent) {
    * to STOP?": an act nobody said, on money. With no field and no value the
    * only right move is one short question. gpt-4.1 messy sweep, 2026-10-06.
    */
+  /**
+   * "BUMP HIS DEAL BY 10%" is a raise of the MONTHLY, not a 10% add-on: it
+   * was previewed as add-on 0% → 10% on all three of Peter's deals (test
+   * sweep 2026-10-07). The add-on only when they say add-on or fee.
+   */
+  if (/\b(?:bump|raise|increase|up|uplift|rise)\b[^%]*\d+(?:\.\d+)?\s*%/i.test(lastSaid(history))
+    && !/\b(?:add[- ]?on|addon|fee|uplift percent)\b/i.test(lastSaid(history))) {
+    messages.push({
+      role: 'system',
+      content: 'THIS IS A PERCENTAGE RAISE OF THE MONTHLY AMOUNT, not an add-on and not a fee. Use bulk_update_master_sheet '
+        + 'with raiseMonthlyPercent and the person in `people`. If they said ONE deal ("his main deal", a company or a group), '
+        + 'raise only that deal: ask which if it is not clear. Never change addonPercent or feePercent for this.',
+    });
+  }
   if (VAGUE_EDIT.test(lastSaid(history))) {
     messages.push({
       role: 'system',
@@ -2911,7 +2925,9 @@ async function runAgentTurn(history, contextName, onEvent) {
    * See engine/. Ahead of the held calls, so a "yes" to a plan is the plan's.
    * A plan that cannot be made (no AI, nothing understood) hands back to her.
    */
-  const pending = pendingPlan(history);
+  // A QUESTION WHILE A PLAN WAITS is answered as a question; the plan keeps
+  // waiting (see pendingPlan, and the reminder in runAgent below).
+  const pending = isQuestion(asked) ? null : pendingPlan(history);
   // A FILE THEY DROPPED IN rides on their message; a pasted sheet is the message.
   const attachment = [...history].reverse().find((m) => m.role === 'user')?.attachment ?? null;
   const attached = attachment ? (attachment.text || attachment.tables?.length ? true : null) : null;
@@ -5220,6 +5236,17 @@ async function runAgentTurn(history, contextName, onEvent) {
  * that same data: she reads what is shown, all of it. See screenReading.js.
  */
 async function runAgent(history, contextName, onEvent) {
+  const waiting = isQuestion(lastSaid(history)) ? pendingPlan(history) : null;
+  const done = await runAgentScreen(history, contextName, onEvent);
+  // THE PLAN IS STILL THERE: said after the answer, so a yes still finds it.
+  if (waiting && done?.reply && !/\bplan\b/i.test(done.reply)) {
+    const n = waiting.steps.filter((s) => !s.skipped).length;
+    return { ...done, reply: `${done.reply}\n\nYour plan is still waiting (${n} ${n === 1 ? 'change' : 'changes'}). Say yes to go ahead, or cancel.` };
+  }
+  return done;
+}
+
+async function runAgentScreen(history, contextName, onEvent) {
   const shown = [];
   const result = await runAgentTurn(history, contextName, (e) => {
     if (e?.type === 'card' || e?.type === 'list' || e?.type === 'check') shown.push(e);
