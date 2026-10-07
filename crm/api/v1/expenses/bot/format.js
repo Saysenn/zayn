@@ -128,66 +128,75 @@ function reasonOf(d) {
 /** Can it be skipped, saved again or replaced? A repeat, a lookalike, a copy. */
 const CHOICE = /^same receipt as one saved|^looks already saved|^same as \d+/;
 
+/** What one doubt is, in a few words, grouped with every expense it is on. */
+function doubtLabel(d) {
+  if (/^same receipt as one saved/.test(d)) return 'Already saved (same receipt)';
+  if (/^looks already saved/.test(d)) return 'Looks like a saved one';
+  if (/^same as \d+/.test(d)) return 'A copy of another in this list';
+  if (/^another .+: new, or a change/.test(d)) return 'Same payee, same day: new, or a change?';
+  if (/large amount/.test(d)) return 'Large amount: right?';
+  if (/in the future/.test(d)) return 'Date is in the future';
+  if (/over 2 months ago/.test(d)) return 'Date is over 2 months ago';
+  if (/not recognised, read as AED/.test(d)) return 'Currency not recognised, read as AED';
+  if (/far from the market/.test(d)) return 'Your rate is far from the market rate';
+  if (/not above 0/.test(d)) return 'Amount is 0 or less';
+  const which = /^which (.+?)\? (.+)$/.exec(d);
+  if (which) return `Which ${which[1]}? *${which[2].split(' or ').join('* or *')}*`;
+  const near = /^did you mean (.+?)\? \((.+)\)$/.exec(d);
+  if (near) return `"${near[2]}": did you mean *${near[1]}*?`;
+  return `_${d}_`;
+}
+
+const MISSING_LABEL = {
+  spentBy: 'Who spent it?', spentOn: 'Date?', payee: 'Paid to?', rawAmount: 'Amount?', description: 'What was it for?', groupName: 'Which group?',
+};
+
 /**
- * WHAT NEEDS AN ANSWER (his call 2026-10-07, "Please check"): a few are
- * listed ONE PER LINE by number with why, so each gets its own answer; many
- * are grouped by kind with their numbers as runs, never 60 lines.
+ * WHAT NEEDS AN ANSWER, ONE LINE PER QUESTION (his call 2026-10-07: "easy to
+ * read, directly what I need to know, no extras"). Each line is the question
+ * and the numbers it is on; the payees and amounts are in the picture.
  */
 function questions(live) {
-  const flagged = live.filter((x) => (x.missing ?? []).length || (x.doubts ?? []).length);
-  if (flagged.length && flagged.length <= ONE_BY_ONE) {
-    return flagged.map((x) => {
-      const why = [
-        ...(x.missing ?? []).map((f) => (f === 'exchangeRate' ? `1 ${x.currency} to AED is?` : ASK[f] ?? `${LABEL[f] ?? f}?`)),
-        ...(x.doubts ?? []).map(reasonOf),
-      ];
-      const what = x.payee || x.description || 'no description';
-      return `${x.n}. ${what} · ${x.rawAmount == null ? '?' : money(x.currency, x.rawAmount)}: ${why.join('; ')}`;
-    });
-  }
   const by = new Map();
-  const put = (key, n) => by.set(key, [...(by.get(key) ?? []), n]);
+  const put = (label, n) => by.set(label, [...(by.get(label) ?? []), n]);
   for (const x of live) {
-    for (const f of x.missing ?? []) put(f === 'exchangeRate' ? `1 ${x.currency} to AED is?` : ASK[f] ?? `${LABEL[f] ?? f}?`, x.n);
-    for (const d of x.doubts ?? []) {
-      if (/^same as \d+/.test(d)) put('copies of earlier ones', x.n);
-      else if (/^looks already saved/.test(d)) put('look like ones already saved (same shop, amount and day), different receipts', x.n);
-      else if (/^same receipt as one saved/.test(d)) put('the same receipts you already saved', x.n);
-      else if (/^another .+: new, or a change/.test(d)) put('another expense to the same payee that day: new, or a change to that one?', x.n);
-      else put(reasonOf(d), x.n);
-    }
+    for (const f of x.missing ?? []) put(f === 'exchangeRate' ? `Rate for 1 ${x.currency}?` : MISSING_LABEL[f] ?? `${LABEL[f] ?? f}?`, x.n);
+    for (const d of x.doubts ?? []) put(doubtLabel(d), x.n);
   }
-  const lines = [...by].map(([q, ns]) => `• No. ${ranges(ns)}: ${q}`);
-  return lines.length > QUESTIONS_SHOWN
-    ? [...lines.slice(0, QUESTIONS_SHOWN), `• _…and ${lines.length - QUESTIONS_SHOWN} more, see the tinted cells_`]
-    : lines;
+  return [...by].map(([label, ns]) => {
+    const nums = `No. ${ranges([...new Set(ns)])}`;
+    // a question with choices: the numbers before the choices
+    if (/\?\s+\*/.test(label)) return `• ${label.replace(/\?\s+/, `? ${nums}: `)}`;
+    return `• ${label}${/\?$/.test(label) ? '' : ':'} ${nums}`;
+  });
 }
 
 /**
- * HOW TO ANSWER, with their own numbers: one word for all of them, or one
- * line each ("1 skip", "2 replace", "3 save", "4 me").
+ * WHAT TO REPLY, ON ONE LINE (his call 2026-10-07: no "Or one by one"
+ * examples, no "me is you" note; the reader still understands "18 skip",
+ * "1–3 Ahmed" and the rest). One example, made from what is actually missing.
  */
-function howToAnswer(live) {
+function replyLine(live) {
+  const missing = live.filter((x) => x.missing?.length);
   const choice = live.filter((x) => (x.doubts ?? []).some((d) => CHOICE.test(d)));
-  const replaceable = choice.filter((x) => x.repeatOf || x.lookalikeOf);
-  const spender = live.filter((x) => (x.missing ?? []).includes('spentBy'));
-  const out = [];
-  if (choice.length) out.push(`For all of them: *skip all* · *save all*${replaceable.length ? ' · *replace all*' : ''}`);
-  const examples = [];
-  for (const x of choice) {
-    if (examples.length >= 3) break;
-    const verb = (x.repeatOf || x.lookalikeOf) && !examples.some((e) => /replace/.test(e)) ? 'replace' : examples.some((e) => /skip/.test(e)) ? 'save' : 'skip';
-    examples.push(`${x.n} ${verb}`);
+  const replaceable = choice.some((x) => x.repeatOf || x.lookalikeOf);
+  const parts = [];
+  if (missing.length) {
+    const f = missing[0].missing[0];
+    const ns = missing.filter((x) => x.missing.includes(f)).map((x) => x.n);
+    const run = ns.length > 1 && ns.at(-1) - ns[0] === ns.length - 1 ? `${ns[0]}–${ns.at(-1)}` : `${ns[0]}`;
+    const cur = String(missing[0].currency ?? 'gbp').toLowerCase();
+    const ex = {
+      spentBy: `${run} me`, payee: `${run} paid to Careem`, spentOn: `${run} is 5 Oct`, rawAmount: `${run} is 150`,
+      description: `${run} is taxi`, groupName: `${run} is MANBAT`, exchangeRate: `1 ${cur} to aed is 4.85`,
+    }[f] ?? `${run} is 150`;
+    parts.push(`answer like *${ex}*`);
+  } else {
+    parts.push('*yes* to save');
   }
-  if (spender.length) {
-    examples.push(spender.length > 1 ? `${ranges(spender.slice(0, -1).map((x) => x.n))} Ahmed` : `${spender[0].n} me`);
-    if (spender.length > 1) examples.push(`${spender.at(-1).n} me`);
-  }
-  if (examples.length) {
-    out.push(choice.length ? 'Or one by one, like:' : 'Reply like:', ...examples.slice(0, 4).map((e) => `*${e}*`));
-    if (spender.length) out.push('_*me* is you; a name is who spent it._');
-  }
-  return out;
+  if (choice.length) parts.push(`*skip all* / *save all*${replaceable ? ' / *replace all*' : ''}`);
+  parts.push('*modify*', '*cancel*');
+  return `Reply: ${parts.join(' · ')}`;
 }
 
 /**
@@ -208,24 +217,12 @@ function addPreview(items, group) {
 
   const missing = live.filter((x) => x.missing?.length);
   const doubts = live.filter((x) => !x.missing?.length && x.doubts?.length);
-  if (missing.length || doubts.length) {
-    out.push('', '⚠️ *Please check*', ...questions(live));
-    const how = howToAnswer(live);
-    if (how.length) out.push('', ...how);
-  }
-  const m = missing.find((x) => !x.missing.includes('spentBy') || x.missing.length > 1);
-  const example = m && (m.missing.includes('exchangeRate') ? `*1 ${m.currency.toLowerCase()} to aed is 4.85*` : m.missing.includes('groupName') ? `*${m.n} is MANBAT*`
-    : m.missing.includes('spentOn') ? `*${m.n} is 5 Oct*` : m.missing.includes('payee') ? `*${m.n} paid to Careem*`
-      : m.missing.includes('rawAmount') ? `*${m.n} is 150*` : `*${m.n} is taxi*`);
-  out.push('', missing.length
-    ? `Reply with the answers${example ? ` (like ${example})` : ''} · *modify* · *cancel*`
-    : doubts.length
-      ? 'Reply *yes* to save as shown · *modify* to change · *cancel*'
-      : 'Reply *yes* to save · *modify* to change · *cancel*');
+  if (missing.length || doubts.length) out.push('', '⚠️ *Please check*', ...questions(live));
+  out.push('', replyLine(live));
   return out.join('\n');
 }
 
-const FIELD = { groupName: 'Group', spentOn: 'Date', description: 'Description', rawAmount: 'Amount', currency: 'Currency', payee: 'Paid to', spentBy: 'Spent by' };
+const FIELD = { groupName: 'Group', spentOn: 'Date', description: 'Description', rawAmount: 'Amount', currency: 'Currency', payee: 'Paid to', spentBy: 'Spent by', category: 'Category' };
 const shown = (field, v, x) => (v == null || v === '' ? 'blank'
   : field === 'spentOn' ? dayFull(v) : field === 'rawAmount' ? money(x?.currency, v) : String(v));
 const headOf = (x, group) => `*${x.description || 'No description'}* · ${[group && x.groupName, day(x.spentOn), x.payee].filter(Boolean).join(' · ')}`;
@@ -238,10 +235,52 @@ function editPreview(expense, fields, { group = false } = {}) {
   return out.join('\n');
 }
 
+/**
+ * SEVERAL CHANGES, ONE YES (his call 2026-10-07: "why doesn't it stack up
+ * the things I want to change and ask once?"). One line per expense, each
+ * field before ➜ after.
+ */
+function editsPreview(items, { group = false, removes = [] } = {}) {
+  // CHANGES AND REMOVALS TOGETHER, one yes (the planner's draft)
+  if (removes.length) {
+    const n = items.length;
+    const out = [`✏️ *${[n ? `CHANGE ${n}` : '', `REMOVE ${removes.length}`].filter(Boolean).join(' · ')}?*`, '_Not changed yet_', SEP];
+    for (const x of items) {
+      const b = x.before;
+      const what = Object.entries(x.fields).filter(([f]) => f !== 'currency')
+        .map(([f, v]) => `${FIELD[f] ?? f} ${shown(f, b[f], b)} ➜ *${shown(f, v, { ...b, ...x.fields })}*`).join(' · ');
+      out.push(`• *${b.description || 'No description'}* · ${[group && b.groupName, day(b.spentOn)].filter(Boolean).join(' · ')}: ${what}`);
+    }
+    for (const r of removes) out.push(`• 🗑️ *${r.before.description}* · ${day(r.before.spentOn)} · ${money(r.before.currency, r.before.rawAmount)}: remove`);
+    out.push(SEP, `Reply *yes* to do ${n + removes.length === 1 ? 'it' : 'them all'} · *cancel* · add another, or drop one (_not the ${String((items[0]?.before ?? removes[0].before).description ?? 'first').split(' ')[0].toLowerCase()}_)`);
+    return out.join('\n');
+  }
+  if (items.length === 1) {
+    const [x] = items;
+    return editPreview({ ...x.before, n: null }, x.fields, { group }).replace('Reply *yes* · *modify* · *cancel*', 'Reply *yes* · *cancel* · or add another change');
+  }
+  const out = [`✏️ *CHANGE ${items.length} EXPENSES?*`, '_Not changed yet_', SEP];
+  for (const x of items) {
+    const b = x.before;
+    const what = Object.entries(x.fields).filter(([f]) => f !== 'currency')
+      .map(([f, v]) => `${FIELD[f] ?? f} ${shown(f, b[f], b)} ➜ *${shown(f, v, { ...b, ...x.fields })}*`).join(' · ');
+    out.push(`• *${b.description || 'No description'}* · ${[group && b.groupName, day(b.spentOn)].filter(Boolean).join(' · ')}: ${what}`);
+  }
+  out.push(SEP, `Reply *yes* to change them all · *cancel* · add another, or drop one (_not the ${String(items[0].before.description ?? 'first').split(' ')[0].toLowerCase()}_)`);
+  return out.join('\n');
+}
+
+/** Several changed at once: one line each. */
+function changedMany(rows, { group = false } = {}) {
+  return [`✅ *CHANGED · ${rows.length} expenses*`, SEP, ...rows.map((x) => line({ ...x, n: null }, { number: false, group })), SEP, 'Reply *undo* to put them all back.'].join('\n');
+}
+
 function removePreview(list, { group = false } = {}) {
   const out = [`🗑️ *REMOVE ${list.length === 1 ? 'THIS EXPENSE' : `${list.length} EXPENSES`}?*`, '_Not removed yet_', SEP];
   for (const x of list) out.push(line({ ...x, n: null }, { number: false, group }));
-  out.push(SEP, totalLine(list), '', 'Reply *yes* · *cancel*  (you can *undo* afterwards)');
+  out.push(SEP, totalLine(list), '', list.length === 1
+    ? 'Reply *yes* · *cancel* · or add another to remove'
+    : `Reply *yes* to remove them all · *cancel* · add another, or drop one (_not the ${String(list[0].description ?? 'first').split(' ')[0].toLowerCase()}_)`);
   return out.join('\n');
 }
 
@@ -372,6 +411,34 @@ function ratesBubble(items) {
  * THE CAPTION beside the preview picture: the summary, what needs an
  * answer, and the reply line, so it can be answered and searched.
  */
+/** The picture's own caption: what it is and what it comes to, nothing more. */
+function captionHead(items, group, { saved = false } = {}) {
+  const live = items.filter((x) => !x.skipped);
+  const head = saved
+    ? `✅ *SAVED · ${live.length} ${live.length === 1 ? 'expense' : 'expenses'} · ${group === '*' ? [...new Set(live.map((x) => x.groupName))].join(', ') : group}*`
+    : `*${live.length} ${live.length === 1 ? 'EXPENSE' : 'EXPENSES'}${group === '*' ? '' : ` · ${group}`}* _(not saved yet)_`;
+  return [head, totalLine(live)].join('\n');
+}
+
+/**
+ * WHAT GOES UNDER THE PICTURES, as its own message (his call 2026-10-07:
+ * the pictures first, then the notes, "Please check" and what to reply).
+ */
+function captionBody(items, group, { saved = false } = {}) {
+  const live = items.filter((x) => !x.skipped);
+  const out = [];
+  // THE NOTES: nothing to answer, worth knowing ("Ahmed read as Ahmed Khan")
+  const notes = new Map();
+  for (const x of live) for (const n of x.notes ?? []) notes.set(n, [...(notes.get(n) ?? []), x.n]);
+  if (notes.size) out.push('📝 *Notes*', ...[...notes].slice(0, 6).map(([n, ns]) => `• No. ${ranges(ns)}: ${n}`), '');
+  if (saved) return [...out, `Reply *undo* to take ${live.length === 1 ? 'it' : 'them'} back.`].join('\n');
+  const missing = live.filter((x) => x.missing?.length);
+  const doubts = live.filter((x) => !x.missing?.length && x.doubts?.length);
+  if (missing.length || doubts.length) out.push('⚠️ *Please check*', ...questions(live), '');
+  out.push(replyLine(live));
+  return out.join('\n');
+}
+
 function caption(items, group, { saved = false } = {}) {
   const live = items.filter((x) => !x.skipped);
   const head = saved
@@ -381,17 +448,13 @@ function caption(items, group, { saved = false } = {}) {
   if (saved) return [...out, '', `Reply *undo* to take ${live.length === 1 ? 'it' : 'them'} back.`].join('\n');
   const missing = live.filter((x) => x.missing?.length);
   const doubts = live.filter((x) => !x.missing?.length && x.doubts?.length);
-  if (missing.length || doubts.length) {
-    out.push('', '⚠️ *Please check*', ...questions(live));
-    const how = howToAnswer(live);
-    if (how.length) out.push('', ...how);
-  }
+  if (missing.length || doubts.length) out.push('', '⚠️ *Please check*', ...questions(live));
   // the same last line as the text preview
   out.push('', addPreview(items, group).split('\n').at(-1));
   return out.join('\n');
 }
 
 module.exports = {
-  HELP_DIANE, HELLO, guideSpec, guideText, SEP, ratesBubble, caption, ranges, questions, howToAnswer,
+  HELP_DIANE, HELLO, guideSpec, guideText, editsPreview, changedMany, SEP, ratesBubble, caption, captionHead, captionBody, ranges, questions, replyLine,
   day, dayFull, amount, money, totals, line, block, addPreview, editPreview, removePreview, pickList, undoPreview, saved, changed, removed, LABEL,
 };

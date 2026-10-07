@@ -15,12 +15,12 @@ const {
 // and the whole message goes to the model instead. A wrong read is worse
 // than no read.
 
-const YES = /^(?:y|ye|yes+|yeah|yep|yup|ok(?:ay)?|k|sure(?: thing)?|confirm(?:ed)?|go(?: ahead)?|ok go|save(?: (?:it|them|all))?|do it|correct|approved?|👍|✅|yes(?: please| pls| save(?: it| them)?)?|fine|proceed|send it|that'?s? (?:is )?(?:correct|right|fine)|all (?:correct|right)|sige|oo|tama|tamam|yalla|haan|theek hai|go for it|👌|👌🏻|👍🏻|👍🏼|👍🏽|🆗|✔️|☑️|🙏)$/iu;
+const YES = /^(?:sorted|all sorted|done|all done|all good|crack on|go on|good to go|that'?s it|thats it|spot on|bang on|y|ye|yes+|yeah|yep|yup|ok(?:ay)?|k|sure(?: thing)?|confirm(?:ed)?|go(?: ahead)?|ok go|save(?: (?:it|them|all))?|do it|correct|approved?|👍|✅|yes(?: please| pls| save(?: it| them)?)?|fine|proceed|send it|that'?s? (?:is )?(?:correct|right|fine)|all (?:correct|right)|sige|oo|tama|tamam|yalla|haan|theek hai|go for it|👌|👌🏻|👍🏻|👍🏼|👍🏽|🆗|✔️|☑️|🙏)$/iu;
 // "HOLD ON": nothing changes, it waits
 const HOLD = /^(?:hold on|wait|one sec(?:ond)?|1 sec|a sec|hang on|brb|give me a (?:sec|minute|moment)|let me check|one moment)[.!\s]*$/i;
 // "NO, CANCEL THAT" is a cancel. It went to the router as "undo" and offered
 // to take back the last save (test sweep 2026-10-07).
-const NO = /^(?:(?:no+|nope|nah)[,.!\s]*)?(?:no+|nope|nah|cancel|stop|never ?mind|nevermind|forget (?:it|that|about it)|don'?t(?: save)?|do not save|abort|discard|not now|leave (?:it|that|those|them|it alone)|scrap (?:it|that)|❌)(?:\s+(?:that|this|it|those|them|all|please|pls|thanks))*$/i;
+const NO = /^(?:(?:wait|hold on|oh|hmm+|actually|oops)[,.!\s]+)?(?:(?:no+|nope|nah)[,.!\s]*)?(?:no+|nope|nah|cancel|stop|never ?mind|nevermind|forget (?:it|that|about it)|don'?t(?: save)?|do not save|abort|discard|not now|leave (?:it|that|those|them|it alone)|scrap (?:it|that)|❌)(?:\s+(?:that|this|it|those|them|all|please|pls|thanks))*$/i;
 
 const nums = (s) => (String(s).match(/\d+/g) ?? []).map(Number);
 
@@ -181,6 +181,30 @@ function readRates(text) {
   return only ? { only: Number(only[1]) } : null;
 }
 
+function answersForAll(bare, pending, year) {
+  const live = pending.items.filter((x) => !x.skipped);
+  const tokens = bare.split(/\s*(?:,|;|\band\b|&|\+)\s*/i).map((t) => t.replace(/^(?:both|all|everything|for all|all of them|they(?:'re| are)|its?|it'?s)\s+/i, '').replace(/\s+(?:for all|for both|for everything|for all of them|on all|on both)$/i, '').trim()).filter(Boolean);
+  if (tokens.length < 2 && !/^(?:both|all)\b/i.test(bare)) return null;
+  const fixes = [];
+  for (const t of tokens) {
+    if (ME.test(t)) { fixes.push({ field: 'spentBy', value: 'me' }); continue; }
+    if (/^(?:today|yesterday)$/i.test(t)) { fixes.push({ field: 'spentOn', value: t.toLowerCase() }); continue; }
+    const d = dayOf(t.replace(/^on\s+/i, ''), year);
+    if (d && /[a-z]|\//i.test(t)) { fixes.push({ field: 'spentOn', value: d }); continue; }
+    const paid = /^(?:paid to|payee|at|to)\s+(.{2,40})$/i.exec(t);
+    if (paid) { fixes.push({ field: 'payee', value: paid[1] }); continue; }
+    const by = /^(?:spent by|by)\s+(.{2,40})$/i.exec(t);
+    if (by) { fixes.push({ field: 'spentBy', value: by[1] }); continue; }
+    return null;
+  }
+  if (!fixes.length) return null;
+  const parts = fixes.map((f) => {
+    const missing = live.filter((x) => (x.missing ?? []).includes(f.field));
+    return { which: (missing.length ? missing : live).map((x) => x.n), fixes: [f] };
+  });
+  return { kind: 'fix', parts, ok: [] };
+}
+
 function readReply(said, pending, { year = new Date().getUTCFullYear(), groups = [] } = {}) {
   const text = String(said ?? '').trim().replace(/\s+/g, ' ');
   if (!text || !pending) return null;
@@ -262,6 +286,33 @@ function readReply(said, pending, { year = new Date().getUTCFullYear(), groups =
     const which = nums(skip[1]);
     return which.length && which.every((n) => n >= 1 && n <= count) ? { kind: 'skip', which } : null;
   }
+  // "ACTUALLY IT WAS 50" with one expense in the preview: that one
+  const live1 = pending.items.filter((x) => !x.skipped);
+  // read from what they typed, capitals kept ("it was Ali", not "ali")
+  const typed = text.replace(/[!.]+$/, '').trim();
+  const itIs = /^(?:(?:actually|no|sorry|oops|wait|hmm)[,!.\s]+)*(?:it was|it'?s|it is|make it|should be|it should be|change it to)\s+(.+)$/i.exec(typed);
+  if (itIs && live1.length === 1) {
+    const one = onePart(`${live1[0].n} is ${itIs[1]}`, count, year, groups, pending.items);
+    if (one) return { kind: 'fix', parts: [one], ok: [] };
+  }
+  // "THE FIRST ONE WAS YESTERDAY", "the second one is 50"
+  const ORD0 = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5 };
+  const nthWas = /^(?:the\s+)?(first|second|third|fourth|fifth|last)(?:\s+one)?\s+(?:was|is|were|should be)\s+(.+)$/i.exec(typed);
+  if (nthWas) {
+    const n = /^last$/i.test(nthWas[1]) ? count : ORD0[nthWas[1].toLowerCase()];
+    const one = n && n <= count ? onePart(`${n} is ${nthWas[2]}`, count, year, groups, pending.items) : null;
+    if (one) return { kind: 'fix', parts: [one], ok: [] };
+  }
+  // BY POSITION: "remove the second one", "skip the last", "only the first two"
+  const ORD = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, ninth: 9, tenth: 10 };
+  const nth = (w) => (/^last$/i.test(w) ? count : ORD[w.toLowerCase()] ?? Number(String(w).replace(/(?:st|nd|rd|th)$/i, '')));
+  const posOut = /^(?:remove|delete|skip|drop|leave out|take out|not|without)\s+(?:the\s+)?(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|last|\d+(?:st|nd|rd|th))(?:\s+one)?$/i.exec(bare);
+  if (posOut && nth(posOut[1]) >= 1 && nth(posOut[1]) <= count) return { kind: 'skip', which: [nth(posOut[1])] };
+  const posOnly = /^(?:only|just|save only|keep only)\s+(?:the\s+)?(?:first|top)\s+(two|three|four|five|\d+)(?:\s+ones?)?$/i.exec(bare);
+  if (posOnly) {
+    const k = { two: 2, three: 3, four: 4, five: 5 }[posOnly[1].toLowerCase()] ?? Number(posOnly[1]);
+    if (k >= 1 && k <= count) return { kind: 'only', which: Array.from({ length: k }, (_, i) => i + 1) };
+  }
   const only = /^(?:only|just|save only|keep only)\s+(?:#|no\.?\s*|number\s+)?([\d\s,&and]+)$/i.exec(bare);
   if (only) {
     const which = nums(only[1]);
@@ -272,6 +323,23 @@ function readReply(said, pending, { year = new Date().getUTCFullYear(), groups =
   if (/^(?:(?:they(?:'?re| are)|these are|it'?s|all are)\s+)?(?:all\s+)?(?:new|new ones?|fine|correct|ok(?:ay)?|right|separate|different)(?:\s+ones?)?$/i.test(bare)
     && /\b(?:all|they|these)\b/i.test(bare)) {
     return { kind: 'fix', parts: [], ok: pending.items.map((x) => x.n) };
+  }
+  /**
+   * SEVERAL ANSWERS IN ONE GO ("today, me", "both today and both me",
+   * "yesterday + paid to careem", his harness 2026-10-07): each one goes to
+   * every expense still missing that field.
+   */
+  const many = answersForAll(text.replace(/[!.]+$/, '').trim(), pending, year);
+  if (many) return many;
+  /**
+   * THE ONE THING MISSING, ANSWERED BARE: "interflora" when only who it was
+   * paid to is asked, for every one missing it (his harness 2026-10-07).
+   */
+  const asked = [...new Set(pending.items.filter((x) => !x.skipped).flatMap((x) => x.missing ?? []))];
+  if (asked.length === 1 && ['payee', 'description'].includes(asked[0]) && /^[\p{L}][\p{L}\d .&'()-]{1,40}$/u.test(bare)
+    && bare.split(/\s+/).length <= 4 && !YES.test(bare) && !NO.test(bare) && !/^(?:modify|change|edit|help|hi|hello|show|undo|wait)\b/i.test(bare)) {
+    const which = pending.items.filter((x) => !x.skipped && (x.missing ?? []).includes(asked[0])).map((x) => x.n);
+    return { kind: 'fix', parts: [{ which, fixes: [{ field: asked[0], value: String(said).trim() }] }] };
   }
   // "ME": every one still waiting on who spent it was the admin
   const noSpender = pending.items.filter((x) => !x.skipped && x.missing?.includes('spentBy'));

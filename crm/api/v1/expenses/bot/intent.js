@@ -51,6 +51,8 @@ async function readIntent(said, summary, { client = null } = {}) {
 
 /** The one line it sees: counts only, never an expense. */
 function summaryOf(pending) {
+  if (pending?.kind === 'edit') return `${(pending.items ?? [1]).length} change(s) to saved expenses, waiting for yes`;
+  if (pending?.kind === 'remove') return `${(pending.ids ?? [1]).length} expense(s) to remove, waiting for yes`;
   const live = (pending?.items ?? []).filter((x) => !x.skipped);
   const missing = live.filter((x) => x.missing?.length).length;
   const copies = live.filter((x) => (x.doubts ?? []).some((d) => /^same as \d+/.test(d))).length;

@@ -10,7 +10,7 @@ const { ask } = require('./ai');
 // value is checked by code before anything is written.
 
 const KINDS = ['add', 'edit', 'remove', 'question', 'undo', 'answer', 'chat', 'other'];
-const FIELDS = ['groupName', 'spentOn', 'description', 'payee', 'rawAmount', 'currency', 'spentBy'];
+const FIELDS = ['groupName', 'spentOn', 'description', 'payee', 'rawAmount', 'currency', 'spentBy', 'category'];
 
 const TARGET = {
   type: 'object',

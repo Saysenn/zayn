@@ -11,6 +11,7 @@ import Modal from '../components/modals/Modal';
 import { EmptyState, ErrorState } from '../components/display/StateBlocks';
 import ConfirmDialog from '../components/modals/ConfirmDialog';
 import AddExpense from '../components/modals/AddExpense';
+import ReceiptViewer from '../components/modals/ReceiptViewer';
 import ExpensesDiffModal from '../components/import/ExpensesDiffModal';
 import ExpensesExportModal from '../components/export/ExpensesExportModal';
 import NumberRangeFilter from '../components/filters/NumberRangeFilter';
@@ -57,13 +58,15 @@ const STICKY = 'expenses';
 const asList = (values) => values.map((v) => ({ value: v, label: v }));
 
 /**
- * THE RECEIPT, OPENED IN A NEW TAB. Kept for the current month and the two
+ * THE RECEIPT, OPENED ON THE PAGE in a zoomable window (his call
+ * 2026-10-07; it was a new tab). Kept for the current month and the two
  * before (expenses/bot/receipts.js); older says so rather than linking to
  * nothing. Fetched with the sign-in cookie, so it is never a public link.
  */
 function ReceiptLink({ row }) {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [file, setFile] = useState(null);
   if (!row.receipt_path) {
     return row.receipt_cleared_at
       ? <span className="text-[11px] text-text-faint" title="Receipts are kept for 3 months">receipt cleared</span>
@@ -73,8 +76,8 @@ function ReceiptLink({ row }) {
     setBusy(true);
     setFailed(false);
     try {
-      const { blob } = await apiService.expenseReceipt.get(row.id);
-      window.open(URL.createObjectURL(blob), '_blank', 'noopener');
+      const { blob, filename } = await apiService.expenseReceipt.get(row.id);
+      setFile({ blob, filename });
     } catch {
       setFailed(true);
     } finally {
@@ -82,17 +85,26 @@ function ReceiptLink({ row }) {
     }
   };
   return (
-    <button
-      type="button"
-      onClick={open}
-      disabled={busy}
-      title={failed ? 'Receipt unavailable' : 'View the receipt'}
-      aria-label={`View the receipt for ${row.description}`}
-      className="btn-quiet inline-flex h-6 min-h-0 items-center gap-1 rounded border border-border bg-surface px-1.5 py-0 text-[11px] font-medium text-accent-strong hover:border-accent disabled:opacity-50"
-    >
-      <ReceiptIcon width={12} height={12} />
-      {failed ? 'Unavailable' : busy ? '…' : 'Receipt'}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={open}
+        disabled={busy}
+        title={failed ? 'Receipt unavailable' : 'View the receipt'}
+        aria-label={`View the receipt for ${row.description}`}
+        className="btn-quiet inline-flex h-6 min-h-0 items-center gap-1 rounded border border-border bg-surface px-1.5 py-0 text-[11px] font-medium text-accent-strong hover:border-accent disabled:opacity-50"
+      >
+        <ReceiptIcon width={12} height={12} />
+        {failed ? 'Unavailable' : busy ? '…' : 'Receipt'}
+      </button>
+      {file && (
+        <ReceiptViewer
+          file={file}
+          title={`${row.description} · ${formatMoney(row.raw_amount, row.currency)} · ${formatDate(row.spent_on)}`}
+          onClose={() => setFile(null)}
+        />
+      )}
+    </>
   );
 }
 

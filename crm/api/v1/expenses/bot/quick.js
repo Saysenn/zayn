@@ -19,20 +19,21 @@ const find = require('./find');
  * longer verb counts ("delte", "upadte").
  */
 const VERBS = {
-  remove: ['get rid of', 'take out', 'take off', 'cross off', 'strike off', 'remove', 'delete', 'del', 'drop', 'erase', 'scrap', 'wipe', 'discard',
+  remove: ['get rid of', 'take out', 'take off', 'cross off', 'strike off', 'remove', 'delete', 'del', 'drop', 'erase', 'scrap', 'wipe', 'discard', 'clear',
     'void', 'bin', 'chuck'],
   change: ['change', 'update', 'edit', 'modify', 'fix', 'correct', 'amend', 'adjust', 'revise', 'alter', 'rectify', 'tweak'],
   show: ['pull up', 'bring up', 'show', 'list', 'view', 'display'],
 };
 const escape = (w) => w.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&');
-const VERB_AT_START = Object.fromEntries(Object.entries(VERBS).map(([k, list]) => [k, new RegExp(`^(?:(?:ok(?:ay)?|pls|please|so|right|can you|could you)[,\\s]+)?(?:${list.map(escape).join('|')})\\b`, 'i')]));
+const VERB_AT_START = Object.fromEntries(Object.entries(VERBS).map(([k, list]) => [k, new RegExp(`^(?:(?:ok(?:ay)?|pls|please|so|right|hey|hi|can you|could you|can u|could u|would you|will you|i need you to|i want to|i'?d like to)[,\\s]+)*(?:${list.map(escape).join('|')})\\b`, 'i')]));
 const VERB_AT_END = Object.fromEntries(Object.entries(VERBS).map(([k, list]) => [k, new RegExp(`\\s+(?:${list.map(escape).join('|')})(?:\\s+(?:please|pls|it|them|mate))*[.!?]*$`, 'i')]));
 // words around a request that are never what it is about
 const SAY_FILLER = /\b(?:please|pls|mate|cheers)\b/gi;
 
 /** "bin the cleaner" → "remove the cleaner"; "the taxi, remove it" → "remove the taxi". */
 function canonicalVerbs(text) {
-  const t = String(text ?? '').trim();
+  // WHY they want it is not what it is: "the internet bill is a duplicate, remove it"
+  const t = String(text ?? '').trim().replace(/\s*,?\s*\b(?:is|was|looks like|it'?s)\s+(?:a\s+)?(?:duplicate|double|dupe|mistake|wrong one|not ours|repeat(?:ed)?|copy)\b\s*,?/gi, ' ').replace(/\s+/g, ' ').trim();
   // A NEW EXPENSE is never a request ("drop off fee 30 paid to Ali")
   if (/\bpaid\b|\bspent\b/i.test(t) && /\d/.test(t) && !/\b(?:to|into)\s+\d/i.test(t)) return t;
   const { oneTypo } = require('../../agent/tools/resolvePerson');
@@ -75,28 +76,49 @@ function periodOf(text, today) {
   return null;
 }
 
-const NOT_A_TARGET = /\b(?:all|every|everything|each|and|also|both|it|that|this|them|those|last)\b/i;
+const NOT_A_TARGET = /\b(?:all|every|everything|each|and|both|it|that|this|them|those|last)\b/i;
 
-/** "the cleaner on 7 Oct", "the 45 taxi": one target, or null. */
+// the groups' names, never part of what an expense is ("the MANBAT groceries")
+let GROUP_NAMES = [];
+
+/** "the cleaner on 7 Oct", "the 45 taxi", "the 120.43 one": one target, or null. */
 function targetOf(text, today) {
-  const t = String(text).trim();
+  // a group named narrows the search to it (Diane's command center)
+  const named = GROUP_NAMES.find((g) => new RegExp(`\\b${g.replace(/[^a-z0-9 ]/gi, '')}\\b`, 'i').test(String(text)));
+  const t = GROUP_NAMES.reduce((x, g) => x.replace(new RegExp(`\\b${g.replace(/[^a-z0-9 ]/gi, '')}(?:'s)?\\b`, 'gi'), ' '), String(text)).replace(/\s+/g, ' ').trim().replace(/\b(\d+(?:\.\d+)?)\s*(?:aed|dhs?)?\s+one\b/i, 'aed $1').replace(/^(?:the\s+)?(\d+\.\d{2})$/, 'aed $1');
   if (!t || NOT_A_TARGET.test(t.replace(/\b(?:the|this month'?s?)\b/gi, ''))) return null;
   const list = find.targetsIn(t, Number(today.slice(0, 4)), today);
   if (list.length !== 1) return null;
   const x = list[0];
   if (!find.wordsOf(x.words).length && !x.date && !x.amount) return null;
-  return { ...blank, words: String(x.words ?? '').trim(), amount: x.amount ?? '', date: x.date ?? '' };
+  return { ...blank, words: String(x.words ?? '').trim(), amount: x.amount ?? '', date: x.date ?? '', ...(named ? { group: named } : {}) };
 }
 
 /** The new value in "to 50", "to 5 Oct", "to Careem": one field, or null. */
+const CATEGORY_OF = {
+  fuel: 'fuel', petrol: 'fuel', diesel: 'fuel', travel: 'travel', transport: 'travel', taxi: 'travel', food: 'food', meal: 'food', meals: 'food',
+  office: 'office', supplies: 'office', bills: 'bills', bill: 'bills', utilities: 'bills', utility: 'bills', other: 'other',
+};
+
 function changeOf(value, today, field = null) {
-  const v = String(value).trim().replace(/[.!]+$/, '');
-  const money = /^(?:(aed|gbp|eur|usd|dhs?|£|€|\$)\s*)?(\d[\d,]*(?:\.\d+)?)\s*(aed|gbp|eur|usd|dhs?|dirhams?)?$/i.exec(v);
+  const v = String(value).trim().replace(/[.!]+$/, '').replace(/\s+(?:instead|please|pls)$/i, '');
+  // A CATEGORY, only when they said it is the category
+  if (field === 'category') {
+    const c = CATEGORY_OF[v.toLowerCase().replace(/^(?:a|an|the)\s+/, '').replace(/\s+(?:category|expense)$/, '')];
+    return c ? [{ field: 'category', value: c }] : null;
+  }
+  // "the 6th", "on the 6th": this month's day
+  const ord = /^(?:on\s+)?(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)$/i.exec(v);
+  if (ord && (!field || field === 'spentOn') && Number(ord[1]) >= 1 && Number(ord[1]) <= 31) {
+    return [{ field: 'spentOn', value: `${today.slice(0, 8)}${String(ord[1]).padStart(2, '0')}` }];
+  }
+  const money = /^(?:(aed|gbp|eur|usd|dhs?|£|€|\$)\s*)?(\d[\d,]*(?:\.\d+)?)\s*(aed|gbp|eur|usd|dhs?|dirhams?|pounds?|quid|sterling|euros?|dollars?)?(?:\s+not\s+\S+)?$/i.exec(v);
   if (money && (!field || field === 'rawAmount')) {
     const cur = currencyOf(money[1] ?? money[3] ?? '');
     return [{ field: 'rawAmount', value: String(num(money[2])) }, ...(cur ? [{ field: 'currency', value: cur }] : [])];
   }
-  const day = /^today$/i.test(v) ? today : /^yesterday$/i.test(v) ? minus(today, 1) : dayOf(v, Number(today.slice(0, 4)));
+  const dv = v.replace(/^on\s+/i, '');
+  const day = /^today$/i.test(dv) ? today : /^yesterday$/i.test(dv) ? minus(today, 1) : dayOf(dv, Number(today.slice(0, 4)));
   if (day && (!field || field === 'spentOn') && /[a-z]|\/|-/i.test(v)) return [{ field: 'spentOn', value: day }];
   const by = /^(?:spent by|by)\s+(.{2,40})$/i.exec(v);
   if (by && (!field || field === 'spentBy')) return [{ field: 'spentBy', value: by[1] }];
@@ -108,6 +130,7 @@ function changeOf(value, today, field = null) {
 }
 
 const FIELD_WORD = {
+  category: 'category', type: 'category', kind: 'category',
   amount: 'rawAmount', price: 'rawAmount', cost: 'rawAmount', total: 'rawAmount',
   date: 'spentOn', day: 'spentOn', payee: 'payee', shop: 'payee', vendor: 'payee',
   spender: 'spentBy', 'spent by': 'spentBy', description: 'description', name: 'description',
@@ -118,6 +141,7 @@ const FIELD_WORD = {
  * @returns {null | { kind, sure, target, changes, query, quick: true }}
  */
 function quickRoute(said, { today, groups = [], group = null } = {}) {
+  GROUP_NAMES = [...groups, ...(group && group !== '*' ? [group] : [])].filter(Boolean);
   const t = canonicalVerbs(String(said ?? '').trim().replace(/\s+/g, ' '));
   if (!t || t.length > 140 || /\n/.test(said)) return null;
   const route = (kind, extra) => ({ kind, sure: true, target: { ...blank }, changes: [], query: { from: '', to: '', group: '', groupBy: '', measure: 'list', words: '' }, quick: true, ...extra });
@@ -126,12 +150,82 @@ function quickRoute(said, { today, groups = [], group = null } = {}) {
   const rm = /^(?:(?:ok(?:ay)?|pls|please)[,\s]+)?(?:remove|delete|take out|get rid of)\s+(.+?)(?:\s+(?:please|pls))?[.!]*$/i.exec(t);
   if (rm) {
     if (/^(?:it|that|that one|the last one|this one)$/i.test(rm[1])) return route('remove', { target: { ...blank, last: true } });
-    const target = targetOf(rm[1].replace(/\b(\d+(?:\.\d+)?)\s+one\b/i, 'aed $1'), today);
+    const target = targetOf(rm[1].replace(/\b(\d+(?:\.\d+)?)\s+one\b/i, 'aed $1').replace(/^(?:everything|all)\s+(?:from\s+)?/i, ''), today);
+    // "REMOVE YESTERDAY": every one that day, shown for a yes
+    if (target && target.date && !find.wordsOf(target.words).length && !target.amount) target.all = true;
+    // "REMOVE ALL THE TAXIS": every one of them, shown for a yes
+    if (target && /^(?:all|every|each|everything)\b/i.test(rm[1])) target.all = true;
     return target ? route('remove', { target }) : null;
   }
 
   // CHANGE: "change the taxi on 5 Oct to 50", "make the lunch 120", "change the date of the taxi to 5 Oct"
-  const ch = /^(?:(?:ok(?:ay)?|pls|please|actually)[,\s]+)?(?:change|make|update|set|correct|edit)\s+(?:the\s+)?(?:(amount|price|cost|total|date|day|payee|shop|vendor|spender|spent by|description|name)\s+(?:of|on|for)\s+(?:the\s+)?)?(.+?)\s+(?:to|=|into)\s+(.+)$/i.exec(t)
+  const FIELDS_SAID = 'amount|price|cost|total|date|day|payee|shop|vendor|spender|spent by|description|name|category|type';
+  // "IT": "make it 250", "actually 250 not 300", "it was on the 3rd" — the one in hand
+  const it = /^(?:(?:actually|no|sorry|oops|wait|hmm|ah)[,!.\s]+)*(?:(?:make|change|set)\s+it\s+(?:to\s+)?|it'?s\s+|it\s+(?:is|was)\s+|should be\s+|it\s+should be\s+)?(.+?)(?:\s+not\s+[^\s]+)?(?:\s+instead)?[.!]*$/i.exec(t);
+  if (it && /^(?:(?:actually|no|sorry|oops|wait|hmm|ah)\b|make it|change it|set it|it'?s|it (?:is|was)|should be|\d)/i.test(t) && !/\b(?:paid|spent|at|from)\b/i.test(t)) {
+    const changes = changeOf(it[1], today);
+    if (changes) return route('edit', { target: { ...blank, last: true }, changes, it: true });
+  }
+  // A FIELD ALONE: "and the date to 3 Oct", "the payee to Uber" — the one in hand
+  const alone = new RegExp(`^(?:and\\s+)?(?:change\\s+|make\\s+|set\\s+)?(?:the\\s+)?(${FIELDS_SAID})\\s+(?:to|=|is|should be)\\s+(.+)$`, 'i').exec(t);
+  if (alone) {
+    const changes = changeOf(alone[2], today, FIELD_WORD[alone[1].toLowerCase()]);
+    if (changes) return route('edit', { target: { ...blank, last: true }, changes, it: true });
+  }
+  // "THE GROCERIES CATEGORY TO OFFICE", "the taxi payee to Uber"
+  const after = new RegExp(`^(?:change|update|set|correct|edit)\\s+(?:the\\s+)?(.+?)(?:'s)?\\s+(${FIELDS_SAID})\\s+(?:to|=|at|as)?\\s*(.+)$`, 'i').exec(t);
+  if (after) {
+    const target = targetOf(after[1], today);
+    const changes = changeOf(after[3], today, FIELD_WORD[after[2].toLowerCase()]);
+    if (target && changes) return route('edit', { target, changes });
+  }
+  // "TAXI 45 -> 50", "the taxi from 45 to 50", "groceries 139.91 => 300"
+  const arrow = /^(?:change\s+)?(?:the\s+)?([a-z][\w\s'&.-]{1,40}?)\s+(?:from\s+)?(?:aed\s*)?(\d[\d,]*(?:\.\d+)?)\s*(?:->|=>|→|➜|to)\s*(?:aed\s*)?(\d[\d,]*(?:\.\d+)?)\s*(?:aed)?[.!]*$/i.exec(t);
+  if (arrow) {
+    const target = targetOf(`${arrow[1]} aed ${arrow[2]}`, today);
+    if (target) return route('edit', { target, changes: [{ field: 'rawAmount', value: String(num(arrow[3])) }] });
+  }
+  // "UPDATE THE LAST EXPENSE TO 99", "change the last one to 99"
+  const lastOne = /^(?:change|update|set|make|correct|edit|fix)\s+(?:the\s+)?last\s+(?:one|expense|entry|item)\s+(?:to|=)?\s*(.+)$/i.exec(t);
+  if (lastOne) {
+    const changes = changeOf(lastOne[1], today);
+    if (changes) return route('edit', { target: { ...blank, last: true }, changes });
+  }
+  // "PUT THE GROCERIES UNDER OFFICE", "move the taxi to travel"
+  const under = /^(?:put|move|file|class|categori[sz]e)\s+(?:the\s+)?(.+?)\s+(?:under|in|into|as|to)\s+(?:the\s+)?([a-z]+)(?:\s+category)?$/i.exec(t);
+  if (under && CATEGORY_OF[under[2].toLowerCase()]) {
+    const target = targetOf(under[1], today);
+    if (target) return route('edit', { target, changes: [{ field: 'category', value: CATEGORY_OF[under[2].toLowerCase()] }] });
+  }
+  // "FIX THE DATE ON THE INTERNET BILL, IT WAS 30 SEPT", "correct the internet bill, it's 480",
+  // "update the taxi amount, it should have been 55 aed"
+  const itWas = new RegExp(`^(?:change|update|set|correct|edit|fix)\\s+(?:the\\s+)?(?:(${FIELDS_SAID})\\s+(?:on|of|for)\\s+(?:the\\s+)?)?(.+?)(?:\\s+(${FIELDS_SAID}))?\\s*[,;:-]\\s*(?:it|that|this)?\\s*(?:'s|is|was|were|should be|should have been|needs to be)\\s+(.+)$`, 'i').exec(t);
+  if (itWas) {
+    const field = (itWas[1] || itWas[3]) ? FIELD_WORD[(itWas[1] || itWas[3]).toLowerCase()] : null;
+    const target = targetOf(itWas[2], today);
+    const changes = changeOf(itWas[4], today, field);
+    if (target && changes) return route('edit', { target, changes });
+  }
+  // "50 FOR THE TAXI NOT 45", "300 for the groceries"
+  const forThe = /^(?:aed\s*)?(\d[\d,]*(?:\.\d+)?)\s*(?:aed|dhs?)?\s+(?:for|on)\s+(?:the\s+)?(.+?)(?:\s+not\s+\S+)?[.!]*$/i.exec(t);
+  if (forThe && !/\b(?:paid|spent|at)\b/i.test(t) && /\bnot\b|^\d/.test(t)) {
+    const target = targetOf(forThe[2], today);
+    if (target && /\bnot\b/i.test(t)) return route('edit', { target, changes: [{ field: 'rawAmount', value: String(num(forThe[1])) }] });
+  }
+  // "CHANGE CLEANER 200" (no "to"), as a part of several
+  const bareChange = /^(?:change|update|set)\s+(?:the\s+)?([a-z][\w\s'&.-]{1,40}?)\s+(?:aed\s*)?(\d[\d,]*(?:\.\d+)?)\s*(?:aed)?$/i.exec(t);
+  if (bareChange && !/\s(?:to|into|=|is|was)$/i.test(bareChange[1])) {
+    const target = targetOf(bareChange[1], today);
+    if (target) return route('edit', { target, changes: [{ field: 'rawAmount', value: String(num(bareChange[2])) }] });
+  }
+  // "THE TAXI WAS 55", "the cleaner was on the 6th", "the petrol should be 130 not 120.43"
+  const was = /^(?:the\s+)?([a-z][\w\s'&.-]{1,50}?)\s+(?:was|were|is|are|should be|should have been|=)\s+(?:actually\s+)?(.+?)(?:\s+not\s+[^\s]+)?[.!]*$/i.exec(t);
+  if (was && !/^(?:it|that|this|there|what|how|which|who|change|update|set|make|correct|edit|fix)\b/i.test(was[1])) {
+    const target = targetOf(was[1], today);
+    const changes = changeOf(was[2], today);
+    if (target && changes) return route('edit', { target, changes });
+  }
+  const ch = /^(?:(?:ok(?:ay)?|pls|please|actually)[,\s]+)?(?:change|make|update|set|correct|edit)\s+(?:the\s+)?(?:(amount|price|cost|total|date|day|payee|shop|vendor|spender|spent by|description|name|category|type)\s+(?:of|on|for)\s+(?:the\s+)?)?(.+?)\s+(?:to|=|into)\s+(.+)$/i.exec(t)
     ?? /^(?:make)\s+(?:the\s+)?()(.+?)\s+(\d[\d,]*(?:\.\d+)?(?:\s*(?:aed|gbp|eur|usd|dhs?))?)$/i.exec(t);
   if (ch) {
     const field = ch[1] ? FIELD_WORD[ch[1].toLowerCase()] : null;
@@ -140,16 +234,24 @@ function quickRoute(said, { today, groups = [], group = null } = {}) {
     return target && changes ? route('edit', { target, changes }) : null;
   }
 
-  // HOW MUCH / LIST: "how much this month?", "how much on fuel this week", "list today's expenses"
-  const total = /^(?:so\s+)?(?:how much|what(?:'s| is| did we spend| have we spent)(?: the)? total|total(?: spent| spending)?)\b(.*)$/i.exec(t);
-  const list = !total && /^(?:list|show(?: me)?)\s+(?:all\s+)?(?:the\s+)?(.*?)(?:'s)?\s*expenses?\b(.*)$/i.exec(t);
-  if (total || list) {
-    const rest = total ? total[1] : `${list[1]} ${list[2]}`;
-    // a split, a follow-up or a name is the router's to read
-    if (/\b(?:by|per|each|split|break ?down|and|what about|biggest|largest|most)\b/i.test(rest)) return null;
-    const period = periodOf(rest, today);
-    let words = rest
-      .replace(/\b(?:did|do|have|has|we|i|you|they|spend|spent|spending|so far|in total|altogether|this month|today|yesterday|this week|last month|month to date|on|for|at|the|our|expenses?|was|were|is|are)\b/gi, ' ')
+  /**
+   * QUESTIONS, in code (his harness 2026-10-07): totals, lists, counts, the
+   * biggest, split by category / payee / person / day / group, for a period
+   * and a payee or a category. Follow-ups ("and august?") stay the router's.
+   */
+  const SPLIT = { category: 'category', categories: 'category', type: 'category', payee: 'payee', payees: 'payee', shop: 'payee', vendor: 'payee', person: 'spentBy', people: 'spentBy', spender: 'spentBy', who: 'spentBy', day: 'day', days: 'day', date: 'day', group: 'group', groups: 'group' };
+  const asking = /^(?:so\s+)?(?:how much|how many|what(?:'s| is| was| did we spend| have we spent| did i spend)|total|list|show(?: me)?|give me|biggest|largest|top|expenses?|spending)\b/i.test(t)
+    || /^(?:today|yesterday|this week|this month|last month)'?s?\s+expenses?\??$/i.test(t);
+  if (asking && !/\b(?:what about|and in|and for|and on|how about)\b/i.test(t) && !/^(?:show|give)(?: me)? (?:the )?(?:receipt|preview|image|picture)/i.test(t)) {
+    const split = /\b(?:by|per|each|split by|broken down by|break ?down by)\s+(category|categories|type|payee|payees|shop|vendor|person|people|spender|who|day|days|date|group|groups)\b/i.exec(t);
+    const measure = /\b(?:biggest|largest|top|most expensive|highest)\b/i.test(t) ? 'biggest'
+      : /^how many\b|\bcount\b|\bnumber of\b/i.test(t) ? 'count'
+        : (/^(?:list|show|give me|expenses?)\b|\bexpenses?\s*\??$/i.test(t) || /^(?:today|yesterday|this week|this month|last month)/i.test(t)) && !/\b(?:how much|total)\b/i.test(t) ? 'list' : 'total';
+    const period = periodOf(t, today);
+    let words = t.replace(/['’]s\b/gi, '')
+      .replace(/^(?:so\s+)?(?:how much|how many|what(?:'s| is| was| did we spend| have we spent| did i spend)?|total|list|show(?: me)?|give me)\b/i, ' ')
+      .replace(split ? split[0] : /$^/, ' ')
+      .replace(/\b(?:did|do|have|has|we|i|you|they|spend|spent|spending|so far|in total|altogether|this month|today'?s?|yesterday'?s?|this week|last month|month to date|on|for|at|in|from|the|our|my|all|expenses?|expense|was|were|is|are|biggest|largest|top|most expensive|highest|count|number of|cost|costs|total|overall|whole)\b/gi, ' ')
       .replace(/[?.!,'’]/g, ' ').replace(/\s+/g, ' ').trim();
     // a group named (Diane's command center): the group, not a word to search
     const g = groups.find((x) => new RegExp(`\\b${x.replace(/[^a-z0-9 ]/gi, '')}\\b`, 'i').test(words));
@@ -160,7 +262,7 @@ function quickRoute(said, { today, groups = [], group = null } = {}) {
     if (/^(?:spent by|by)\b/i.test(words)) return null;
     return route('question', {
       query: {
-        from: period?.from ?? '', to: period?.to ?? '', group: g ?? groupOf('', groups) ?? '', groupBy: '', measure: total ? 'total' : 'list', words,
+        from: period?.from ?? '', to: period?.to ?? '', group: g ?? '', groupBy: split ? SPLIT[split[1].toLowerCase()] : '', measure: split ? 'total' : measure, words,
       },
     });
   }

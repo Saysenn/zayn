@@ -182,6 +182,9 @@ export async function handleMessage(input) {
           text: `${lead}${out.reply}`,
           ...(extra.length ? { more: extra } : {}),
           ...(out.image ? { image: out.image } : {}),
+          // the picture's one-line caption, and the notes / "Please check" /
+          // what to reply sent AFTER the pictures (his call 2026-10-07)
+          ...(out.image && out.imageCaption ? { imageCaption: out.imageCaption, body: `${lead}${out.body ?? ''}` } : {}),
           ...(out.moreImages?.length ? { moreImages: out.moreImages } : {}),
           ...(out.receipt ? { receipt: out.receipt } : {}),
         };

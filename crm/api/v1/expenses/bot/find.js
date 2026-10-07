@@ -44,7 +44,11 @@ const asItem = (r) => ({
 const stem = (w) => w.replace(/ies$/, 'y').replace(/(?<=[a-z]{3})(?:es|s)$/, (m, i, all) => (/(?:ss|us|is)$/.test(all) ? m : ''));
 const wordsOf = (s) => String(s ?? '').toLowerCase().split(/[^\p{L}\p{N}]+/u).map((w) => stem(fold(w))).filter((w) => w.length >= 3 && !['the', 'and', 'for', 'one', 'expense', 'expenses', 'paid', 'yesterday', 'today',
   // said around a target, never part of one ("actually change the cleaner to 200 instead")
-  'actually', 'instead', 'also', 'please', 'pls', 'just', 'that', 'this', 'those', 'these', 'too', 'again', 'wait', 'sorry', 'yes', 'okay', 'mate', 'cheers'].includes(w));
+  'actually', 'instead', 'also', 'please', 'pls', 'just', 'that', 'this', 'those', 'these', 'too', 'again', 'wait', 'sorry', 'yes', 'okay', 'mate', 'cheers',
+  // what any expense is, never which one ("the dewa bill" is DEWA's)
+  'bill', 'invoice', 'receipt', 'payment', 'purchase', 'transaction', 'entry', 'item', 'thing',
+  // around a date or a request, never a name ("the cleaner payment from 7 oct")
+  'from', 'dated', 'with', 'about', 'regarding'].includes(w));
 
 /**
  * The saved expenses their words point at, in the last two months.
@@ -57,11 +61,19 @@ async function findTarget(group, target, { today, lastIds = [] } = {}) {
     const hit = rows.filter((r) => lastIds.includes(r.id));
     if (hit.length) return hit;
   }
+  // "THE LAST ONE" with nothing done this chat: the last one SAVED here
+  // (his sweep 2026-10-07: it picked the oldest)
+  if (target.last && !wordsOf(target.words).length) {
+    const last = await lastSaved(group, 1);
+    if (last.length) return last;
+  }
   const want = wordsOf(target.words);
   const amount = Number(String(target.amount ?? '').replace(/[^\d.]/g, ''));
   const close = (w, h) => h === w || (Math.min(w.length, h.length) >= 4 && (h.startsWith(w) || w.startsWith(h)));
   const isDay = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v ?? ''));
+  const inGroup = (r) => !target.group || String(r.groupName ?? '').toUpperCase() === String(target.group).toUpperCase();
   const scored = rows.map((r) => {
+    if (!inGroup(r)) return null;
     if (target.date && r.spentOn !== target.date) return null;
     // A RANGE THEY SAID ("this week", "in october") is kept to: "remove the
     // coffees from this week" reached back to August (test sweep 2026-10-07).
@@ -80,7 +92,21 @@ async function findTarget(group, target, { today, lastIds = [] } = {}) {
   // No partial fallback: "team dinner" reached every "Team lunch", and with
   // "remove all" that is the wrong things gone. Nothing whole is "not found",
   // which shows the latest so they can say which.
-  return scored.filter((x) => x.hits === want.length).map((x) => x.r);
+  const whole = scored.filter((x) => x.hits === want.length).map((x) => x.r);
+  if (whole.length || !want.length) return whole;
+  /**
+   * A TYPO ("grocries", his sweep 2026-10-07): one letter off on words of 5
+   * or more, only when nothing matched exactly. Still shown for a yes.
+   */
+  const { oneTypo } = require('../../agent/tools/resolvePerson');
+  const near = (w, h) => close(w, h) || (w.length >= 5 && h.length >= 5 && oneTypo(w, h));
+  return rows.filter((r) => {
+    if (!inGroup(r)) return false;
+    if (target.date && r.spentOn !== target.date) return false;
+    if (target.amount && Number.isFinite(amount) && amount > 0 && Math.abs(r.rawAmount - amount) > 0.005) return false;
+    const have = wordsOf(`${r.description} ${r.payee}`);
+    return want.every((w) => have.some((h) => near(w, h)));
+  });
 }
 
 /**
@@ -97,7 +123,7 @@ const FILLER = /\b(?:yes|yeah|yep|ok(?:ay)?|sure|please|pls|and|also|too|as well
 
 function targetsIn(text, year, today = null) {
   const { dayOf } = require('./extract');
-  const parts = String(text ?? '').split(/\n+|\s*•\s*|\s*;\s*|,\s*(?=(?:and\s+)?(?:also\s+)?(?:remove|delete|the)\b)|\s+and\s+(?:also\s+)?(?:remove|delete)\s+|\s+(?:and\s+)?also\s+(?:remove\s+|delete\s+)?|\s+and\s+(?=the\b)/i);
+  const parts = String(text ?? '').split(/\n+|\s*•\s*|\s*;\s*|\s*&\s*|,(?!\d)\s*(?!(?:\d|on\b|from\b))|\s+and\s+(?:also\s+)?(?:remove|delete)\s+|\s+(?:and\s+)?also\s+(?:remove\s+|delete\s+)?|\s+and\s+(?=the\b)/i);
   const out = [];
   for (const raw of parts) {
     let part = String(raw ?? '').trim();
@@ -116,12 +142,18 @@ function targetsIn(text, year, today = null) {
     } else {
       if (today && /\byesterday'?s?\b/i.test(part)) { t.date = minus(today, 1); part = part.replace(/\byesterday'?s?\b/i, ' '); }
       if (today && /\btoday'?s?\b/i.test(part)) { t.date = today; part = part.replace(/\btoday'?s?\b/i, ' '); }
+      // "on the 5th": this month's day
+      const ord = today && /\b(?:on\s+)?the\s+(\d{1,2})(?:st|nd|rd|th)\b|\bon\s+(\d{1,2})(?:st|nd|rd|th)\b/i.exec(part);
+      if (ord && !t.date) {
+        const d = Number(ord[1] ?? ord[2]);
+        if (d >= 1 && d <= 31) { t.date = `${today.slice(0, 8)}${String(d).padStart(2, '0')}`; part = part.replace(ord[0], ' '); }
+      }
       const dm = DAY_MONTH.exec(part);
       const md = !dm && MONTH_DAY.exec(part);
       if (dm) { t.date = dayOf(`${dm[1]} ${dm[2]}`, year); part = part.replace(dm[0], ' '); }
       if (md) { t.date = dayOf(`${md[2]} ${md[1]}`, year); part = part.replace(md[0], ' '); }
-      const money = /(?:\b(?:aed|gbp|eur|usd)|[£€$])\s*(\d+(?:\.\d+)?)|\b(\d+(?:\.\d+)?)\s*(?:aed|gbp|dhs?)\b/i.exec(part);
-      if (money) { t.amount = money[1] ?? money[2]; part = part.replace(money[0], ' '); }
+      const money = /(?:\b(?:aed|gbp|eur|usd)|[£€$])\s*(\d[\d,]*(?:\.\d+)?)|\b(\d[\d,]*(?:\.\d+)?)\s*(?:aed|gbp|dhs?)\b/i.exec(part);
+      if (money) { t.amount = String(money[1] ?? money[2]).replace(/,/g, ''); part = part.replace(money[0], ' '); }
       t.words = part.replace(FILLER, ' ').replace(/\s+/g, ' ').trim();
     }
     // a word, a day or an amount is enough to point at one ("the 45 one")
@@ -168,6 +200,7 @@ async function answer(scopeGroup, query, { today, out = null }) {
   if (rest.length) rows = rows.filter((r) => rest.some((w) => wordsOf(`${r.description} ${r.payee} ${r.spentBy}`).some((h) => h === w || h.startsWith(w))));
   const span = from === to ? format.day(from) : `${format.day(from)} – ${format.day(to)}`;
   const scope = `${group === ALL ? 'all groups' : group}${want.length ? ` · "${query.words}"` : ''} · ${span}`;
+  if (out) out.ids = rows.map((r) => r.id);
   if (!rows.length) return `No expenses found for ${scope}.`;
   const allGroups = group === ALL;
 

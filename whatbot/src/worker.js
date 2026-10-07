@@ -124,12 +124,16 @@ const messageWorker = new Worker(
     // THE EXPENSE PREVIEW AS A PICTURE, its text as the caption.
     if (reply.image && features[reply.image.feature ?? "expenseImages"]) {
       // a pay breakdown: its one line caption, then whatever menu followed it
-      const caption = reply.caption ? [reply.caption, menuOf(reply.text)].filter(Boolean).join("\n\n") : reply.text;
+      const caption = reply.imageCaption
+        ?? (reply.caption ? [reply.caption, menuOf(reply.text)].filter(Boolean).join("\n\n") : reply.text);
       await sendImage(from, to, { content: Buffer.from(reply.image.base64, "base64"), caption, mimetype: reply.image.mime });
       // a long report's further pages, in order
       for (const page of reply.moreImages ?? []) {
         await sendImage(from, to, { content: Buffer.from(page.base64, "base64"), caption: "", mimetype: page.mime });
       }
+      // AN EXPENSE PREVIEW: the pictures first, THEN the notes, "Please
+      // check" and what to reply, as their own message
+      if (reply.imageCaption && reply.body?.trim()) await sendText(from, to, reply.body);
     } else {
       await sendText(from, to, reply.text);
     }

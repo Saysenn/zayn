@@ -184,6 +184,9 @@ const TurnReply = z.object({
   replies: z.array(z.string()).optional(),
   // the preview as a picture; `reply` is then its caption
   image: z.object({ base64: z.string(), mime: z.string(), filename: z.string().optional() }).optional(),
+  // the picture's one-line caption, and what goes after the pictures
+  imageCaption: z.string().optional(),
+  body: z.string().optional(),
   // the receipt they asked for ("show me the receipt for 4")
   receipt: z.object({ base64: z.string(), mime: z.string(), filename: z.string().optional() }).optional(),
   // a long report's further pages, sent after the first, no caption

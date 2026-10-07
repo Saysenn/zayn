@@ -88,8 +88,8 @@ test('THE PREVIEW is WhatsApp formatting written by code: a field per line, sepa
   assert.match(text, /\*1\. Taxi\*\n• Amount: \*AED 45\.00\*\n• Date: 06 Oct 2026\n• Paid to: Careem\n• Spent by: Gary Test/);
   assert.match(text, /\*2\. Ink\* ⚠️\n• Amount: \*AED 180\.00\*\n• Date: ❓ _missing_/);
   assert.match(text, /\*TOTAL:\* \*AED 225\.00\*/);
-  assert.match(text, /⚠️ \*Please check\*\n2\. Amazon · AED 180\.00: what date\?/);
-  assert.match(text, /Reply with the answers \(like \*2 is 5 Oct\*\) · \*modify\* · \*cancel\*$/);
+  assert.match(text, /⚠️ \*Please check\*\n• Date\? No\. 2/);
+  assert.match(text, /Reply: answer like \*2 is 5 Oct\* · \*modify\* · \*cancel\*$/, 'one line of options (his call 2026-10-07)');
   assert.doesNotMatch(text, /is 150\* to fix/, 'yes, modify, cancel: never "1 is 150 to fix"');
   assert.ok(!/\*\*|^#/m.test(text), 'never Markdown');
 });
@@ -157,7 +157,7 @@ test('DIANE\'S VIEW: a preview is a card, the reply plain, and nothing becomes a
 
 test('YES, MODIFY, CANCEL: the line under a ready preview, and "modify" is understood', () => {
   const items = [normalise({ n: 1, spentOn: '2026-10-06', description: 'Taxi', payee: 'Careem', rawAmount: '45' }, ctx)];
-  assert.match(format.addPreview(items, 'MANBAT'), /Reply \*yes\* to save · \*modify\* to change · \*cancel\*$/);
+  assert.match(format.addPreview(items, 'MANBAT'), /Reply: \*yes\* to save · \*modify\* · \*cancel\*$/);
   for (const t of ['modify', 'Modify', 'change something', 'edit']) assert.deepEqual(readReply(t, { kind: 'add', items }), { kind: 'modify' }, t);
 });
 
@@ -191,7 +191,7 @@ test('THE RATE TO AED: market rate filled in, their own wins, missing is asked, 
   const text = format.addPreview([x], 'MANBAT');
   assert.match(text, /• Rate: 1 GBP = 4\.86 AED _\(hourly market rate\)_\n• In AED: \*AED 419\.90\*/);
   assert.match(format.ratesBubble([x]), /💱 \*RATES TO AED\*[\s\S]*1 GBP = \*4\.86 AED\*/);
-  assert.match(format.addPreview([none], 'MANBAT'), /\n1\. X · JPY 100\.00: 1 JPY to AED is\?/);
+  assert.match(format.addPreview([none], 'MANBAT'), /\n• Rate for 1 JPY\? No\. 1/);
 });
 
 test('THEIR OWN RATE, in the ways people say it', () => {
@@ -215,8 +215,8 @@ test('THE PICTURE: a PNG drawn by code, and a short caption that can still be an
   assert.ok(png.length > 5000, 'a real picture');
   const cap = format.caption(items, 'MANBAT');
   assert.match(cap, /^\*2 EXPENSES · MANBAT\* _\(not saved yet\)_\n\*TOTAL:\* \*AED 225\.00\*/);
-  assert.match(cap, /⚠️ \*Please check\*\n2\. Amazon · AED 180\.00: what date\?/);
-  assert.match(cap, /Reply with the answers/);
+  assert.match(cap, /⚠️ \*Please check\*\n• Date\? No\. 2/);
+  assert.match(cap, /Reply: answer like/);
   assert.match(format.caption(items, 'MANBAT', { saved: true }), /^✅ \*SAVED · 2 expenses · MANBAT\*[\s\S]*Reply \*undo\*/);
 });
 
@@ -229,9 +229,9 @@ test('A BIG PREVIEW READS SHORT: questions grouped by kind, numbers as runs', ()
   items[9].missing.push('payee');
   const q = format.questions(items);
   assert.deepEqual(q, [
-    '• No. 3, 10: paid to whom?'.replace('paid to whom?', q[0].split(': ')[1]),
-    '• No. 21–35: copies of earlier ones',
-    '• No. 36–40: look like ones already saved (same shop, amount and day), different receipts',
+    '• Paid to? No. 3, 10',
+    '• A copy of another in this list: No. 21–35',
+    '• Looks like a saved one: No. 36–40',
   ]);
 });
 
@@ -293,13 +293,14 @@ test('PLEASE CHECK (his call 2026-10-07): one per line by number, then skip, sav
     { n: 2, payee: 'Careem', currency: 'AED', rawAmount: 45, missing: [], doubts: ['looks already saved: Taxi on 05 Oct'], lookalikeOf: 12 },
     { n: 3, payee: 'ENOC', currency: 'AED', rawAmount: 120, missing: ['spentBy'], doubts: [] },
   ];
+  // ONE LINE PER QUESTION, the numbers it is on, nothing else (his call 2026-10-07)
   assert.deepEqual(format.questions(items), [
-    '1. Carrefour · AED 139.91: same receipt as one saved on 04 Oct',
-    '2. Careem · AED 45.00: looks like one already saved (Taxi on 05 Oct), different receipt',
-    '3. ENOC · AED 120.00: who spent it?',
+    '• Already saved (same receipt): No. 1',
+    '• Looks like a saved one: No. 2',
+    '• Who spent it? No. 3',
   ]);
-  const how = format.howToAnswer(items).join('\n');
-  assert.match(how, /^For all of them: \*skip all\* · \*save all\* · \*replace all\*\nOr one by one, like:\n\*1 replace\*\n\*2 skip\*\n\*3 me\*/);
+  // ONE LINE, no "Or one by one" list and no "me is you" note (his call 2026-10-07)
+  assert.equal(format.replyLine(items), 'Reply: answer like *3 me* · *skip all* / *save all* / *replace all* · *modify* · *cancel*');
   const pending = { kind: 'add', items };
   assert.deepEqual(readReply('skip all', pending), { kind: 'choices', skip: [1, 2], keep: [], replace: [] }, '"all" is the listed ones');
   assert.deepEqual(readReply('replace all', pending), { kind: 'choices', skip: [], keep: [], replace: [1, 2] });
@@ -391,7 +392,11 @@ test('THE COMMON ASKS IN CODE (his call 2026-10-07: as efficient as Diane): the 
   assert.deepEqual(q('how much this month?').query, { from: '2026-10-01', to: '2026-10-07', group: '', groupBy: '', measure: 'total', words: '' });
   assert.equal(q('how much on fuel this week').query.from, '2026-10-05', 'the week starts on Monday');
   assert.equal(q('how much did MANBAT spend this month').query.words, '', 'its own group is not a search word');
-  for (const t of ['how much by category', 'what about august', 'remove the cleaner and the petrol', 'change the taxi', 'remove all the taxis']) assert.equal(q(t), null, t);
+  for (const t of ['what about august', 'remove the cleaner and the petrol', 'change the taxi']) assert.equal(q(t), null, t);
+  assert.equal(q('how much by category').query.groupBy, 'category', 'a split, in code now');
+  assert.equal(q('biggest expense this month').query.measure, 'biggest');
+  assert.equal(q('how many expenses this week').query.measure, 'count');
+  assert.equal(q('remove all the taxis').target.all, true, '"all" is every one of them');
 });
 
 test('"UPDATE ZAYN EXPENSES" asks which, in code; never handed to the pay side (his report 2026-10-07)', () => {
@@ -399,7 +404,7 @@ test('"UPDATE ZAYN EXPENSES" asks which, in code; never handed to the pay side (
   const re = new RegExp(/const CHANGE_WHICH = \/(.*)\/iu;/.exec(src)[1], 'iu');
   for (const t of ['update zayn expenses', 'update expenses', 'modify expenses', "edit Zayn's expenses", 'i want to change some expenses']) assert.ok(re.test(t), t);
   for (const t of ['change the taxi to 50', 'update the cleaner to 200']) assert.ok(!re.test(t), t);
-  assert.match(src, /if \(\/\\bexpen\[cs\]\\w\*\\b\/i\.test\(said\)\)/, 'a message that says expense is never handed off');
+  assert.match(src, /if \(\/\\bexpen\[cs\]\\w\*\\b\/i\.test\(said\) \|\| ctx\.awaiting \|\| pending\)/, 'a message that says expense, or answers what it asked, is never handed off');
 });
 
 test('EVERY UK ENGLISH WAY OF SAYING REMOVE, CHANGE AND SHOW, typos too (his calls 2026-10-07)', () => {
@@ -418,4 +423,67 @@ test('EVERY UK ENGLISH WAY OF SAYING REMOVE, CHANGE AND SHOW, typos too (his cal
   };
   for (const [said, want] of Object.entries(cases)) assert.equal(canonicalVerbs(said), want, said);
   assert.equal(canonicalVerbs('drop off fee 30 paid to Ali'), 'drop off fee 30 paid to Ali', 'a new expense is never a request');
+});
+
+test('SEVERAL CHANGES, ONE PREVIEW, ONE YES (his call 2026-10-07)', () => {
+  const items = [
+    { id: 1, before: { description: 'Groceries', spentOn: '2026-10-04', rawAmount: 139.91, currency: 'AED' }, fields: { rawAmount: 300 } },
+    { id: 2, before: { description: 'Internet bill Sep 2026', spentOn: '2026-10-01', rawAmount: 471.45, currency: 'AED' }, fields: { rawAmount: 800 } },
+  ];
+  const text = format.editsPreview(items);
+  assert.match(text, /^✏️ \*CHANGE 2 EXPENSES\?\*/);
+  assert.match(text, /• \*Groceries\* · 04 Oct: Amount AED 139\.91 ➜ \*AED 300\.00\*/);
+  assert.match(text, /• \*Internet bill Sep 2026\* · 01 Oct: Amount AED 471\.45 ➜ \*AED 800\.00\*/);
+  assert.match(text, /Reply \*yes\* to change them all · \*cancel\* · add another, or drop one \(_not the groceries_\)$/);
+  assert.match(format.editsPreview(items.slice(0, 1)), /Reply \*yes\* · \*cancel\* · or add another change$/);
+});
+
+test('UPDATES AND REMOVALS SAID LIKE A PERSON (his sweep 2026-10-07)', () => {
+  const { quickRoute, canonicalVerbs } = require('./quick');
+  const q = (t) => quickRoute(t, { today: '2026-10-07', group: 'MANBAT' });
+  assert.deepEqual(q('actually 250 not 300').changes, [{ field: 'rawAmount', value: '250' }]);
+  assert.equal(q('actually 250 not 300').target.last, true, '"it": the one in hand');
+  assert.deepEqual(q('and the date to 3 Oct').changes, [{ field: 'spentOn', value: '2026-10-03' }]);
+  assert.deepEqual(q('change the groceries category to office').changes, [{ field: 'category', value: 'office' }]);
+  assert.deepEqual(q('the cleaner was on the 6th').changes, [{ field: 'spentOn', value: '2026-10-06' }]);
+  assert.deepEqual(q('taxi was 55').changes, [{ field: 'rawAmount', value: '55' }]);
+  assert.equal(q('remove yesterday').target.all, true, 'a day alone is every one that day');
+  assert.equal(canonicalVerbs('the internet bill is a duplicate, remove it'), 'remove the internet bill');
+  for (const t of ['taxi to office 45 paid to Careem', 'coffee 12 at Costa']) assert.equal(q(t), null, `${t}: a new expense`);
+});
+
+test('"1. ADD 500 / 2. DEDUCT 100 / 3. MAKE IT 800": a list answered by number (his report 2026-10-07)', () => {
+  const src = require('fs').readFileSync(require.resolve('./brain'), 'utf8');
+  assert.match(src, /function changeFromWords\(words, row, today\)/);
+  assert.match(src, /ALL OR NOTHING: every line read first/);
+  assert.match(src, /\|\| ctx\.awaiting \|\| pending\) \{/, 'never handed to the pay side right after it asked');
+});
+
+test('MESSY REPLIES TO A PREVIEW, read in code (his harness 2026-10-07)', () => {
+  const p = { kind: 'add', items: [{ n: 1, missing: ['spentOn', 'spentBy'], doubts: [] }, { n: 2, missing: ['spentOn', 'spentBy'], doubts: [] }, { n: 3, missing: [], doubts: [] }] };
+  assert.equal(readReply('both today and both me', p, { year: 2026 }).parts.length, 2, 'several answers in one go');
+  assert.deepEqual(readReply('remove the second one', p), { kind: 'skip', which: [2] });
+  assert.deepEqual(readReply('only the first two', p), { kind: 'only', which: [1, 2] });
+  assert.equal(readReply('sorted', p).kind, 'yes');
+  assert.equal(readReply('wait no', p).kind, 'no');
+  const one = { kind: 'add', items: [{ n: 1, missing: ['payee'], doubts: [] }] };
+  assert.deepEqual(readReply('Interflora', one).parts[0].fixes, [{ field: 'payee', value: 'Interflora' }], 'the one thing missing, answered bare, capitals kept');
+  assert.deepEqual(readReply('it was Ali', { kind: 'add', items: [{ n: 1, missing: ['spentBy'], doubts: [] }] }, { year: 2026 }).parts[0].fixes, [{ field: 'spentBy', value: 'Ali' }]);
+});
+
+test('CHANGES SAID EVERY WAY, read in code (his harness 2026-10-07)', () => {
+  const { quickRoute } = require('./quick');
+  const q = (t) => quickRoute(t, { today: '2026-10-07', group: 'MANBAT' });
+  const amount = (t) => q(t)?.changes?.find((c) => c.field === 'rawAmount')?.value;
+  assert.equal(amount('taxi 45 -> 50'), '50');
+  assert.equal(q('taxi 45 -> 50').target.amount, '45');
+  assert.equal(amount('update taxi = 50'), '50');
+  assert.equal(amount('set the groceries amount at 300'), '300');
+  assert.equal(amount('50 for the taxi not 45'), '50');
+  assert.equal(amount("correct the internet bill, it's 480"), '480');
+  assert.equal(q('the groceries were spent by Abe').changes[0].field, 'spentBy');
+  assert.deepEqual(q('put the groceries under office').changes, [{ field: 'category', value: 'office' }]);
+  assert.equal(q('update the last expense to 99').target.last, true);
+  assert.equal(q('the 120.43 one should be 125').target.amount, '120.43');
+  assert.equal(q('change the MANBAT groceries to 300').target.words, 'groceries', 'a group is not part of the name');
 });
