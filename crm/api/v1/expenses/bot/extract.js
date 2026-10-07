@@ -248,8 +248,13 @@ async function extract(msg, { today, client, groups = [] } = {}) {
       notes.push(`${d.filename}: nothing in it to read`);
     }
   }
-  if (media.length) out.push(...(await fromMedia(media, msg.text, { today, client, groups })));
-  else if (!docs.length && String(msg.text ?? '').trim()) out.push(...(await fromText(msg.text, { today, client, groups })));
+  // A BURST OF RECEIPTS is read six at a time: one call per handful keeps
+  // each read sharp, and one bad photo cannot spoil twenty.
+  for (let i = 0; i < media.length; i += 6) {
+    // eslint-disable-next-line no-await-in-loop
+    out.push(...(await fromMedia(media.slice(i, i + 6), msg.text, { today, client, groups })));
+  }
+  if (!media.length && !docs.length && String(msg.text ?? '').trim()) out.push(...(await fromText(msg.text, { today, client, groups })));
   return { items: out.map((x, i) => ({ ...x, n: i + 1 })), notes };
 }
 

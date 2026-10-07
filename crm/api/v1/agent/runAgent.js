@@ -39,6 +39,8 @@ const { saidAlready } = require('./notTwice');
 // Said ABOVE a recomputed block, never instead of it. The figures are the
 // answer; this only says they were looked at again.
 const LOOKED_AGAIN = 'I ran it again and it has not moved.';
+// Her words when a change is shown and waits on a yes (not an offer to show something).
+const WRITE_PREVIEW = /NOTHING HAS BEEN (?:CHANGED|UNDONE|SAVED)|nothing (?:has )?(?:been )?changed yet|Nothing changes now|not (?:saved|applied|changed|undone) yet|Shall I (?:save|apply|undo|stop|change|update|park|put|go ahead|do it)|Is that what you want|Should I (?:undo|put|apply|save|stop|go ahead)|This (?:will|would) (?:put|undo|change|stop|move|set)/i;
 const WHAT_MONTH = /^(?:\s*(?:so|ok(?:ay)?|wait|hey|diane)[,\s]+)*(?:which|what)\s+(?:month|date|day)\s+(?:is\s+it|are\s+we(?:\s+in|\s+on)?|is\s+(?:it\s+)?today|is\s+this)(?:\s+(?:now|today|again))?\s*\??\s*$|^\s*what(?:'?s|\s+is)\s+(?:the\s+|today'?s\s+)?(?:date|month)(?:\s+(?:today|now))?\s*\??\s*$/i;
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const monthName = (ym) => `${MONTH_NAMES[Number(String(ym).slice(5, 7)) - 1]} ${String(ym).slice(0, 4)}`;
@@ -3045,6 +3047,20 @@ async function runAgentTurn(history, contextName, onEvent) {
   // "nothing matched" went to recall and claimed deleting by date was not
   // possible, which it is. Both answered here, in plain words. 2026-10-04.
   const bare = lastSaid(history).trim();
+  /**
+   * A YES TO A PREVIEW SHE NO LONGER HOLDS. The held change lives in memory
+   * for ten minutes and dies with a restart. A yes after that fell through
+   * to the model, which had nothing to apply and said "All done!" or "All
+   * undone!" with nothing written (test sweep 2026-10-07). It is said
+   * plainly here instead, and nothing is called.
+   */
+  if (heldCalls.length === 0 && !somethingHeld() && agreed(bare) && bare.split(/\s+/).length <= 4
+    && WRITE_PREVIEW.test(String(prior ?? ''))) {
+    return {
+      reply: 'That confirmation has expired (it waited too long, or I restarted), so nothing was changed. Ask me again and I\'ll show it fresh.',
+      changedRowIds: [], context: context.key, claims: [],
+    };
+  }
   if (heldCalls.length === 0 && /^To add .+ I still need\b/.test(String(prior ?? '')) && CALLED_OFF_ADD.test(bare)) {
     return { reply: 'Okay, nothing was added. What next?', changedRowIds: [], context: context.key, claims: [] };
   }

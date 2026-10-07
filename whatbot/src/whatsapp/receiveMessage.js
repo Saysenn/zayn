@@ -3,6 +3,7 @@ import { inboundQueue } from "../system/queue.js";
 import { jobIdOf } from "../system/jobId.js";
 import { withRedisTimeout } from "../system/redis.js";
 import { sendText } from "./sendMessage.js";
+import { arrived } from "../expenses/batch.js";
 
 /**
  * Every message someone sends us comes through here.
@@ -16,6 +17,12 @@ import { sendText } from "./sendMessage.js";
  */
 export async function receiveMessage(msg) {
   const { messageId, from, to, groupId, text, voice, attachments } = msg;
+
+  // A receipt or file is numbered as it arrives, so a burst of them can be
+  // answered once, by the last (expenses/batch.js).
+  const batchSeq = attachments?.length
+    ? await arrived(from, groupId).catch(() => null)
+    : null;
 
   // Buffers do not survive JSON. See the note on InboundMessageJob.
   const queuedVoice = voice && {
@@ -40,6 +47,7 @@ export async function receiveMessage(msg) {
           ...(queuedVoice ? { voice: queuedVoice } : {}),
           // paths to receipts on disk, never the bytes: see expenses.js
           ...(attachments?.length ? { attachments } : {}),
+          ...(batchSeq ? { batchSeq } : {}),
           receivedAt: new Date().toISOString(),
         },
         // through jobIdOf because BullMQ rejects a colon and the ID is Baileys'

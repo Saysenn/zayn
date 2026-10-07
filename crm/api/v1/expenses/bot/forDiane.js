@@ -10,14 +10,15 @@ const format = require('./format');
 // line under it saying what to reply, and every other reply loses the marks.
 
 const plain = (s) => String(s ?? '')
+  // Her chat has its own cards and spacing: the WhatsApp separator lines go.
+  .split('\n').filter((l) => !/^=+$/.test(l.trim())).join('\n')
   // The card names its sections; there is no ⚠️ on a row to point at.
-  .replace(/Answer the ⚠️ ones/g, 'Answer the ones under Needs an answer')
-  .replace(/Check the ⚠️ ones/g, 'Check the ones under To check')
+  .replace(/the ⚠️ ones?/g, 'the ones under Needs an answer')
   .replace(/\*([^*\n]+)\*/g, '$1')
   .replace(/(^|[\s(])_([^_\n]+)_(?=[\s.,;:)!?]|$)/gm, '$1$2')
   .replace(/#(\d)/g, 'no. $1');
 
-const PREVIEW = /\(not (?:saved|removed) yet\)/;
+const PREVIEW = /_Not (?:saved|removed) yet_/;
 
 function rowOf(x) {
   const notes = [

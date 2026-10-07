@@ -95,7 +95,7 @@ async function answer(scopeGroup, query, { today }) {
 
   const aedTotal = rows.reduce((n, r) => n + (r.aed ?? 0), 0);
   const noRate = rows.filter((r) => r.aed == null).length;
-  const totalLine = `*${format.money('AED', Math.round(aedTotal * 100) / 100)}* across ${rows.length} ${rows.length === 1 ? 'expense' : 'expenses'}${noRate ? ` _(${noRate} with no AED rate not counted)_` : ''}`;
+  const totalLine = `*${format.money('AED', Math.round(aedTotal * 100) / 100)}* (${rows.length} ${rows.length === 1 ? 'expense' : 'expenses'})${noRate ? ` _· ${noRate} with no AED rate not counted_` : ''}`;
 
   if (query.groupBy) {
     const key = { group: (r) => r.groupName, payee: (r) => r.payee || 'no payee', spentBy: (r) => r.spentBy || 'nobody', day: (r) => format.day(r.spentOn), currency: (r) => r.currency, description: (r) => r.description }[query.groupBy];
@@ -109,16 +109,16 @@ async function answer(scopeGroup, query, { today }) {
     }
     const lines = [...groups].sort((a, b) => b[1].aed - a[1].aed).slice(0, 20)
       .map(([k, g]) => `• ${k}: *${format.money('AED', Math.round(g.aed * 100) / 100)}* (${g.n})`);
-    return [`*Expenses by ${{ group: 'group', payee: 'payee', spentBy: 'person', day: 'day', currency: 'currency', description: 'item' }[query.groupBy]}* · ${scope}`, '', ...lines, '', `Total ${totalLine}`].join('\n');
+    return [`📊 *SPENDING BY ${{ group: 'GROUP', payee: 'PAYEE', spentBy: 'PERSON', day: 'DAY', currency: 'CURRENCY', description: 'ITEM' }[query.groupBy]}* · ${scope}`, format.SEP, ...lines, format.SEP, `*TOTAL:* ${totalLine}`].join('\n');
   }
-  if (query.measure === 'count') return `*${rows.length}* ${rows.length === 1 ? 'expense' : 'expenses'} · ${scope}`;
-  if (query.measure === 'total') return `Spent ${totalLine}\n_${scope}_`;
+  if (query.measure === 'count') return `📊 *${rows.length} ${rows.length === 1 ? 'EXPENSE' : 'EXPENSES'}* · ${scope}`;
+  if (query.measure === 'total') return [`📊 *SPENDING* · ${scope}`, format.SEP, `*TOTAL:* ${totalLine}`].join('\n');
   const list = query.measure === 'biggest' ? [...rows].sort((a, b) => (b.aed ?? 0) - (a.aed ?? 0)).slice(0, 5) : rows.slice(0, 15);
   return [
-    `*${query.measure === 'biggest' ? 'Biggest expenses' : 'Expenses'}* · ${scope}`, '',
+    `📋 *${query.measure === 'biggest' ? 'BIGGEST EXPENSES' : 'EXPENSES'}* · ${scope}`, format.SEP,
     ...list.map((r) => format.line({ ...r, n: null }, { number: false, group: allGroups })),
     ...(query.measure !== 'biggest' && rows.length > 15 ? [`_…and ${rows.length - 15} more on the Expenses page._`] : []),
-    '', `Total ${totalLine}`,
+    format.SEP, `*TOTAL:* ${totalLine}`,
   ].join('\n');
 }
 

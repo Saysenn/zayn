@@ -93,6 +93,8 @@ function readReply(said, pending, { year = new Date().getUTCFullYear(), groups =
   const bare = text.toLowerCase().replace(/[!.]+$/, '').replace(/,? ?(?:please|pls|thanks|thank you)$/, '').trim();
   if (YES.test(bare)) return { kind: 'yes' };
   if (NO.test(bare)) return { kind: 'no' };
+  // "MODIFY" on its own: they want to change something, and say what next.
+  if (/^(?:modify|change|change (?:it|something|that)|edit|amend|fix(?: it)?|correct(?: it)?)$/i.test(bare)) return { kind: 'modify' };
 
   if (pending.kind === 'pick') {
     const m = /^(?:#|no\.?\s*|number\s+|the\s+)?(\d+)(?:st|nd|rd|th)?(?: one)?$/.exec(bare);

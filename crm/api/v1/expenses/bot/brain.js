@@ -65,7 +65,7 @@ const UNDO = /^(?:undo(?: (?:that|it|this|last|the last one))?|take (?:it|that|t
  * @param {{ client?: object, today?: string }} opts `client` for tests
  * @returns {Promise<{ registered: boolean, reply?: string }>}
  */
-const PREVIEWS = /\(not (?:saved|removed) yet\)|\(nothing changed yet\)|^\*Which one /;
+const PREVIEWS = /_Not (?:saved|removed|changed) yet_|_Nothing changed yet_|WHICH ONE /;
 
 function showAgain(ctx) {
   const p = ctx.state.pending;
@@ -297,6 +297,11 @@ async function saveAdd(ctx) {
 
 async function onReply(r, ctx) {
   const { pending } = ctx.state;
+  if (r.kind === 'modify') {
+    return pending.kind === 'add'
+      ? 'Sure, what should change? Just say it, like _the taxi was 50_, _the lunch was yesterday_ or _leave out the parking_.'
+      : 'Sure, what should it be instead? Just say it, like _make it 50_ or _it was on 5 Oct_.';
+  }
   if (r.kind === 'no') { ctx.state.pending = null; return `Okay, cancelled. Nothing was ${pending.kind === 'remove' ? 'removed' : pending.kind === 'add' ? 'saved' : 'changed'}.`; }
   if (pending.kind === 'pick') {
     const id = pending.choices[r.n - 1];

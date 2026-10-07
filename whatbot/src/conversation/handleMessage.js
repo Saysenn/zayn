@@ -44,6 +44,7 @@ import {
 import { scriptedReply } from "./scriptedReply.js";
 import { replier } from "./sendReply.js";
 import { expenseTurn, isExpenseAdmin } from "../expenses/expenses.js";
+import { collect } from "../expenses/batch.js";
 import {
   EXPENSE,
   EXPENSE_WORD,
@@ -126,7 +127,17 @@ export async function handleMessage(input) {
       lead = MODE_REPLIES.switchedForFile(channelGroup);
     }
     if (mode === EXPENSE) {
-      const out = await expenseTurn({ phone, group: channelGroup, text, attachments, messageId });
+      // SEVERAL FILES AT ONCE: only the last of the burst answers, for all of
+      // them; the others say nothing (expenses/batch.js).
+      let files = attachments;
+      let said = text;
+      if (attachments.length && input.batchSeq) {
+        const burst = await collect({ phone, group: channelGroup, seq: input.batchSeq, attachments, text });
+        if (!burst) return NO_REPLY;
+        files = burst.attachments;
+        said = burst.text;
+      }
+      const out = await expenseTurn({ phone, group: channelGroup, text: said, attachments: files, messageId });
       if (out.registered !== false && !out.handOff) {
         return out.reply ? words(`${lead}${out.reply}`) : NO_REPLY;
       }

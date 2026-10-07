@@ -1318,10 +1318,11 @@ export default function AgentOverlay({ open, onClose }) {
     if ((!input.trim() && !attached.fileId) || isSending) return undefined;
     const file = attached;
     setAttached(null);
-    const said = `📎 ${file.filename}${input.trim() ? `\n${input.trim()}` : ''}`;
+    const names = file.files ? file.files.map((f) => f.filename).join(', ') : file.filename;
+    const said = `📎 ${names}${input.trim() ? `\n${input.trim()}` : ''}`;
     return sendMessage(said, history, {
       attachment: file.fileId
-        ? { filename: file.filename, fileId: file.fileId }
+        ? { filename: file.filename, fileId: file.fileId, files: file.files?.map(({ filename, fileId }) => ({ filename, fileId })) }
         : { filename: file.filename, text: file.text, tables: file.tables },
     });
   }
@@ -1411,22 +1412,44 @@ export default function AgentOverlay({ open, onClose }) {
   // A file belongs to the context it was attached in: a deals sheet held
   // when switching to Expenses (or a receipt the other way) is dropped.
   useEffect(() => { setAttached(null); }, [context]);
-  async function attachFile(file) {
-    if (!file || isSending || attaching) return;
+  async function attachFile(picked) {
+    const list = Array.from(picked?.length !== undefined ? picked : [picked]).filter(Boolean);
+    if (!list.length || isSending || attaching) return;
     setAttaching(true);
     try {
-      const body = new FormData();
-      body.append('file', file);
-      // EXPENSES: a receipt photo, a PDF or a sheet, held on the server by id
-      // and read by the expense brain when the message goes.
+      // EXPENSES: receipt photos, PDFs or sheets, SEVERAL AT ONCE (his call
+      // 2026-10-07), each held on the server by id and read together by the
+      // expense brain when the message goes: one preview for all of them.
       const forExpenses = context === 'expenses';
       const route = forExpenses ? 'expenses/agent/attach' : 'master-sheet/agent/attach';
-      const res = await whenReachable(() => fetch(`${BASE_URL}/api/v1/${route}`, { method: 'POST', credentials: 'include', body }));
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || data.message || `I couldn't open ${file.name}. Is it an Excel, CSV or text file?`);
-      setAttached(forExpenses
-        ? { filename: data.filename, fileId: data.fileId, kind: /^image\//.test(data.mime) ? 'photo' : /pdf/.test(data.mime) ? 'PDF' : 'file' }
-        : { filename: data.filename, text: data.text ?? '', lines: data.lines, tables: data.tables ?? [] });
+      const upload = async (file) => {
+        const body = new FormData();
+        body.append('file', file);
+        const res = await whenReachable(() => fetch(`${BASE_URL}/api/v1/${route}`, { method: 'POST', credentials: 'include', body }));
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || data.message || `I couldn't open ${file.name}. Is it an Excel, CSV or text file?`);
+        return data;
+      };
+      if (forExpenses) {
+        const already = attached?.files ?? [];
+        const room = Math.max(0, 20 - already.length);
+        const got = [];
+        for (const file of list.slice(0, room)) {
+          // eslint-disable-next-line no-await-in-loop
+          const data = await upload(file);
+          got.push({ filename: data.filename, fileId: data.fileId, kind: /^image\//.test(data.mime) ? 'photo' : /pdf/.test(data.mime) ? 'PDF' : 'file' });
+        }
+        const files = [...already, ...got];
+        setAttached({
+          files,
+          fileId: files[0].fileId,
+          filename: files.length === 1 ? files[0].filename : `${files.length} files`,
+          kind: files.length === 1 ? files[0].kind : [...new Set(files.map((f) => f.kind))].join(', '),
+        });
+      } else {
+        const data = await upload(list[0]);
+        setAttached({ filename: data.filename, text: data.text ?? '', lines: data.lines, tables: data.tables ?? [] });
+      }
       inputRef.current?.focus?.();
     } catch (err) {
       // In words, never the browser's own: "Failed to fetch" was shown raw.
@@ -2062,12 +2085,13 @@ export default function AgentOverlay({ open, onClose }) {
                       ? 'image/*,.pdf,.xlsx,.csv,.txt,.tsv,.json,.docx,.pptx'
                       : '.xlsx,.csv,.txt,.tsv,.json,.docx,.pptx'}
                     className="hidden"
-                    onChange={(e) => attachFile(e.target.files?.[0])}
+                    multiple={context === 'expenses'}
+                    onChange={(e) => attachFile(context === 'expenses' ? e.target.files : e.target.files?.[0])}
                   />
                   <button
                     type="button"
                     onClick={() => fileRef.current?.click()}
-                    disabled={isSending || attaching || Boolean(attached)}
+                    disabled={isSending || attaching || (Boolean(attached) && !(context === 'expenses' && (attached.files?.length ?? 0) < 20))}
                     className="shrink-0 w-11 h-11 rounded-full flex items-center justify-center border min-h-0 p-0 transition-colors disabled:opacity-30 border-diane-line/60 bg-transparent text-diane-signal hover:border-diane-signal"
                     aria-label={context === 'expenses' ? 'Attach a receipt or file for Diane' : 'Attach a sheet for Diane to check'}
                     title={context === 'expenses'

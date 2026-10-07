@@ -27,7 +27,8 @@ agent.post('/message', async (req, res, next) => {
   try {
     const { phone, group, text, attachments, messageId } = req.body ?? {};
     if (!phone || !group) return res.status(400).json({ error: 'phone and group are required' });
-    const list = Array.isArray(attachments) ? attachments.slice(0, 10) : [];
+    // A burst of receipts arrives as one turn (WhatBot's expenses/batch.js).
+    const list = Array.isArray(attachments) ? attachments.slice(0, 20) : [];
     const out = await brain.turn({ phone, group, text, attachments: list, messageId: messageId ? String(messageId) : null });
     res.json({ ...out, usd: Number(meter.dollars.toFixed(4)) });
   } catch (err) {
@@ -124,11 +125,15 @@ admin.post('/expenses/agent/attach', (req, res, next) => {
 async function dianeTurn(history, send) {
   const last = [...history].reverse().find((m) => m.role === 'user') ?? {};
   const text = String(last.content ?? '').replace(/^📎 [^\n]*\n?/, '').trim();
-  const att = last.attachment?.fileId ? files.get(last.attachment.fileId) : null;
-  if (last.attachment?.fileId && !att) {
-    return { reply: `I no longer have ${last.attachment.filename ?? 'that file'} (files are kept for an hour). Attach it again.` };
+  // SEVERAL FILES IN ONE MESSAGE (the paperclip takes up to 20): one turn,
+  // one preview for all of them.
+  const wanted = last.attachment?.files?.length ? last.attachment.files : last.attachment?.fileId ? [last.attachment] : [];
+  const atts = wanted.map((f) => ({ name: f.filename, file: files.get(f.fileId) }));
+  const gone = atts.filter((a) => !a.file).map((a) => a.name ?? 'a file');
+  if (gone.length) {
+    return { reply: `I no longer have ${gone.join(', ')} (files are kept for an hour). Attach ${gone.length === 1 ? 'it' : 'them'} again.` };
   }
-  const out = await brain.turn({ text, attachments: att ? [att] : [] }, { channel: 'diane' });
+  const out = await brain.turn({ text, attachments: atts.map((a) => a.file) }, { channel: 'diane' });
   if (out.card) send({ type: 'list', list: out.card });
   return { reply: out.reply ?? '' };
 }

@@ -71,17 +71,19 @@ test('LOOKS ALREADY SAVED, or twice in one batch: a doubt, never merged', () => 
   assert.match(items[1].doubts.join(), /same as 1/);
 });
 
-test('THE PREVIEW is WhatsApp formatting written by code: problems first, one line saying what to reply', () => {
+test('THE PREVIEW is WhatsApp formatting written by code: a field per line, separators, bold total', () => {
   const items = [
     normalise({ n: 1, spentOn: '2026-10-06', description: 'Taxi', payee: 'Careem', rawAmount: '45' }, ctx),
     normalise({ n: 2, spentOn: '', description: 'Ink', payee: 'Amazon', rawAmount: '180' }, ctx),
   ];
   const text = format.addPreview(items, 'MANBAT');
-  assert.match(text, /^\*2 expenses for MANBAT\* \(not saved yet\)/);
-  assert.match(text, /⚠️ \*1 needs an answer\*\n2\. Ink: _date missing_/);
-  assert.match(text, /1\. Taxi · \*AED 45\*\n {3}06 Oct · paid to Careem · by Gary Test/);
-  assert.match(text, /Total \*AED 225\*/);
-  assert.match(text, /Answer the ⚠️ ones \(like \*2 is 5 Oct\*\)/);
+  assert.match(text, /^\*2 EXPENSES · MANBAT\*\n_Not saved yet_\n==================/);
+  assert.match(text, /\*1\. Taxi\*\n• Amount: \*AED 45\.00\*\n• Date: 06 Oct 2026\n• Paid to: Careem\n• Spent by: Gary Test/);
+  assert.match(text, /\*2\. Ink\* ⚠️\n• Amount: \*AED 180\.00\*\n• Date: ❓ _missing_/);
+  assert.match(text, /\*TOTAL:\* \*AED 225\.00\*/);
+  assert.match(text, /⚠️ \*Needs an answer\*\n• No\. 2: what date\?/);
+  assert.match(text, /Reply with the answers \(like \*2 is 5 Oct\*\) · \*modify\* · \*cancel\*$/);
+  assert.doesNotMatch(text, /is 150\* to fix/, 'yes, modify, cancel: never "1 is 150 to fix"');
   assert.ok(!/\*\*|^#/m.test(text), 'never Markdown');
 });
 
@@ -139,9 +141,15 @@ test('DIANE\'S VIEW: a preview is a card, the reply plain, and nothing becomes a
   const state = { pending: { kind: 'add', items } };
   const out = forDiane(format.addPreview(items, '*'), state);
   assert.equal(out.card.kind, 'plan');
-  assert.equal(out.card.title, '2 expenses · AED 225');
+  assert.equal(out.card.title, '2 expenses · AED 225.00');
   assert.deepEqual(out.card.sections.map((s) => s.label), ['Needs an answer · 1', 'Ready · 1']);
   assert.equal(out.card.sections[1].rows[0].where, 'MANBAT · 06 Oct · paid to Careem · by Gary');
   assert.ok(!/[*_#]/.test(out.reply), out.reply);
   assert.equal(plain('✅ *Saved 1 expense* · _ok_ #3'), '✅ Saved 1 expense · ok no. 3');
+});
+
+test('YES, MODIFY, CANCEL: the line under a ready preview, and "modify" is understood', () => {
+  const items = [normalise({ n: 1, spentOn: '2026-10-06', description: 'Taxi', payee: 'Careem', rawAmount: '45' }, ctx)];
+  assert.match(format.addPreview(items, 'MANBAT'), /Reply \*yes\* to save · \*modify\* to change · \*cancel\*$/);
+  for (const t of ['modify', 'Modify', 'change something', 'edit']) assert.deepEqual(readReply(t, { kind: 'add', items }), { kind: 'modify' }, t);
 });
