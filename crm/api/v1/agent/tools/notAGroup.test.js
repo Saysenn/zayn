@@ -47,6 +47,7 @@ test('EVERY READ TOOL THAT TAKES A GROUP CHECKS THE GROUP IS REAL', () => {
     'conversations.js': fs.readFileSync(require.resolve('./conversations.js'), 'utf8'),
     'monthHistory.js': fs.readFileSync(require.resolve('./monthHistory.js'), 'utf8'),
     'historicalBreakdown.js': fs.readFileSync(require.resolve('./historicalBreakdown.js'), 'utf8'),
+    'sheetPreset.js': fs.readFileSync(require.resolve('./sheetPreset.js'), 'utf8'),
   };
 
   const takesGroup = masterSheetTools
@@ -64,6 +65,7 @@ test('EVERY READ TOOL THAT TAKES A GROUP CHECKS THE GROUP IS REAL', () => {
     'list_concerns',
     'recall_past_conversations',
     'show_past_conversation',
+    'show_sheet_preset',
     'summarize_deals',
     'total_master_sheet',
   ], 'the set of group-taking read tools changed');

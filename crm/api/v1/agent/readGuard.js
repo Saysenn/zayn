@@ -22,7 +22,9 @@ const { fold, oneTypo } = require('./tools/resolvePerson');
 // Group, sorting and free text are left alone: none has misread yet, and a
 // dropped group would quietly widen the answer to every group.
 
-const GUARDED_TOOLS = new Set(['filter_master_sheet', 'summarize_deals', 'total_master_sheet']);
+// and the other reads that take any of the same filters (compare months,
+// breakdowns): the guard only ever touches a filter that was set
+const GUARDED_TOOLS = new Set(['filter_master_sheet', 'summarize_deals', 'total_master_sheet', 'compare_months', 'breakdown_master_sheet']);
 
 /** "1k", "1,500", "£2.5k", "two thousand" is not attempted. */
 function numbersIn(text) {
@@ -141,7 +143,9 @@ function guardFilters(args = {}) {
     }
   }
   if (out.currency === undefined || out.currency === null) {
-    const codes = ['GBP', 'AED', 'EURO', 'USD'].filter((c) => /\b(?:in|paid in|on)\s+/i.test(now) && VALUE_WORDS.currency[c].test(now));
+    // "paid in AED" / "in euros", never "is on GBP right?", which is a
+    // question about everyone, not a filter (denominator.test.js)
+    const codes = ['GBP', 'AED', 'EURO', 'USD'].filter((c) => new RegExp(`\\b(?:paid |earn\\w* |gets? paid )?in\\s+(?:${VALUE_WORDS.currency[c].source})`, 'i').test(now));
     if (codes.length) { out.currency = codes; added.push(codes.join(' or ')); }
   }
   // NOTHING LEFT TO NARROW: their words asked for something, the model's

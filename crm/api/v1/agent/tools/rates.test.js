@@ -404,7 +404,7 @@ test('ONE definition of the exit, so a fifth tool cannot forget half of it', () 
     'masterSheet.js has a second copy of the exit again',
   );
   // Every tool that takes a name goes through it.
-  assert.ok((tools.match(/resolvePerson\(/g) || []).length >= 5, 'declared once, called by each tool');
+  assert.ok((tools.match(/resolvePerson(?:WithParts)?\(/g) || []).length >= 5, 'declared once, called by each tool');
 });
 
 /* ===============================

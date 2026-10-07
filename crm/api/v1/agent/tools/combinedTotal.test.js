@@ -166,7 +166,8 @@ test('THE PERCENTAGES ARE THERE, one line per person', async () => {
 test('one person alone is unaffected', async () => {
   await withRepos(async () => {
     const out = await total.handler({ person: 'Gloria', said: `what is gloria owed for ${MONTH_WORD}`, month: MONTH });
-    assert.deepEqual(out.total, { GBP: 2000 });
+    // HIS RULE 2026-10-07: "Gloria difference" is part of Gloria, so her total carries its AED 150.
+    assert.deepEqual(out.total, { GBP: 2000, AED: 150 });
   });
 });
 
@@ -190,8 +191,10 @@ test('one person with an add on: the HEADLINE is the computed figure', async () 
 
   // THE NET, not the raw. The headline used to say 2,000 and then talk its
   // way up to 2,100 in the same sentence.
-  assert.match(out.reply, /Gloria is owed GBP 2,100 for/, 'the net leads');
-  assert.match(out.reply, /GBP 2,000 (?:at [^.]+ )?plus GBP 100 add on \(5%\)/, 'and one line says where it came from');
+  // HIS RULE 2026-10-07: her difference (AED 150) is hers, on its own line
+  assert.match(out.reply, /Gloria is owed GBP 2,100 and AED 157\.5 for/, 'the net leads');
+  assert.match(out.reply, /GBP 2,000 and AED 150 (?:at [^.]+ )?plus GBP 100 and AED 7\.5 add on \(5%\)/, 'and one line says where it came from');
+  assert.match(out.reply, /Workforce · Gloria difference: AED 150/, 'the difference says what it is');
   assert.doesNotMatch(out.reply, /to find/, 'the old wording is gone for good');
 
   /**

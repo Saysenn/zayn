@@ -562,7 +562,7 @@ function doneReply(plan) {
   const bad = ran.filter((s) => !s.result?.ok);
   const parked = good.some((s) => s.when);
   let reply = bad.length === 0
-    ? `Done, all ${good.length} ${good.length === 1 ? 'change' : 'changes'}.`
+    ? (good.length === 1 ? 'Done.' : `Done, all ${good.length} changes.`)
     : `Done ${good.length} of ${ran.length}. Not done: ${bad.map((s) => `step ${s.n} (${s.result.why})`).join('; ')}.`;
   if (plan.steps.some((s) => s.skipped)) reply += ` Skipped: step ${plan.steps.filter((s) => s.skipped).map((s) => s.n).join(', ')}.`;
   if (good.length) reply += ' "Undo that" puts it all back.';

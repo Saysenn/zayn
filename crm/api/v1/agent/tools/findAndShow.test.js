@@ -251,7 +251,8 @@ test('answering the question with the exact name ENDS it', async () => {
   const out = await tool.handler({ person: 'Gloria' });
 
   assert.ok(!/matches more than one person/.test(out.summary), out.summary);
-  assert.equal(out.total?.GBP, 500, "only Gloria's money, never the other one's");
+  // HIS RULE 2026-10-07: "Gloria difference" is part of Gloria, so it is added in
+  assert.equal(out.total?.GBP, 1400, 'Gloria and her difference, one person');
 });
 
 test('an ambiguous name still asks, and names them exactly as written', async () => {

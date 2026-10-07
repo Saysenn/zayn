@@ -244,7 +244,7 @@ function nameFragment(said, rows) {
  *   runAgent, never passed by the model: the whole point is that it is the
  *   one version of the name she cannot have shortened.
  */
-function resolvePerson(rows, typed, said = '') {
+function resolvePersonOnly(rows, typed, said = '') {
   const longer = fromSaid(rows, said);
   const wanted = fold(longer && fold(longer).length > fold(typed).length ? longer : typed);
   const nameOf = (r) => String(r.person_name ?? '').trim();
@@ -442,6 +442,36 @@ function saidFor(names, said) {
   return names.length === 1 ? (said ?? '') : '';
 }
 
+/**
+ * ===============================
+ * * "GLORIA DIFFERENCE" IS PART OF GLORIA
+ * ===============================
+ * His call 2026-10-07. The boss's sheet pays a top up as its own "person",
+ * "Gloria difference", so her total of GBP 2,000 left out its AED 150. A
+ * name that is another person's name plus "difference" (or "diff") is that
+ * person's: found with them, totalled with them, shown as its own line.
+ * ONLY that word. "Abe" and "Abe Lincoln" stay two people.
+ */
+const PART = /^(.+?)\s+(?:difference|differnce|differance|diff)$/i;
+const baseOf = (name) => PART.exec(String(name ?? '').trim())?.[1] ?? null;
+
+// READS ONLY (totals, lists, details): a change to "gloria" must never
+// touch her difference row too, so writes keep resolvePerson as it was.
+function resolvePersonWithParts(rows, typed, said = '') {
+  const picked = resolvePersonOnly(rows, typed, said);
+  if (!picked || picked.ambiguous || !picked.rows?.length) return picked;
+  const names = new Set(picked.rows.map((r) => fold(r.person_name)));
+  // asked for the difference itself: it stands alone
+  if ([...names].every((n) => [...(rows ?? [])].some((r) => fold(r.person_name) === n && baseOf(r.person_name)))) return picked;
+  // labelled as the difference, so its line says what it is
+  const parts = (rows ?? []).filter((r) => baseOf(r.person_name) && names.has(fold(baseOf(r.person_name))) && !picked.rows.includes(r))
+    .map((r) => ({ ...r, company: `${r.company ?? ''}${r.company ? ' · ' : ''}${r.person_name}` }));
+  return parts.length ? { ...picked, rows: [...picked.rows, ...parts], parts: [...new Set(parts.map((r) => r.person_name))] } : picked;
+}
+
+const resolvePerson = resolvePersonOnly;
+
 module.exports = {
+  baseOf, resolvePersonWithParts,
   resolvePerson, personKey, fold, mentionedIn, personMentionedIn, within, oneTypo, peopleIn, saidFor,
 };

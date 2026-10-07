@@ -96,3 +96,14 @@ test('a short name must be a real word, not two letters across a word boundary',
   assert.equal(personMentionedIn('show me nicola details', 'Ad'), false);
   assert.equal(personMentionedIn('show me Ad details', 'Ad'), true);
 });
+
+test('ANY NAME PLUS "DIFFERENCE" IS THAT PERSON\'S, future names too (his call 2026-10-07)', () => {
+  const { resolvePersonWithParts, resolvePerson: plain } = require('./resolvePerson');
+  const row = (id, name, group) => ({ id, person_id: name.toLowerCase().replace(/ /g, '-'), person_name: name, company: 'Workforce', group_name: group });
+  const rows = [row(1, 'Paddy', 'ALL GROUPS'), row(2, 'Paddy difference', 'ALL GROUPS'), row(3, 'Nicola', 'INDIGO'), row(4, 'Nicola diff', 'INDIGO'), row(5, 'Abe', 'NEXUS'), row(6, 'Abe Lincoln', 'INDIGO')];
+  assert.deepEqual(resolvePersonWithParts(rows, 'Paddy', 'paddy total').rows.map((r) => r.id), [1, 2]);
+  assert.deepEqual(resolvePersonWithParts(rows, 'Nicola', 'how much is nicola owed').rows.map((r) => r.id), [3, 4]);
+  assert.deepEqual(resolvePersonWithParts(rows, 'Paddy difference', 'paddy difference').rows.map((r) => r.id), [2], 'the difference alone');
+  assert.deepEqual(resolvePersonWithParts(rows, 'Abe', 'abe total').rows.map((r) => r.id), [5], 'Abe Lincoln is not a difference');
+  assert.deepEqual(plain(rows, 'Paddy', 'add 100 to paddy').rows.map((r) => r.id), [1], 'a change never reaches the difference row');
+});

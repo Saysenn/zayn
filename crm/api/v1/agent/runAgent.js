@@ -77,7 +77,9 @@ const STATUS_ASK = /^\s*(?:so\s+|and\s+|ok\s+)?(?:are\s+)?(?:we\s+(?:all\s+)?goo
  * "which deals have been stopped" read the live sheet and said none had,
  * and "which companies are in baker" drew deals. 2026-09-30.
  */
-const STOPPED_ASK = /\b(?:which|what|who|show|list|any(?:one|body)?)\b[^.?!]*\b(?:stopped|archived|in the archive)\b/i;
+// "WHICH DEALS ENDED / HAVE LEFT" is the same archive (clone 2026-10-07: read
+// as an end date filter it answered "none" beside 8 stopped deals)
+const STOPPED_ASK = /\b(?:which|what|who|show|list|any(?:one|body)?)\b[^.?!]*\b(?:stopped|archived|in the archive|ended|have left|has left|left us)\b/i;
 const COMPANIES_IN_ASK = /\b(?:which|what|list|show)\b[^.?!]*\bcompanies\b[^.?!]*\b(?:in|on|under)\s+\w/i;
 // "give me the payment breakdown for corvid this month by company" was
 // answered with nothing drawn in one run of three. A breakdown has one tool,
@@ -452,6 +454,7 @@ const { fold, personMentionedIn, within, oneTypo } = require('./tools/resolvePer
 const { parseEdit, callFor, followUp, sameFor } = require('./directEdit');
 const { looksMultiStep, pendingPlan, isQuestion } = require('./engine/planSteps');
 const { route: routeMessage, asEdit } = require('./engine/router');
+const { readRoute, toolCall: readToolCall } = require('./engine/readRouter');
 const { planTurn, sheetTurn } = require('./engine/runPlan');
 const { looksLikeSheet } = require('./engine/sheetCheck');
 const { PROMPT_PLACEHOLDERS } = require('./promptPlaceholders');
@@ -2939,8 +2942,16 @@ async function runAgentTurn(history, contextName, onEvent) {
    * the file again; anything else to a waiting plan answers the plan.
    */
   const earlierFile = !attachment && [...history].reverse().find((m) => m.role === 'user' && m.attachment)?.attachment;
-  const asksCheck = /\b(?:check|cross ?check|compare|discrepanc\w*|new deals?|missing|what'?s wrong|differ\w*)\b/i.test(asked)
+  // ABOUT THE FILE, not just a check word: "who is missing a phone number"
+  // and "gloria difference" re-read the last file and drew its card again
+  // (2026-10-07). A short check ("check again", "any discrepancies?") or one
+  // that points at it ("check this", "new deals in the file") still does.
+  const checkWord = /\b(?:check|cross ?check|compare|discrepanc\w*|new deals?|missing|what'?s wrong|differ\w*)\b/i.test(asked)
     && !/^(?:show|list|see|view|what about|why)\b/i.test(asked.trim());
+  const atTheFile = /\b(?:this|that|the|my|your)\s+(?:file|sheet|upload|attachment|list|spreadsheet|one)\b|\b(?:it|again|in there|from it)\b/i.test(asked)
+    || asked.trim().split(/\s+/).length <= 4;
+  const aNamesDifference = /\b[a-z]+\s+differ\w*\b/i.test(asked) && !/\b(?:any|the|a|what|see|find|check)\s+differ/i.test(asked);
+  const asksCheck = checkWord && atTheFile && !aNamesDifference;
   const recheck = Boolean(earlierFile && asksCheck);
   const fileNow = attachment ?? (recheck ? earlierFile : null);
   const sheetGiven = Boolean(fileNow) || (!pending && looksLikeSheet(asked));
@@ -3064,6 +3075,75 @@ async function runAgentTurn(history, contextName, onEvent) {
       }
     } catch (err) {
       logger.warn({ err: err.message }, 'diane: a plan could not be made, she takes it');
+    }
+  }
+
+  /**
+   * ===============================
+   * * THE READ ROUTER: A PLAIN QUESTION, ONE LIGHT CALL, THE TOOL DIRECTLY
+   * ===============================
+   * His call 2026-10-07: reads as efficient as writes. A question the router
+   * is sure of is read into a strict shape with every name in front of it
+   * (engine/readRouter.js), its names held to the sheet, its filters held to
+   * their words (readGuard.js), and its tool called once, with no rounds of
+   * the full model. Not sure, or a question code already routes? On as before.
+   */
+  /**
+   * A MESSAGE THAT IS A NAME opens that person, in code: "gloria difference"
+   * alone was read as "the month difference for Gloria" (2026-10-07). The
+   * whole message, a name on the sheet, nothing else in it.
+   */
+  if (!pending && !sheetGiven && !fileNow && context.tools.some((t) => t.name === 'find_and_show_details')) {
+    const bare = asked.trim().replace(/[?.!]+$/, '').replace(/^(?:and |what about |how about |show me |show )/i, '').trim();
+    const roster = await require('../repos/people.repo').filterOptions().catch(() => null);
+    const person = (roster?.people ?? []).map((p) => p.name).find((n) => fold(n) === fold(bare));
+    if (person && bare.split(/\s+/).length >= 1) {
+      turnState.model = 'code';
+      const result = await invokeTool(context.tools, 'find_and_show_details', JSON.stringify({ name: person }), history, onEvent, turnState);
+      for (const card of result?.cards ?? []) onEvent?.({ type: 'card', card });
+      if (result?.list) onEvent?.({ type: 'list', list: result.list });
+      const reply = result?.reply ?? (result?.cards?.length ? `${person}: ${result.cards.length} ${result.cards.length === 1 ? 'deal' : 'deals'}, on screen.` : '');
+      if (reply) return { reply, changedRowIds: [], context: context.key, claims: [] };
+    }
+  }
+  const codeRouted = STOPPED_ASK.test(asked) || COMPANIES_IN_ASK.test(asked) || BREAKDOWN_ASK.test(asked)
+    || COMPANIES_LIST_ASK.test(asked) || STATUS_ASK.test(asked) || SECOND_ASK.test(asked) || RESUME_ASK.test(asked);
+  if (routed?.sure && routed.kind === 'question' && !pending && !sheetGiven && !fileNow && !codeRouted
+    && context.tools.some((t) => t.name === 'filter_master_sheet') && LIGHT_MODEL && LIGHT_MODEL !== 'off' && env.aiProvider === 'openai') {
+    try {
+      const roster = await require('../repos/people.repo').filterOptions().catch(() => null);
+      const names = { people: (roster?.people ?? []).map((p) => p.name), groups: roster?.groups ?? [], companies: roster?.companies ?? [] };
+      const recent = history.slice(0, -1).filter((m) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && !m.list && !m.card).slice(-3);
+      const shape = await readRoute(asked, { recent, ...names, model: LIGHT_MODEL });
+      const call = shape && readToolCall(shape, { ...names, said: asked });
+      if (shape) logger.info({ shape, call }, 'diane: read routed');
+      if (call && context.tools.some((t) => t.name === call.name)) {
+        turnState.model = LIGHT_MODEL;
+        const result = await invokeTool(context.tools, call.name, JSON.stringify(call.args), history, onEvent, turnState);
+        if (result?.list) onEvent?.({ type: 'list', list: result.list });
+        if (result?.check) onEvent?.({ type: 'check', check: result.check });
+        if (call.name === 'find_and_show_details' || CARD_ASKED.test(asked)) for (const card of result?.cards ?? []) onEvent?.({ type: 'card', card });
+        let reply = result?.reply ?? '';
+        const sub = result?.list?.subtitle && !/^everything$/i.test(result.list.subtitle) ? `, ${result.list.subtitle}` : '';
+        if (!reply && result?.list?.title) reply = `${result.list.title}${sub}.`;
+        if (!reply && result?.summary) {
+          // one short sentence from the result, by the light model, no tools
+          const said = await getClient().chat.completions.create({
+            model: LIGHT_MODEL,
+            temperature: 0,
+            messages: [
+              { role: 'system', content: 'You are Diane. Answer their question in one or two short sentences, using ONLY the facts in the tool result. If it says to ask them something, ask it. No lists if a card is on screen.' },
+              { role: 'user', content: `Question: ${asked}\n\nTool result: ${String(result.summary).slice(0, 3000)}` },
+            ],
+          });
+          reply = said.choices?.[0]?.message?.content?.trim() ?? '';
+        }
+        if (reply) {
+          return { reply, changedRowIds: [], context: context.key, claims: [] };
+        }
+      }
+    } catch (err) {
+      logger.warn({ err: err.message }, 'diane: the read router could not answer, she takes it');
     }
   }
 

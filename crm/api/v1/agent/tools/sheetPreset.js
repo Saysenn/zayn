@@ -1,4 +1,5 @@
 const { presetTable, PICTURE_PRESETS } = require('../../masterSheet/presetTable');
+const { notAGroup } = require('./notAGroup');
 
 /**
  * ===============================
@@ -26,6 +27,7 @@ const showSheetPreset = {
     properties: {
       preset: { type: 'string', enum: PICTURE_PRESETS, description: 'Which sheet.' },
       group: { type: 'string', description: 'One group, only if they named one. Otherwise every group.' },
+      groups: { type: 'array', items: { type: 'string' }, description: 'Several groups, when they named more than one. Use this INSTEAD of group.' },
       month: { type: 'string', description: 'YYYY-MM, only if they named another month. Otherwise this month.' },
     },
     required: ['preset'],
@@ -35,7 +37,14 @@ const showSheetPreset = {
     if (!PICTURE_PRESETS.includes(id)) {
       return { summary: 'Only the Standard, Bank, Cash and Crypto sheets can be shown. Ask which one.', reply: 'Which sheet: Standard, Bank, Cash or Crypto?', computedReply: true };
     }
-    const group = args.group ? String(args.group).toUpperCase() : undefined;
+    const asked = [...(args.groups ?? []), ...(args.group ? [args.group] : [])].map((g) => String(g).trim()).filter(Boolean);
+    // A GROUP THAT IS NOT ONE is said, never answered as an empty sheet
+    for (const g of asked) {
+      // eslint-disable-next-line no-await-in-loop
+      const wrong = await notAGroup(g, args.said);
+      if (wrong) return { summary: wrong };
+    }
+    const group = asked.length ? asked.map((g) => g.toUpperCase()).join(',') : undefined;
     const month = /^\d{4}-\d{2}$/.test(String(args.month ?? '')) ? args.month : undefined;
     const t = await presetTable(id, { group, month });
     const label = `${LABEL[id]} sheet${group ? ` · ${group}` : ''}`;

@@ -61,6 +61,9 @@ const PLURAL_DIMENSIONS = [
  */
 const SINGULAR_BY_DESIGN = new Set([
   'export_sheet:month',
+  // THE EXPORT'S SHEET IS ONE MONTH'S FILE, like export_sheet: several
+  // months is several files, not one picture.
+  'show_sheet_preset:month',
   // A RATE IS FOR ONE MONTH. "What was August's rate" has one answer, saved
   // with that month's snapshot; several months is several rates and that is
   // a history question for compare_months, not a rate lookup.

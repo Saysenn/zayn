@@ -14,7 +14,7 @@
     "backup": "node scripts/backup.js create",
     "backup:verify": "node scripts/backup.js verify",
     "backup:restore": "node scripts/backup.js restore",
-    "test": "node --test --test-force-exit v1/**/*.test.js",
+    "test": "node --test --test-force-exit \"v1/**/*.test.js\"",
     "test:drift": "node scripts/testDrift.js",
     "test:diane": "node scripts/dianeSuite/run.mjs",
     "test:diane:tz": "for z in Asia/Dubai Europe/London America/Los_Angeles; do echo \"== $z\"; TZ=$z node scripts/dianeSuite/run.mjs; done"

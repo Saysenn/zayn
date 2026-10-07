@@ -106,8 +106,21 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
   const ctx = { admin, group, phone, state, today, client, channel, groups: channel === 'diane' ? await knownGroups() : [] };
 
   let reply;
+  // what the open preview held before this message, to see if it changed
+  const heldBefore = state.pending?.kind === 'add' ? JSON.stringify(state.pending.items.map(({ n, spentOn, rawAmount, currency, payee, description, skipped }) => [n, spentOn, rawAmount, currency, payee, description, skipped])) : null;
   try {
     reply = await answerTurn(said, files, ctx);
+    /**
+     * SENT AGAIN, CHANGED NOTHING (his call 2026-10-07): the same expenses
+     * typed while their preview is open re-showed it as if new. Now it says
+     * so. Only for a message with figures in it, never "yes" or "show it".
+     */
+    const heldAfter = state.pending?.kind === 'add' ? JSON.stringify(state.pending.items.map(({ n, spentOn, rawAmount, currency, payee, description, skipped }) => [n, spentOn, rawAmount, currency, payee, description, skipped])) : null;
+    if (heldBefore && heldBefore === heldAfter && !files.length && /\d/.test(said) && said.split(/\s+/).length >= 3
+      && /_Not saved yet_/.test(String(reply ?? '')) && !/^Just to be sure/.test(String(reply ?? ''))) {
+      const live = state.pending.items.filter((x) => !x.skipped).length;
+      reply = `Those are already in your preview, so nothing changed. It still has ${live} ${live === 1 ? 'expense' : 'expenses'}: reply *yes*, *modify* or *cancel*.`;
+    }
   } catch (err) {
     if (err.code === 'NO_AI') reply = 'I can\'t read that right now (my reading service is off). Nothing was saved. Try again later.';
     else {
@@ -378,8 +391,26 @@ async function reviseFrom(said, ctx) {
   for (const u of got.updates) applyFix(items, { which: [u.n], fixes: [{ field: u.field, value: u.value }] }, ctx.today);
   for (const n of got.skip) { const x = items.find((i) => i.n === n); if (x) x.skipped = true; }
   for (const n of got.ok) { const x = items.find((i) => i.n === n); if (x) x.ok = true; }
+  const before = items.length;
   for (const e of got.newExpenses) items.push({ ...e, n: items.length + 1, modelDoubt: e.doubt || null });
-  const checked = await recheck(items, ctx);
+  let checked = await recheck(items, ctx);
+  /**
+   * TYPED AGAIN, ADDED NOTHING (his call 2026-10-07): new ones that are
+   * exact copies of ones already in the preview are dropped, as for files.
+   */
+  if (got.newExpenses.length) {
+    const open = checked.slice(0, before).filter((o) => !o.skipped);
+    const fresh = checked.slice(before);
+    const copies = fresh.filter((x) => open.some((o) => exactCopy(o, x)));
+    if (copies.length) {
+      const kept = items.slice(before).filter((_, i) => !copies.includes(fresh[i])).map((x, i) => ({ ...x, n: before + i + 1 }));
+      if (!kept.length && !got.updates.length && !got.skip.length && !got.ok.length) {
+        const live = open.length;
+        return `Those ${copies.length === 1 ? 'is' : 'are'} already in your preview, so nothing was added. It still has ${live} ${live === 1 ? 'expense' : 'expenses'}: reply *yes*, *modify* or *cancel*.`;
+      }
+      checked = await recheck([...items.slice(0, before), ...kept], ctx);
+    }
+  }
   ctx.state.pending = { kind: 'add', items: checked };
   // NEVER SAVED FROM AN ANSWER. "they're all new ones" and "1 milkman nadia
   // r, yes its right" saved at once, unseen (test sweep 2026-10-07). Changed

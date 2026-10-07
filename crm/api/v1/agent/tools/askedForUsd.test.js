@@ -420,11 +420,12 @@ test('THE SINGLE PATH CHECKS THE WHOLE SHEET, not the rows one name found', asyn
 
 test('and ONE person named is answered, on both doors', async () => {
   await withRepos(async () => {
+    // HIS RULE 2026-10-07: "Gloria difference" is part of Gloria, so her total carries its AED 150.
     const a = await total.handler({ person: 'Gloria', month: MONTH, said: 'what is gloria owed' });
-    assert.deepEqual(a.total, { GBP: 2000 });
+    assert.deepEqual(a.total, { GBP: 2000, AED: 150 });
 
     const b = await total.handler({ people: ['Gloria'], month: MONTH, said: 'what is gloria owed' });
-    assert.deepEqual(b.total, { GBP: 2000 });
+    assert.deepEqual(b.total, { GBP: 2000, AED: 150 });
   });
 });
 
@@ -432,6 +433,7 @@ test('a vague sentence names nobody, so a list of one is fine', async () => {
   // "And in dollars?" or "add those two up" must not be refused.
   await withRepos(async () => {
     const out = await total.handler({ people: ['Gloria'], month: MONTH, said: 'and that one?' });
-    assert.deepEqual(out.total, { GBP: 2000 });
+    // HIS RULE 2026-10-07: "Gloria difference" is part of Gloria, so her total carries its AED 150.
+    assert.deepEqual(out.total, { GBP: 2000, AED: 150 });
   });
 });

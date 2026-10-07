@@ -61,7 +61,7 @@ const { ratedRows } = require('../../shared/ratedRows.helper');
 const { money: amount2dp } = require('../../shared/money.helper');
 const { periodFor, PERIOD, PERIOD_LABEL } = require('../../shared/paymentPeriod.helper');
 const {
-  resolvePerson, personKey, fold, peopleIn, saidFor, personMentionedIn, within,
+  resolvePerson, resolvePersonWithParts, baseOf, personKey, fold, peopleIn, saidFor, personMentionedIn, within,
 } = require('./resolvePerson');
 const { exportSheet } = require('./exportSheet');
 const { showSheetPreset } = require('./sheetPreset');
@@ -1402,7 +1402,7 @@ const findAndShow = {
     // end it replaced. Only ambiguous if two rows share the SAME exact name.
     // resolvePerson: the exact-name exit and the which-PERSON rule, shared
     // by every tool that takes a name. See its banner for both rules.
-    const picked = resolvePerson(rows, args.name, args.said);
+    const picked = resolvePersonWithParts(rows, args.name, args.said);
     if (picked.ambiguous) {
       // Deliberately NOT resolved by picking the top score. Two people can
       // legitimately be a near-tie.
@@ -4009,10 +4009,17 @@ async function totalReply(rows, month, args, whoLabel = null, plural = false, {
   const moneyText = (currency, n) => `${currency || 'GBP'} ${amountText(n)}`;
   const percentText = (values) => (values.size === 1 ? `${amountText([...values][0])}%` : null);
   const personTotals = new Map();
+  // "GLORIA DIFFERENCE" COUNTS AS GLORIA when she is in the same total
+  // (resolvePerson.js, baseOf): one person, one line, one rank
+  const basesHere = new Map(counted.map((c) => [fold(c.row.person_name), c.row.person_name]));
+  // NAMED ON ITS OWN ("gloria + gloria difference"), it keeps its own line
+  const namedHere = new Set([...(args?.people ?? []), args?.person].filter(Boolean).map(fold));
 
   for (const c of counted) {
     const row = c.row;
-    const name = row.person_name || 'Unknown person';
+    const own = row.person_name || 'Unknown person';
+    const base = baseOf(own);
+    const name = base && basesHere.has(fold(base)) && !namedHere.has(fold(own)) ? basesHere.get(fold(base)) : own;
     const currency = row.currency || 'GBP';
     const byPerson = personTotals.get(name) ?? new Map();
     const item = byPerson.get(currency) ?? {
@@ -4059,7 +4066,10 @@ async function totalReply(rows, month, args, whoLabel = null, plural = false, {
       && ranked[top.length].usd === top[top.length - 1].usd) top.push(ranked[top.length]);
     const headline = `${rankBy > 0 ? 'Owed the most' : 'Owed the least'}, ${when}, in USD:`;
     const lines = top.map((r, i) => `${i + 1}. ${r.name}: USD ${amountText(r.usd)} (${r.native})`);
-    const reply = top.length > 0 ? `${headline}\n${lines.join('\n')}` : `Nobody is owed anything ${when}.`;
+    // ONE PERSON IS A SENTENCE, not a list of one
+    const reply = top.length === 1 && Math.abs(rankBy) === 1
+      ? `${top[0].name} is owed the ${rankBy > 0 ? 'most' : 'least'}, ${when}: ${top[0].native} (USD ${amountText(top[0].usd)}).`
+      : top.length > 0 ? `${headline}\n${lines.join('\n')}` : `Nobody is owed anything ${when}.`;
     return {
       summary: `${reply}\n\nCOMPUTED, ranked in code across ${ranked.length} people at the saved rates. `
         + 'Say it exactly; never reorder it or add a name.',
@@ -4712,7 +4722,7 @@ const totalFor = {
         if (found.length === 0) { missing.push(`"${who}" matches nobody`); continue; }
         // NO `said` WHEN SEVERAL PEOPLE ARE LISTED. The rule and the two
         // incidents behind it are on `saidFor` in resolvePerson.js.
-        const picked = resolvePerson(found, who, saidFor(named, args.said));
+        const picked = resolvePersonWithParts(found, who, saidFor(named, args.said));
         if (picked.ambiguous) { missing.push(`"${who}" is ${picked.names.join(' or ')}`); continue; }
         for (const r of picked.rows) if (!seen.has(r.id)) { seen.add(r.id); pooled.push(r); }
       }
@@ -4816,7 +4826,7 @@ const totalFor = {
       }
 
       // rules, including the exact-name exit out of the question.
-      const picked = resolvePerson(rows, args.person, args.said);
+      const picked = resolvePersonWithParts(rows, args.person, args.said);
       if (picked.ambiguous) {
         return {
           summary: `"${args.person}" matches more than one person: ${picked.names.join(', ')}. `
