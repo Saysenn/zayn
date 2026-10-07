@@ -18,6 +18,7 @@ const QUIET_MS = 6000;
 const KEEP_S = 60 * 60;
 const seqKey = (phone, group) => `expense-batch-seq:${phone}:${String(group).toUpperCase()}`;
 const listKey = (phone, group) => `expense-batch:${phone}:${String(group).toUpperCase()}`;
+const ackKey = (phone, group) => `expense-batch-ack:${phone}:${String(group).toUpperCase()}`;
 const sleep = (ms) => new Promise((r) => { setTimeout(r, ms); });
 
 /** Numbered when it arrives, before the queue: the order the phone sent them. */
@@ -26,6 +27,17 @@ export async function arrived(phone, group) {
   const seq = await withRedisTimeout(redis.incr(key));
   await withRedisTimeout(redis.expire(key, KEEP_S));
   return seq;
+}
+
+/**
+ * THE FIRST FILE OF A BURST SAYS "GOT IT", once (his call 2026-10-07: after
+ * sending files the bot sat silent while it read them). True for the first
+ * file only; the flag clears when the burst is answered, so the next burst
+ * says it again.
+ */
+export async function firstOfBurst(phone, group) {
+  const set = await withRedisTimeout(redis.set(ackKey(phone, group), "1", "EX", 120, "NX"));
+  return set === "OK";
 }
 
 /**
@@ -45,7 +57,7 @@ export async function collect({ phone, group, seq, attachments, text, quietMs = 
 
   // THE LAST ONE: take the whole burst, in the order it was sent.
   const raw = await withRedisTimeout(redis.lrange(list, 0, -1));
-  await withRedisTimeout(redis.del(list));
+  await withRedisTimeout(redis.del(list, ackKey(phone, group)));
   const parts = raw.map((r) => JSON.parse(r)).sort((a, b) => a.seq - b.seq);
   return {
     attachments: parts.flatMap((p) => p.attachments ?? []),

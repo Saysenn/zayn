@@ -16,7 +16,7 @@ import { arrived } from "../expenses/batch.js";
  * that number.
  */
 export async function receiveMessage(msg) {
-  const { messageId, from, to, groupId, text, voice, attachments } = msg;
+  const { messageId, from, to, groupId, text, voice, attachments, unreadable } = msg;
 
   // A receipt or file is numbered as it arrives, so a burst of them can be
   // answered once, by the last (expenses/batch.js).
@@ -48,6 +48,7 @@ export async function receiveMessage(msg) {
           // paths to receipts on disk, never the bytes: see expenses.js
           ...(attachments?.length ? { attachments } : {}),
           ...(batchSeq ? { batchSeq } : {}),
+          ...(unreadable ? { unreadable } : {}),
           receivedAt: new Date().toISOString(),
         },
         // through jobIdOf because BullMQ rejects a colon and the ID is Baileys'

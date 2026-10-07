@@ -64,6 +64,7 @@ const {
   resolvePerson, personKey, fold, peopleIn, saidFor, personMentionedIn, within,
 } = require('./resolvePerson');
 const { exportSheet } = require('./exportSheet');
+const { showSheetPreset } = require('./sheetPreset');
 const { confirmFirst } = require('./confirmFirst');
 const { applyCompanyStatus, wouldStop } = require('../../shared/companyStatus.helper');
 // "Add 3%" written as "set to 3" took 160 AED out of a month in silence.
@@ -2389,6 +2390,11 @@ function listRow(r) {
     paid: r.override_paid,
     company: r.company || null,
     group: r.group_name || null,
+    // Plain numbers for the picture's total (pictures/fromAgent.js), added
+    // in code there, never read by her.
+    currency: r.currency || 'GBP',
+    payable: r.payable_amount ?? r.monthly_amount ?? null,
+    method: r.payment_method || null,
   };
 }
 
@@ -2733,6 +2739,19 @@ const shorten = (spec) => {
   return out;
 };
 const FILTER_PARAMS_SHORT = Object.fromEntries(Object.entries(FILTER_PARAMS).map(([k, v]) => [k, shorten(v)]));
+
+/** Narrowed by a single payment method and nothing else but a group. */
+function onlyMethod(args) {
+  const f = filtersIn(args);
+  const m = Array.isArray(f.paymentMethod) && f.paymentMethod.length === 1 ? f.paymentMethod[0] : f.paymentMethod;
+  return typeof m === 'string' && ['cash', 'bank', 'crypto'].includes(m) && Object.keys(f).every((k) => k === 'paymentMethod');
+}
+
+/** The group(s) it was narrowed to, as the export's group filter reads them. */
+const groupsOf = (args) => {
+  const list = [].concat(args.groups ?? [], args.group ?? []).map((g) => String(g).trim().toUpperCase()).filter(Boolean);
+  return list.length ? [...new Set(list)].join(',') : undefined;
+};
 
 function filtersIn(args) {
   const out = {};
@@ -3527,6 +3546,9 @@ const filterRows = {
         + 'count and what they have in common, then STOP. Do not offer to open any of them.\n\n'
         + denominator + zeroSplit,
       list: {
+        // ONLY A PAYMENT METHOD (and maybe a group): the export's own Cash /
+        // Bank / Crypto sheet is drawn for its picture (pictures/fromAgent.js).
+        ...(onlyMethod(args) ? { preset: { id: [].concat(args.paymentMethod)[0], group: groupsOf(args) } } : {}),
         title: `${total} ${total === 1 ? 'deal' : 'deals'}${scope}`,
         // The count in the title is the WHOLE match; the panel holds one
         // page of it. Saying so on screen too, because a header reading 76
@@ -11005,6 +11027,8 @@ module.exports = {
     // READ ONLY, and it opens a panel rather than building anything. Above
     // the writes for the same reason findAndShow is: it is the common ask.
     exportSheet,
+    // The export's Standard / Bank / Cash / Crypto sheet as a picture, read only.
+    showSheetPreset,
     perGroup(recallConversations),
     perGroup(showPastConversation),
     perGroup(deletePastConversations),

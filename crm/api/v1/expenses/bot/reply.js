@@ -144,6 +144,14 @@ function readReply(said, pending, { year = new Date().getUTCFullYear(), groups =
     const which = nums(back[1]);
     return which.length && which.every((n) => n >= 1 && n <= count) ? { kind: 'unskip', which } : null;
   }
+  // "SKIP COPIES" / "SKIP SAVED": every copy of an earlier one, or every one
+  // that looks already saved, in one go (his call 2026-10-07).
+  const bulk = /^(?:skip|drop|remove|leave out)\s+(?:all\s+)?(?:the\s+)?(copies|copy|duplicates?|dupes?|repeats?|(?:already\s+)?saved(?:\s+ones)?|ones? already saved)$/i.exec(bare);
+  if (bulk) {
+    const saved = /saved/i.test(bulk[1]);
+    const which = pending.items.filter((x) => !x.skipped && (x.doubts ?? []).some((d) => (saved ? /^looks already saved/ : /^same as \d+/).test(d))).map((x) => x.n);
+    return { kind: 'skip', which, bulk: saved ? 'saved' : 'copies' };
+  }
   // "skip 3 to 6" / "skip 3-6": a range is every number in it.
   const span = /^(?:skip|drop|remove|delete|without|leave out|not)\s+(?:#|no\.?\s*|numbers?\s+)?(\d+)\s*(?:to|-|–|through|thru|till)\s*(\d+)$/i.exec(bare);
   if (span && Number(span[2]) >= Number(span[1])) {

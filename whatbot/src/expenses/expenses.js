@@ -52,6 +52,26 @@ async function admins() {
   return cache.keys;
 }
 
+/**
+ * How many expenses are in this admin's open preview, for the "reading"
+ * note. 0 when there is none, or the CRM did not answer in time: the note
+ * is a courtesy, never worth waiting on.
+ */
+export async function openPreviewSize(phone, group) {
+  try {
+    const q = new URLSearchParams({ phone, group }).toString();
+    const res = await fetch(`${crmConfig.apiUrl}/api/v1/agent/expenses/pending?${q}`, {
+      headers: { "x-api-key": crmConfig.apiKey },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return 0;
+    const { open } = await res.json();
+    return Number.isFinite(Number(open)) ? Number(open) : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export async function isExpenseAdmin(phone, group) {
   return (await admins()).has(key(phone, group));
 }
@@ -64,6 +84,25 @@ export const resetAdminCache = () => {
 // ---- media ----
 
 const MAX_BYTES = 15 * 1024 * 1024;
+
+/**
+ * WHAT THE EXPENSE BRAIN CAN READ. Anything else is answered at once with
+ * what it can read (his call 2026-10-07: never silence after a file), and
+ * never downloaded.
+ */
+const READABLE = /\.(jpe?g|png|webp|heic|pdf|xlsx|xls|csv|tsv|txt|json|docx|pptx)$/i;
+export function readable(media) {
+  if (media.kind === "image") return true;
+  return READABLE.test(media.filename) || /^image\/|pdf|spreadsheet|excel|csv|wordprocessing|presentation|text\/plain/.test(media.mime);
+}
+
+/** The instant answer for a file it will not read. */
+export function unreadableReply(u) {
+  const name = u.filename ? `*${u.filename}*` : "that file";
+  if (u.why === "size") return `⚠️ ${name} is too big for me (15 MB at most). Send a smaller copy, or a photo of the page.`;
+  if (u.why === "failed") return `⚠️ I couldn't download ${name} from WhatsApp. Please send it again.`;
+  return `⚠️ I can't read ${name}. Send a photo, a PDF, Excel, CSV, Word, PowerPoint or a text file.`;
+}
 const MEDIA_DIR = join(tmpdir(), "whatbot-expense-media");
 
 /** A photo or a file on this message, with its caption. Null for anything else. */
@@ -134,6 +173,8 @@ const TurnReply = z.object({
   replies: z.array(z.string()).optional(),
   // the preview as a picture; `reply` is then its caption
   image: z.object({ base64: z.string(), mime: z.string(), filename: z.string().optional() }).optional(),
+  // a long report's further pages, sent after the first, no caption
+  moreImages: z.array(z.object({ base64: z.string(), mime: z.string(), filename: z.string().optional() })).optional(),
 });
 
 export async function expenseTurn({ phone, group, text, attachments = [], messageId }) {

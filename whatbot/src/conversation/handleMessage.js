@@ -43,8 +43,8 @@ import {
 } from "../payday/paydayMessages.js";
 import { scriptedReply } from "./scriptedReply.js";
 import { replier } from "./sendReply.js";
-import { expenseTurn, isExpenseAdmin } from "../expenses/expenses.js";
-import { collect } from "../expenses/batch.js";
+import { expenseTurn, isExpenseAdmin, openPreviewSize, unreadableReply } from "../expenses/expenses.js";
+import { collect, firstOfBurst } from "../expenses/batch.js";
 import {
   EXPENSE,
   EXPENSE_WORD,
@@ -85,6 +85,16 @@ export const NO_REPLY = Symbol("no-reply");
 /** the common case: words only. an object, because a file cannot be a string */
 const words = (text) => ({ text });
 
+// The expense bot's word while it reads files (his call 2026-10-07).
+const readingNote = (files, open) => {
+  const n = `${files} ${files === 1 ? "file" : "files"}`;
+  return open
+    ? `📥 Got ${n}, adding ${files === 1 ? "it" : "them"} to your open preview (${open} so far)…`
+    : `📥 Got ${n}, reading your expenses now…`;
+};
+const STILL_READING = "⏳ Still reading, almost there…";
+const STILL_READING_AFTER_MS = 30_000;
+
 /**
  * One message in, one reply out. The orchestrator.
  *
@@ -119,6 +129,9 @@ export async function handleMessage(input) {
       await setMode(phone, channelGroup, PAYMENTS);
       return words(MODE_REPLIES[PAYMENTS](channelGroup));
     }
+    // A FILE IT WILL NOT READ (wrong type, too big, failed download): said at
+    // once, never silence.
+    if (input.unreadable && !attachments.length) return words(unreadableReply(input.unreadable));
     let mode = await modeOf(phone, channelGroup);
     let lead = "";
     if (attachments.length && mode === PAYMENTS) {
@@ -132,12 +145,31 @@ export async function handleMessage(input) {
       let files = attachments;
       let said = text;
       if (attachments.length && input.batchSeq) {
+        // "typing…" from the first file of the burst, at once (his call
+        // 2026-10-07: never silence while it reads).
+        if (await firstOfBurst(phone, channelGroup).catch(() => false)) input.typingOnce?.();
         const burst = await collect({ phone, group: channelGroup, seq: input.batchSeq, attachments, text });
         if (!burst) return NO_REPLY;
         files = burst.attachments;
         said = burst.text;
+        // "GOT 6 FILES": the count, and the open preview they are joining,
+        // so sending the same files twice is plain to see.
+        const open = await openPreviewSize(phone, channelGroup);
+        await input.notify?.(`${lead}${readingNote(burst.count, open)}`);
+        lead = "";
       }
-      const out = await expenseTurn({ phone, group: channelGroup, text: said, attachments: files, messageId });
+      // "typing…" while it reads, and one "still reading" if it is slow
+      const stopTyping = files.length ? (input.typing?.() ?? (() => {})) : () => {};
+      const slow = files.length
+        ? setTimeout(() => void input.notify?.(STILL_READING), STILL_READING_AFTER_MS)
+        : null;
+      let out;
+      try {
+        out = await expenseTurn({ phone, group: channelGroup, text: said, attachments: files, messageId });
+      } finally {
+        clearTimeout(slow);
+        stopTyping();
+      }
       if (out.registered !== false && !out.handOff) {
         if (!out.reply) return NO_REPLY;
         // EXTRA BUBBLES (the rates to AED after a preview) go after the first.
@@ -146,6 +178,7 @@ export async function handleMessage(input) {
           text: `${lead}${out.reply}`,
           ...(extra.length ? { more: extra } : {}),
           ...(out.image ? { image: out.image } : {}),
+          ...(out.moreImages?.length ? { moreImages: out.moreImages } : {}),
         };
       }
       // NOT ABOUT EXPENSES ("how much am I getting paid?"): answered as a

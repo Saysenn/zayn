@@ -29,6 +29,7 @@ import { recordMessage } from "./system/crmClient.js";
 import { sendText } from "./whatsapp/sendMessage.js";
 import { sendDocument } from "./whatsapp/sendDocument.js";
 import { sendImage } from "./whatsapp/sendImage.js";
+import { keepTyping, typingOnce } from "./whatsapp/typing.js";
 import { startConnections, closeConnections } from "./whatsapp/connection.js";
 import { receiveMessage } from "./whatsapp/receiveMessage.js";
 import { buildAdminReplyApp } from "./http/adminReplyApp.js";
@@ -74,13 +75,15 @@ const PAYDAY_RETRY_EVERY_MS = 5 * 60_000;
 /**
  * One job = one message. handleMessage does the work, this delivers it.
  *
- * One message in, one message out. No "Checking..." holding reply.
+ * One message in, one message out. No "Checking..." holding reply, with ONE
+ * exception: an expense admin's files get "Got it, reading…" from the first
+ * of the burst, and "typing…" while they are read (his call 2026-10-07).
  * Throws are retried 3 times by BullMQ, so nothing is lost quietly.
  */
 const messageWorker = new Worker(
   INBOUND_QUEUE,
   async (job) => {
-    const { from, to, text, voice, groupId, messageId, attachments, batchSeq } = job.data;
+    const { from, to, text, voice, groupId, messageId, attachments, batchSeq, unreadable } = job.data;
     logger.info({ messageId, groupId }, "processing message");
 
     // A voice note becomes a question HERE, not earlier: transcription is
@@ -104,6 +107,11 @@ const messageWorker = new Worker(
       // the expense brain's dedupe key: a redelivery never saves twice
       messageId,
       batchSeq,
+      unreadable,
+      // the expense bot's "Got it, reading…" and "typing…" while it reads
+      notify: (t) => sendText(from, to, t).catch((err) => logger.warn({ err }, "could not send the reading note")),
+      typing: () => keepTyping(from, to),
+      typingOnce: () => typingOnce(from, to),
     });
 
     // they opted out. say nothing at all, not even "you've opted out".
@@ -113,6 +121,10 @@ const messageWorker = new Worker(
     // THE EXPENSE PREVIEW AS A PICTURE, its text as the caption.
     if (reply.image && features.expenseImages) {
       await sendImage(from, to, { content: Buffer.from(reply.image.base64, "base64"), caption: reply.text, mimetype: reply.image.mime });
+      // a long report's further pages, in order
+      for (const page of reply.moreImages ?? []) {
+        await sendImage(from, to, { content: Buffer.from(page.base64, "base64"), caption: "", mimetype: page.mime });
+      }
     } else {
       await sendText(from, to, reply.text);
     }

@@ -9,12 +9,13 @@ vi.mock("../system/redis.js", () => ({
     expire: async () => 1,
     rpush: async (k, v) => { lists.set(k, [...(lists.get(k) ?? []), v]); return 1; },
     lrange: async (k) => lists.get(k) ?? [],
-    del: async (k) => { lists.delete(k); return 1; },
+    del: async (...ks) => { for (const k of ks) { lists.delete(k); kv.delete(k); } return 1; },
+    set: async (k, v, ...opts) => { if (opts.includes("NX") && kv.has(k)) return null; kv.set(k, v); return "OK"; },
   },
   withRedisTimeout: (op) => op,
 }));
 
-const { arrived, collect } = await import("./batch.js");
+const { arrived, collect, firstOfBurst } = await import("./batch.js");
 
 describe("a burst of receipts is one turn, answered once", () => {
   it("only the last to arrive answers, with every file in the order sent", async () => {
@@ -38,5 +39,14 @@ describe("a burst of receipts is one turn, answered once", () => {
     const seq = await arrived("+447700900002", "INDIGO");
     const out = await collect({ phone: "+447700900002", group: "INDIGO", seq, attachments: [{ path: "/tmp/a.pdf" }], text: "", quietMs: 10 });
     expect(out.count).toBe(1);
+  });
+
+  it("GOT IT is said by the first file of a burst only, and again for the next burst", async () => {
+    const phone = "+447700900003";
+    expect(await firstOfBurst(phone, "MANBAT")).toBe(true);
+    expect(await firstOfBurst(phone, "MANBAT")).toBe(false);
+    const seq = await arrived(phone, "MANBAT");
+    await collect({ phone, group: "MANBAT", seq, attachments: [{ path: "/tmp/b.jpg" }], text: "", quietMs: 5 });
+    expect(await firstOfBurst(phone, "MANBAT")).toBe(true);
   });
 });

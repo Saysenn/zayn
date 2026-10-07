@@ -21,6 +21,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { redis } from "./system/redis.js";
 import { handleMessage, NO_REPLY } from "./conversation/handleMessage.js";
 import { isExpenseAdmin } from "./expenses/expenses.js";
+import { arrived } from "./expenses/batch.js";
 
 const phone = process.argv[2];
 const group = process.argv[3];
@@ -68,12 +69,24 @@ for await (const line of rl) {
   n += 1;
   const started = Date.now();
   try {
-    const reply = await handleMessage({ phone, channelGroup: group, text: message, attachments, messageId: `terminal-${Date.now()}-${n}` });
+    const reply = await handleMessage({
+      phone, channelGroup: group, text: message, attachments, messageId: `terminal-${Date.now()}-${n}`,
+      // numbered like a real arrival, so a file waits for the burst as on WhatsApp
+      batchSeq: attachments.length ? await arrived(phone, group) : undefined,
+      notify: (t) => say(`bot > ${t}`),
+      typing: () => { say("      [typing…]"); return () => {}; },
+      typingOnce: () => say("      [typing…]"),
+    });
     say(reply === NO_REPLY ? "bot > (no reply)" : `bot > ${reply.text.split("\n").join("\n      ")}`);
     if (reply !== NO_REPLY && reply.image) {
       const file = `/tmp/whatbot-expense-${Date.now()}.png`;
       await writeFile(file, Buffer.from(reply.image.base64, "base64"));
       say(`      [picture sent with the text above as its caption: ${file}]`);
+      for (const [i, page] of (reply.moreImages ?? []).entries()) {
+        const more = `/tmp/whatbot-expense-${Date.now()}-${i + 2}.png`;
+        await writeFile(more, Buffer.from(page.base64, "base64"));
+        say(`      [page ${i + 2}: ${more}]`);
+      }
     }
     for (const t of reply.more ?? []) say(`bot > ${t.split("\n").join("\n      ")}`);
   } catch (err) {

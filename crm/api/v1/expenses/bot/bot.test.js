@@ -211,3 +211,42 @@ test('THE PICTURE: a PNG drawn by code, and a short caption that can still be an
   assert.match(cap, /Reply with the answers/);
   assert.match(format.caption(items, 'MANBAT', { saved: true }), /^✅ \*SAVED · 2 expenses · MANBAT\*[\s\S]*Reply \*undo\*/);
 });
+
+test('A BIG PREVIEW READS SHORT: questions grouped by kind, numbers as runs', () => {
+  assert.equal(format.ranges([3, 5, 6, 7, 8, 12, 13]), '3, 5–8, 12, 13');
+  const items = Array.from({ length: 40 }, (_, i) => ({ n: i + 1, missing: [], doubts: [] }));
+  for (let n = 21; n <= 35; n += 1) items[n - 1].doubts.push(`same as ${n - 20}`);
+  for (let n = 36; n <= 40; n += 1) items[n - 1].doubts.push('looks already saved: Lunch on 02 Oct');
+  items[2].missing.push('payee');
+  items[9].missing.push('payee');
+  const q = format.questions(items);
+  assert.deepEqual(q, [
+    '• No. 3, 10: paid to whom?'.replace('paid to whom?', q[0].split(': ')[1]),
+    '• No. 21–35: copies of earlier ones (reply *skip copies*)',
+    '• No. 36–40: look already saved (reply *skip saved*, or *yes* to save anyway)',
+  ]);
+});
+
+test('SKIP COPIES and SKIP SAVED take every one of them, in one go', () => {
+  const pending = { kind: 'add', items: [
+    { n: 1, doubts: [] }, { n: 2, doubts: ['same as 1'] }, { n: 3, doubts: ['looks already saved: Fuel on 06 Oct'] }, { n: 4, doubts: ['same as 1'] },
+  ] };
+  assert.deepEqual(readReply('skip copies', pending), { kind: 'skip', which: [2, 4], bulk: 'copies' });
+  assert.deepEqual(readReply('skip saved', pending), { kind: 'skip', which: [3], bulk: 'saved' });
+  assert.deepEqual(readReply('remove the duplicates', pending).which, [2, 4]);
+});
+
+test('A LONG PREVIEW IS PAGES of 25, the total on the last', () => {
+  const { renderCards } = require('./card');
+  const items = Array.from({ length: 60 }, (_, i) => normalise({ n: i + 1, spentOn: '2026-10-06', description: `Item ${i + 1}`, payee: 'Careem', rawAmount: '10' }, ctx));
+  assert.equal(renderCards(items, { group: 'MANBAT' }).length, 3);
+  assert.equal(renderCards(items, { group: 'MANBAT', style: 'text' }).length, 0);
+});
+
+test('AN EXACT COPY is the same day, amount, currency, payee and description', () => {
+  const { exactCopy } = require('./check');
+  const a = { spentOn: '2026-10-06', rawAmount: 45, currency: 'AED', payee: 'Careem', description: 'Taxi' };
+  assert.equal(exactCopy(a, { ...a, payee: 'careem ' }), true);
+  assert.equal(exactCopy(a, { ...a, rawAmount: 46 }), false);
+  assert.equal(exactCopy(a, { ...a, description: 'Taxi home' }), false);
+});

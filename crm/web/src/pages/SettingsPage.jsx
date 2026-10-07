@@ -474,8 +474,8 @@ export default function SettingsPage() {
 
           {section === 'whatbot' && (
             <Card
-              title="Expense message style"
-              description="How an expense preview and a saved note look, on WhatsApp and in Diane's chat. A picture opens full screen when tapped, and its caption still says what needs an answer and how to reply. Anything that needs checking is tinted on its own cell."
+              title="Picture style"
+              description="How long results look as a picture: expense previews and reports on WhatsApp and in Diane's chat, and her sheet checks, plans and deal lists. Only results of 4 or more rows get one. Anything that needs checking is tinted on its own cell, and the caption still says what needs an answer."
             >
               <ExpenseStyle
                 value={data?.expenseStyle}

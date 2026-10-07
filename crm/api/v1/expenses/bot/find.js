@@ -91,7 +91,12 @@ async function latest(group, today, n = 5) {
 function firstOfMonth(day) { return `${day.slice(0, 8)}01`; }
 
 /** "SPENT AED 1,245 ON 12 EXPENSES", worked out here. */
-async function answer(scopeGroup, query, { today }) {
+/**
+ * @param {object} [opts.out] receives `table`: the same answer as a table
+ *   spec for a picture (pictures/table.js), and `caption`, the short text
+ *   that goes with it. Set only for a list or a breakdown.
+ */
+async function answer(scopeGroup, query, { today, out = null }) {
   // From the command center, "how much did MANBAT spend" narrows to it.
   const group = scopeGroup === ALL && query.group ? query.group : scopeGroup;
   const from = /^\d{4}-\d{2}-\d{2}$/.test(query.from) ? query.from : firstOfMonth(today);
@@ -118,15 +123,48 @@ async function answer(scopeGroup, query, { today }) {
       g.n += 1;
       groups.set(k, g);
     }
-    const lines = [...groups].sort((a, b) => b[1].aed - a[1].aed).slice(0, 20)
+    const sorted = [...groups].sort((a, b) => b[1].aed - a[1].aed);
+    const lines = sorted.slice(0, 20)
       .map(([k, g]) => `• ${k}: *${format.money('AED', Math.round(g.aed * 100) / 100)}* (${g.n})`);
-    return [`📊 *SPENDING BY ${{ group: 'GROUP', payee: 'PAYEE', spentBy: 'PERSON', day: 'DAY', currency: 'CURRENCY', description: 'ITEM' }[query.groupBy]}* · ${scope}`, format.SEP, ...lines, format.SEP, `*TOTAL:* ${totalLine}`].join('\n');
+    const by = { group: 'GROUP', payee: 'PAYEE', spentBy: 'PERSON', day: 'DAY', currency: 'CURRENCY', description: 'ITEM' }[query.groupBy];
+    const head = `📊 *SPENDING BY ${by}* · ${scope}`;
+    if (out) {
+      out.table = {
+        title: `Spending by ${by.toLowerCase()}`, subtitle: `${scope} · ${rows.length} expenses`,
+        columns: [{ label: { group: 'Group', payee: 'Paid to', spentBy: 'Person', day: 'Day', currency: 'Currency', description: 'Item' }[query.groupBy], weight: 3 }, { label: 'Expenses', weight: 1, align: 'right' }, { label: 'AED', weight: 1.6, align: 'right' }],
+        sections: [{ rows: sorted.map(([k, g]) => ({ cells: [k, String(g.n), format.money('AED', Math.round(g.aed * 100) / 100)] })) }],
+        total: { value: format.money('AED', Math.round(aedTotal * 100) / 100), ...(noRate ? { sub: `${noRate} with no AED rate not counted` } : {}) },
+      };
+      out.caption = [head, `*TOTAL:* ${totalLine}`].join('\n');
+    }
+    return [head, format.SEP, ...lines, format.SEP, `*TOTAL:* ${totalLine}`].join('\n');
   }
   if (query.measure === 'count') return `📊 *${rows.length} ${rows.length === 1 ? 'EXPENSE' : 'EXPENSES'}* · ${scope}`;
   if (query.measure === 'total') return [`📊 *SPENDING* · ${scope}`, format.SEP, `*TOTAL:* ${totalLine}`].join('\n');
   const list = query.measure === 'biggest' ? [...rows].sort((a, b) => (b.aed ?? 0) - (a.aed ?? 0)).slice(0, 5) : rows.slice(0, 15);
+  const head = `📋 *${query.measure === 'biggest' ? 'BIGGEST EXPENSES' : 'EXPENSES'}* · ${scope}`;
+  if (out) {
+    // THE PICTURE HOLDS EVERY ROW, not the first 15: that is what it is for.
+    const shown = query.measure === 'biggest' ? list : rows;
+    out.table = {
+      title: query.measure === 'biggest' ? 'Biggest expenses' : 'Expenses', subtitle: `${scope} · ${rows.length} ${rows.length === 1 ? 'expense' : 'expenses'}`,
+      columns: [
+        { label: 'Date', weight: 1 },
+        ...(allGroups ? [{ label: 'Group', weight: 1.4 }] : []),
+        { label: 'What', weight: 2.6 }, { label: 'Paid to', weight: 1.7 }, { label: 'Spent by', weight: 1.3 }, { label: 'Amount', weight: 1.7, align: 'right' },
+      ],
+      sections: [{
+        rows: shown.map((r) => ({
+          cells: [format.day(r.spentOn), ...(allGroups ? [r.groupName] : []), r.description, r.payee, r.spentBy, format.money(r.currency, r.rawAmount)],
+          ...(r.currency !== 'AED' ? { sub: r.aed == null ? 'no AED rate' : `≈ ${format.money('AED', Math.round(r.aed * 100) / 100)}` } : {}),
+        })),
+      }],
+      total: { value: format.money('AED', Math.round(aedTotal * 100) / 100), ...(noRate ? { sub: `${noRate} with no AED rate not counted` } : {}) },
+    };
+    out.caption = [head, `*TOTAL:* ${totalLine}`].join('\n');
+  }
   return [
-    `📋 *${query.measure === 'biggest' ? 'BIGGEST EXPENSES' : 'EXPENSES'}* · ${scope}`, format.SEP,
+    head, format.SEP,
     ...list.map((r) => format.line({ ...r, n: null }, { number: false, group: allGroups })),
     ...(query.measure !== 'biggest' && rows.length > 15 ? [`_…and ${rows.length - 15} more on the Expenses page._`] : []),
     format.SEP, `*TOTAL:* ${totalLine}`,

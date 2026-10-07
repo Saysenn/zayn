@@ -46,8 +46,12 @@ const aedLine = (x) => (x.currency && x.currency !== 'AED'
 
 // ---------------------------------------------------------------- the sheet
 // Like the master sheet export: a thin grid, the Blue white header.
-function sheet(items, { group, saved, today }) {
+function sheet(items, { group, saved, today, page = null }) {
   const live = items.filter((x) => !x.skipped);
+  // ONE PAGE of a long preview: its rows; the count and total are the whole
+  const every = page?.all ?? live;
+  const last = !page || page.last;
+  const of = page && page.of > 1 ? `  (${page.n}/${page.of})` : '';
   const all = group === '*';
   const C = {
     ink: '#1f2328', soft: '#5f6368', grid: '#c8d3df', head: '#DDEBF7', zebra: '#F2F8FD', review: '#FFF2CC', reviewInk: '#9a6700', missing: '#9aa0a6', ok: '#1e7e34',
@@ -61,12 +65,11 @@ function sheet(items, { group, saved, today }) {
   const xs = [L];
   for (const [, w] of cols) xs.push(xs.at(-1) + w);
   const rowH = (x) => (aedLine(x) ? 52 : 38);
-  const ask = saved ? [] : live.filter((x) => asks(x).length);
-  const tableH = 36 + live.reduce((n, x) => n + rowH(x), 0) + 42;
-  const H = 104 + tableH + (ask.length ? 40 + ask.length * 26 : 0) + 64;
+  const tableH = 36 + live.reduce((n, x) => n + rowH(x), 0) + (last ? 42 : 0);
+  const H = 104 + tableH + 64;
   const o = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">`, `<rect width="${W}" height="${H}" fill="#ffffff"/>`];
-  o.push(t(L, 50, `Expenses${all ? '' : ` · ${group}`}`, { size: 28, weight: 700 }));
-  o.push(t(L, 78, `${format.dayFull(today)}  ·  ${live.length} ${live.length === 1 ? 'item' : 'items'}`, { size: 15, fill: C.soft }));
+  o.push(t(L, 50, `Expenses${all ? '' : ` · ${group}`}${of}`, { size: 28, weight: 700 }));
+  o.push(t(L, 78, `${format.dayFull(today)}  ·  ${every.length} ${every.length === 1 ? 'item' : 'items'}`, { size: 15, fill: C.soft }));
   o.push(t(R, 50, saved ? 'Saved' : 'Not saved yet', { size: 16, weight: 700, fill: saved ? C.ok : C.reviewInk, anchor: 'end' }));
   let y = 104;
   // header
@@ -101,19 +104,20 @@ function sheet(items, { group, saved, today }) {
   let ry = top + 36;
   o.push(`<line x1="${L}" y1="${ry}" x2="${R}" y2="${ry}" stroke="${C.grid}" stroke-width="1"/>`);
   live.forEach((x) => { ry += rowH(x); o.push(`<line x1="${L}" y1="${ry}" x2="${R}" y2="${ry}" stroke="${C.grid}" stroke-width="1"/>`); });
-  // total row
-  const tot = totals(live);
-  o.push(`<rect x="${L}" y="${y}" width="${R - L}" height="42" fill="${C.head}"/>`,
-    `<line x1="${L}" y1="${y}" x2="${R}" y2="${y}" stroke="#7f8c99" stroke-width="1.2"/>`,
-    t(L + 10, y + 27, 'Total', { size: 16, weight: 700 }),
-    t(R - 10, y + 27, `${tot.text}${tot.aed ? `   (≈ ${tot.aed})` : ''}`, { size: 17, weight: 700, anchor: 'end' }));
-  y += 42 + 30;
-  if (ask.length) {
-    o.push(t(L, y, 'Needs an answer', { size: 15, weight: 700, fill: C.reviewInk }));
-    ask.forEach((x, i) => o.push(t(L, y + 26 * (i + 1), cut(`No. ${x.n}  —  ${asks(x).join(';  ')}`, 100), { size: 15, fill: C.ink })));
-    y += 26 * (ask.length + 1);
+  // total row, of the whole preview, on its last page
+  if (last) {
+    const tot = totals(every);
+    o.push(`<rect x="${L}" y="${y}" width="${R - L}" height="42" fill="${C.head}"/>`,
+      `<line x1="${L}" y1="${y}" x2="${R}" y2="${y}" stroke="#7f8c99" stroke-width="1.2"/>`,
+      t(L + 10, y + 27, 'Total', { size: 16, weight: 700 }),
+      t(R - 10, y + 27, `${tot.text}${tot.aed ? `   (≈ ${tot.aed})` : ''}`, { size: 17, weight: 700, anchor: 'end' }));
   }
-  if (!saved) o.push(t(L, H - 22, 'Reply yes · modify · cancel', { size: 14, fill: C.soft }));
+  // WHAT NEEDS AN ANSWER is not listed here: the caption sent with the
+  // picture says it, and listing it twice only made the picture taller (his
+  // call 2026-10-07). The tinted cells still show where.
+  y += 42 + 30;
+  if (!saved && last) o.push(t(L, H - 22, 'Reply yes · modify · cancel', { size: 14, fill: C.soft }));
+  else if (!last) o.push(t(R, H - 22, 'continued on the next picture', { size: 13, fill: C.soft, anchor: 'end', style: 'italic' }));
   o.push('</svg>');
   return o.join('');
 }
@@ -121,8 +125,11 @@ function sheet(items, { group, saved, today }) {
 // ------------------------------------------------------------- the notebook
 // A real note: ruled cream paper, a red margin, a blue pen, a highlighter on
 // just the part that needs checking.
-function notebook(items, { group, saved, today }) {
+function notebook(items, { group, saved, today, page = null }) {
   const live = items.filter((x) => !x.skipped);
+  const every = page?.all ?? live;
+  const last = !page || page.last;
+  const of = page && page.of > 1 ? ` (${page.n}/${page.of})` : '';
   const all = group === '*';
   const C = {
     paper: '#fbf7ec', rule: '#c9d8ea', margin: '#e6a1a1', pen: '#1d3a8a', red: '#c0392b', soft: '#6b6b6b', marker: '#fff27a', ok: '#2e7d32',
@@ -131,13 +138,12 @@ function notebook(items, { group, saved, today }) {
   const t = (x, y, s, { size = 30, weight = 400, fill = C.pen, anchor = 'start' } = {}) => `<text x="${x}" y="${y}" ${F} font-size="${size}" font-weight="${weight}" fill="${fill}" text-anchor="${anchor}">${esc(s)}</text>`;
   const LINE = 44;
   const M = 96;
-  const ask = saved ? [] : live.filter((x) => asks(x).length);
   const rows = live.length + (live.some((x) => aedLine(x)) ? live.filter((x) => aedLine(x)).length : 0);
-  const H = 140 + (rows + 3) * LINE + (ask.length ? (ask.length + 1) * LINE : 0) + 50;
+  const H = 140 + (rows + 3) * LINE + 50;
   const o = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">`, `<rect width="${W}" height="${H}" fill="${C.paper}"/>`];
   for (let y = 120; y < H - 10; y += LINE) o.push(`<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="${C.rule}" stroke-width="1.2"/>`);
   o.push(`<line x1="${M - 16}" y1="0" x2="${M - 16}" y2="${H}" stroke="${C.margin}" stroke-width="2"/>`);
-  const title = `${all ? 'Expenses' : `${group} expenses`} — ${format.dayFull(today)}`;
+  const title = `${all ? 'Expenses' : `${group} expenses`} — ${format.dayFull(today)}${of}`;
   o.push(t(M, 78, title, { size: 46, weight: 700 }));
   o.push(`<path d="M ${M} 90 q ${title.length * 9} 6 ${title.length * 18} 0" stroke="${C.pen}" stroke-width="2.4" fill="none" stroke-linecap="round"/>`);
   o.push(t(W - 40, 70, saved ? 'saved ✓' : 'not saved yet', { size: 30, fill: saved ? C.ok : C.red, anchor: 'end' }));
@@ -169,35 +175,50 @@ function notebook(items, { group, saved, today }) {
     const extra = aedLine(x);
     if (extra) { o.push(t(W - 48, y - 6, extra, { size: 24, fill: C.soft, anchor: 'end' })); y += LINE; }
   });
-  const tot = totals(live);
-  y += LINE / 2;
-  o.push(`<line x1="${W - 420}" y1="${y - 30}" x2="${W - 48}" y2="${y - 30}" stroke="${C.pen}" stroke-width="2"/>`);
-  o.push(t(W - 420, y, 'Total', { size: 32, weight: 700 }), t(W - 48, y, tot.text, { size: 32, weight: 700, anchor: 'end' }));
-  o.push(`<line x1="${W - 300}" y1="${y + 8}" x2="${W - 48}" y2="${y + 8}" stroke="${C.pen}" stroke-width="2"/><line x1="${W - 300}" y1="${y + 13}" x2="${W - 48}" y2="${y + 13}" stroke="${C.pen}" stroke-width="2"/>`);
-  y += LINE;
-  if (tot.aed) { o.push(t(W - 48, y - 4, `≈ ${tot.aed}`, { size: 26, fill: C.soft, anchor: 'end' })); y += LINE; }
-  if (ask.length) {
-    o.push(t(M, y, 'To check:', { size: 32, weight: 700, fill: C.red }));
-    ask.forEach((x, i) => o.push(t(M + 20, y + LINE * (i + 1), cut(`No. ${x.n} — ${asks(x).join('; ')}`, 70), { size: 28, fill: C.red })));
-    y += LINE * (ask.length + 1);
+  if (last) {
+    const tot = totals(every);
+    y += LINE / 2;
+    o.push(`<line x1="${W - 420}" y1="${y - 30}" x2="${W - 48}" y2="${y - 30}" stroke="${C.pen}" stroke-width="2"/>`);
+    o.push(t(W - 420, y, 'Total', { size: 32, weight: 700 }), t(W - 48, y, tot.text, { size: 32, weight: 700, anchor: 'end' }));
+    o.push(`<line x1="${W - 300}" y1="${y + 8}" x2="${W - 48}" y2="${y + 8}" stroke="${C.pen}" stroke-width="2"/><line x1="${W - 300}" y1="${y + 13}" x2="${W - 48}" y2="${y + 13}" stroke="${C.pen}" stroke-width="2"/>`);
+    y += LINE;
+    if (tot.aed) { o.push(t(W - 48, y - 4, `≈ ${tot.aed}`, { size: 26, fill: C.soft, anchor: 'end' })); y += LINE; }
   }
-  if (!saved) o.push(t(M, H - 20, 'reply: yes · modify · cancel', { size: 26, fill: C.soft }));
+  if (!saved && last) o.push(t(M, H - 20, 'reply: yes · modify · cancel', { size: 26, fill: C.soft }));
+  else if (!last) o.push(t(W - 48, H - 16, 'continued on the next page…', { size: 24, fill: C.soft, anchor: 'end' }));
   o.push('</svg>');
   return o.join('');
 }
 
+const PER_PAGE = 25;
+const draw = (svg, style) => new Resvg(svg, {
+  font: { loadSystemFonts: true, fontFiles: [FONT_FILE], defaultFontFamily: style === 'notebook' ? 'Caveat' : 'Helvetica' },
+  fitTo: { mode: 'width', value: W },
+}).render().asPng();
+
 /**
+ * THE PREVIEW IN PAGES of 25, each readable on a phone, the total on the
+ * last (his call 2026-10-07: 141 rows squeezed into one picture).
  * @param {object[]} items the expenses, as the preview holds them
  * @param {{ group: string, saved?: boolean, style?: string, today?: string }} opts
- * @returns {Buffer|null} a PNG, or null for the plain-text style
+ * @returns {Buffer[]} PNGs; none for the plain-text style
  */
-function renderCard(items, { group, saved = false, style = 'sheet', today = new Date().toISOString().slice(0, 10) } = {}) {
-  if (style === 'text') return null;
-  const svg = style === 'notebook' ? notebook(items, { group, saved, today }) : sheet(items, { group, saved, today });
-  return new Resvg(svg, {
-    font: { loadSystemFonts: true, fontFiles: [FONT_FILE], defaultFontFamily: style === 'notebook' ? 'Caveat' : 'Helvetica' },
-    fitTo: { mode: 'width', value: W },
-  }).render().asPng();
+function renderCards(items, { group, saved = false, style = 'sheet', today = new Date().toISOString().slice(0, 10) } = {}) {
+  if (style === 'text') return [];
+  const all = items.filter((x) => !x.skipped);
+  const chunks = [];
+  for (let i = 0; i < all.length; i += PER_PAGE) chunks.push(all.slice(i, i + PER_PAGE));
+  if (!chunks.length) chunks.push([]);
+  return chunks.map((chunk, i) => {
+    const page = { n: i + 1, of: chunks.length, last: i === chunks.length - 1, all };
+    const svg = style === 'notebook' ? notebook(chunk, { group, saved, today, page }) : sheet(chunk, { group, saved, today, page });
+    return draw(svg, style);
+  });
+}
+
+/** One picture, for a short preview and the Settings samples. */
+function renderCard(items, opts = {}) {
+  return renderCards(items, opts)[0] ?? null;
 }
 
 /** Sample expenses for the Settings preview of each style. */
@@ -208,4 +229,4 @@ const SAMPLE = [
   { n: 4, spentOn: '2026-10-07', description: 'Office chairs', payee: 'IKEA', rawAmount: 2400, currency: 'AED', spentBy: 'Omar T', missing: [], doubts: ['a large amount: is it right?'] },
 ];
 
-module.exports = { renderCard, STYLES, SAMPLE };
+module.exports = { renderCard, renderCards, STYLES, SAMPLE };

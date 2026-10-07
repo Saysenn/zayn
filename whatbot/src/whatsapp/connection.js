@@ -15,7 +15,7 @@ import {
 import { logger } from "../system/logger.js";
 import { publishStatus } from "./status.js";
 import { downloadVoiceNote, isVoiceNote, voiceSeconds } from "./voiceNote.js";
-import { isExpenseAdmin, mediaOf, saveMedia } from "../expenses/expenses.js";
+import { isExpenseAdmin, mediaOf, readable, saveMedia } from "../expenses/expenses.js";
 
 // Groups already sent a linking code this run: one code per start.
 const pairingAsked = new Set();
@@ -232,7 +232,11 @@ async function connect(groupId, onMessage, attempt = 0) {
         void isExpenseAdmin(from, groupId)
           .then(async (ok) => {
             if (!ok) return;
-            const file = await saveMedia(m, media);
+            // A file it cannot read is never downloaded, and is answered at
+            // once rather than in silence (expenses.js, unreadableReply).
+            const canRead = readable(media);
+            const file = canRead ? await saveMedia(m, media) : null;
+            const unreadable = file ? null : { filename: media.filename, why: !canRead ? "type" : media.bytes > 15 * 1024 * 1024 ? "size" : "failed" };
             await onMessage({
               messageId: m.key.id ?? `${m.key.remoteJid}:${m.messageTimestamp}`,
               from,
@@ -240,6 +244,7 @@ async function connect(groupId, onMessage, attempt = 0) {
               groupId,
               text: media.caption,
               attachments: file ? [file] : [],
+              ...(unreadable ? { unreadable } : {}),
             });
           })
           .catch((err) => logger.error({ err, groupId }, "failed to handle expense media"));

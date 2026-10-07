@@ -6,7 +6,6 @@ const store = require('./expenses/bot/store');
 const brain = require('./expenses/bot/brain');
 const { meter } = require('./expenses/bot/ai');
 const { AppError } = require('./middlewares/errors');
-const { randomUUID } = require('crypto');
 const pool = require('../configs/db');
 const { renderCard, SAMPLE, STYLES } = require('./expenses/bot/card');
 
@@ -34,6 +33,22 @@ agent.post('/message', async (req, res, next) => {
     const list = Array.isArray(attachments) ? attachments.slice(0, 20) : [];
     const out = await brain.turn({ phone, group, text, attachments: list, messageId: messageId ? String(messageId) : null });
     res.json({ ...out, usd: Number(meter.dollars.toFixed(4)) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * HOW MANY ARE IN THE OPEN PREVIEW, for WhatBot's "adding them to your open
+ * preview (141 so far)" while it reads a new batch. A count only.
+ */
+agent.get('/pending', async (req, res, next) => {
+  try {
+    const { phone, group } = req.query ?? {};
+    if (!phone || !group) return res.status(400).json({ error: 'phone and group are required' });
+    const state = await store.getChat(String(phone), String(group));
+    const open = state.pending?.kind === 'add' ? state.pending.items.filter((x) => !x.skipped).length : 0;
+    res.json({ open });
   } catch (err) {
     next(err);
   }
@@ -150,11 +165,8 @@ admin.get('/agent-images/:id', async (req, res, next) => {
   }
 });
 
-async function keepImage(image, caption) {
-  const id = randomUUID();
-  await pool.query('INSERT INTO tb_agent_images (id, png, caption) VALUES ($1, $2, $3)', [id, Buffer.from(image.base64, 'base64'), caption ?? '']);
-  return id;
-}
+// Each picture is kept by pictures/store.js (30 days).
+const keepImage = (image, caption) => require('./pictures/store').keepImage(Buffer.from(image.base64, 'base64'), caption);
 
 /**
  * ONE TURN OF DIANE'S EXPENSES CONTEXT, for agent/workspaces.js: the last
@@ -178,8 +190,14 @@ async function dianeTurn(history, send) {
   // CRM so it can be opened again from the conversation's Attachments.
   if (out.image) {
     try {
-      const caption = `${out.image.saved ? 'Saved' : 'Preview'} · ${new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}`;
-      send({ type: 'image', image: { id: await keepImage(out.image, caption), caption } });
+      const when = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+      const all = [out.image, ...(out.moreImages ?? [])];
+      for (const [i, img] of all.entries()) {
+        const what = img.kind === 'report' ? 'Spending' : img.saved ? 'Saved' : 'Preview';
+        const caption = `${what}${all.length > 1 ? ` ${i + 1}/${all.length}` : ''} · ${when}`;
+        // eslint-disable-next-line no-await-in-loop
+        send({ type: 'image', image: { id: await keepImage(img, caption), caption } });
+      }
     } catch (err) {
       require('../configs/logger').warn({ err: err.message }, 'diane: could not keep the expense picture');
     }

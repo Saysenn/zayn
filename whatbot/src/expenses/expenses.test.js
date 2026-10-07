@@ -76,3 +76,14 @@ describe("the turn: one message to the CRM, one reply back", () => {
     expect((await expenseTurn({ phone: "+1", group: "MANBAT", text: "x" })).registered).toBe(false);
   });
 });
+
+describe("a file the bot will not read is answered at once", () => {
+  it("knows what it can read, and says what it can", async () => {
+    const { readable, unreadableReply } = await import("./expenses.js");
+    expect(readable({ kind: "image", filename: "photo.jpg", mime: "image/jpeg" })).toBe(true);
+    expect(readable({ kind: "document", filename: "October.xlsx", mime: "application/octet-stream" })).toBe(true);
+    expect(readable({ kind: "document", filename: "clip.mp4", mime: "video/mp4" })).toBe(false);
+    expect(unreadableReply({ filename: "clip.mp4", why: "type" })).toMatch(/can't read \*clip\.mp4\*.*photo, a PDF/);
+    expect(unreadableReply({ filename: "big.pdf", why: "size" })).toMatch(/too big/);
+  });
+});

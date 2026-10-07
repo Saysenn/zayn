@@ -46,3 +46,4 @@ came from are in this file's git history (before 2026-10-06).
     debts") and she switches, no clicking: the selector moves and she says
     which one she is on. Any wording, read by meaning like her wake words
     (10). A context still "coming soon" gets a plain "not ready yet".
+12. **HSBC mode.**

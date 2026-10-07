@@ -91,6 +91,50 @@ function block(x, { group = false } = {}) {
   return out.join('\n');
 }
 
+/** "3, 5, 7–12": numbers as short runs. */
+function ranges(ns) {
+  const sorted = [...new Set(ns)].sort((a, b) => a - b);
+  const out = [];
+  for (let i = 0; i < sorted.length; i += 1) {
+    let j = i;
+    while (j + 1 < sorted.length && sorted[j + 1] === sorted[j] + 1) j += 1;
+    out.push(j - i >= 2 ? `${sorted[i]}–${sorted[j]}` : j > i ? `${sorted[i]}, ${sorted[j]}` : `${sorted[i]}`);
+    i = j;
+  }
+  return out.join(', ');
+}
+
+const QUESTIONS_SHOWN = 6;
+
+/**
+ * WHAT NEEDS AN ANSWER, GROUPED: one line per kind of question with the
+ * numbers it covers, never one line per expense (his call 2026-10-07: a
+ * caption of 60 "No. 57: same as 14" lines). Copies and already-saved ones
+ * each get a one-word way out.
+ */
+function questions(live) {
+  const by = new Map();
+  const put = (key, n) => by.set(key, [...(by.get(key) ?? []), n]);
+  for (const x of live) {
+    for (const f of x.missing ?? []) put(f === 'exchangeRate' ? `1 ${x.currency} to AED is?` : ASK[f] ?? `${LABEL[f] ?? f}?`, x.n);
+    for (const d of x.doubts ?? []) {
+      if (/^same as \d+/.test(d)) put('§copies', x.n);
+      else if (/^looks already saved/.test(d)) put('§saved', x.n);
+      else if (/^another .+: new, or a change/.test(d)) put('another expense to the same payee that day: new, or a change to that one?', x.n);
+      else put(`_${d}_`, x.n);
+    }
+  }
+  const lines = [...by].map(([q, ns]) => {
+    const nums = `No. ${ranges(ns)}`;
+    if (q === '§copies') return `• ${nums}: ${ns.length === 1 ? 'a copy of an earlier one' : 'copies of earlier ones'} (reply *skip copies*)`;
+    if (q === '§saved') return `• ${nums}: ${ns.length === 1 ? 'looks' : 'look'} already saved (reply *skip saved*, or *yes* to save anyway)`;
+    return `• ${nums}: ${q}`;
+  });
+  return lines.length > QUESTIONS_SHOWN
+    ? [...lines.slice(0, QUESTIONS_SHOWN), `• _…and ${lines.length - QUESTIONS_SHOWN} more, see the tinted cells_`]
+    : lines;
+}
+
 /**
  * THE PREVIEW of new expenses, waiting on a yes. The list, the total, what
  * needs an answer (each by its number), one line saying what to reply.
@@ -110,9 +154,7 @@ function addPreview(items, group) {
   const missing = live.filter((x) => x.missing?.length);
   const doubts = live.filter((x) => !x.missing?.length && x.doubts?.length);
   if (missing.length || doubts.length) {
-    out.push('', missing.length ? '⚠️ *Needs an answer*' : '⚠️ *Please check*');
-    for (const x of missing.slice(0, SHOWN)) out.push(`• No. ${x.n}: ${x.missing.map((f) => (f === 'exchangeRate' ? `1 ${x.currency} to AED is?` : ASK[f] ?? `${LABEL[f] ?? f}?`)).join(' ')}`);
-    for (const x of doubts.slice(0, SHOWN)) out.push(`• No. ${x.n}: _${x.doubts.join('; ')}_`);
+    out.push('', missing.length ? '⚠️ *Needs an answer*' : '⚠️ *Please check*', ...questions(live));
   }
   const m = missing[0];
   const example = m && (m.missing.includes('exchangeRate') ? `*1 ${m.currency.toLowerCase()} to aed is 4.85*` : m.missing.includes('groupName') ? `*${m.n} is MANBAT*` : m.missing.includes('spentBy') ? `*${m.n} by Gary*`
@@ -241,9 +283,7 @@ function caption(items, group, { saved = false } = {}) {
   const missing = live.filter((x) => x.missing?.length);
   const doubts = live.filter((x) => !x.missing?.length && x.doubts?.length);
   if (missing.length || doubts.length) {
-    out.push('', missing.length ? '⚠️ *Needs an answer*' : '⚠️ *Please check*');
-    for (const x of missing) out.push(`• No. ${x.n}: ${x.missing.map((f) => (f === 'exchangeRate' ? `1 ${x.currency} to AED is?` : ASK[f] ?? `${LABEL[f] ?? f}?`)).join(' ')}`);
-    for (const x of doubts) out.push(`• No. ${x.n}: _${x.doubts.join('; ')}_`);
+    out.push('', missing.length ? '⚠️ *Needs an answer*' : '⚠️ *Please check*', ...questions(live));
   }
   // the same last line as the text preview
   out.push('', addPreview(items, group).split('\n').at(-1));
@@ -251,6 +291,6 @@ function caption(items, group, { saved = false } = {}) {
 }
 
 module.exports = {
-  HELP_DIANE, SEP, ratesBubble, caption,
+  HELP_DIANE, SEP, ratesBubble, caption, ranges, questions,
   day, dayFull, amount, money, totals, line, block, addPreview, editPreview, removePreview, pickList, undoPreview, saved, changed, removed, HELP, LABEL,
 };

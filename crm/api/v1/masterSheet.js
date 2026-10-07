@@ -1067,9 +1067,24 @@ router.post('/master-sheet/agent', async (req, res, next) => {
       // the master sheet's is runAgent, as it always was.
       // eslint-disable-next-line global-require
       const elsewhere = require('./agent/workspaces').handlerFor(context);
+      /**
+       * A LONG LIST, PLAN OR SHEET CHECK ALSO GOES AS A PICTURE under its
+       * card (his plan 2026-10-07; pictures/fromAgent.js). Drawn beside her
+       * turn, never inside it, and all sent before `done`.
+       */
+      const drawing = [];
+      const sendAndDraw = (e) => {
+        if (!open) return;
+        send(e);
+        // eslint-disable-next-line global-require
+        drawing.push(require('./pictures/fromAgent').imageEventsFor(e).then((images) => {
+          for (const image of images) if (open) send(image);
+        }));
+      };
       const result = elsewhere
         ? await elsewhere(trimmed, (e) => { if (open) send(e); })
-        : await runAgent(trimmed, context, (e) => { if (open) send(e); });
+        : await runAgent(trimmed, context, sendAndDraw);
+      await Promise.all(drawing);
       // The canonical reply, whole and post-processed. The client replaces
       // whatever it accumulated from tokens with this, so a cleaning pass
       // that shortened the text mid-stream cannot leave it out of step.

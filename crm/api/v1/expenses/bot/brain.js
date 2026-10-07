@@ -5,12 +5,13 @@ const logger = require('../../../configs/logger');
 const store = require('./store');
 const format = require('./format');
 const { extract } = require('./extract');
-const { normalise, duplicates, ready, currencyOf, num } = require('./check');
+const { normalise, duplicates, ready, currencyOf, num, exactCopy } = require('./check');
 const { readReply } = require('./reply');
 const { route, revise } = require('./understand');
 const find = require('./find');
 const { liveRates } = require('./rates');
-const { renderCard } = require('./card');
+const { renderCards } = require('./card');
+const { renderTable, worthAPicture } = require('../../pictures/table');
 const settingsRepo = require('../../repos/settings.repo');
 const { forDiane } = require('./forDiane');
 
@@ -144,6 +145,7 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
    * never costs them the message.
    */
   let image = null;
+  let extraImages = [];
   let text = reply;
   try {
     const savedNow = /^✅ \*SAVED ·/.test(String(reply ?? '')) && savedItems?.length;
@@ -151,25 +153,44 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
     if (previewNow || savedNow) {
       const style = await settingsRepo.expenseStyle();
       const items = savedNow ? savedItems : state.pending.items;
-      const png = renderCard(items, { group, saved: Boolean(savedNow), style, today });
-      if (png) {
-        image = { base64: png.toString('base64'), mime: 'image/png', filename: 'expenses.png', saved: Boolean(savedNow) };
+      const pngs = renderCards(items, { group, saved: Boolean(savedNow), style, today });
+      if (pngs.length) {
+        [image, ...extraImages] = pngs.map((png, i) => ({ base64: png.toString('base64'), mime: 'image/png', filename: `expenses-${i + 1}.png`, saved: Boolean(savedNow) }));
         const lead = /^Added \d+ more[^\n]*\n\n/.exec(String(reply))?.[0] ?? '';
         text = `${lead}${format.caption(items, group, { saved: Boolean(savedNow) })}`;
+      }
+    } else if (ctx.answer?.table) {
+      // A SPENDING REPORT of 4+ rows: the table as a picture (pages when
+      // long), the heading and total as its caption.
+      const spec = { ...ctx.answer.table, style: await settingsRepo.expenseStyle() };
+      if (worthAPicture(spec)) {
+        const pngs = renderTable(spec);
+        if (pngs.length) {
+          [image, ...extraImages] = pngs.map((p, i) => ({ base64: p.toString('base64'), mime: 'image/png', filename: `spending-${i + 1}.png`, kind: 'report' }));
+          text = `${expired ?? ''}${ctx.answer.caption}${pngs.length > 1 ? `\n_${pngs.length} pages_` : ''}${ctx.answer.note ?? ''}`;
+        }
       }
     }
   } catch (err) {
     logger.warn({ err: err.message }, 'expense bot: could not draw the picture, sending text');
     image = null;
+    extraImages = [];
     text = reply;
   }
   if (channel === 'diane') {
     // Diane keeps her card (it can be read and searched); the picture goes
     // under it, to open large and to find again in Attachments.
     const view = forDiane(reply, state);
-    return { registered: true, ...view, ...(image ? { image } : {}), reply: [view.reply, ...more.map(forDiane.plainText)].filter(Boolean).join('\n\n') };
+    // a report picture carries the list, so her text is just its caption
+    if (image?.kind === 'report') view.reply = forDiane.plainText(text);
+    return {
+      registered: true, ...view, ...(image ? { image } : {}), ...(extraImages.length ? { moreImages: extraImages } : {}),
+      reply: [view.reply, ...more.map(forDiane.plainText)].filter(Boolean).join('\n\n'),
+    };
   }
-  return { registered: true, reply: text, replies: [text, ...more], ...(image ? { image } : {}) };
+  return {
+    registered: true, reply: text, replies: [text, ...more], ...(image ? { image } : {}), ...(extraImages.length ? { moreImages: extraImages } : {}),
+  };
 }
 
 async function answerTurn(said, files, ctx) {
@@ -228,9 +249,12 @@ async function answerTurn(said, files, ctx) {
       if (pending?.kind === 'add' && !savedTargetOutsidePreview(r, pending)) return reviseFrom(said, ctx);
       return r.kind === 'edit' ? startEdit(r, ctx) : startRemove(r, ctx);
     case 'question': {
-      const text = await find.answer(group, r.query, { today });
+      // ctx.answer receives the same answer as a table, for the picture
+      ctx.answer = {};
+      const text = await find.answer(group, r.query, { today, out: ctx.answer });
       const waiting = pending?.kind === 'add' ? pending.items.filter((x) => !x.skipped).length : 0;
-      return waiting ? `${text}\n\n_Not counted: ${waiting} in your preview, not saved yet._` : text;
+      ctx.answer.note = waiting ? `\n\n_Not counted: ${waiting} in your preview, not saved yet._` : '';
+      return `${text}${ctx.answer.note}`;
     }
     case 'undo': return startUndo(ctx);
     case 'chat': return THANKS.test(said) ? 'You\'re welcome 🙂' : ctx.channel === 'diane' ? format.HELP_DIANE : format.HELP(admin.name.split(' ')[0], group);
@@ -296,13 +320,33 @@ async function addFrom(msg, ctx) {
   // MORE FOR THE SAME PREVIEW: receipts arrive one photo per message, so a
   // new batch joins the one still open rather than replacing it.
   const open = ctx.state.pending?.kind === 'add' ? ctx.state.pending.items : [];
-  const fresh = got.items.map((x, i) => ({ ...x, n: open.length + i + 1, modelDoubt: x.doubt || null }));
-  const items = await recheck([...open, ...fresh], ctx);
+  let fresh = got.items.map((x, i) => ({ ...x, n: open.length + i + 1, modelDoubt: x.doubt || null }));
+  let items = await recheck([...open, ...fresh], ctx);
+  /**
+   * AN EXACT COPY OF ONE ALREADY IN THE PREVIEW ADDS NOTHING (his call
+   * 2026-10-07: the same 6 files sent again stacked a preview to 141).
+   * Checked once the new ones are read like the old, then numbered again.
+   */
+  let dropped = 0;
+  if (open.length) {
+    const before = items.slice(0, open.length).filter((o) => !o.skipped);
+    const keep = items.slice(open.length).map((x) => !before.some((o) => exactCopy(o, x)));
+    dropped = keep.filter((k) => !k).length;
+    if (dropped) {
+      fresh = fresh.filter((_, i) => keep[i]).map((x, i) => ({ ...x, n: open.length + i + 1 }));
+      if (!fresh.length) {
+        const live = open.filter((x) => !x.skipped).length;
+        return `Those ${dropped === 1 ? 'were' : `${dropped} were`} all already in your preview, so nothing was added. It still has ${live} ${live === 1 ? 'expense' : 'expenses'}: reply *yes*, *modify* or *cancel*.`;
+      }
+      items = await recheck([...open, ...fresh], ctx);
+    }
+  }
   ctx.state.pending = { kind: 'add', items };
   // THE NEW NUMBERS, named: they think of these as "1 and 2" of the message
   // they just sent, and the list calls them 2 and 3.
-  const nums = fresh.map((x) => `*${x.n}*`);
-  const lead = open.length ? `Added ${fresh.length} more: ${nums.length > 1 ? `${nums.slice(0, -1).join(', ')} and ${nums.at(-1)}` : nums[0]}.\n\n` : '';
+  const nums = fresh.map((x) => x.n);
+  const skippedNote = dropped ? ` Skipped ${dropped} already in this preview.` : '';
+  const lead = open.length ? `Added ${fresh.length} more: *${format.ranges(nums)}*.${skippedNote}\n\n` : '';
   const notes = got.notes.length ? `\n\n_${got.notes.join('; ')}_` : '';
   return `${lead}${format.addPreview(items, ctx.group)}${notes}`;
 }
@@ -413,6 +457,9 @@ async function onReply(r, ctx) {
     }
     if (!Object.keys(given).some((c) => others.includes(c))) return `None of these expenses are in ${Object.keys(given).join(', ')}. The other currencies here: ${others.join(', ') || 'none'}.`;
     for (const x of items) if (given[x.currency] > 0) x.rateGiven = given[x.currency];
+  }
+  if (r.kind === 'skip' && r.bulk && !r.which.length) {
+    return r.bulk === 'saved' ? 'None of them look already saved, so nothing was skipped.' : 'There are no copies in this preview, so nothing was skipped.';
   }
   if (r.kind === 'skip') for (const n of r.which) items.find((x) => x.n === n).skipped = true;
   if (r.kind === 'unskip') for (const n of r.which) items.find((x) => x.n === n).skipped = false;

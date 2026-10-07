@@ -1573,6 +1573,9 @@ module.exports = {
   // whichever document it is narrowing.
   pickColumns,
   MASTER_SHEET_COLUMNS: COLUMNS_WITH_GROUP,
+  // Shared with presetTable.js: the picture of a preset reads its rows with
+  // the very same value map, order and totals as this file writes them.
+  toRow, byCompany, sortGroupNames, totalsByCurrency,
   // Exported so the colour test asserts the SAME three the file paints.
   RUNNING_ARGB, STARTED_ARGB, NOT_STARTED_ARGB,
   // Shared with buildPayoutSheet.js so the cash, bank and expensing files

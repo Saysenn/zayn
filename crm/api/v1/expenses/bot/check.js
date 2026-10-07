@@ -142,6 +142,13 @@ const sameSpend = (a, b) => a.spentOn && b.spentOn && String(a.spentOn).slice(0,
   && String(a.currency).toUpperCase() === String(b.currency).toUpperCase();
 
 /**
+ * AN EXACT COPY: the same day, amount, currency, payee and description. A
+ * file sent again while its preview is open adds nothing (his call
+ * 2026-10-07: 6 files sent twice stacked a preview to 141).
+ */
+const exactCopy = (a, b) => Boolean(sameSpend(a, b)) && fold(a.payee ?? '') === fold(b.payee ?? '') && fold(a.description ?? '') === fold(b.description ?? '');
+
+/**
  * LOOKS ALREADY SAVED, or twice in this batch. A candidate, never a verdict:
  * two taxis of 45 on one day can both be real, so it is a doubt they see.
  * @param {object[]} items normalised
@@ -170,5 +177,5 @@ function duplicates(items, saved = []) {
 const ready = (items) => items.filter((x) => !x.skipped).every((x) => x.missing.length === 0);
 
 module.exports = {
-  normalise, duplicates, ready, currencyOf, groupOf, canonical, spenderOf, REQUIRED, num, iso,
+  normalise, duplicates, ready, currencyOf, groupOf, canonical, spenderOf, REQUIRED, num, iso, exactCopy,
 };
