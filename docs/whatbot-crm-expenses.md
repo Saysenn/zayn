@@ -178,6 +178,15 @@ Tested on the clone, through WhatBot's own `handleMessage` from the terminal.
 4. Replies use WhatsApp's own formatting (*bold*, _italic_, numbered lines),
    written by code from templates, never by the model.
 
+**Two modes for a registered admin (his call, 2026-10-07):** typing
+*expense* sends everything to the CRM expense brain; typing *payments* sends
+everything to WhatBot's own agent, as for any employee. Remembered per admin
+per group number; expense mode by default. A photo or file always goes to
+expenses (switching and saying so). In expense mode, a message the router
+says is not about expenses ("how much am I getting paid?") is answered by the
+normal agent once, with a hint to type *payments*. Code:
+`whatbot/src/expenses/mode.js`.
+
 **How a message flows (the same formula as Diane):**
 
 1. The guard (registered on this group's number?), before anything else,

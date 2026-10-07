@@ -44,6 +44,15 @@ import {
 import { scriptedReply } from "./scriptedReply.js";
 import { replier } from "./sendReply.js";
 import { expenseTurn, isExpenseAdmin } from "../expenses/expenses.js";
+import {
+  EXPENSE,
+  EXPENSE_WORD,
+  MODE_REPLIES,
+  PAYMENTS,
+  PAYMENTS_WORD,
+  modeOf,
+  setMode,
+} from "../expenses/mode.js";
 
 /**
  * Their answer to the payday check. Three ways in, because people use all
@@ -88,18 +97,54 @@ export async function handleMessage(input) {
   const { phone, channelGroup, text, attachments = [], messageId } = input;
 
   /**
-   * A REGISTERED EXPENSE ADMIN on this group's number goes to the CRM's
-   * expense brain: expenses in, a preview, saved on their yes. FIRST, before
-   * the opt-out words: to an admin "cancel" and "stop" mean "drop that
-   * preview", and read as an opt-out they silenced the bot (live 2026-10-07).
-   * Before the per-minute limit too: a pile of receipts is one photo per message.
-   * The CRM checks the registration again; if it says no, they are handled
-   * below exactly as before. See expenses/expenses.js.
+   * A REGISTERED EXPENSE ADMIN on this group's number. FIRST, before the
+   * opt-out words: to an admin in expense mode "cancel" and "stop" mean
+   * "drop that preview", and read as an opt-out they silenced the bot (live
+   * 2026-10-07). Before the per-minute limit too: a pile of receipts is one
+   * photo per message. See expenses/expenses.js and expenses/mode.js.
+   *
+   *   "expense" / "payments"   switch side, answered here for nothing
+   *   a photo or a file        always expenses (the pay side cannot read one)
+   *   expense mode             the CRM's expense brain; a message it says is
+   *                            not about expenses is answered below, once
+   *   payments mode            below, exactly as for anyone else
    */
   if (await isExpenseAdmin(phone, channelGroup)) {
-    const out = await expenseTurn({ phone, group: channelGroup, text, attachments, messageId });
-    if (out.registered !== false) return out.reply ? words(out.reply) : NO_REPLY;
+    if (EXPENSE_WORD.test(text ?? "")) {
+      await setMode(phone, channelGroup, EXPENSE);
+      return words(MODE_REPLIES[EXPENSE](channelGroup));
+    }
+    if (PAYMENTS_WORD.test(text ?? "")) {
+      await setMode(phone, channelGroup, PAYMENTS);
+      return words(MODE_REPLIES[PAYMENTS](channelGroup));
+    }
+    let mode = await modeOf(phone, channelGroup);
+    let lead = "";
+    if (attachments.length && mode === PAYMENTS) {
+      await setMode(phone, channelGroup, EXPENSE);
+      mode = EXPENSE;
+      lead = MODE_REPLIES.switchedForFile(channelGroup);
+    }
+    if (mode === EXPENSE) {
+      const out = await expenseTurn({ phone, group: channelGroup, text, attachments, messageId });
+      if (out.registered !== false && !out.handOff) {
+        return out.reply ? words(`${lead}${out.reply}`) : NO_REPLY;
+      }
+      // NOT ABOUT EXPENSES ("how much am I getting paid?"): answered as a
+      // payments question this once, and said so.
+      if (out.handOff) {
+        const answered = await answerAsEmployee(input);
+        return answered === NO_REPLY ? answered : { ...answered, text: `${answered.text}${MODE_REPLIES.handedOver}` };
+      }
+    }
   }
+
+  return answerAsEmployee(input);
+}
+
+/** Everyone who is not an expense admin in expense mode: the bot as it always was. */
+async function answerAsEmployee(input) {
+  const { phone, channelGroup, text } = input;
 
   // STOP first, before anything. it must never be treated as a question.
   const intent = optOutIntent(text);

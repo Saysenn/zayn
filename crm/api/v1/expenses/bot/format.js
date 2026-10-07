@@ -130,6 +130,7 @@ const HELP = (name, group) => [
   '• _how much did we spend this month?_',
   '',
   'I always show you what I read before saving anything.',
+  'Type *payments* to ask about your own pay instead.',
 ].join('\n');
 
 module.exports = {

@@ -29,6 +29,7 @@ const find = require('./find');
 //   5. VERIFIED: every write is read back, one action, one undo.
 
 const EVENT = 'expenses:changed';
+const HAND_OFF = Symbol('hand off');
 const PENDING_MS = 6 * 60 * 60 * 1000;
 const HISTORY = 6;
 const year = (today) => Number(String(today).slice(0, 4));
@@ -106,6 +107,11 @@ async function turn(msg, { client = null, today = currentDay() } = {}) {
       reply = 'Sorry, something went wrong on my side. Nothing was saved. Please try again in a minute.';
     }
   }
+  if (reply === HAND_OFF) {
+    if (state.pending) state.pending.shownLast = false;
+    await store.saveChat(phone, group, state);
+    return { registered: true, handOff: true };
+  }
   if (expired && reply) reply = `${expired}${reply}`;
   // Was the open preview the last thing they saw? A "yes" counts only then.
   if (state.pending) state.pending.at = state.pending.at ?? Date.now();
@@ -158,7 +164,9 @@ async function answerTurn(said, files, ctx) {
     case 'undo': return startUndo(ctx);
     case 'chat': return THANKS.test(said) ? 'You\'re welcome 🙂' : format.HELP(admin.name.split(' ')[0], group);
     default:
-      return `I only handle *${group}* expenses here. Send me an expense (text, a receipt photo or a file), or ask something like _how much did we spend this month?_`;
+      // NOT ABOUT EXPENSES ("how much am I getting paid?"): WhatBot's own
+      // agent answers it, his call 2026-10-07. Nothing here is touched.
+      return HAND_OFF;
   }
 }
 

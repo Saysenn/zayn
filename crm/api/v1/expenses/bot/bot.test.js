@@ -108,3 +108,11 @@ test('SAME PAYEE, SAME DAY, ANOTHER AMOUNT: asked whether it is new or a change'
   duplicates(items, [{ spent_on: '2026-10-05', raw_amount: '35.00', currency: 'AED', payee: 'Uber', description: 'Uber' }]);
   assert.match(items[0].doubts[0], /another Uber on 05 Oct \(AED 35\): new, or a change to that one\?/);
 });
+
+test('NOT ABOUT EXPENSES: the router is told an admin\'s own pay is "other", handed back to WhatBot', () => {
+  const src = require('fs').readFileSync(require.resolve('./understand'), 'utf8');
+  assert.match(src, /other: anything NOT about the business\\'s expenses, above all the admin\\'s OWN pay/);
+  const brain = require('fs').readFileSync(require.resolve('./brain'), 'utf8');
+  assert.match(brain, /default:\s*\/\/ NOT ABOUT EXPENSES[\s\S]*?return HAND_OFF;/);
+  assert.match(brain, /if \(reply === HAND_OFF\)[\s\S]*?return \{ registered: true, handOff: true \};[\s\S]*?if \(expired && reply\)/, 'checked before anything adds text to it');
+});

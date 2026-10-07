@@ -128,6 +128,8 @@ export const CRM_DOWN =
 const TurnReply = z.object({
   registered: z.boolean(),
   reply: z.string().nullable().optional(),
+  // not about expenses: the normal agent answers it instead
+  handOff: z.boolean().optional(),
 });
 
 export async function expenseTurn({ phone, group, text, attachments = [], messageId }) {

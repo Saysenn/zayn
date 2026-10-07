@@ -30,6 +30,7 @@ src/
                   and every file
   expenses/       expenses — the guard (registered admins, from the CRM), receipt
                   media, and one message to the CRM's expense brain. The brain is the CRM's
+                  mode — an admin's "expense" / "payments" switch
   employee/       access · storage · types — assignments, and who may read them
   sheet/          syncSheet · parseSheet · fakes/ (sample data only)
                   source is excel (local .xlsx), sheets, or fake — all read-only
