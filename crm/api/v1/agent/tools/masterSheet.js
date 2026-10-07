@@ -65,6 +65,8 @@ const {
 } = require('./resolvePerson');
 const { exportSheet } = require('./exportSheet');
 const { showSheetPreset } = require('./sheetPreset');
+// eslint-disable-next-line import/order
+const { guarded } = require('../readGuard');
 const { confirmFirst } = require('./confirmFirst');
 const { applyCompanyStatus, wouldStop } = require('../../shared/companyStatus.helper');
 // "Add 3%" written as "set to 3" took 160 AED out of a month in silence.
@@ -11070,7 +11072,9 @@ module.exports = {
     // BOTH REACTIVE. She answers with these; she never offers them.
     perGroup(listConcerns),
     undoChange,
-  ],
+  // THE READ GUARD on filter, summarize and total: their filters checked
+  // against their words before anything is read (agent/readGuard.js).
+  ].map(guarded),
   // The arithmetic on its own, so it can be tested without a database.
   // It is the part that was wrong on a real answer, so it is the part
   // that needs pinning.

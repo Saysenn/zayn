@@ -21,6 +21,7 @@ const FONT_DIR = path.join(__dirname, '../../assets/fonts');
 const FONT_FILES = require('fs').readdirSync(FONT_DIR).filter((f) => f.endsWith('.ttf')).map((f) => path.join(FONT_DIR, f));
 const STYLES = ['sheet', 'notebook', 'receipt', 'ledger', 'chalkboard'];
 const WIDTH = 1000;
+const { measure, wrapTo, fitColumns } = require('./measure');
 const MIN_ROWS = 4;
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const cut = (s, n) => { const v = String(s ?? ''); return n > 1 && v.length > n ? `${v.slice(0, n - 1)}…` : v; };
@@ -88,12 +89,6 @@ function pages(spec, perPage) {
   return out.length ? out : [[]];
 }
 
-function columnsX(columns, L, R) {
-  const sum = columns.reduce((n, c) => n + (c.weight ?? 1), 0);
-  const xs = [L];
-  for (const c of columns) xs.push(xs.at(-1) + ((R - L) * (c.weight ?? 1)) / sum);
-  return xs.map(Math.round);
-}
 
 // --------------------------------------------- the sheet, ledger, chalkboard
 // One table layout, three looks (his calls 2026-10-07): the export's Blue
@@ -104,7 +99,7 @@ const noise = (id, freq, opacity, tone) => `<filter id="${id}" x="0" y="0" width
 
 const THEMES = {
   sheet: {
-    font: "Helvetica, Arial, 'Segoe UI', sans-serif", charW: 8.6, upperW: 10.5, size: 16, line: 20,
+    font: "Inter, Helvetica, Arial, sans-serif", face: 'sans', size: 16, line: 20,
     ink: '#1f2328', soft: '#5f6368', pending: '#9a6700', ok: '#1e7e34',
     paper: (W, H) => `<rect width="${W}" height="${H}" fill="#ffffff"/>`,
     head: { fill: '#DDEBF7', text: '#1f2328' }, zebra: '#F2F8FD', plain: '#ffffff', section: { fill: '#eaf2fb', text: '#1f2328' },
@@ -112,52 +107,71 @@ const THEMES = {
     tint: (x, y, w, h) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#FFF2CC"/>`,
   },
   ledger: {
-    font: "'Libre Baskerville', Georgia, serif", charW: 9.4, upperW: 11.6, size: 15, line: 21,
+    font: "'Libre Baskerville', Georgia, serif", face: 'serif', size: 15, line: 21,
     ink: '#2b2118', soft: '#6e6153', pending: '#9b2c1f', ok: '#2f6b3a',
     paper: (W, H) => `<defs>${noise('grain', 0.9, 0.10, 0.35)}</defs><rect width="${W}" height="${H}" fill="#f5edd8"/><rect width="${W}" height="${H}" filter="url(#grain)"/>`
-      + `<rect x="8" y="8" width="${W - 16}" height="${H - 16}" fill="none" stroke="#c9b48a" stroke-width="1.2"/>`,
-    head: { fill: 'none', text: '#2f6b3a', rule: '#b33a2b' }, zebra: 'none', plain: 'none', section: { fill: '#ebe0c2', text: '#2b2118' },
-    grid: { color: '#a9c7ae', dash: '' }, rows: { color: '#c6d3de' }, total: { fill: 'none', rule: '#b33a2b', double: true },
+      + `<rect x="8" y="8" width="${W - 16}" height="${H - 16}" fill="none" stroke="#e4d8bc" stroke-width="0.8"/>`,
+    head: { fill: 'none', text: '#2f6b3a', rule: '#e3bdb5', ruleWidth: 1 }, zebra: 'none', plain: 'none', section: { fill: '#efe6cd', text: '#2b2118' },
+    grid: { color: '#dbe6dc', dash: '' }, rows: { color: '#e2e8ee' }, total: { fill: 'none', rule: '#e3bdb5', double: true, width: 0.8 },
     tint: (x, y, w, h) => `<rect x="${x + 2}" y="${y + 2}" width="${w - 4}" height="${h - 4}" fill="#f3d36b" opacity="0.45"/>`,
     // the serif has no "≈": it fell back to another face mid line
     words: (v) => String(v).replace(/≈\s*/g, 'about '),
   },
   chalkboard: {
-    font: "'Patrick Hand', 'Comic Sans MS', cursive", charW: 8.2, upperW: 10, size: 19, line: 23,
+    font: "'Patrick Hand', 'Comic Sans MS', cursive", face: 'chalk', size: 19, line: 23,
     ink: '#f4f1e8', soft: '#bcc8c1', pending: '#f7c873', ok: '#a8e6a1',
-    paper: (W, H) => `<defs>${noise('chalk', 0.75, 0.22, 1)}</defs><rect width="${W}" height="${H}" fill="#7a5230"/>`
+    paper: (W, H) => `<defs>${noise('chalk', 0.75, 0.22, 1)}</defs><rect width="${W}" height="${H}" fill="#1f302a"/>`
       + `<rect x="16" y="16" width="${W - 32}" height="${H - 32}" rx="6" fill="#263a33"/><rect x="16" y="16" width="${W - 32}" height="${H - 32}" rx="6" filter="url(#chalk)"/>`,
-    head: { fill: 'none', text: '#f7e48c', rule: '#f4f1e8' }, zebra: 'none', plain: 'none', section: { fill: 'rgba(255,255,255,0.08)', text: '#f7e48c' },
-    grid: { color: 'rgba(244,241,232,0.35)', dash: '6 6' }, total: { fill: 'none', rule: '#f4f1e8', double: true },
-    tint: (x, y, w, h) => `<rect x="${x + 4}" y="${y + 4}" width="${w - 8}" height="${h - 8}" rx="8" fill="rgba(247,228,140,0.16)" stroke="#f7e48c" stroke-width="2" stroke-dasharray="7 5"/>`,
+    head: { fill: 'none', text: '#f7e48c', rule: 'rgba(244,241,232,0.28)', ruleWidth: 1 }, zebra: 'none', plain: 'none', section: { fill: 'rgba(255,255,255,0.05)', text: '#f7e48c' },
+    grid: { color: 'rgba(244,241,232,0.14)', dash: '6 6' }, total: { fill: 'none', rule: 'rgba(244,241,232,0.3)', double: true, width: 0.8 },
+    tint: (x, y, w, h) => `<rect x="${x + 4}" y="${y + 4}" width="${w - 8}" height="${h - 8}" rx="8" fill="rgba(247,228,140,0.12)" stroke="rgba(247,228,140,0.45)" stroke-width="1" stroke-dasharray="5 5"/>`,
     inset: 28,
   },
 };
 
 function sheet(spec, page, { n, of, last }, theme = THEMES.sheet) {
-  const W = spec.width ?? WIDTH;
   const C = theme;
   const F = `font-family="${theme.font}"`;
   const t = (x, y, s, { size = theme.size, weight = 400, fill = C.ink, anchor = 'start', style = 'normal', deco = '' } = {}) => `<text x="${x}" y="${y}" ${F} font-size="${size}" font-weight="${weight}" font-style="${style}" fill="${fill}" text-anchor="${anchor}"${deco ? ` text-decoration="${deco}"` : ''}>${esc(theme.words ? theme.words(s) : s)}</text>`;
   const pad = theme.inset ?? 0;
+  const headSize = theme.size - (theme.head.fill === 'none' ? 4 : 2);
+  const headText = (c) => (theme.head.fill === 'none' ? c.label.toUpperCase() : c.label);
+  // COLUMNS FROM WHAT IS IN THEM, over every page so the pages line up; the
+  // picture grows wider rather than cut a word (pictures/measure.js)
+  const everyRow = spec.sections.flatMap((s) => s.rows);
+  const fit = fitColumns(spec.columns.map((c) => ({ ...c, label: headText(c) })), everyRow, {
+    face: theme.face, size: theme.size, headSize, avail: (spec.width ?? WIDTH) - 64 - 2 * pad,
+  });
+  const W = Math.round(fit.total + 64 + 2 * pad);
   const L = 32 + pad; const R = W - 32 - pad;
-  const xs = columnsX(spec.columns, L, R);
-  const maxOf = (i, v) => Math.floor((xs[i + 1] - xs[i] - 18) / (/[A-Z]{4}/.test(v ?? '') ? theme.upperW : theme.charW));
-  const linesOf = (r) => spec.columns.map((c, i) => (c.align === 'right' ? [cut(r.cells[i], maxOf(i, r.cells[i]))] : wrap(r.cells[i], maxOf(i, r.cells[i]))));
+  const xs = [L];
+  for (const w of fit.widths) xs.push(xs.at(-1) + w);
+  const inner = (i) => xs[i + 1] - xs[i] - 18;
+  const linesOf = (r) => spec.columns.map((c, i) => wrapTo(r.cells[i], inner(i), theme.face, theme.size, c.align === 'right' || i === 0));
   const rowH = (r) => 18 + Math.max(1, ...linesOf(r).map((l) => l.length)) * theme.line + (r.sub ? 14 : 0);
-  const top = (spec.subtitle ? 104 : 84) + pad;
+  const headLines = spec.columns.map((c, i) => wrapTo(headText(c), inner(i), theme.face, headSize, true));
+  const headH = Math.max(36, 16 + Math.max(...headLines.map((l) => l.length)) * (headSize + 4));
+  // the status beside the title, or under it when the two would meet
+  const title = `${spec.title}${of > 1 ? `  (${n}/${of})` : ''}`;
+  const statusBelow = spec.status && measure(title, theme.face, theme.size + 12, true) + measure(spec.status.text, theme.face, theme.size, true) + 40 > R - L;
+  const top = (spec.subtitle ? 104 : 84) + pad + (statusBelow ? 26 : 0);
   const bodyH = page.reduce((h, s) => h + (s.label ? 34 : 0) + s.rows.reduce((m, r) => m + rowH(r), 0), 0);
-  const H = top + 36 + bodyH + (last && spec.total ? 46 + (spec.total.sub ? 20 : 0) : 0) + (spec.footer && last ? 60 : 30) + pad;
+  const totalTwoLines = spec.total && measure(spec.total.label ?? 'Total', theme.face, theme.size, true) + measure(spec.total.value, theme.face, theme.size + 1, true) + 40 > R - L;
+  const th = spec.total ? 46 + (totalTwoLines ? 26 : 0) + (spec.total.sub ? 20 : 0) : 0;
+  const H = top + headH + bodyH + (last ? th : 0) + (spec.footer && last ? 60 : 30) + pad;
   const o = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">`, theme.paper(W, H)];
-  o.push(t(L, 50 + pad, `${spec.title}${of > 1 ? `  (${n}/${of})` : ''}`, { size: theme.size + 12, weight: 700 }));
+  o.push(t(L, 50 + pad, title, { size: theme.size + 12, weight: 700 }));
   if (spec.subtitle) o.push(t(L, 78 + pad, spec.subtitle, { size: theme.size - 1, fill: C.soft }));
-  if (spec.status) o.push(t(R, 50 + pad, spec.status.text, { size: theme.size, weight: 700, fill: { pending: C.pending, ok: C.ok }[spec.status.tone] ?? C.soft, anchor: 'end' }));
+  if (spec.status) {
+    const tone = { pending: C.pending, ok: C.ok }[spec.status.tone] ?? C.soft;
+    o.push(statusBelow ? t(L, top - 14, spec.status.text, { size: theme.size - 1, weight: 700, fill: tone }) : t(R, 50 + pad, spec.status.text, { size: theme.size, weight: 700, fill: tone, anchor: 'end' }));
+  }
   let y = top;
-  if (theme.head.fill !== 'none') o.push(`<rect x="${L}" y="${y}" width="${R - L}" height="36" fill="${theme.head.fill}"/>`);
-  spec.columns.forEach((c, i) => o.push(t(c.align === 'right' ? xs[i + 1] - 10 : xs[i] + 10, y + 24, theme.head.fill === 'none' ? c.label.toUpperCase() : c.label, {
-    size: theme.size - (theme.head.fill === 'none' ? 4 : 2), weight: 700, fill: theme.head.text, anchor: c.align === 'right' ? 'end' : 'start',
-  })));
-  y += 36;
+  if (theme.head.fill !== 'none') o.push(`<rect x="${L}" y="${y}" width="${R - L}" height="${headH}" fill="${theme.head.fill}"/>`);
+  spec.columns.forEach((c, i) => headLines[i].forEach((line, k) => o.push(t(c.align === 'right' ? xs[i + 1] - 10 : xs[i] + 10, y + 24 + k * (headSize + 4), line, {
+    size: headSize, weight: 700, fill: theme.head.text, anchor: c.align === 'right' ? 'end' : 'start',
+  }))));
+  y += headH;
   const lines = [y];
   const runs = [];
   let runTop = y;
@@ -183,7 +197,7 @@ function sheet(spec, page, { n, of, last }, theme = THEMES.sheet) {
           weight: right || i === 0 ? 600 : 400, fill: ls.length ? (struck ? C.soft : C.ink) : C.soft, anchor: right ? 'end' : 'start', deco: struck ? 'line-through' : '',
         })));
       });
-      if (r.sub) o.push(t(R - 10, y + h - 9, cut(r.sub, 110), { size: theme.size - 4, fill: C.soft, anchor: 'end' }));
+      if (r.sub) o.push(t(R - 10, y + h - 9, r.sub, { size: theme.size - 4, fill: C.soft, anchor: 'end' }));
       y += h; lines.push(y); z += 1;
     }
   }
@@ -191,19 +205,20 @@ function sheet(spec, page, { n, of, last }, theme = THEMES.sheet) {
   const dash = theme.grid.dash ? ` stroke-dasharray="${theme.grid.dash}"` : '';
   if (theme === THEMES.sheet) o.push(`<rect x="${L}" y="${top}" width="${R - L}" height="${y - top}" fill="none" stroke="${theme.grid.color}" stroke-width="1"/>`);
   // column lines through the header and the plain rows, never a group heading
-  for (const [a, b] of [[top, top + 36], ...runs]) {
+  for (const [a, b] of [[top, top + headH], ...runs]) {
     xs.slice(1, -1).forEach((gx) => o.push(`<line x1="${gx}" y1="${a}" x2="${gx}" y2="${b}" stroke="${theme.grid.color}" stroke-width="1"${dash}/>`));
   }
-  lines.forEach((ly, i) => o.push(`<line x1="${L}" y1="${ly}" x2="${R}" y2="${ly}" stroke="${i === 0 && theme.head.rule ? theme.head.rule : theme.rows?.color ?? theme.grid.color}" stroke-width="${i === 0 && theme.head.rule ? 2 : 1}"${i === 0 ? '' : dash}/>`));
-  if (theme.head.rule) o.push(`<line x1="${L}" y1="${top + 40}" x2="${R}" y2="${top + 40}" stroke="${theme.head.rule}" stroke-width="1"/>`);
+  lines.forEach((ly, i) => o.push(`<line x1="${L}" y1="${ly}" x2="${R}" y2="${ly}" stroke="${i === 0 && theme.head.rule ? theme.head.rule : theme.rows?.color ?? theme.grid.color}" stroke-width="${i === 0 && theme.head.rule ? theme.head.ruleWidth ?? 2 : 1}"${i === 0 ? '' : dash}/>`));
+  if (theme.head.rule) o.push(`<line x1="${L}" y1="${top + headH + 4}" x2="${R}" y2="${top + headH + 4}" stroke="${theme.head.rule}" stroke-width="${theme.head.ruleWidth ?? 1}"/>`);
   if (last && spec.total) {
-    const th = 46 + (spec.total.sub ? 20 : 0);
     if (theme.total.fill !== 'none') o.push(`<rect x="${L}" y="${y}" width="${R - L}" height="${th}" fill="${theme.total.fill}"/>`);
-    o.push(`<line x1="${L}" y1="${y}" x2="${R}" y2="${y}" stroke="${theme.total.rule}" stroke-width="1.4"/>`,
+    const vy = y + 29 + (totalTwoLines ? 26 : 0);
+    o.push(`<line x1="${L}" y1="${y}" x2="${R}" y2="${y}" stroke="${theme.total.rule}" stroke-width="${theme.total.width ?? 1.4}"/>`,
       t(L + 10, y + 29, spec.total.label ?? 'Total', { size: theme.size, weight: 700 }),
-      t(R - 10, y + 29, spec.total.value, { size: theme.size + 1, weight: 700, anchor: 'end' }));
-    if (theme.total.double) o.push(`<line x1="${R - 360}" y1="${y + 38}" x2="${R}" y2="${y + 38}" stroke="${theme.total.rule}" stroke-width="1.2"/><line x1="${R - 360}" y1="${y + 42}" x2="${R}" y2="${y + 42}" stroke="${theme.total.rule}" stroke-width="1.2"/>`);
-    if (spec.total.sub) o.push(t(R - 10, y + 60, spec.total.sub, { size: theme.size - 3, fill: C.soft, anchor: 'end' }));
+      t(R - 10, vy, spec.total.value, { size: theme.size + 1, weight: 700, anchor: 'end' }));
+    const vw = Math.min(R - L - 20, measure(spec.total.value, theme.face, theme.size + 1, true) + 20);
+    if (theme.total.double) o.push(`<line x1="${R - vw}" y1="${vy + 9}" x2="${R}" y2="${vy + 9}" stroke="${theme.total.rule}" stroke-width="${theme.total.width ?? 1.2}"/><line x1="${R - vw}" y1="${vy + 13}" x2="${R}" y2="${vy + 13}" stroke="${theme.total.rule}" stroke-width="${theme.total.width ?? 1.2}"/>`);
+    if (spec.total.sub) o.push(t(R - 10, vy + 31, spec.total.sub, { size: theme.size - 3, fill: C.soft, anchor: 'end' }));
     y += th;
   }
   if (spec.footer && last) o.push(t(L, H - 22 - pad, spec.footer, { size: theme.size - 2, fill: C.soft }));
@@ -224,21 +239,41 @@ function receipt(spec, page, { n, of, last }) {
   const F = "font-family=\"'IBM Plex Mono', Menlo, monospace\"";
   const t = (x, y, s, { size = 17, weight = 400, fill = ink, anchor = 'start' } = {}) => `<text x="${x}" y="${y}" ${F} font-size="${size}" font-weight="${weight}" fill="${fill}" text-anchor="${anchor}" xml:space="preserve">${esc(s)}</text>`;
   const L = 48; const R = W - 48;
-  const rightCols = spec.columns.map((c, i) => (c.align === 'right' ? i : -1)).filter((i) => i >= 0);
-  const leftCols = spec.columns.map((c, i) => (c.align === 'right' ? -1 : i)).filter((i) => i >= 0);
-  // a row: the left cells as words that wrap; the right cells on its first line
+  const rightAll = spec.columns.map((c, i) => (c.align === 'right' ? i : -1)).filter((i) => i >= 0);
+  // THE AMOUNT ON THE RIGHT, its currency in front of it: a wide sheet's
+  // other right hand numbers ("31" payable days) get a label instead.
+  const amountCol = rightAll.at(-1);
+  const currencyCol = spec.columns.findIndex((c) => /^currency$/i.test(c.label));
+  const wide = spec.columns.length > 6;
+  const plainCols = spec.columns.map((c, i) => i).filter((i) => i !== amountCol && i !== currencyCol && (!wide || spec.columns[i].align !== 'right'));
+  const firstCols = wide ? plainCols.slice(0, 3) : plainCols;
+  const labelled = wide ? spec.columns.map((c, i) => i).filter((i) => i !== amountCol && i !== currencyCol && !firstCols.includes(i)) : [];
+  // a row: its first words, then "Label value" pairs that wrap, the same
+  // value said once for every field that holds it
   const layout = (r) => {
-    const right = rightCols.map((i) => r.cells[i]).filter(Boolean).join('  ');
-    const room = Math.floor((R - L) / CW) - right.length - 3;
-    const placed = [];
-    let line = 0; let col = 0;
-    for (const i of leftCols) {
+    const amount = amountCol === undefined ? '' : r.cells[amountCol] ?? '';
+    const right = currencyCol >= 0 && r.cells[currencyCol] && amount ? `${r.cells[currencyCol]} ${amount}` : amount;
+    const room = Math.floor((R - L) / CW);
+    const tokens = firstCols.map((i) => ({ i, text: String(r.cells[i] ?? '').trim() })).filter((x) => x.text);
+    const byValue = new Map();
+    for (const i of labelled) {
       const v = String(r.cells[i] ?? '').trim();
       if (!v) continue;
-      const width = Math.min(v.length, room);
-      if (col > 0 && col + 2 + width > room) { line += 1; col = 0; }
-      const at = col === 0 ? 0 : col + 2;
-      placed.push({ i, text: cut(v, room), line, col: at });
+      byValue.set(v, [...(byValue.get(v) ?? []), i]);
+    }
+    for (const [v, is] of byValue) {
+      const label = is.map((i) => spec.columns[i].label).join(', ');
+      tokens.push({ i: is[0], label: `${label}:`, text: v, all: is });
+    }
+    const placed = [];
+    let line = 0; let col = 0;
+    for (const x of tokens) {
+      const full = x.label ? `${x.label} ${x.text}` : x.text;
+      const limit = line === 0 ? room - right.length - 3 : room;
+      const width = Math.min(full.length, room);
+      if (col > 0 && col + 3 + width > limit) { line += 1; col = 0; }
+      const at = col === 0 ? 0 : col + 3;
+      placed.push({ ...x, text: cut(x.text, room - (x.label ? x.label.length + 1 : 0)), line, col: at });
       col = at + width;
     }
     return { right, placed, lines: line + 1 + (r.sub ? 1 : 0) };
@@ -250,7 +285,8 @@ function receipt(spec, page, { n, of, last }) {
   o.push(t(W / 2, y, `${spec.title}${of > 1 ? ` (${n}/${of})` : ''}`.toUpperCase(), { size: 22, weight: 600, anchor: 'middle' }));
   if (spec.subtitle) { y += 32; o.push(t(W / 2, y, spec.subtitle, { size: 15, fill: soft, anchor: 'middle' })); }
   if (spec.status) { y += 30; o.push(t(W / 2, y, spec.status.text, { size: 15, weight: 600, fill: spec.status.tone === 'pending' ? '#9a3b00' : spec.status.tone === 'ok' ? '#1e6b34' : soft, anchor: 'middle' })); }
-  const rule = (yy, dashed = true) => `<line x1="${L}" y1="${yy}" x2="${R}" y2="${yy}" stroke="${ink}" stroke-width="1.2"${dashed ? ' stroke-dasharray="6 6"' : ''}/>`;
+  // rules barely there (his call 2026-10-07: no strong borders)
+  const rule = (yy, dashed = true) => `<line x1="${L}" y1="${yy}" x2="${R}" y2="${yy}" stroke="#d6d6d6" stroke-width="0.8"${dashed ? ' stroke-dasharray="5 6"' : ''}/>`;
   y += 26; o.push(rule(y)); y += 14;
   for (const s of page) {
     if (s.label) { y += LH; o.push(t(L, y, s.label, { weight: 600 })); y += LH * 0.6; }
@@ -259,13 +295,14 @@ function receipt(spec, page, { n, of, last }) {
       y += LH;
       const rows = Math.max(...placed.map((p) => p.line), 0);
       for (const p of placed) {
-        const x = L + p.col * CW;
+        let x = L + p.col * CW;
         const yy = y + p.line * LH;
-        if ((r.tint ?? []).includes(p.i)) o.push(`<rect x="${x - 3}" y="${yy - 19}" width="${p.text.length * CW + 6}" height="26" fill="#ffe98a"/>`);
+        if (p.label) { o.push(t(x, yy, p.label, { size: 15, fill: soft })); x += (p.label.length + 1) * CW; }
+        if ((p.all ?? [p.i]).some((i) => (r.tint ?? []).includes(i))) o.push(`<rect x="${x - 3}" y="${yy - 19}" width="${p.text.length * CW + 6}" height="26" fill="#ffe98a"/>`);
         o.push(t(x, yy, p.text, { fill: (r.strike ?? []).includes(p.i) ? soft : ink }));
       }
       if (right) {
-        const tinted = rightCols.some((i) => (r.tint ?? []).includes(i));
+        const tinted = [amountCol, currencyCol].some((i) => (r.tint ?? []).includes(i));
         if (tinted) o.push(`<rect x="${R - right.length * CW - 3}" y="${y - 19}" width="${right.length * CW + 6}" height="26" fill="#ffe98a"/>`);
         o.push(t(R, y, right, { weight: 600, anchor: 'end' }));
       }
@@ -287,7 +324,6 @@ function receipt(spec, page, { n, of, last }) {
 
 // ------------------------------------------------------------- the notebook
 function notebook(spec, page, { n, of, last }) {
-  const W = spec.width ?? WIDTH;
   const C = {
     paper: '#fbf7ec', rule: '#c9d8ea', margin: '#e6a1a1', pen: '#1d3a8a', red: '#c0392b', soft: '#6b6b6b', marker: '#fff27a', ok: '#2e7d32',
   };
@@ -297,25 +333,44 @@ function notebook(spec, page, { n, of, last }) {
   const pen = (v) => String(v ?? '').replace(/\s*→\s*/g, ' -> ');
   const t = (x, y, s, { size = 28, weight = 400, fill = C.pen, anchor = 'start', deco = '' } = {}) => `<text x="${x}" y="${y}" ${F} font-size="${size}" font-weight="${weight}" fill="${fill}" text-anchor="${anchor}"${deco ? ` text-decoration="${deco}"` : ''}>${esc(pen(s))}</text>`;
   const LINE = 42;
+  const SIZE = 28;
+  const HEAD = 22;
   const M = 96;
-  const xs = columnsX(spec.columns, M, W - 44);
-  const maxOf = (i) => Math.floor((xs[i + 1] - xs[i] - 12) / 11.5);
-  const linesOf = (r) => spec.columns.map((c, i) => (c.align === 'right' ? [cut(pen(r.cells[i]), maxOf(i))] : wrap(pen(r.cells[i]), maxOf(i))));
+  const everyRow = spec.sections.flatMap((s) => s.rows.map((r) => ({ ...r, cells: r.cells.map(pen) })));
+  const fit = fitColumns(spec.columns.map((c) => ({ ...c, label: c.label.toLowerCase() })), everyRow, {
+    face: 'hand', size: SIZE, headSize: HEAD, pad: 20, avail: (spec.width ?? WIDTH) - M - 44,
+  });
+  const W = Math.round(fit.total + M + 44);
+  const R = W - 44;
+  const xs = [M];
+  for (const w of fit.widths) xs.push(xs.at(-1) + w);
+  const inner = (i) => xs[i + 1] - xs[i] - 14;
+  const linesOf = (r) => spec.columns.map((c, i) => wrapTo(pen(r.cells[i]), inner(i), 'hand', SIZE, c.align === 'right'));
   const rowLines = (r) => Math.max(1, ...linesOf(r).map((l) => l.length));
-  const lineCount = page.reduce((n2, s) => n2 + (s.label ? 1 : 0) + s.rows.reduce((m, r) => m + rowLines(r) + (r.sub ? 1 : 0), 0), 0);
-  const H = 130 + (lineCount + 1) * LINE + (last && spec.total ? 3 * LINE : 0) + (spec.footer && last ? LINE : 0) + 30;
+  const headLines = spec.columns.map((c, i) => wrapTo(c.label.toLowerCase(), inner(i), 'hand', HEAD));
+  const headRows = Math.max(1, ...headLines.map((l) => l.length));
+  const title = `${spec.title}${of > 1 ? ` (${n}/${of})` : ''}`;
+  const titleW = measure(title, 'hand', 44, true);
+  const statusBelow = spec.status && titleW + measure(spec.status.text, 'hand', 28) + 60 > R - M;
+  const totalW = spec.total ? measure(spec.total.value, 'hand', 32, true) : 0;
+  const labelW = spec.total ? measure(spec.total.label ?? 'Total', 'hand', 32, true) : 0;
+  const totalTwoLines = spec.total && labelW + totalW + 40 > R - M;
+  const lineCount = page.reduce((n2, s) => n2 + (s.label ? 1 : 0) + s.rows.reduce((m, r) => m + rowLines(r) + (r.sub ? 1 : 0), 0), 0) + headRows - 1;
+  const H = 130 + (lineCount + 1) * LINE + (last && spec.total ? (totalTwoLines ? 4 : 3) * LINE : 0) + (spec.footer && last ? LINE : 0) + 30;
   const o = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">`, `<rect width="${W}" height="${H}" fill="${C.paper}"/>`];
   for (let ly = 130; ly < H - 6; ly += LINE) o.push(`<line x1="0" y1="${ly}" x2="${W}" y2="${ly}" stroke="${C.rule}" stroke-width="1.2"/>`);
   o.push(`<line x1="${M - 16}" y1="0" x2="${M - 16}" y2="${H}" stroke="${C.margin}" stroke-width="2"/>`);
-  const title = `${spec.title}${of > 1 ? ` (${n}/${of})` : ''}`;
   o.push(t(M, 70, title, { size: 44, weight: 700 }));
-  o.push(`<path d="M ${M} 82 q ${title.length * 8} 6 ${title.length * 17} 0" stroke="${C.pen}" stroke-width="2.4" fill="none" stroke-linecap="round"/>`);
+  o.push(`<path d="M ${M} 82 q ${titleW / 2} 6 ${titleW} 0" stroke="${C.pen}" stroke-width="2.4" fill="none" stroke-linecap="round"/>`);
   if (spec.subtitle) o.push(t(M, 116, spec.subtitle, { size: 24, fill: C.soft }));
-  if (spec.status) o.push(t(W - 40, 64, spec.status.text.toLowerCase(), { size: 28, fill: spec.status.tone === 'ok' ? C.ok : spec.status.tone === 'pending' ? C.red : C.soft, anchor: 'end' }));
+  if (spec.status) {
+    const tone = spec.status.tone === 'ok' ? C.ok : spec.status.tone === 'pending' ? C.red : C.soft;
+    o.push(statusBelow ? t(R, 116, spec.status.text.toLowerCase(), { size: 26, fill: tone, anchor: 'end' }) : t(R + 4, 64, spec.status.text.toLowerCase(), { size: 28, fill: tone, anchor: 'end' }));
+  }
   let y = 130 + LINE - 10;
   // the column heads, small, like a ruled ledger
-  spec.columns.forEach((c, i) => o.push(t(c.align === 'right' ? xs[i + 1] - 4 : xs[i], y, c.label.toLowerCase(), { size: 22, fill: C.soft, anchor: c.align === 'right' ? 'end' : 'start' })));
-  y += LINE;
+  spec.columns.forEach((c, i) => headLines[i].forEach((line, k) => o.push(t(c.align === 'right' ? xs[i + 1] - 4 : xs[i], y + k * LINE, line, { size: HEAD, fill: C.soft, anchor: c.align === 'right' ? 'end' : 'start' }))));
+  y += LINE * headRows;
   for (const s of page) {
     if (s.label) { o.push(t(M, y, s.label, { size: 30, weight: 700, deco: 'underline' })); y += LINE; }
     for (const r of s.rows) {
@@ -326,7 +381,7 @@ function notebook(spec, page, { n, of, last }) {
         const struck = (r.strike ?? []).includes(i);
         const ls = cellLines[i].filter(Boolean);
         (ls.length ? ls : ['???']).forEach((v, k) => {
-          const w = v.length * 11.2;
+          const w = measure(v, 'hand', SIZE, right);
           if ((r.tint ?? []).includes(i)) o.push(`<rect x="${(right ? x - w : x) - 4}" y="${y + k * LINE - 26}" width="${w + 8}" height="32" rx="6" fill="${C.marker}" opacity="0.75"/>`);
           o.push(t(x, y + k * LINE, v, { fill: v === '???' ? C.red : struck ? C.soft : C.pen, anchor: right ? 'end' : 'start', weight: right ? 700 : 400, deco: struck ? 'line-through' : '' }));
         });
@@ -335,19 +390,23 @@ function notebook(spec, page, { n, of, last }) {
       // just the change, so it has none
       if ((r.tint ?? []).length && spec.marks !== false) o.push(t(M - 50, y, '?', { size: 32, fill: C.red }));
       y += LINE * rowLines(r);
-      if (r.sub) { o.push(t(W - 44, y - 6, cut(r.sub, 80), { size: 22, fill: C.soft, anchor: 'end' })); y += LINE; }
+      if (r.sub) { o.push(t(R, y - 6, r.sub, { size: 22, fill: C.soft, anchor: 'end' })); y += LINE; }
     }
   }
   if (last && spec.total) {
     y += LINE / 2;
-    o.push(`<line x1="${W - 440}" y1="${y - 30}" x2="${W - 44}" y2="${y - 30}" stroke="${C.pen}" stroke-width="2"/>`);
-    o.push(t(W - 440, y, spec.total.label ?? 'Total', { size: 32, weight: 700 }), t(W - 44, y, spec.total.value, { size: 32, weight: 700, anchor: 'end' }));
-    o.push(`<line x1="${W - 300}" y1="${y + 8}" x2="${W - 44}" y2="${y + 8}" stroke="${C.pen}" stroke-width="2"/><line x1="${W - 300}" y1="${y + 13}" x2="${W - 44}" y2="${y + 13}" stroke="${C.pen}" stroke-width="2"/>`);
+    // the label never under its value: placed by their measured widths
+    const lineFrom = Math.max(M, R - Math.max(totalW, totalTwoLines ? labelW : labelW + totalW + 30) - 10);
+    o.push(`<line x1="${lineFrom}" y1="${y - 30}" x2="${R}" y2="${y - 30}" stroke="${C.pen}" stroke-width="2"/>`);
+    o.push(t(lineFrom, y, spec.total.label ?? 'Total', { size: 32, weight: 700 }));
+    if (totalTwoLines) y += LINE;
+    o.push(t(R, y, spec.total.value, { size: 32, weight: 700, anchor: 'end' }));
+    o.push(`<line x1="${R - totalW - 6}" y1="${y + 8}" x2="${R}" y2="${y + 8}" stroke="${C.pen}" stroke-width="2"/><line x1="${R - totalW - 6}" y1="${y + 13}" x2="${R}" y2="${y + 13}" stroke="${C.pen}" stroke-width="2"/>`);
     y += LINE;
-    if (spec.total.sub) { o.push(t(W - 44, y - 4, spec.total.sub, { size: 24, fill: C.soft, anchor: 'end' })); y += LINE; }
+    if (spec.total.sub) { o.push(t(R, y - 4, spec.total.sub, { size: 24, fill: C.soft, anchor: 'end' })); y += LINE; }
   }
   if (spec.footer && last) o.push(t(M, H - 20, spec.footer.toLowerCase(), { size: 24, fill: C.soft }));
-  else if (!last) o.push(t(W - 44, H - 14, 'continued on the next page…', { size: 22, fill: C.soft, anchor: 'end' }));
+  else if (!last) o.push(t(R, H - 14, 'continued on the next page…', { size: 22, fill: C.soft, anchor: 'end' }));
   o.push('</svg>');
   return o.join('');
 }
@@ -368,7 +427,6 @@ function renderTable(spec) {
         : sheet(spec, page, at, THEMES[style]);
     return new Resvg(svg, {
       font: { loadSystemFonts: true, fontFiles: FONT_FILES, defaultFontFamily: 'Helvetica' },
-      fitTo: { mode: 'width', value: style === 'receipt' ? Math.min(spec.width ?? WIDTH, 1000) : spec.width ?? WIDTH },
     }).render().asPng();
   });
 }
