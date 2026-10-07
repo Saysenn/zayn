@@ -11,6 +11,7 @@ import PaymentStartRules from '../components/settings/PaymentStartRules';
 import ConversionRates from '../components/settings/ConversionRates';
 import ThemePicker from '../components/settings/ThemePicker';
 import ExpenseAdmins from '../components/settings/ExpenseAdmins';
+import ExpenseStyle from '../components/settings/ExpenseStyle';
 import Button, { FileButton, LinkButton } from '../components/buttons/Button';
 import Toggle from '../components/forms/Toggle';
 import Select from '../components/forms/Select';
@@ -468,6 +469,20 @@ export default function SettingsPage() {
               description="Who may send expenses to WhatBot, and on which group's number. Only these numbers can save, change or remove expenses, and only for that group: anyone else is ignored. The bot shows what it read and saves nothing until they reply yes."
             >
               <ExpenseAdmins />
+            </Card>
+          )}
+
+          {section === 'whatbot' && (
+            <Card
+              title="Expense message style"
+              description="How an expense preview and a saved note look, on WhatsApp and in Diane's chat. A picture opens full screen when tapped, and its caption still says what needs an answer and how to reply. Anything that needs checking is tinted on its own cell."
+            >
+              <ExpenseStyle
+                value={data?.expenseStyle}
+                isLoading={isLoading}
+                disabled={isPending}
+                onChange={(v) => update({ expenseStyle: v })}
+              />
             </Card>
           )}
 

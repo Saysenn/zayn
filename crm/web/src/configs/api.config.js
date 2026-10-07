@@ -172,6 +172,14 @@ export const apiService = {
   agentContext: {
     guess: (text, contexts) => api.post(`${apiPath}/agent-context/guess`, { text, contexts }),
   },
+  // How an expense preview looks (Settings → Whatbot): each style's sample
+  // picture, and a picture Diane sent, by id. Both resolve { blob }.
+  expenseStyle: {
+    preview: (style) => api.download(`${apiPath}/expense-style/preview/${encodeURIComponent(style)}`),
+  },
+  agentImages: {
+    get: (id) => api.download(`${apiPath}/agent-images/${encodeURIComponent(id)}`),
+  },
   // Who may send expenses to each group's WhatBot number.
   expenseAdmins: {
     list: () => api.get(`${apiPath}/expense-admins`),

@@ -195,6 +195,27 @@ function setAgentAutoConfirm(on) {
     .then((res) => res.rows[0]?.agent_auto_confirm === true);
 }
 
+/**
+ * HOW AN EXPENSE PREVIEW LOOKS (migration 073): 'sheet', 'notebook' or
+ * 'text'. Read on its own like the two above; before the migration it is
+ * the sheet, the default.
+ */
+async function expenseStyle() {
+  try {
+    const { rows } = await pool.query('SELECT expense_style FROM tb_settings WHERE id = 1');
+    return rows[0]?.expense_style ?? 'sheet';
+  } catch (err) {
+    if (err?.code === '42703') return 'sheet';
+    throw err;
+  }
+}
+
+function setExpenseStyle(style) {
+  return pool
+    .query('UPDATE tb_settings SET expense_style = $1, updated_at = now() WHERE id = 1 RETURNING expense_style', [style])
+    .then((res) => res.rows[0]?.expense_style ?? 'sheet');
+}
+
 function setColorUsesEndDate(on) {
   return pool
     .query(
@@ -254,6 +275,7 @@ module.exports = {
   driverSheet, setDriverSheet,
   loginBriefing, setLoginBriefing,
   agentAutoConfirm, setAgentAutoConfirm,
+  expenseStyle, setExpenseStyle,
   cryptoPercent, setCryptoPercent, CRYPTO_DEFAULT,
   setDashboardHistoryMonths, DEFAULT_DASHBOARD_HISTORY,
   exportTabStyle, setExportTabStyle,

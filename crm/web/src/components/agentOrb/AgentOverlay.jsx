@@ -19,6 +19,8 @@ import OrbHud from './OrbHud';
 import OrbVitals from './OrbVitals';
 import DianeEnvironment from './DianeEnvironment';
 import Messages from './Messages';
+import ImageViewer from './ImageViewer';
+import AttachmentsPanel, { attachmentsOf } from './AttachmentsPanel';
 import DealModal from './forms/DealModal';
 import ScrollMore from './ScrollMore';
 import RichInput from './RichInput';
@@ -33,7 +35,7 @@ import { orbStateFor } from './orbStateFor';
 import { useOrbSlot } from './particlesOrb/useOrbSlot';
 import {
   MicIcon, SpeakerMuteIcon, SendIcon, WaveformIcon, ExpandIcon,
-  DownloadIcon, ResetIcon, PaperclipIcon,
+  DownloadIcon, ResetIcon, PaperclipIcon, ImageIcon,
 } from '../icons';
 import { BASE_URL } from '../../helpers/api.helper';
 import { readSwitch } from './contextSwitch';
@@ -399,6 +401,9 @@ export default function AgentOverlay({ open, onClose }) {
   // The row a chip in her list was clicked on, or null. The modal fetches
   // the full card itself; this only holds which one.
   const [openDeal, setOpenDeal] = useState(null);
+  // A picture Diane sent, open large; and the conversation's Attachments list.
+  const [viewing, setViewing] = useState(null);
+  const [showAttachments, setShowAttachments] = useState(false);
   // While a file is actually being generated. Pinned beside the input, not
   // only inside the card, which by then has usually scrolled away.
   const [buildProgress, setBuildProgress] = useState(null);
@@ -586,11 +591,11 @@ export default function AgentOverlay({ open, onClose }) {
   // A DEAL OPEN ON TOP takes the Escape: it closed the pop-up AND Diane
   // behind it. 2026-09-30. The pop-up closes itself; she stays.
   useEffect(() => {
-    if (!open || confirmingReset || openDeal) return;
+    if (!open || confirmingReset || openDeal || viewing) return;
     const onKey = (e) => e.key === 'Escape' && onClose();
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [open, onClose, confirmingReset, openDeal]);
+  }, [open, onClose, confirmingReset, openDeal, viewing]);
 
   // The orb closing is a SAVE POINT. Fire and forget: closing must never
   // wait on a write, and the save is idempotent so carrying on afterwards
@@ -1125,6 +1130,16 @@ export default function AgentOverlay({ open, onClose }) {
             }]);
           }
 
+          /**
+           * A PICTURE (the expense preview, in the style picked in Settings):
+           * its own turn under the card. The transcript keeps only its id;
+           * the picture is kept in the CRM, so it opens again from
+           * Attachments.
+           */
+          if (event.type === 'image' && event.image?.id) {
+            setHistory((h) => [...h, { role: 'assistant', content: `[picture: ${event.image.caption}]`, image: event.image }]);
+          }
+
           if (event.type === 'list' && event.list) {
             // A PLAN carries its rows inside its sections, not as `rows`.
             const listRows = event.list.rows ?? (event.list.sections ?? []).flatMap((x) => x.rows ?? []);
@@ -1464,6 +1479,7 @@ export default function AgentOverlay({ open, onClose }) {
     endConversation();
     forgetExport();
     setHistory([{ role: 'assistant', content: GREETING }]);
+    setShowAttachments(false);
     setStreamingReply('');
     setProgress(null);
     setInput('');
@@ -1917,6 +1933,23 @@ export default function AgentOverlay({ open, onClose }) {
               {/* Not developer only: the transcript survives a close and a
                   reload on purpose, so without this the only way out of a
                   conversation gone sideways was to wait thirty minutes. */}
+              {/* EVERYTHING SENT, in one list: her pictures and your files. */}
+              <button
+                type="button"
+                onClick={() => setShowAttachments((v) => !v)}
+                disabled={!showAttachments && attachmentsOf(history).length === 0}
+                aria-pressed={showAttachments}
+                className={`btn-quiet relative w-8 h-8 min-h-0 p-0 border-0 bg-transparent hover:text-diane-signal disabled:opacity-30 ${showAttachments ? 'text-diane-signal' : 'text-diane-dim/60'}`}
+                aria-label="Attachments in this conversation"
+                title="Attachments in this conversation"
+              >
+                <ImageIcon width={16} height={16} />
+                {attachmentsOf(history).length > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 min-w-[14px] rounded-full bg-diane-signal px-1 text-[9px] font-semibold leading-[14px] text-diane-void">
+                    {attachmentsOf(history).length}
+                  </span>
+                )}
+              </button>
               <button
                 type="button"
                 onClick={() => setConfirmingReset(true)}
@@ -1933,6 +1966,11 @@ export default function AgentOverlay({ open, onClose }) {
           {/* `relative` so the jump pill can sit over the foot of the
               transcript rather than taking a row of its own. */}
           <div className="relative flex-1 min-h-0">
+            {showAttachments && (
+              <div className="absolute inset-0 z-10 bg-diane-panel/95">
+                <AttachmentsPanel history={history} onOpenImage={setViewing} onClose={() => setShowAttachments(false)} />
+              </div>
+            )}
             <div
               ref={drawerScrollRef}
               className={`agent-scroll h-full overflow-y-auto flex flex-col gap-2 px-4 py-4 ${buildingSheet ? 'session-alive' : ''}`}
@@ -1949,6 +1987,7 @@ export default function AgentOverlay({ open, onClose }) {
                 onOpenDeal={setOpenDeal}
                 onRetry={retryLastTurn}
                 onOffer={answerOffer}
+                onOpenImage={setViewing}
               />
             </div>
 
@@ -2131,6 +2170,7 @@ export default function AgentOverlay({ open, onClose }) {
       {/* One deal, opened from a chip in her list. It fetches its own card
           rather than asking her to look the row up again. */}
       {openDeal && <DealModal row={openDeal} onClose={() => setOpenDeal(null)} />}
+      <ImageViewer image={viewing} onClose={() => setViewing(null)} />
 
       {/* NAMES WHAT SURVIVES, because "reset" alone reads as though the
           conversation is being deleted from the CRM, and it is not. */}

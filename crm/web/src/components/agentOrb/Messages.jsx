@@ -16,6 +16,7 @@ import CompanyList from './forms/CompanyList';
 import SectionedList from './forms/SectionedList';
 import TurnOffer from './TurnOffer';
 import SheetCheck from './forms/SheetCheck';
+import ExpenseImage from './forms/ExpenseImage';
 import { SpinnerIcon } from '../icons';
 
 /**
@@ -97,7 +98,7 @@ function Bubble({ text, onOpenDeal }) {
 
 export default function Messages({
   history, isSending, workingText, progress = null, streamingReply = '', onFormSubmit, onCellEdit,
-  onExportPause, onOpenDeal, onRetry, onOffer,
+  onExportPause, onOpenDeal, onRetry, onOffer, onOpenImage,
 }) {
   return (
     <>
@@ -158,6 +159,11 @@ export default function Messages({
               disabled={isSending}
               onAnswer={(choice) => onOffer?.(i, choice)}
             />
+          </div>
+        ) : m.image ? (
+          /* THE EXPENSE PICTURE, under her card. Click to open it large. */
+          <div key={i} className="self-start w-full max-w-[95%]">
+            <ExpenseImage image={m.image} onOpen={onOpenImage} />
           </div>
         ) : m.list ? (
           <div key={i} className="self-start w-full max-w-[95%]">

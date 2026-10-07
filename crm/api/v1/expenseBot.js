@@ -6,6 +6,9 @@ const store = require('./expenses/bot/store');
 const brain = require('./expenses/bot/brain');
 const { meter } = require('./expenses/bot/ai');
 const { AppError } = require('./middlewares/errors');
+const { randomUUID } = require('crypto');
+const pool = require('../configs/db');
+const { renderCard, SAMPLE, STYLES } = require('./expenses/bot/card');
 
 // ***************************************************
 // * EXPENSES THROUGH WHATBOT
@@ -118,6 +121,42 @@ admin.post('/expenses/agent/attach', (req, res, next) => {
 });
 
 /**
+ * THE STYLE PICKER'S PREVIEWS (Settings → Whatbot): each style drawn from
+ * the same sample expenses, so they can be compared side by side.
+ */
+admin.get('/expense-style/preview/:style', (req, res, next) => {
+  try {
+    const { style } = req.params;
+    if (!STYLES.includes(style) || style === 'text') throw new AppError(404, 'No picture for that style.');
+    const png = renderCard(SAMPLE, { group: 'MANBAT', style });
+    res.set({ 'Content-Type': 'image/png', 'Cache-Control': 'private, max-age=300' }).send(png);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * A PICTURE DIANE SENT, by id: for her chat and its Attachments panel. The
+ * chat itself lives in the browser tab, so it keeps only the id.
+ */
+admin.get('/agent-images/:id', async (req, res, next) => {
+  try {
+    if (!/^[0-9a-f-]{36}$/.test(req.params.id)) throw new AppError(404, 'Picture not found.');
+    const { rows } = await pool.query('SELECT png FROM tb_agent_images WHERE id = $1', [req.params.id]);
+    if (!rows[0]) throw new AppError(404, 'Picture not found.');
+    res.set({ 'Content-Type': 'image/png', 'Cache-Control': 'private, max-age=86400' }).send(rows[0].png);
+  } catch (err) {
+    next(err);
+  }
+});
+
+async function keepImage(image, caption) {
+  const id = randomUUID();
+  await pool.query('INSERT INTO tb_agent_images (id, png, caption) VALUES ($1, $2, $3)', [id, Buffer.from(image.base64, 'base64'), caption ?? '']);
+  return id;
+}
+
+/**
  * ONE TURN OF DIANE'S EXPENSES CONTEXT, for agent/workspaces.js: the last
  * thing they said (and the file with it, by id) to the expense brain, for
  * every group and with no spender assumed. A preview goes out as a card.
@@ -135,6 +174,16 @@ async function dianeTurn(history, send) {
   }
   const out = await brain.turn({ text, attachments: atts.map((a) => a.file) }, { channel: 'diane' });
   if (out.card) send({ type: 'list', list: out.card });
+  // THE PICTURE under the card, in the style picked in Settings. Kept in the
+  // CRM so it can be opened again from the conversation's Attachments.
+  if (out.image) {
+    try {
+      const caption = `${out.image.saved ? 'Saved' : 'Preview'} · ${new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}`;
+      send({ type: 'image', image: { id: await keepImage(out.image, caption), caption } });
+    } catch (err) {
+      require('../configs/logger').warn({ err: err.message }, 'diane: could not keep the expense picture');
+    }
+  }
   return { reply: out.reply ?? '' };
 }
 

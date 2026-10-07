@@ -176,10 +176,10 @@ router.get('/settings', async (req, res, next) => {
     // A new column in get()'s SELECT would take down every other reader
     // on a deploy that forgot the migration.
     // Auto mode is its own query too, and for the same reason.
-    const [row, loginBriefing, agentAutoConfirm] = await Promise.all([
-      settingsRepo.get(), settingsRepo.loginBriefing(), settingsRepo.agentAutoConfirm(),
+    const [row, loginBriefing, agentAutoConfirm, expenseStyle] = await Promise.all([
+      settingsRepo.get(), settingsRepo.loginBriefing(), settingsRepo.agentAutoConfirm(), settingsRepo.expenseStyle(),
     ]);
-    res.json({ ...toSettings(row), loginBriefing, agentAutoConfirm });
+    res.json({ ...toSettings(row), loginBriefing, agentAutoConfirm, expenseStyle });
   } catch (err) {
     next(err);
   }
@@ -198,12 +198,13 @@ router.patch('/settings', async (req, res, next) => {
     const {
       devMode, whatbotWrites, localLocations, colorUsesEndDate,
       cryptoPercent, dashboardHistoryMonths: historyMonths, loginBriefing,
-      agentAutoConfirm,
+      agentAutoConfirm, expenseStyle,
     } = req.body || {};
     if (devMode === undefined && whatbotWrites === undefined
       && localLocations === undefined && colorUsesEndDate === undefined
       && cryptoPercent === undefined && historyMonths === undefined
-      && loginBriefing === undefined && agentAutoConfirm === undefined) {
+      && loginBriefing === undefined && agentAutoConfirm === undefined
+      && expenseStyle === undefined) {
       return res.status(400).json({ error: 'nothing to change' });
     }
 
@@ -304,12 +305,20 @@ router.patch('/settings', async (req, res, next) => {
       }
       await settingsRepo.setAgentAutoConfirm(agentAutoConfirm);
     }
+    // How WhatBot and Diane show an expense preview (Settings → Whatbot).
+    if (expenseStyle !== undefined) {
+      if (!['sheet', 'notebook', 'text'].includes(expenseStyle)) {
+        return res.status(400).json({ error: 'expenseStyle must be sheet, notebook or text' });
+      }
+      await settingsRepo.setExpenseStyle(expenseStyle);
+    }
 
     // Same reason as the GET: each flag is its own query.
     res.json({
       ...toSettings(row ?? (await settingsRepo.get())),
       loginBriefing: await settingsRepo.loginBriefing(),
       agentAutoConfirm: await settingsRepo.agentAutoConfirm(),
+      expenseStyle: await settingsRepo.expenseStyle(),
     });
   } catch (err) {
     next(err);

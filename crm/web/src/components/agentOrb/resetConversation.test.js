@@ -79,7 +79,8 @@ test('ESCAPE ANSWERS THE CONFIRM, not the overlay behind it', () => {
   // still has to stand down while a confirm is open, or Escape throws you
   // back to the CRM with the question still on screen.
   // And while a deal is open on top: Escape closes that, not Diane. 2026-09-30.
-  assert.match(OVERLAY, /if \(!open \|\| confirmingReset \|\| openDeal\) return;/);
+  // Same for a picture open large (ImageViewer has its own). 2026-10-07.
+  assert.match(OVERLAY, /if \(!open \|\| confirmingReset \|\| openDeal \|\| viewing\) return;/);
   assert.equal((OVERLAY.match(/e\.key === 'Escape'|e\.key !== 'Escape'/g) ?? []).length, 1,
     'there is more than one Escape handler again');
 });

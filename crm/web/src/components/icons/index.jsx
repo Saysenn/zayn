@@ -116,6 +116,14 @@ export const PaperclipIcon = (props) => (
   </svg>
 );
 
+export const ImageIcon = (props) => (
+  <svg {...BASE} aria-hidden="true" {...props}>
+    <rect x="3" y="3" width="18" height="18" rx="2.5" />
+    <circle cx="8.5" cy="8.5" r="1.5" />
+    <path d="M21 15l-5-5L5 21" />
+  </svg>
+);
+
 export const SpreadsheetIcon = (props) => (
   <svg {...BASE} aria-hidden="true" {...props}>
     <rect x="3" y="3" width="18" height="18" rx="2.5" />

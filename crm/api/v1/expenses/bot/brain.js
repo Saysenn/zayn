@@ -11,6 +11,7 @@ const { route, revise } = require('./understand');
 const find = require('./find');
 const { liveRates } = require('./rates');
 const { renderCard } = require('./card');
+const settingsRepo = require('../../repos/settings.repo');
 const { forDiane } = require('./forDiane');
 
 // ***************************************************
@@ -135,14 +136,12 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
   const savedItems = state.lastSaved ?? null;
   delete state.lastSaved;
   await store.saveChat(phone, group, state);
-  if (channel === 'diane') {
-    const view = forDiane(reply, state);
-    return { registered: true, ...view, reply: [view.reply, ...more.map(forDiane.plainText)].filter(Boolean).join('\n\n') };
-  }
   /**
-   * THE PICTURE (his call 2026-10-07, "always"): a preview or a saved batch
-   * goes as a clean note with a short caption. Text stays the fallback: a
-   * picture that cannot be drawn never costs them the message.
+   * THE PICTURE (his calls 2026-10-07: "always", then a style picked in
+   * Settings → Whatbot: sheet, notebook or plain text). A preview or a saved
+   * batch goes as a note drawn from the very items "yes" will save, with a
+   * short caption. Text stays the fallback: a picture that cannot be drawn
+   * never costs them the message.
    */
   let image = null;
   let text = reply;
@@ -150,15 +149,25 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
     const savedNow = /^✅ \*SAVED ·/.test(String(reply ?? '')) && savedItems?.length;
     const previewNow = state.pending?.kind === 'add' && /_Not saved yet_/.test(String(reply ?? '')) && !/^Just to be sure/.test(String(reply ?? ''));
     if (previewNow || savedNow) {
+      const style = await settingsRepo.expenseStyle();
       const items = savedNow ? savedItems : state.pending.items;
-      image = { base64: renderCard(items, { group, saved: Boolean(savedNow) }).toString('base64'), mime: 'image/png', filename: 'expenses.png' };
-      const lead = /^Added \d+ more[^\n]*\n\n/.exec(String(reply))?.[0] ?? '';
-      text = `${lead}${format.caption(items, group, { saved: Boolean(savedNow) })}`;
+      const png = renderCard(items, { group, saved: Boolean(savedNow), style, today });
+      if (png) {
+        image = { base64: png.toString('base64'), mime: 'image/png', filename: 'expenses.png', saved: Boolean(savedNow) };
+        const lead = /^Added \d+ more[^\n]*\n\n/.exec(String(reply))?.[0] ?? '';
+        text = `${lead}${format.caption(items, group, { saved: Boolean(savedNow) })}`;
+      }
     }
   } catch (err) {
     logger.warn({ err: err.message }, 'expense bot: could not draw the picture, sending text');
     image = null;
     text = reply;
+  }
+  if (channel === 'diane') {
+    // Diane keeps her card (it can be read and searched); the picture goes
+    // under it, to open large and to find again in Attachments.
+    const view = forDiane(reply, state);
+    return { registered: true, ...view, ...(image ? { image } : {}), reply: [view.reply, ...more.map(forDiane.plainText)].filter(Boolean).join('\n\n') };
   }
   return { registered: true, reply: text, replies: [text, ...more], ...(image ? { image } : {}) };
 }
