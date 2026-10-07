@@ -54,7 +54,9 @@ const SAY = {
   pastYear: (n) => `${n} ${plural(n, 'deal is', 'deals are')} past a year.`,
   // THIS month, his words 2026-09-28: the tick asks for it now, not forever.
   reviewMonthly: (n) => `${n} ${plural(n, 'deal is', 'deals are')} marked for review this month.`,
-  unpaid: (n) => `${n} ${plural(n, 'deal has', 'deals have')} not been marked paid this month.`,
+  // PEOPLE, NOT DEALS (his call 2026-10-07): the boss needs WHO has not
+  // been paid, not how many rows. One person, one line, their deals summed.
+  unpaid: (n) => `${n} ${plural(n, 'person has', 'people have')} not been marked paid this month.`,
   // PEOPLE, NOT CONCERNS: one person can hold five, and whatbot is named. 2026-09-21.
   // DISTINCT people: a row is a (person, group) pair, so one name in two
   // groups is two rows but one person. The flags are said beside it.
@@ -77,6 +79,46 @@ function owedThisMonth(rows, month, useEndDate) {
 }
 
 /** One deal as the screen lists it. The amount is RATED, what they are paid. */
+/**
+ * THE UNPAID, ONE ROW PER PERSON: their deals counted, their groups named,
+ * what they are owed per currency (never added across currencies). The id
+ * is the person's, so the page ticks them off once ALL their deals are paid.
+ */
+function unpaidPeople(rows) {
+  const byPerson = new Map();
+  for (const r of rows) {
+    const key = String(r.person_id ?? r.person_name ?? r.id).trim().toLowerCase();
+    const p = byPerson.get(key) ?? {
+      id: `person:${key}`, personId: r.person_id ?? null, person: r.person_name || r.company || '(no handler)',
+      companies: new Set(), groups: new Set(), deals: 0, owed: new Map(),
+    };
+    p.deals += 1;
+    if (r.company) p.companies.add(r.company);
+    if (r.group_name) p.groups.add(r.group_name);
+    const cur = r.currency || 'GBP';
+    p.owed.set(cur, Math.round(((p.owed.get(cur) ?? 0) + (Number(r.payable_amount) || 0)) * 100) / 100);
+    byPerson.set(key, p);
+  }
+  return [...byPerson.values()]
+    .map((p) => {
+      const totals = [...p.owed].map(([currency, amount]) => ({ amount, currency }));
+      return {
+        id: p.id,
+        personId: p.personId,
+        person: p.person,
+        // one company named; several said as a count
+        company: p.companies.size === 1 ? [...p.companies][0] : null,
+        deals: p.deals,
+        group: [...p.groups].sort().join(', ') || null,
+        amount: totals[0]?.amount ?? 0,
+        currency: totals[0]?.currency ?? 'GBP',
+        totals,
+        monthly: 0,
+      };
+    })
+    .sort((a, b) => a.person.localeCompare(b.person));
+}
+
 function dealRow(row, amountField) {
   return {
     id: String(row.id),
@@ -139,7 +181,7 @@ async function briefing(period = currentMonth()) {
   add('liquidating', by(REVIEW_REASON.LIQUIDATION).map((r) => dealRow(r, 'monthly_amount')));
   add('pastYear', by(REVIEW_REASON.PAST_END).map((r) => dealRow(r, 'monthly_amount')));
   add('reviewMonthly', by(REVIEW_REASON.REVIEW).map((r) => dealRow(r, 'monthly_amount')));
-  add('unpaid', unpaid.map((r) => dealRow(r, 'payable_amount')));
+  add('unpaid', unpaidPeople(unpaid));
   // `total` from listGrouped counts (person, group) pairs; the line counts people.
   const concernRows = concerns.rows.map(concernRow);
   const people = new Set(concernRows.map((r) => String(r.person).trim().toLowerCase())).size;

@@ -12,6 +12,15 @@ import { logger } from "../system/logger.js";
 const STYLES = ["sheet", "notebook", "receipt", "ledger", "chalkboard"];
 let cache = { at: 0, style: null };
 
+/**
+ * THE PAY BREAKDOWN'S LOOK: its own, from .env, a handwritten note by
+ * default (his call 2026-10-07: "like it's been written down on paper").
+ * Not the CRM's expense style: payments is WhatBot's own.
+ */
+export function payPictureStyle() {
+  return STYLES.includes(env.PAY_PICTURE_STYLE) ? env.PAY_PICTURE_STYLE : "notebook";
+}
+
 export async function pictureStyle() {
   if (cache.style && Date.now() - cache.at < 5 * 60 * 1000) return cache.style;
   const fallback = STYLES.includes(env.PICTURE_STYLE) ? env.PICTURE_STYLE : "sheet";

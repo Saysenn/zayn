@@ -152,6 +152,9 @@ const EnvSchema = z
     // The picture look when the CRM cannot be asked: sheet, notebook,
     // receipt, ledger or chalkboard.
     PICTURE_STYLE: z.string().default("sheet"),
+    // The PAY breakdown's own look (his call 2026-10-07: written on paper),
+    // never the CRM's expense style: sheet, notebook, receipt, ledger, chalkboard.
+    PAY_PICTURE_STYLE: z.string().default("notebook"),
     FEATURE_EXPENSE_IMAGES: z
       .enum(["true", "false"])
       .default("true")

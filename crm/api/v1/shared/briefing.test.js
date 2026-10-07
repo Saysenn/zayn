@@ -145,15 +145,34 @@ test('MONEY FIRST, TIDYING LAST', async () => {
 
 test('UNPAID IS WHAT THE MONTH OWES AND NOBODY TICKED', async () => {
   const out = await load({ rows: [OWED] }).briefing('2026-09');
+  // PEOPLE, NOT DEALS (his call 2026-10-07)
   assert.equal(out.items.find((i) => i.key === 'unpaid').sentence,
-    '1 deal has not been marked paid this month.');
+    '1 person has not been marked paid this month.');
+});
+
+test('ONE PERSON, ONE ROW: their deals counted, each currency on its own', async () => {
+  const out = await load({ rows: [
+    { ...OWED, id: 1, person_id: 'nathan', person_name: 'Nathan', company: 'Acqua', group_name: 'INDIGO', currency: 'GBP', payable_amount: 500 },
+    { ...OWED, id: 2, person_id: 'nathan', person_name: 'Nathan', company: 'Souracore', group_name: 'MILKMAN', currency: 'GBP', payable_amount: 700 },
+    { ...OWED, id: 3, person_id: 'nathan', person_name: 'Nathan', company: 'Workforce', group_name: 'MILKMAN', currency: 'AED', payable_amount: 150 },
+    { ...OWED, id: 4, person_id: 'abe', person_name: 'Abe', company: 'KP', group_name: 'NEXUS', currency: 'GBP', payable_amount: 300 },
+  ] }).briefing('2026-09');
+  const item = out.items.find((i) => i.key === 'unpaid');
+  assert.equal(item.sentence, '2 people have not been marked paid this month.');
+  const nathan = item.rows.find((r) => r.person === 'Nathan');
+  assert.equal(nathan.deals, 3);
+  assert.equal(nathan.company, null, 'several companies are a count, not one name');
+  assert.equal(nathan.group, 'INDIGO, MILKMAN');
+  assert.deepEqual(nathan.totals.map((t) => t.currency), ['GBP', 'AED']);
+  assert.equal(nathan.id, 'person:nathan');
 });
 
 test('EACH ROW SAYS WHO, WHERE AND WHAT THEY ARE PAID, rates on', async () => {
   const out = await load({ rows: [{ ...OWED, person_id: 'gloria', group_name: 'INDIGO', currency: 'GBP', payable_amount: 2000 }] })
     .briefing('2026-09');
   assert.deepEqual(out.items.find((i) => i.key === 'unpaid').rows[0], {
-    id: '1', personId: 'gloria', person: 'Gloria', company: 'Workforce', group: 'INDIGO', amount: 2100, monthly: 0, currency: 'GBP',
+    id: 'person:gloria', personId: 'gloria', person: 'Gloria', company: 'Workforce', deals: 1, group: 'INDIGO',
+    amount: 2100, monthly: 0, currency: 'GBP', totals: [{ amount: 2100, currency: 'GBP' }],
   });
 });
 

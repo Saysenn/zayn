@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("./style.js", () => ({ pictureStyle: async () => "sheet" }));
+vi.mock("./style.js", () => ({ payPictureStyle: () => "notebook" }));
 const { breakdownPicture } = await import("./breakdown.js");
 
 describe("the pay breakdown as a picture", () => {

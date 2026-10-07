@@ -1,5 +1,5 @@
 import { renderTable } from "./table.js";
-import { pictureStyle } from "./style.js";
+import { payPictureStyle } from "./style.js";
 import { money, totalsByCurrency, groupName } from "../tools/format/money.js";
 import { noteLines } from "../payments/elsewhere.js";
 
@@ -13,7 +13,7 @@ import { noteLines } from "../payments/elsewhere.js";
  */
 export async function breakdownPicture(rows, ctx) {
   if (!rows?.length) return null;
-  const style = await pictureStyle();
+  const style = payPictureStyle();
   const month = new Date().toLocaleString("en-GB", { month: "long", year: "numeric" });
   const sorted = [...rows].sort((a, b) => String(a.company ?? "").localeCompare(String(b.company ?? "")));
   const total = totalsByCurrency(rows);

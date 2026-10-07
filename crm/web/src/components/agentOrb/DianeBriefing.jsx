@@ -7,7 +7,7 @@ import { useOpenaiSpeech } from './useOpenaiSpeech';
 import { useVoiceInput } from './useVoiceInput';
 import {
   BRIEFING_GOES_TO, NO, heardYes, ASK, nextGreeting, sectionSegments, heardTopic, groupCounts, cardEntries,
-  reconcile, changeCounts, closingLine, ROW_STATUS, TOPIC_WORDS, DETAIL_KEYS, TOPIC_LABEL, HUD_LABEL,
+  reconcile, changeCounts, closingLine, ROW_STATUS, TOPIC_WORDS, DETAIL_KEYS, TOPIC_LABEL, HUD_LABEL, owedText,
 } from './briefingAnswer';
 import { ORB_STATE } from './particlesOrb/orbState';
 import { useOrbSlot } from './particlesOrb/useOrbSlot';
@@ -159,10 +159,11 @@ function DetailRow({ row, keyName, order, state = READ_STATE.DONE }) {
   const palette = useDianePalette();
   const { tint } = palette;
   const sorted = row.status === ROW_STATUS.SORTED;
-  const where = [row.company, row.group].filter(Boolean).join(' · ');
+  // a person with several unpaid deals: "3 deals" where one company would go
+  const where = [row.company ?? (row.deals > 1 ? `${row.deals} deals` : null), row.group].filter(Boolean).join(' · ');
   const figure = keyName === 'payableOver'
     ? `${formatMoney(row.amount, row.currency)} of ${formatMoney(row.monthly, row.currency)} monthly`
-    : formatMoney(row.amount, row.currency);
+    : keyName === 'unpaid' ? owedText(row, formatMoney) : formatMoney(row.amount, row.currency);
   return (
     <div
       className="briefing-row-in flex items-baseline gap-3 px-1 py-0.5 text-[13px]"

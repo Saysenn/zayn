@@ -294,7 +294,7 @@ test('THE BREAKDOWN IS EXACT: every company, counts that add up to the total', (
 test('A SORTED ROW LEAVES THE CARD AND WHAT SHE READS', () => {
   const rows = [...AT('Workforce', 2), { ...AT('KP', 1)[0], status: ROW_STATUS.SORTED }];
   assert.deepEqual(groupCounts(rows), [{ name: 'Workforce', count: 2 }]);
-  assert.equal(sectionSegments({ key: 'unpaid', sentence: 'x', rows })[1].text, 'Workforce 2.');
+  assert.equal(sectionSegments({ key: 'pastYear', sentence: 'x', rows })[1].text, 'Workforce 2.');
 });
 
 test('THE DATA CHECKS READ EVERY DEAL WITH ITS AMOUNTS', () => {
@@ -305,7 +305,13 @@ test('THE DATA CHECKS READ EVERY DEAL WITH ITS AMOUNTS', () => {
   const parts = sectionSegments({ key: 'payableOver', sentence: 'x', rows });
   assert.equal(parts[1].text, 'Drew at Monument, £2,000 against £1,250 a month and Smurf at Workforce, £1,000 against £500 a month.');
   assert.equal(parts.length, 2, 'no money line: each amount was already said');
-  assert.deepEqual(DETAIL_KEYS, ['specialCase', 'payableOver']);
+  assert.deepEqual(DETAIL_KEYS, ['specialCase', 'payableOver', 'unpaid']);
+  // UNPAID IS PEOPLE (his call 2026-10-07): names read, amounts on screen
+  const unpaid = sectionSegments({ key: 'unpaid', sentence: 'x', rows: [
+    { id: 'person:abe', person: 'Abe', company: 'KP', deals: 1, totals: [{ amount: 300, currency: 'GBP' }] },
+    { id: 'person:nathan', person: 'Nathan', company: null, deals: 3, totals: [{ amount: 1200, currency: 'GBP' }, { amount: 150, currency: 'AED' }] },
+  ] });
+  assert.equal(unpaid[1].text, 'Abe and Nathan.');
   const flags = sectionSegments({ key: 'concerns', sentence: 'x', rows: [{ id: 'a', person: 'Abe', flags: 3 }, { id: 'b', person: 'Zo', flags: 1 }] });
   // One person in two groups is two rows: the group tells them apart.
   const twice = sectionSegments({ key: 'concerns', sentence: 'x', rows: [{ id: 'A|d', person: 'Drew', group: 'A', flags: 1 }, { id: 'B|d', person: 'Drew', group: 'B', flags: 1 }] });

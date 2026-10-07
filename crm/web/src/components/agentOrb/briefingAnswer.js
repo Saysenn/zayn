@@ -166,7 +166,12 @@ export function heardYes(said) {
 // sentences, and no totals. The card and her voice come from cardEntries().
 
 // The two checks on the data itself: the card lists every row with its amounts.
-export const DETAIL_KEYS = Object.freeze(['specialCase', 'payableOver']);
+// 'unpaid' is one row per PERSON (his call 2026-10-07), shown in full
+export const DETAIL_KEYS = Object.freeze(['specialCase', 'payableOver', 'unpaid']);
+
+/** What a person is owed, each currency on its own: "AED 4,100 and £500". */
+export const owedText = (r, money) => (r.totals?.length ? r.totals : [{ amount: r.amount, currency: r.currency }])
+  .map((t) => money(t.amount, t.currency)).join(' and ');
 
 /** Rows still in play: a row sorted while she talked no longer counts. */
 const live = (rows) => (rows ?? []).filter((r) => r.status !== ROW_STATUS.SORTED);
@@ -202,7 +207,10 @@ export function cardEntries(item) {
   }
   if (DETAIL_KEYS.includes(item.key)) {
     return rows.map((r) => {
-      const at = r.company ? ` at ${r.company}` : '';
+      const at = r.company ? ` at ${r.company}` : r.deals > 1 ? `, ${r.deals} deals` : '';
+      // the NAMES are read, the amounts stay on screen: at a month's start
+      // nearly everyone is on this card, and every amount aloud is minutes
+      if (item.key === 'unpaid') return { id: r.id, row: r, said: r.person };
       const said = item.key === 'payableOver'
         ? `${r.person}${at}, ${whole(r.amount, r.currency)} against ${whole(r.monthly, r.currency)} a month`
         : `${r.person}${at}, ${whole(r.amount, r.currency)}`;
