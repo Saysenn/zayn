@@ -3,6 +3,7 @@ import { escalate } from "./escalate.js";
 import { outOfScopeReply } from "./outOfScope.js";
 import { blockBypass } from "./blockBypass.js";
 import { greetingReply } from "./greeting.js";
+import { employeeExpensesOn } from "../expenses/expenses.js";
 import { jokeReply, moodReply, personalReply } from "./banter.js";
 
 /**
@@ -58,6 +59,11 @@ export async function scriptedReply(text, c) {
   // 5. A greeting is not a question. Instant, uses their name, and the one
   //    place the menu earns its keep — on a thread with no history
   const hello = greetingReply(text, ctx, { firstContact });
+  // "MY EXPENSES" on the first menu, only while his switch is on (his call
+  // 2026-10-07): off, the bot never mentions expenses
+  if (hello?.offer && (await employeeExpensesOn().catch(() => false))) {
+    hello.offer = { ...hello.offer, choices: [...hello.offer.choices, { label: "My expenses this month", ask: "my expenses" }] };
+  }
   if (hello) return hello;
 
   // 6. Then how their day is going — after greetings, since "good morning"

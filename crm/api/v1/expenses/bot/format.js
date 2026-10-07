@@ -279,16 +279,58 @@ const removed = (list) => [
   `Reply *undo* to bring ${list.length === 1 ? 'it' : 'them'} back.`,
 ].join('\n');
 
-const HELP = (name, group) => [
-  `Hi ${name}! 👋 Send me *${group}* expenses and I'll save them to the CRM.`,
-  SEP,
-  '• Text: _taxi to office 45 paid to Careem_',
-  '• A receipt photo, or a file (Excel, CSV, Word, PowerPoint, PDF)',
-  '• _change the taxi to 50_ · _remove yesterday\'s lunch_',
-  '• _how much did we spend this month?_',
-  SEP,
-  'I always show you what I read before saving anything.',
-  'Type *payments* to ask about your own pay instead.',
+
+/**
+ * THE ADMIN'S HELLO, four lines (his call 2026-10-07: the old one was too
+ * long). The full guide is a note picture, only on "help".
+ */
+const HELLO = (name, group) => [
+  `Hi ${name} 👋 *${group}* expenses.`,
+  'Send a text, a receipt photo or a file; I show it before saving.',
+  'Files: photo, PDF, Excel, CSV, Word, PowerPoint or text.',
+  '*help* for examples · *payments* for your pay',
+].join('\n');
+
+/** THE GUIDE, as rows: drawn as a paper note on "help", read as text if not. */
+const GUIDE = [
+  { label: 'Send expenses', rows: [
+    ['A typed line', 'taxi to office 45 paid to Careem'],
+    ['Who spent it', 'lunch 30 at Pret, spent by Abe'],
+    ['A receipt', 'a photo, or several at once'],
+    ['A file', 'PDF, Excel, CSV, Word, PowerPoint, text'],
+  ] },
+  { label: 'Answer "Please check"', rows: [
+    ['All of them', 'skip all · save all · replace all'],
+    ['One by one', '1 skip · 2 replace · 3 save'],
+    ['Who spent it', 'me · 1-3 Ahmed, 4 me'],
+    ['Save', 'yes · or cancel'],
+  ] },
+  { label: 'Change or ask', rows: [
+    ['Change', 'change the taxi to 50'],
+    ['Remove', "remove yesterday's lunch"],
+    ['Totals', 'how much did we spend this month?'],
+    ['Undo', 'undo (it asks first)'],
+  ] },
+];
+
+const guideSpec = (group) => ({
+  style: 'notebook',
+  title: `${group} expenses · how to`,
+  subtitle: 'send it, answer it, change it',
+  columns: [{ label: 'To', weight: 1 }, { label: 'Send or type', weight: 2.2 }],
+  sections: GUIDE.map((g) => ({ label: g.label, rows: g.rows.map((cells) => ({ cells })) })),
+  notes: { title: 'Good to know', lines: [
+    { label: 'Nothing saves', text: 'until you reply yes' },
+    { label: 'payments', text: 'switches to your own pay' },
+  ] },
+  marks: false,
+});
+
+const guideText = (group) => [
+  `📒 *${group} expenses · how to*`,
+  ...GUIDE.flatMap((g) => ['', `*${g.label}*`, ...g.rows.map(([a, b]) => `• ${a}: _${b}_`)]),
+  '',
+  'Nothing saves until you reply *yes*. *payments* switches to your own pay.',
 ].join('\n');
 
 const HELP_DIANE = [
@@ -348,6 +390,6 @@ function caption(items, group, { saved = false } = {}) {
 }
 
 module.exports = {
-  HELP_DIANE, SEP, ratesBubble, caption, ranges, questions, howToAnswer,
-  day, dayFull, amount, money, totals, line, block, addPreview, editPreview, removePreview, pickList, undoPreview, saved, changed, removed, HELP, LABEL,
+  HELP_DIANE, HELLO, guideSpec, guideText, SEP, ratesBubble, caption, ranges, questions, howToAnswer,
+  day, dayFull, amount, money, totals, line, block, addPreview, editPreview, removePreview, pickList, undoPreview, saved, changed, removed, LABEL,
 };

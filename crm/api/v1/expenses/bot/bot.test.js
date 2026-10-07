@@ -336,3 +336,14 @@ test('A NAME TO ONE MASTER SHEET PERSON: exact, a first name, the group, never a
   assert.deepEqual(matchName('Ahmed (cleaner)', list), { status: 'none' });
   assert.deepEqual(matchName('Sara', list), { status: 'none' });
 });
+
+test('A COPY IN ONE PREVIEW, worded two ways, is still a copy (his report 2026-10-07)', () => {
+  const items = [
+    normalise({ n: 1, spentOn: '2026-10-04', description: 'Groceries (water, towels, soap, coffee pods)', payee: 'Carrefour', rawAmount: '139.91' }, ctx),
+    normalise({ n: 2, spentOn: '2026-10-04', description: 'Groceries and coffee pods', payee: 'Carrefour', rawAmount: '139.91' }, ctx),
+    normalise({ n: 3, spentOn: '2026-10-04', description: 'Taxi', payee: 'Careem', rawAmount: '139.91' }, ctx),
+  ];
+  duplicates(items, []);
+  assert.match(items[1].doubts.join(), /same as 1/);
+  assert.doesNotMatch(items[2].doubts.join(), /same as/, 'another payee and other words is another expense');
+});

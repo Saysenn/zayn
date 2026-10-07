@@ -202,7 +202,12 @@ function duplicates(items, saved = []) {
     const near = !twin && saved.find((s) => x.payee && s.payee && fold(s.payee) === fold(x.payee)
       && String(s.spent_on instanceof Date ? s.spent_on.toISOString() : s.spent_on).slice(0, 10) === String(x.spentOn ?? '').slice(0, 10));
     if (near) x.doubts.push(`another ${near.payee} on ${require('./format').day(String(near.spent_on instanceof Date ? near.spent_on.toISOString() : near.spent_on).slice(0, 10))} (${near.currency} ${Number(near.raw_amount)}): new, or a change to that one?`);
-    const earlier = items.find((y) => y !== x && y.n < x.n && !y.skipped && sameSpend(x, y) && fold(x.description ?? '') === fold(y.description ?? ''));
+    // A COPY IN THIS PREVIEW: the same day, amount and currency, and the same
+    // payee OR the same words. The model words one receipt two ways ("Groceries
+    // and coffee pods" / "Groceries (water, towels…)"), so the words alone
+    // missed it (his report 2026-10-07). Still asked, never dropped.
+    const earlier = items.find((y) => y !== x && y.n < x.n && !y.skipped && sameSpend(x, y)
+      && ((x.payee && y.payee && fold(x.payee) === fold(y.payee)) || fold(x.description ?? '') === fold(y.description ?? '')));
     if (earlier) x.doubts.push(`same as ${earlier.n}`);
     x.flag = x.missing.length > 0 || x.doubts.length > 0;
   }

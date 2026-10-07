@@ -87,3 +87,17 @@ describe("the answer", () => {
     expect(await answerMyExpenses(ctx, PHONE, "how much am I owed")).toBeNull();
   });
 });
+
+describe("the first hello's menu", () => {
+  it("offers My expenses only while the switch is on", async () => {
+    const { scriptedReply } = await import("../conversation/scriptedReply.js");
+    const c = { ctx: { ...ctx, person: { ...ctx.person, personName: "Zayn Test" } }, firstContact: true };
+    crm({ on: true });
+    const on = await scriptedReply("hi", c);
+    resetAdminCache();
+    crm({ on: false });
+    const off = await scriptedReply("hi", c);
+    expect(on?.offer?.choices.map((x) => x.label)).toContain("My expenses this month");
+    expect(off?.offer?.choices.map((x) => x.label)).not.toContain("My expenses this month");
+  });
+});

@@ -26,6 +26,7 @@ import {
 import { useStickyState, useClearSticky } from '../hooks/useStickyState';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import useRowSelection from '../hooks/useRowSelection';
+import { useStickyColumns } from '../hooks/useStickyColumns';
 import useBulkActions, { bulkMessage, patchQueries } from '../hooks/useBulkActions';
 import { countOf } from '../helpers/pluralNoun';
 import { apiService } from '../configs/api.config';
@@ -181,6 +182,9 @@ export default function ExpensesPage() {
     [rows],
   );
   const sel = useRowSelection(visibleIds);
+  // THE TICK, DATE AND DESCRIPTION STAY PUT while the rest scrolls sideways
+  // (his call 2026-10-07): the same freeze People and the Master Sheet use
+  const tableRef = useStickyColumns(3, [rows, page]);
   const { run } = useBulkActions();
   const [bulkEditing, setBulkEditing] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -401,12 +405,12 @@ export default function ExpensesPage() {
       <ErrorState error={error} title="Couldn't load expenses" onRetry={refetch} />
 
       <div className="table-wrap">
-        <table className="w-full min-w-[900px] text-sm">
+        <table ref={tableRef} className="w-full min-w-[900px] text-sm">
           <thead>
             <tr>
-              <th className="th w-8"><SelectAll count={sel.count} total={sel.total} onChange={sel.setAll} /></th>
-              <th className="th">Date</th>
-              <th className="th">Description</th>
+              <th className="th sticky-col w-8"><SelectAll count={sel.count} total={sel.total} onChange={sel.setAll} /></th>
+              <th className="th sticky-col">Date</th>
+              <th className="th sticky-col sticky-edge">Description</th>
               <th className="th">Payee</th>
               <th className="th">Category</th>
               <th className="th">Currency</th>
@@ -436,7 +440,7 @@ export default function ExpensesPage() {
                 }}
                 className={`cursor-pointer hover:bg-surface-sunken ${sel.has(row.id) ? 'row-selected' : ''}`}
               >
-                <td className="td w-8" onClick={(e) => e.stopPropagation()}>
+                <td className="td sticky-col w-8" onClick={(e) => e.stopPropagation()}>
                   <input
                     type="checkbox"
                     checked={sel.has(row.id)}
@@ -448,13 +452,14 @@ export default function ExpensesPage() {
                 {/* EditableCell IS the <td>, so it takes the table's own
                     `.td` padding instead of sitting inside a second one. */}
                 <EditableCell
+                  className="sticky-col"
                   type="date"
                   value={row.spent_on}
                   display={formatDate(row.spent_on)}
                   onSave={(v) => saveCell(row, 'spentOn', v)}
                 />
                 <EditableCell
-                  className="font-medium text-text"
+                  className="sticky-col sticky-edge font-medium text-text"
                   value={row.description}
                   onSave={(v) => saveCell(row, 'description', v)}
                 />

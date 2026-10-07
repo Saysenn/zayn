@@ -55,7 +55,9 @@ const SNAP = (r) => ({
 });
 const same = (a, b) => JSON.stringify(SNAP(a)) === JSON.stringify(SNAP(b));
 
-const GREETING = /^(?:hi+|hello+|hey+|hiya|salam|assalam[ou]?\s*alaikum|good (?:morning|afternoon|evening)|help|menu|start|what can you do\??)[!. ]*$/i;
+const GREETING = /^(?:hi+|hello+|hey+|hiya|salam|assalam[ou]?\s*alaikum|good (?:morning|afternoon|evening)|start)[!. ]*$/i;
+// "HELP": the whole guide, as a note picture (his call 2026-10-07)
+const HELP_ASK = /^(?:help|menu|guide|commands?|how (?:does this work|do i use (?:this|it)|to use (?:this|it))|what can you do|examples?|show me examples?)[!.? ]*$/i;
 const THANKS = /^(?:thanks?(?: you)?|thank u|thx|ty|cheers|great|perfect|nice|cool|ok thanks|👍🏻?|🙏)[!. ]*$/i;
 const EDIT_WORDS = /\b(?:change|changed|edit|update|correct|fix|wrong|should be|was (?:actually|really)|not \d|instead|remove|delete|cancel|undo|how|what|which|when|who|total|list|show|sum|spent on|spend|much|many|biggest|\?)|\?/i;
 // A TYPO IN AN EDIT WORD is still an edit: "chnage yestrday's uber to 35"
@@ -204,6 +206,13 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
         const tail = /\n\n⏳[\s\S]*$/.exec(String(reply))?.[0] ?? '';
         text = `${lead}${format.caption(items, group, { saved: Boolean(savedNow) })}${tail}`;
       }
+    } else if (ctx.guide) {
+      // THE GUIDE AS A NOTE; its text stays the fallback
+      const pngs = renderTable(format.guideSpec(group));
+      if (pngs.length) {
+        image = { base64: pngs[0].toString('base64'), mime: 'image/png', filename: 'expenses-guide.png', kind: 'guide' };
+        text = `📒 How to send *${group}* expenses. Type *payments* for your own pay.`;
+      }
     } else if (ctx.answer?.table) {
       // A SPENDING REPORT of 4+ rows: the table as a picture (pages when
       // long), the heading and total as its caption.
@@ -296,10 +305,15 @@ async function answerTurn(said, files, ctx) {
   // three times (2026-10-07).
   if (GREETING.test(said)) {
     const lastBot = String(state.history?.at(-1)?.reply ?? '');
-    if (/I'll save it|I'll save them to the CRM|Hi again/.test(lastBot)) {
+    if (/I show it before saving|I'll save it|Hi again/.test(lastBot)) {
       return pending ? 'Hi again! Your preview is still waiting: reply *yes*, *modify* or *cancel*.' : 'Hi again! Send an expense whenever you\'re ready.';
     }
-    return ctx.channel === 'diane' ? format.HELP_DIANE : format.HELP(admin.name.split(' ')[0], group);
+    return ctx.channel === 'diane' ? format.HELP_DIANE : format.HELLO(admin.name.split(' ')[0], group);
+  }
+  if (HELP_ASK.test(said)) {
+    if (ctx.channel === 'diane') return format.HELP_DIANE;
+    ctx.guide = true;
+    return format.guideText(group);
   }
   if (THANKS.test(said) && !pending) return 'You\'re welcome 🙂';
   // "SHOW ME THE RECEIPT FOR 4" / "...for the careem taxi" (his call 2026-10-07)
@@ -491,6 +505,30 @@ async function link(items, ctx) {
 }
 
 async function addFrom(msg, ctx) {
+  /**
+   * THE SAME FILE, ALREADY IN THIS PREVIEW, IS NOT READ AGAIN (his report
+   * 2026-10-07): 6 files sent twice were read twice, the model worded 3 of
+   * them differently, and they slipped in as new. A file is known by its
+   * fingerprint before any model sees it, so a resend costs nothing.
+   */
+  const open0 = ctx.state.pending?.kind === 'add' ? ctx.state.pending.items : [];
+  const inPreview = new Set(open0.filter((x) => !x.skipped).map((x) => x.receipt?.print).filter(Boolean));
+  let knownFiles = 0;
+  if (msg.attachments?.length) {
+    const seen = new Set();
+    const fresh = [];
+    for (const file of msg.attachments) {
+      // eslint-disable-next-line no-await-in-loop
+      const print = (await receipts.fingerprint(file).catch(() => null))?.print;
+      if (print && (inPreview.has(print) || seen.has(print))) { knownFiles += 1; continue; }
+      if (print) seen.add(print);
+      fresh.push(file);
+    }
+    if (!fresh.length && !String(msg.text ?? '').trim()) {
+      return `${ALREADY}${format.addPreview(open0, ctx.group)}`;
+    }
+    msg = { ...msg, attachments: fresh };
+  }
   const got = await extract(msg, { today: ctx.today, client: ctx.client, groups: ctx.groups });
   if (!got.items.length) {
     const why = got.notes.length ? `\n_${got.notes.join('; ')}_` : '';
@@ -536,7 +574,8 @@ async function addFrom(msg, ctx) {
   // THE NEW NUMBERS, named: they think of these as "1 and 2" of the message
   // they just sent, and the list calls them 2 and 3.
   const nums = fresh.map((x) => x.n);
-  const skippedNote = dropped ? ` Skipped ${dropped} already in this preview.` : '';
+  const already = dropped + knownFiles;
+  const skippedNote = already ? ` Skipped ${already} already in this preview.` : '';
   const lead = open.length ? `Added ${fresh.length} more: *${format.ranges(nums)}*.${skippedNote}\n\n` : '';
   const notes = got.notes.length ? `\n\n_${got.notes.join('; ')}_` : '';
   return `${lead}${format.addPreview(items, ctx.group)}${notes}`;
