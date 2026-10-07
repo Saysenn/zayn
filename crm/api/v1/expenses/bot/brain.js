@@ -9,6 +9,7 @@ const { normalise, duplicates, ready, currencyOf, num } = require('./check');
 const { readReply } = require('./reply');
 const { route, revise } = require('./understand');
 const find = require('./find');
+const { liveRates } = require('./rates');
 const { forDiane } = require('./forDiane');
 
 // ***************************************************
@@ -111,6 +112,13 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
       reply = 'Sorry, something went wrong on my side. Nothing was saved. Please try again in a minute.';
     }
   }
+  // THE RATES BUBBLE after a preview with other currencies in it: a second
+  // message, so the rates read on their own (his call 2026-10-07).
+  const more = [];
+  if (state.pending?.kind === 'add' && PREVIEWS.test(String(reply ?? ''))) {
+    const bubble = format.ratesBubble(state.pending.items);
+    if (bubble) more.push(bubble);
+  }
   if (reply === HAND_OFF) {
     if (state.pending) state.pending.shownLast = false;
     await store.saveChat(phone, group, state);
@@ -123,8 +131,11 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
   state.history = [...(state.history ?? []), { said: said || (files.length ? `[${files.length} file(s)]` : ''), reply }].slice(-HISTORY);
   if (msg.messageId) state.seen = [...(state.seen ?? []), { id: msg.messageId, reply }].slice(-30);
   await store.saveChat(phone, group, state);
-  if (channel === 'diane') return { registered: true, ...forDiane(reply, state) };
-  return { registered: true, reply };
+  if (channel === 'diane') {
+    const view = forDiane(reply, state);
+    return { registered: true, ...view, reply: [view.reply, ...more.map(forDiane.plainText)].filter(Boolean).join('\n\n') };
+  }
+  return { registered: true, reply, replies: [reply, ...more] };
 }
 
 async function answerTurn(said, files, ctx) {
@@ -133,8 +144,21 @@ async function answerTurn(said, files, ctx) {
 
   // 2. CODE FIRST: an answer to what is open.
   if (pending && !files.length) {
+    // "1, AND THE SPENDER IS LEO P": a pick with more change in it. The
+    // extra part went to the router alone and the first change was lost.
+    const picked = pending.kind === 'pick' && /^\s*(?:#|no\.?\s*)?(\d+)\b[\s,.;:-]+(.{3,})$/.exec(said);
+    if (picked && Number(picked[1]) >= 1 && Number(picked[1]) <= pending.choices.length && pending.then.kind === 'edit') {
+      const more = await route(picked[2], { today, pending: false, client: ctx.client, groups: ctx.groups });
+      const row = await expensesRepo.findById(pending.choices[Number(picked[1]) - 1]);
+      if (row) return editPreviewFor(row, { ...pending.then.changes, ...changesFrom(more.changes, today) }, ctx);
+    }
     const r = readReply(said, pending, { year: year(today), groups: ctx.groups });
     if (r) return onReply(r, ctx);
+  }
+  // "NO, CANCEL THAT" WITH NOTHING OPEN: nothing to cancel, said so, never
+  // read as "undo the last thing" or "not about expenses".
+  if (!pending && !files.length && /^(?:(?:no+|nope|nah)[,.!\s]*)?(?:cancel|stop|never ?mind|forget it|leave it)\b/i.test(said) && said.split(/\s+/).length <= 4) {
+    return 'Okay, there was nothing waiting, so nothing changed.';
   }
   // New expenses in a photo or a file: always an add, no router needed.
   if (files.length) return addFrom({ text: said, attachments: files }, ctx);
@@ -203,7 +227,9 @@ async function rates() {
 /** Check every item again: fields, defaults, duplicates against what is saved. */
 async function recheck(items, ctx) {
   const r = await rates();
-  const out = items.map((x) => normalise({ ...x, doubt: x.modelDoubt }, { admin: ctx.admin, group: ctx.group, groups: ctx.groups, rates: r, today: ctx.today }))
+  // Today's market rate for every other currency in the batch.
+  const live = await liveRates(items.map((x) => currencyOf(x.currency) ?? 'AED'));
+  const out = items.map((x) => normalise({ ...x, doubt: x.modelDoubt }, { admin: ctx.admin, group: ctx.group, groups: ctx.groups, rates: r, live, today: ctx.today }))
     .map((x, i) => ({ ...x, modelDoubt: items[i].modelDoubt ?? null }));
   const dates = out.map((x) => x.spentOn).filter(Boolean).sort();
   const saved = dates.length ? await find.between(ctx.group, minus(dates[0], 1), dates.at(-1)) : [];
@@ -262,7 +288,9 @@ async function reviseFrom(said, ctx) {
   for (const e of got.newExpenses) items.push({ ...e, n: items.length + 1, modelDoubt: e.doubt || null });
   const checked = await recheck(items, ctx);
   ctx.state.pending = { kind: 'add', items: checked };
-  if (got.confirm && ready(checked)) return saveAdd(ctx);
+  // NEVER SAVED FROM AN ANSWER. "they're all new ones" and "1 milkman nadia
+  // r, yes its right" saved at once, unseen (test sweep 2026-10-07). Changed
+  // things are always shown again, and only a plain yes saves.
   return format.addPreview(checked, ctx.group);
 }
 
@@ -320,6 +348,22 @@ async function onReply(r, ctx) {
   }
   // add: skip / only / fixes
   const items = pending.items.map((x) => ({ ...x }));
+  // THEIR OWN RATE TO AED: for the currency they named, or the only one.
+  if (r.kind === 'rate') {
+    const others = [...new Set(items.filter((x) => !x.skipped && x.currency !== 'AED').map((x) => x.currency))];
+    let given = r.rates ?? {};
+    if (r.lastUsed) {
+      const last = await rates();
+      given = Object.fromEntries(others.filter((c) => last[c]?.rate).map((c) => [c, last[c].rate]));
+      if (!Object.keys(given).length) return 'There is no earlier rate saved for that currency. Send it like *1 gbp to aed is 4.85*.';
+    }
+    if (r.only) {
+      if (others.length !== 1) return `Which currency is ${r.only} for? Say it like *1 ${String(others[0] ?? 'gbp').toLowerCase()} to aed is ${r.only}*.`;
+      given = { [others[0]]: r.only };
+    }
+    if (!Object.keys(given).some((c) => others.includes(c))) return `None of these expenses are in ${Object.keys(given).join(', ')}. The other currencies here: ${others.join(', ') || 'none'}.`;
+    for (const x of items) if (given[x.currency] > 0) x.rateGiven = given[x.currency];
+  }
   if (r.kind === 'skip') for (const n of r.which) items.find((x) => x.n === n).skipped = true;
   if (r.kind === 'only') for (const x of items) x.skipped = !r.which.includes(x.n);
   if (r.kind === 'fix') {
@@ -350,6 +394,19 @@ function changesFrom(list, today) {
 async function startEdit(r, ctx) {
   const changes = changesFrom(r.changes, ctx.today);
   if (!Object.keys(changes).length) return 'What should it change to? For example _change the taxi to 50_ or _the lunch was on 5 Oct_.';
+  /**
+   * MORE FOR THE SAME CHANGE: "change the taxi to 50", then "and the
+   * spender is Leo P", lost the 50; "and paid to costa" changed the
+   * description (test sweep 2026-10-07). With a change open and no other
+   * expense named, the new part joins it.
+   */
+  const open = ctx.state.pending?.kind === 'edit' ? ctx.state.pending : null;
+  if (open) {
+    const row = await expensesRepo.findById(open.id);
+    const words = String(r.target?.words ?? '').toLowerCase().split(/\W+/).filter((w) => w.length >= 3);
+    const sameOne = !words.length || words.some((w) => `${row?.description ?? ''} ${row?.payee ?? ''}`.toLowerCase().includes(w));
+    if (row && sameOne) return editPreviewFor(row, { ...open.fields, ...changes }, ctx);
+  }
   const hits = await find.findTarget(ctx.group, r.target, { today: ctx.today, lastIds: ctx.state.lastIds ?? [] });
   if (!hits.length) return notFound(ctx);
   if (hits.length > 1) return pick(hits, { kind: 'edit', changes }, 'should I change', ctx);

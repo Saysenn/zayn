@@ -167,7 +167,7 @@ const TOTAL_ROW = /^(?:grand\s+)?(?:sub\s*)?totals?\b|^sum\b/i;
  * Every row of every expenses table, read by code from the column meanings.
  * @returns {{ items: object[], skipped: string[] }}
  */
-async function fromTables(tables, { today, client } = {}) {
+async function fromTables(tables, { today, client, groups = [] } = {}) {
   if (!tables.length) return { items: [], skipped: [] };
   const briefs = tables.map((t) => ({
     id: t.id, sheet: t.sheet, headers: t.headers.map((h, index) => ({ index, header: h })), rows: t.rows.slice(0, 6).map((r) => r.cells),
@@ -192,6 +192,10 @@ async function fromTables(tables, { today, client } = {}) {
     const m = (map.tables ?? []).find((x) => x.id === t.id);
     if (!m?.isExpenses) { skipped.push(`${t.sheet ? `${t.sheet} tab` : 'a table'}: not expenses`); continue; }
     const col = (f) => m.columns.find((c) => c.field === f)?.index;
+    // A TAB NAMED AFTER A GROUP is that group's expenses: the October
+    // workbook has a MANBAT tab, an INDIGO tab… and every row came back
+    // "group missing" (test sweep 2026-10-07).
+    const tabGroup = t.sheet ? groups.find((g) => fold(g) === fold(t.sheet)) ?? '' : '';
     const at = Object.fromEntries(FIELDS.map((f) => [f, col(f)]));
     for (const r of t.rows) {
       const get = (f) => (at[f] === undefined ? null : r.cells[at[f]]);
@@ -202,7 +206,7 @@ async function fromTables(tables, { today, client } = {}) {
       const rawDay = get('spentOn');
       const spentOn = dayOf(rawDay, year);
       items.push({
-        groupName: get('groupName') == null ? '' : String(get('groupName')),
+        groupName: get('groupName') == null ? tabGroup : String(get('groupName')),
         spentOn: spentOn ?? '',
         description: description == null ? '' : String(description),
         payee: get('payee') == null ? '' : String(get('payee')),
@@ -238,7 +242,7 @@ async function extract(msg, { today, client, groups = [] } = {}) {
     }
     if (got.tables?.length) {
       // eslint-disable-next-line no-await-in-loop
-      const read = await fromTables(got.tables, { today, client });
+      const read = await fromTables(got.tables, { today, client, groups });
       out.push(...read.items);
       notes.push(...read.skipped);
     } else if (String(got.text ?? '').trim()) {

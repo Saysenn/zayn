@@ -18,12 +18,32 @@ const { couldSkip, spelledOut, autoConfirmOffer } = require('./autoConfirm');
 const { stripMarkdown } = require('./stripMarkdown');
 const { noDashes } = require('./noDashes');
 const { dealWords } = require('./dealWords');
-const { easeOffPetNames } = require('./petNames');
+const { easeOffPetNames: easeOffNames } = require('./petNames');
+
+/**
+ * HER OWN CHECKS ARE NOT THE ADMIN. A guard that catches a slip is fed back
+ * as a message, and she answered it as if they had corrected her: "You're
+ * right, and thank you for catching that…", then never answered what was
+ * asked (test sweep 2026-10-07). Each is labelled as an automatic check,
+ * and a thank-you or apology they did not prompt is taken off the reply.
+ */
+const AUTO_CHECK = '[AUTOMATIC CHECK, not the admin speaking. Never thank, apologise or say "you\'re right" for it: just answer the admin\'s message correctly.] ';
+const FALSE_THANKS = /^\s*(?:(?:you(?:'re| are) (?:absolutely |quite )?right|good catch|great catch|thanks? (?:you )?(?:so much )?for (?:catching|pointing|spotting|flagging) (?:that|this)(?: out)?|my (?:apologies|mistake)|(?:i'?m )?sorry(?: about that)?|apologies)[,.!]*\s*(?:and\s+)?)+/i;
+function easeOffPetNames(reply, history = []) {
+  const said = String([...history].reverse().find((m) => m.role === 'user')?.content ?? '');
+  const doubted = /\b(?:wrong|not right|incorrect|mistake|you sure|are you sure|check|that'?s not|no,|nope|actually)\b/i.test(said);
+  let text = String(reply ?? '');
+  if (!doubted) {
+    const cut = text.replace(FALSE_THANKS, '');
+    if (cut !== text && cut.trim()) text = cut.charAt(0).toUpperCase() + cut.slice(1);
+  }
+  return easeOffNames(text, history);
+}
 const { AppError } = require('../middlewares/errors');
 // Renamed: runAgent's own `messages` array shadowed it, so a failed model call threw a TypeError.
 const { messages: copy } = require('../shared/messages');
 const { captureLog } = require('../shared/captureLog.helper');
-const { checkFigures } = require('./checkFigures');
+const { checkFigures, figuresIn } = require('./checkFigures');
 const { checkMonths } = require('./checkMonths');
 const { checkPercents } = require('./checkPercents');
 const { checkDays } = require('./checkDays');
@@ -86,6 +106,10 @@ const DEAL_RATE_SET = /\b(?:set|change|make|put)\b[^.?!]*\b(?:fee|add[\s-]?on)s?
 // THE SCOPE SAID OUT LOUD: "his deals", "all", "every", "each", "both",
 // "everywhere". "deal" alone is one of them, so it is not here.
 const EVERY_DEAL = /\b(?:deals|all|every|each|both|everywhere|everything|any\s+deal)\b/i;
+// "IN ALL GROUPS" IS A GROUP, NOT EVERY DEAL: ALL GROUPS is one of the
+// groups. "glorias deal in all groups, add 50" changed all four of her
+// deals with no preview (test sweep 2026-10-07).
+const everyDealSaid = (text) => EVERY_DEAL.test(String(text ?? '').replace(/\ball\s+groups?\b/gi, ' '));
 
 /**
  * AN EDIT TO EVERY DEAL IS THE BULK TOOL, on the first round. gpt-4.1
@@ -158,7 +182,7 @@ function lightTurn(asked, lastAnswer, { named, routedTool }) {
   if (/\b(?:park\w*|schedul\w*|cancel|forecast|project\w*|export)\b/i.test(text)) return false;
   if (!isSetInstruction(text)) return true;
   if (routedTool && routedTool !== 'update_master_sheet_row') return false;
-  if (named !== 1 || EVERY_DEAL.test(text)) return false;
+  if (named !== 1 || everyDealSaid(text)) return false;
   if (/\b(?:new|another|create|open)\b|\badd(?:ing)?\s+(?:a\s+|an\s+)?(?:\w+\s+)?deal\b/i.test(text)) return false;
   const fields = NAMED_FIELDS.filter(([, words]) => words.test(text)).map(([keys]) => keys[0]);
   return fields.length <= 2 && !fields.some((f) => RISKY_FIELDS.has(f));
@@ -178,7 +202,7 @@ function stableJson(value) {
 const EVERY_DEAL_EDIT = {
   test: (said) => {
     const text = String(said ?? '');
-    return isSetInstruction(text) && EVERY_DEAL.test(text)
+    return isSetInstruction(text) && everyDealSaid(text)
       && !/\b(?:stop|end|terminate|delete|remove|resume|restart|reopen|undo|revert|roll\s*back|answer|review\s+answer)\b/i.test(text)
       && !/\badd\s+(?:a|an|another|new)\s+(?:deal|row|company|handler)/i.test(text)
       // A LATER MONTH is parked, one per deal, by the one row tool's `when`:
@@ -2651,6 +2675,8 @@ async function runAgentTurn(history, contextName, onEvent) {
     { role: 'system', content: `Today is ${calendarDay(todayIs())}. This month is ${monthName(monthIs())}; next month is ${monthName(nextMonthOf(monthIs()))}. Never look this up.` },
     ...trimHistory(history),
   ];
+  // Everything from here on that wears the user's role is one of her checks.
+  const turnStart = messages.length;
   if (reschedules(lastSaid(history), history)) {
     messages.push({
       role: 'system',
@@ -2694,7 +2720,7 @@ async function runAgentTurn(history, contextName, onEvent) {
         + 'any field, and do not look anything up or change anything yet.',
     });
   }
-  if (isSetInstruction(lastSaid(history)) && EVERY_DEAL.test(lastSaid(history)) && !LATER_MONTH.test(lastSaid(history))) {
+  if (isSetInstruction(lastSaid(history)) && everyDealSaid(lastSaid(history)) && !LATER_MONTH.test(lastSaid(history))) {
     messages.push({
       role: 'system',
       content: 'THIS IS ONE CHANGE TO EVERY DEAL THEY NAMED (they said deals, all, every, each, both '
@@ -2941,7 +2967,7 @@ async function runAgentTurn(history, contextName, onEvent) {
         logger.info({ route: routed }, 'diane: routed');
         captureLog({ source: 'agent', level: 'info', message: `Diane routed: ${routed.kind}${routed.sure ? '' : ' (unsure)'}`, detail: { said: asked, route: routed } });
         // A PERSON IT NAMED MUST BE ON THE SHEET, by the same reading as everywhere.
-        const edit = asEdit(routed);
+        const edit = asEdit(routed, asked);
         // ONE TYPO FROM TWO PEOPLE IS A QUESTION, never a pick. Clone
         // 2026-10-06: "zyan" is one slip from Zayn AND Ryan; the first in the
         // list was taken, and it could as easily have been the other's pay.
@@ -2972,10 +2998,17 @@ async function runAgentTurn(history, contextName, onEvent) {
       }
     }
   }
-  const toEngine = routed
+  /**
+   * ENDING SOMEONE'S DEAL goes to the engine, which always shows a stop
+   * preview. "james heath has left, stop him" was answered with his deal
+   * listed and nothing else (re-test 2026-10-07).
+   */
+  const endsADeal = /\b(?:stop|stopped|has left|have left|left us|quit|quits|leaving|let go|finished with us|end (?:his|her|their|the) deals?)\b/i.test(asked)
+    && !/\b(?:from|in|next|november|december|january)\b.*\bmonth\b|\bnext month\b/i.test(asked);
+  const toEngine = (routed
     // A whole group goes to the engine too: one preview, every deal listed.
     ? routed.sure && (routed.kind === 'multi_step' || routed.kind === 'bulk_edit')
-    : looksMultiStep(asked);
+    : looksMultiStep(asked)) || (endsADeal && !pending);
   if (((pending && !sheetGiven) || sheetGiven || toEngine) && editsHere) {
     try {
       const roster = await require('../repos/people.repo').filterOptions().catch(() => null);
@@ -3262,7 +3295,7 @@ async function runAgentTurn(history, contextName, onEvent) {
   let yesToName = null;
   if (!forcedTool && !yesToTalkedEdit && heldCalls.length === 0 && BARE_YES.test(lastSaid(history))
     && /\bdid you mean\b|\bdo you mean\b|\bmeant\b[^?]*\?/i.test(String(lastAssistantAnswer(history) ?? ''))
-    && askedBefore && (isSetInstruction(askedBefore) || EVERY_DEAL.test(askedBefore))) {
+    && askedBefore && (isSetInstruction(askedBefore) || everyDealSaid(askedBefore))) {
     const people = (await require('../repos/people.repo').filterOptions().catch(() => null))?.people ?? [];
     const prior = String(lastAssistantAnswer(history) ?? '');
     const quoted = (prior.match(/"([^"]+)"/) ?? [])[1] ?? '';
@@ -3316,7 +3349,7 @@ async function runAgentTurn(history, contextName, onEvent) {
    */
   let oneExisting = false;
   if (!forcedTool && !severalExisting && heldCalls.length === 0 && isSetInstruction(asked)
-    && !LATER_MONTH.test(asked) && !EVERY_DEAL.test(asked) && !OWN_TOOL.test(asked)
+    && !LATER_MONTH.test(asked) && !everyDealSaid(asked) && !OWN_TOOL.test(asked)
     && !/\b(?:new|another|second|extra|create|open)\b|\badd(?:ing)?\s+(?:a\s+|an\s+)?(?:\w+\s+)?deal\b/i.test(asked)
     && context.tools.some((t) => t.name === 'update_master_sheet_row')) {
     const everyone = (await require('../repos/people.repo').filterOptions().catch(() => null))?.people ?? [];
@@ -3534,7 +3567,8 @@ async function runAgentTurn(history, contextName, onEvent) {
         //
         max_tokens: maxTokens,
         frequency_penalty: 0.4,
-        messages,
+        messages: messages.map((m, i) => (i >= turnStart && m.role === 'user' && typeof m.content === 'string' && !m.content.startsWith(AUTO_CHECK)
+          ? { ...m, content: `${AUTO_CHECK}${m.content}` } : m)),
         tools: roundTools,
         // "WE GOOD?" RUNS THE CHECK. Asked it live, she answered "everything
         // looks smooth, no flags" having looked at nothing, with 29 findings
@@ -3758,6 +3792,12 @@ async function runAgentTurn(history, contextName, onEvent) {
        */
       if (raw && !figureRetry) {
         const check = checkFigures(raw, toolResults);
+        // THEIR OWN FIGURES ARE NOT INVENTED: "put zayn milkman back to 4100"
+        // was refused as "that amount hasn't been used before" (test sweep
+        // 2026-10-07). An amount in their last few messages may be said back.
+        const theirs = new Set(history.filter((m) => m.role === 'user').slice(-4).flatMap((m) => [...figuresIn(String(m.content ?? ''))]));
+        check.unsupported = (check.unsupported ?? []).filter((n) => !theirs.has(n));
+        check.ok = check.unsupported.length === 0;
         if (check.had && !check.ok) {
           figureRetry = true;
           logger.warn(

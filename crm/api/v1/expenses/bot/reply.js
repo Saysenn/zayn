@@ -14,7 +14,9 @@ const { currencyOf, num, groupOf } = require('./check');
 // than no read.
 
 const YES = /^(?:y|ye|yes+|yeah|yep|yup|ok(?:ay)?|k|sure|confirm(?:ed)?|go(?: ahead)?|save(?: (?:it|them|all))?|do it|correct|approved?|👍|✅|yes(?: please| pls| save(?: it| them)?)?)$/i;
-const NO = /^(?:no|nope|cancel|stop|never ?mind|nevermind|forget it|don'?t|abort|❌)$/i;
+// "NO, CANCEL THAT" is a cancel. It went to the router as "undo" and offered
+// to take back the last save (test sweep 2026-10-07).
+const NO = /^(?:(?:no+|nope|nah)[,.!\s]*)?(?:no+|nope|nah|cancel|stop|never ?mind|nevermind|forget (?:it|that|about it)|don'?t|abort|leave (?:it|that|those|them|it alone)|scrap (?:it|that)|❌)(?:\s+(?:that|this|it|those|them|all|please|pls|thanks))*$/i;
 
 const nums = (s) => (String(s).match(/\d+/g) ?? []).map(Number);
 
@@ -48,7 +50,8 @@ function bareValue(rest, year, groups = []) {
   const v = rest.trim();
   const g = groupOf(v, groups);
   if (g && fold(v) === fold(g)) return { field: 'groupName', value: g };
-  if (/^(?:fine|ok(?:ay)?|right|correct|good|real|not a duplicate|keep it)$/i.test(v)) return { ok: true };
+  // "NEW" answers "new, or a change to that one?": it is a separate expense.
+  if (/^(?:fine|ok(?:ay)?|right|correct|good|real|new|a new one|new one|separate|different|not a duplicate|not the same|keep it|it'?s right)$/i.test(v)) return { ok: true };
   if (/^(?:today|yesterday)$/i.test(v)) return { field: 'spentOn', value: v.toLowerCase() };
   const d = dayOf(v, year);
   if (d && /[a-z]|\/|-/i.test(v)) return { field: 'spentOn', value: d };
@@ -87,6 +90,33 @@ function onePart(part, count, year, groups = []) {
  * @param {object} pending the preview waiting on them
  * @returns {null | { kind: 'yes'|'no'|'skip'|'only'|'fix'|'pick', ... }}
  */
+// A CURRENCY, as people write it in a rate.
+const CUR = '(gbp|eur|euros?|usd|dollars?|pounds?|sterling|aed|dirhams?|sar|inr|php|qar|£|€|\\$)';
+const CUR_CODE = (w) => currencyOf(w) ?? ({ sterling: 'GBP' })[String(w).toLowerCase()] ?? null;
+
+/**
+ * THEIR OWN RATE TO AED, in the ways people say it: "1 gbp to aed is 4.85",
+ * "gbp 4.9", "£1 = 4.9 aed", "4.85 for pounds", "gbp 4.85 and euro 4.2",
+ * "same as last time". Null when the message is not about a rate.
+ * @returns {null | { rates: object } | { lastUsed: true } | { only: number }}
+ */
+function readRates(text) {
+  const t = String(text ?? '').toLowerCase().replace(/,/g, ' ');
+  if (/\b(?:same (?:rate )?as (?:last time|before)|last (?:time'?s? )?rate|use the last rate)\b/.test(t)) return { lastUsed: true };
+  const looksLikeRate = /\bto\s*aed\b|\baed\s*(?:for|per)\b|\brates?\b|=|\bexchange\b|\bper\s+(?:1\s+)?(?:gbp|eur|euro|usd|pound|dollar)/.test(t)
+    || new RegExp(`^\\s*${CUR}\\s*\\d`).test(t)
+    || new RegExp(`\\d\\s*(?:aed\\s*)?(?:for|per)\\s*(?:1\\s*|the\\s*)?${CUR}`).test(t);
+  if (!looksLikeRate) return null;
+  const rates = {};
+  const a = new RegExp(`(?:1\\s*)?${CUR}\\s*(?:1\\s*)?(?:to\\s*aed)?\\s*(?:is|=|:|at|@)?\\s*(\\d+(?:\\.\\d+)?)\\s*(?:aed)?`, 'g');
+  for (const m of t.matchAll(a)) { const c = CUR_CODE(m[1]); if (c && c !== 'AED') rates[c] = Number(m[2]); }
+  const b = new RegExp(`(\\d+(?:\\.\\d+)?)\\s*(?:aed\\s*)?(?:for|per)\\s*(?:1\\s*)?${CUR}`, 'g');
+  for (const m of t.matchAll(b)) { const c = CUR_CODE(m[2]); if (c && c !== 'AED') rates[c] = Number(m[1]); }
+  if (Object.keys(rates).length) return { rates };
+  const only = /\brate\s*(?:is|=|:|of)?\s*(\d+(?:\.\d+)?)/.exec(t);
+  return only ? { only: Number(only[1]) } : null;
+}
+
 function readReply(said, pending, { year = new Date().getUTCFullYear(), groups = [] } = {}) {
   const text = String(said ?? '').trim().replace(/\s+/g, ' ');
   if (!text || !pending) return null;
@@ -104,6 +134,9 @@ function readReply(said, pending, { year = new Date().getUTCFullYear(), groups =
   if (pending.kind !== 'add') return null;
 
   const count = pending.items.length;
+  // THEIR RATE: before the fixes, so "1 gbp to aed is 4.85" is never "item 1".
+  const rate = readRates(text);
+  if (rate) return { kind: 'rate', ...rate };
   const skip = /^(?:skip|drop|remove|delete|without|leave out|not)\s+(?:#|no\.?\s*|number\s+)?([\d\s,&and]+)$/i.exec(bare);
   if (skip) {
     const which = nums(skip[1]);
@@ -115,6 +148,11 @@ function readReply(said, pending, { year = new Date().getUTCFullYear(), groups =
     return which.length && which.every((n) => n >= 1 && n <= count) ? { kind: 'only', which } : null;
   }
 
+  // "ALL NEW", "they're all new ones", "all fine": every doubt looked at.
+  if (/^(?:(?:they(?:'?re| are)|these are|it'?s|all are)\s+)?(?:all\s+)?(?:new|new ones?|fine|correct|ok(?:ay)?|right|separate|different)(?:\s+ones?)?$/i.test(bare)
+    && /\b(?:all|they|these)\b/i.test(bare)) {
+    return { kind: 'fix', parts: [], ok: pending.items.map((x) => x.n) };
+  }
   // "today": the one missing date. Anything wider needs a number.
   const missingDates = pending.items.filter((x) => !x.skipped && x.missing?.includes('spentOn'));
   if (/^(?:today|yesterday)$/i.test(bare) && missingDates.length >= 1) {
@@ -131,4 +169,6 @@ function readReply(said, pending, { year = new Date().getUTCFullYear(), groups =
   return null;
 }
 
-module.exports = { readReply, onePart, bareValue };
+module.exports = {
+  readReply, onePart, bareValue, readRates,
+};

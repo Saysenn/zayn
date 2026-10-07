@@ -139,7 +139,10 @@ export async function handleMessage(input) {
       }
       const out = await expenseTurn({ phone, group: channelGroup, text: said, attachments: files, messageId });
       if (out.registered !== false && !out.handOff) {
-        return out.reply ? words(`${lead}${out.reply}`) : NO_REPLY;
+        if (!out.reply) return NO_REPLY;
+        // EXTRA BUBBLES (the rates to AED after a preview) go after the first.
+        const extra = (out.replies ?? []).slice(1).filter(Boolean);
+        return { text: `${lead}${out.reply}`, ...(extra.length ? { more: extra } : {}) };
       }
       // NOT ABOUT EXPENSES ("how much am I getting paid?"): answered as a
       // payments question this once, and said so.

@@ -70,6 +70,7 @@ for await (const line of rl) {
   try {
     const reply = await handleMessage({ phone, channelGroup: group, text: message, attachments, messageId: `terminal-${Date.now()}-${n}` });
     say(reply === NO_REPLY ? "bot > (no reply)" : `bot > ${reply.text.split("\n").join("\n      ")}`);
+    for (const t of reply.more ?? []) say(`bot > ${t.split("\n").join("\n      ")}`);
   } catch (err) {
     say(`bot > error: ${err instanceof Error ? err.message : err}`);
   }

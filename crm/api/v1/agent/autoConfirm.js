@@ -124,7 +124,13 @@ function autoConfirmOffer({ on, tool, name, replayed }) {
  * A bare "both" names nobody, so it still asks: it may mean the deal that
  * already changed a moment ago, and a preview is what stops it twice.
  */
-const EVERY_OF_THEIRS = /\b(?:all|both|every|each)\b/i;
+// "ALL/EVERY/BOTH ... DEALS" said in words, never "in all groups": ALL
+// GROUPS is a group, and reading it as "every deal" skipped the preview on
+// four deals (test sweep 2026-10-07).
+const EVERY_OF_THEIRS = {
+  test: (text) => /\b(?:all|both|every|each)\b(?:\s+(?:of\s+)?(?:his|her|their|the)?)?(?:\s+\w+['’]?s?)?\s+deals?\b|\beverywhere\b|\b(?:\w+['’]s|his|her|their)\s+deals\b|\bboth\s+of\s+\w+|\b(?:all|both|each|every\s+one)\s+of\s+(?:his|her|their|the|\w+['’]?s?)\s+deals?\b/i
+    .test(String(text ?? '').replace(/\ball\s+groups?\b/gi, ' ')),
+};
 // A key that ends, stops or reviews a deal is never skipped, whatever was said.
 const ENDS_A_DEAL = /stop|end|status|close|delete|archive|review/i;
 const PER_PERSON_ONLY = new Set(['perPerson', 'confirmed', 'said', 'saidRecent', 'turn', 'onProgress', 'priorAnswer']);

@@ -70,6 +70,8 @@ function planPrompt(groups) {
     'changes: mode "add" when they move a figure BY an amount (add, deduct = negative, plus, minus, raise by),',
     'mode "set" when they give the new value (to N, make it N). "add/deduct N" with no field named is monthlyAmount.',
     '"N days" is payableDays. Paid/unpaid is overridePaid "true"/"false". Dates as YYYY-MM-DD. Money as plain numbers.',
+    'THIS MONTH ONLY ("only for this month", "just this month", "one-off", "he already got some cash", "not his monthly")',
+    'is payableAmount (this month\'s payable), NEVER monthlyAmount. When they correct a step that way, move it to payableAmount.',
     'group: only if they named one. Known groups: ' + groups.join(', ') + '.',
     'allDeals: true only if they said all/both/every of that person\'s deals.',
     'A WHOLE GROUP ("every MANBAT deal", "everyone in Indigo", "all of milkman"): ONE update step with person "*",',
@@ -154,6 +156,17 @@ async function checkSteps(steps, { groups, said }) {
     if (step.person === '*') {
       if (step.action !== 'update') { ask('I can only change figures or details for a whole group, not stop or add one. Name the people instead.'); out.push(step); continue; }
       if (!group) { ask(`which group: ${groups.join(', ')}?`); out.push(step); continue; }
+      /**
+       * A WHOLE GROUP ONLY WHEN THEY SAID SO. "put both back to 31", then
+       * "indigo and milkman", became every INDIGO and MILKMAN monthly set
+       * to 31; only the preview stopped it (test sweep 2026-10-07).
+       */
+      const wholeSaid = /\b(?:every|all|whole|each|everyone|everybody|entire)\b/i.test(String(said ?? '').replace(/\ball\s+groups?\b/gi, ' '));
+      if (!wholeSaid) {
+        ask(`do you mean EVERY ${group} deal? If so, say "every ${group} deal". If you meant someone's deal, name them.`);
+        out.push(step);
+        continue;
+      }
       if (missing.length || !step.changes.length) { ask(`what should change for every ${group} deal?`); out.push(step); continue; }
       // eslint-disable-next-line no-await-in-loop
       const all = ((await rowsRepo.findAll({ page: 1, pageSize: 5000 }))?.rows ?? []).filter((r) => !r.stopped_on && r.group_name === group);
@@ -730,7 +743,9 @@ async function sheetTurn({
     ...((await rowsRepo.findAll({ page: 1, pageSize: 5000 }))?.rows ?? []),
     ...((await db.query('SELECT * FROM tb_mastersheet WHERE stopped_on IS NOT NULL').catch(() => ({ rows: [] }))).rows ?? []),
   ].filter((d, i, all) => all.findIndex((x) => x.id === d.id) === i);
-  const found = sheet.compare(read, deals, groups);
+  // The export's charges, so its own figures are not read as changes.
+  const cryptoPercent = Number((await require('../../repos/settings.repo').get().catch(() => null))?.crypto_percent ?? 0);
+  const found = sheet.compare(read, deals, groups, { cryptoPercent });
   const how = sheet.readoutLines(readout);
 
   /**

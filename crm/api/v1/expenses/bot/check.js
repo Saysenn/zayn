@@ -21,11 +21,16 @@ const CURRENCY_WORDS = [
 ];
 const LARGE = 20000;
 
+// REAL CURRENCY CODES ONLY. Any three letters used to pass, so "new" (the
+// answer to "new, or a change?") became currency NEW and 40 rows were saved
+// that way (test sweep 2026-10-07).
+const CODES = new Set(['AED', 'GBP', 'EUR', 'USD', 'SAR', 'INR', 'PHP', 'QAR', 'KWD', 'BHD', 'OMR', 'JPY', 'CNY', 'CHF', 'CAD', 'AUD',
+  'NZD', 'SGD', 'HKD', 'PKR', 'LKR', 'BDT', 'NPR', 'EGP', 'TRY', 'ZAR', 'NGN', 'KES', 'SEK', 'NOK', 'DKK', 'PLN', 'RUB', 'THB', 'MYR', 'IDR']);
 function currencyOf(value) {
   const v = String(value ?? '').trim();
   if (!v) return null;
   for (const [re, code] of CURRENCY_WORDS) if (re.test(v)) return code;
-  return /^[A-Za-z]{3}$/.test(v) ? v.toUpperCase() : null;
+  return CODES.has(v.toUpperCase()) ? v.toUpperCase() : null;
 }
 
 const iso = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v ?? '')) && !Number.isNaN(new Date(`${v}T00:00:00Z`).getTime()) ? String(v) : null);
@@ -52,7 +57,7 @@ function groupOf(value, groups = []) {
   return groups.find((g) => fold(g) === v) ?? groups.find((g) => fold(g).startsWith(v) && v.length >= 3) ?? null;
 }
 
-function normalise(raw, { admin, group, groups = [], rates = {}, today = currentDay() }) {
+function normalise(raw, { admin, group, groups = [], rates = {}, live = {}, today = currentDay() }) {
   const said = currencyOf(raw.currency);
   // FROM THE COMMAND CENTER ('*'): no bot number says the group and no
   // admin is the spender, so both are read from their words or asked.
@@ -70,8 +75,21 @@ function normalise(raw, { admin, group, groups = [], rates = {}, today = current
     skipped: Boolean(raw.skipped),
     ok: Boolean(raw.ok),
   };
-  x.exchangeRate = x.currency === 'AED' ? 1 : rates[x.currency]?.rate ?? null;
-  x.missing = [...(anyGroup ? ['groupName'] : []), ...REQUIRED, ...(x.spentBy ? [] : ['spentBy'])]
+  /**
+   * THE RATE TO AED IS PART OF THE EXPENSE (his call 2026-10-07): the one
+   * they gave, else today's market rate, else the last one used; with none,
+   * it is asked ("1 GBP to AED is?"). It is saved on the expense.
+   */
+  const given = num(raw.rateGiven);
+  x.rateGiven = given;
+  if (x.currency === 'AED') { x.exchangeRate = 1; x.rateSource = null; } else if (given > 0) {
+    x.exchangeRate = given; x.rateSource = 'your rate';
+  } else if (live[x.currency]?.rate) {
+    x.exchangeRate = live[x.currency].rate; x.rateSource = live[x.currency].source;
+  } else if (rates[x.currency]?.rate) {
+    x.exchangeRate = rates[x.currency].rate; x.rateSource = 'the last rate used';
+  } else { x.exchangeRate = null; x.rateSource = null; }
+  x.missing = [...(anyGroup ? ['groupName'] : []), ...REQUIRED, ...(x.spentBy ? [] : ['spentBy']), ...(x.currency !== 'AED' && !x.exchangeRate ? ['exchangeRate'] : [])]
     .filter((f) => x[f] === null || x[f] === undefined || x[f] === '');
   x.doubts = [];
   if (anyGroup && clean(raw.groupName) && !x.groupName) x.doubts.push(`"${raw.groupName}" is not a group`);
@@ -82,8 +100,9 @@ function normalise(raw, { admin, group, groups = [], rates = {}, today = current
   if (x.spentOn && daysBetween(today, x.spentOn) > 62) x.doubts.push('the date is over 2 months ago');
   // A NOTE, not a doubt: nothing to answer, and it does not stop a save.
   x.notes = [];
-  if (x.currency !== 'AED' && x.exchangeRate === null) x.notes.push(`no ${x.currency} to AED rate yet, set it on the Expenses page`);
-  else if (x.currency !== 'AED') x.notes.push(`at ${x.exchangeRate} AED per ${x.currency}, the last rate used`);
+  // A RATE THEY GAVE far from the market's is worth a second look.
+  const market = live[x.currency]?.rate;
+  if (given > 0 && market && Math.abs(given - market) / market > 0.1) x.doubts.push(`your rate ${given} is far from the market's ${market}`);
   if (raw.doubt) x.doubts.push(String(raw.doubt));
   // "3 is fine": a doubt they have looked at stays out of the way.
   if (x.ok) x.doubts = [];

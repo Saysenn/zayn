@@ -44,10 +44,16 @@ function totals(items) {
   }
   return [...by].map(([c, n]) => `*${money(c, Math.round(n * 100) / 100)}*`).join(' + ');
 }
-const totalLine = (items) => `*TOTAL:* ${totals(items) || '*?*'}`;
+/** The total, and what it comes to in AED when other currencies are in it. */
+function totalLine(items) {
+  const mixed = items.some((x) => x.currency && x.currency !== 'AED');
+  const rated = items.every((x) => x.currency === 'AED' || x.exchangeRate);
+  const aed = items.reduce((n, x) => n + (Number(x.rawAmount) || 0) * (x.currency === 'AED' ? 1 : Number(x.exchangeRate) || 0), 0);
+  return `*TOTAL:* ${totals(items) || '*?*'}${mixed && rated ? ` (≈ *${money('AED', Math.round(aed * 100) / 100)}*)` : ''}`;
+}
 
 const LABEL = {
-  groupName: 'group', spentOn: 'date', description: 'what it was for', rawAmount: 'amount', currency: 'currency', payee: 'paid to', spentBy: 'spent by',
+  exchangeRate: 'rate to AED', groupName: 'group', spentOn: 'date', description: 'what it was for', rawAmount: 'amount', currency: 'currency', payee: 'paid to', spentBy: 'spent by',
 };
 // What to ask for each missing field.
 const ASK = {
@@ -77,6 +83,10 @@ function block(x, { group = false } = {}) {
   out.push(`• Date: ${x.spentOn && has('spentOn') ? dayFull(x.spentOn) : MISSING}`);
   out.push(`• Paid to: ${x.payee && has('payee') ? x.payee : MISSING}`);
   out.push(`• Spent by: ${x.spentBy && has('spentBy') ? x.spentBy : MISSING}`);
+  if (x.currency && x.currency !== 'AED') {
+    out.push(`• Rate: ${x.exchangeRate ? `1 ${x.currency} = ${x.exchangeRate} AED _(${x.rateSource ?? 'rate'})_` : MISSING}`);
+    if (x.exchangeRate && x.rawAmount != null) out.push(`• In AED: *${money('AED', Math.round(x.rawAmount * x.exchangeRate * 100) / 100)}*`);
+  }
   for (const d of [...(x.doubts ?? []), ...(x.notes ?? [])]) out.push(`• Note: _${d}_`);
   return out.join('\n');
 }
@@ -101,11 +111,11 @@ function addPreview(items, group) {
   const doubts = live.filter((x) => !x.missing?.length && x.doubts?.length);
   if (missing.length || doubts.length) {
     out.push('', missing.length ? '⚠️ *Needs an answer*' : '⚠️ *Please check*');
-    for (const x of missing.slice(0, SHOWN)) out.push(`• No. ${x.n}: ${x.missing.map((f) => ASK[f] ?? `${LABEL[f] ?? f}?`).join(' ')}`);
+    for (const x of missing.slice(0, SHOWN)) out.push(`• No. ${x.n}: ${x.missing.map((f) => (f === 'exchangeRate' ? `1 ${x.currency} to AED is?` : ASK[f] ?? `${LABEL[f] ?? f}?`)).join(' ')}`);
     for (const x of doubts.slice(0, SHOWN)) out.push(`• No. ${x.n}: _${x.doubts.join('; ')}_`);
   }
   const m = missing[0];
-  const example = m && (m.missing.includes('groupName') ? `*${m.n} is MANBAT*` : m.missing.includes('spentBy') ? `*${m.n} by Gary*`
+  const example = m && (m.missing.includes('exchangeRate') ? `*1 ${m.currency.toLowerCase()} to aed is 4.85*` : m.missing.includes('groupName') ? `*${m.n} is MANBAT*` : m.missing.includes('spentBy') ? `*${m.n} by Gary*`
     : m.missing.includes('spentOn') ? `*${m.n} is 5 Oct*` : m.missing.includes('payee') ? `*${m.n} paid to Careem*`
       : m.missing.includes('rawAmount') ? `*${m.n} is 150*` : `*${m.n} is taxi*`);
   out.push('', missing.length
@@ -195,7 +205,29 @@ const HELP_DIANE = [
   'I show what I read before anything is saved.',
 ].join('\n');
 
+/**
+ * THE RATES BUBBLE, sent after the preview when other currencies are in it:
+ * what each converts at, and how to give their own (his call 2026-10-07).
+ */
+function ratesBubble(items) {
+  const by = new Map();
+  for (const x of items.filter((i) => !i.skipped && i.currency && i.currency !== 'AED')) {
+    if (!by.has(x.currency)) by.set(x.currency, x);
+  }
+  if (!by.size) return null;
+  const lines = [...by.values()].map((x) => (x.exchangeRate
+    ? `• 1 ${x.currency} = *${x.exchangeRate} AED* _(${x.rateSource ?? 'rate'})_`
+    : `• 1 ${x.currency} = ❓ _what rate?_`));
+  const first = [...by.keys()][0].toLowerCase();
+  return ['💱 *RATES TO AED*', SEP, ...lines, SEP,
+    ![...by.values()].every((x) => x.exchangeRate)
+      ? `Send the rate (like *1 ${first} to aed is 4.85*)`
+      : items.some((i) => !i.skipped && (i.missing ?? []).length)
+        ? `These will be used. To use your own, send it (like *1 ${first} to aed is 4.85*)`
+        : `Reply *yes* to save with these, or send your own (like *1 ${first} to aed is 4.85*)`].join('\n');
+}
+
 module.exports = {
-  HELP_DIANE, SEP,
+  HELP_DIANE, SEP, ratesBubble,
   day, dayFull, amount, money, totals, line, block, addPreview, editPreview, removePreview, pickList, undoPreview, saved, changed, removed, HELP, LABEL,
 };

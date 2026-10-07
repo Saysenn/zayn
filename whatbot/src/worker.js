@@ -110,6 +110,8 @@ const messageWorker = new Worker(
 
     // reply FROM the number they messaged, or it shows up as a different chat
     await sendText(from, to, reply.text);
+    // a second or third bubble (the expense bot's rates), in order
+    for (const t of reply.more ?? []) await sendText(from, to, t);
 
     // The file goes SECOND. A document arriving before the sentence that
     // explains it is a file from a number you did not expect one from.

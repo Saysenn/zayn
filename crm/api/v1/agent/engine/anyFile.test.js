@@ -387,6 +387,8 @@ test('A WHOLE GROUP is one step over every live deal in it, each deal shown', as
     assert.equal(step.question, null);
     assert.deepEqual(step.ids, [1, 2], 'live MANBAT deals only');
     assert.equal(step.lines.length, 2);
+    const [vague] = await checkSteps([{ n: 1, action: 'update', person: '*', group: 'manbat', company: '', allDeals: true, changes: [{ field: 'monthlyAmount', mode: 'set', value: '31' }], when: '', newName: '', source: '' }], { groups: ['MANBAT', 'INDIGO'], said: 'manbat and indigo' });
+    assert.match(vague.question, /do you mean EVERY MANBAT deal/, 'a group named in passing is never every deal');
     const [stop] = await checkSteps([{ n: 1, action: 'stop', person: '*', group: 'MANBAT', company: '', allDeals: true, changes: [], when: '', newName: '', source: '' }], { groups: ['MANBAT'], said: 'stop all manbat' });
     assert.match(stop.question, /only change figures or details for a whole group/);
   } finally {

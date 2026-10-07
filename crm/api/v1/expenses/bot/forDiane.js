@@ -82,4 +82,6 @@ function forDiane(reply, state) {
   return { reply: plain(text) };
 }
 
+forDiane.plainText = (s) => plain(s);
+
 module.exports = { forDiane, plain, addCard };

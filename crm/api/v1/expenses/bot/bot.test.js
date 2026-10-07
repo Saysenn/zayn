@@ -55,8 +55,7 @@ test('DOUBTS are shown, not blocking; a rate note is neither', () => {
   const future = normalise({ n: 1, spentOn: '2026-12-01', description: 'X', payee: 'Y', rawAmount: '5' }, ctx);
   assert.match(future.doubts[0], /future/);
   const gbp = normalise({ n: 1, spentOn: '2026-10-06', description: 'Train', payee: 'Trainline', rawAmount: '45', currency: 'GBP' }, ctx);
-  assert.equal(gbp.flag, false, 'no rate yet is a note');
-  assert.match(gbp.notes[0], /no GBP to AED rate yet/);
+  assert.deepEqual(gbp.missing, ['exchangeRate'], 'with no rate known, the rate is asked');
   const fine = normalise({ n: 1, spentOn: '2026-10-06', description: 'Laptop', payee: 'Apple', rawAmount: '25000', ok: true }, ctx);
   assert.deepEqual(fine.doubts, [], '"1 is fine" clears it');
 });
@@ -152,4 +151,47 @@ test('YES, MODIFY, CANCEL: the line under a ready preview, and "modify" is under
   const items = [normalise({ n: 1, spentOn: '2026-10-06', description: 'Taxi', payee: 'Careem', rawAmount: '45' }, ctx)];
   assert.match(format.addPreview(items, 'MANBAT'), /Reply \*yes\* to save · \*modify\* to change · \*cancel\*$/);
   for (const t of ['modify', 'Modify', 'change something', 'edit']) assert.deepEqual(readReply(t, { kind: 'add', items }), { kind: 'modify' }, t);
+});
+
+test('"NEW" ANSWERS THE DUPLICATE QUESTION, never a currency; only real codes are currencies', () => {
+  const { currencyOf } = require('./check');
+  const p = { kind: 'add', items: [{ n: 1 }, { n: 2 }] };
+  assert.equal(currencyOf('new'), null);
+  assert.equal(currencyOf('gbp'), 'GBP');
+  assert.deepEqual(readReply('all new', p, { year: 2026 }).ok, [1, 2]);
+  assert.deepEqual(readReply("they're all new ones", p, { year: 2026 }).ok, [1, 2]);
+  assert.deepEqual(readReply('1 is new', p, { year: 2026 }).ok, [1]);
+});
+
+test('"NO, CANCEL THAT" CANCELS, in its many forms', () => {
+  const p = { kind: 'edit' };
+  for (const t of ['no cancel that', 'NO cancel that', 'no leave it', 'no leave those', 'forget it', 'nah scrap that', 'cancel']) {
+    assert.deepEqual(readReply(t, p), { kind: 'no' }, t);
+  }
+});
+
+test('THE RATE TO AED: market rate filled in, their own wins, missing is asked, and it is shown', () => {
+  const live = { GBP: { rate: 4.86, source: 'hourly market rate' } };
+  const x = normalise({ n: 1, spentOn: '2026-10-06', description: 'Train', payee: 'Trainline', rawAmount: '86.40', currency: 'GBP' }, { ...ctx, live });
+  assert.equal(x.exchangeRate, 4.86);
+  assert.equal(x.rateSource, 'hourly market rate');
+  assert.deepEqual(x.missing, []);
+  const own = normalise({ n: 1, spentOn: '2026-10-06', description: 'Train', payee: 'Trainline', rawAmount: '86.40', currency: 'GBP', rateGiven: 4.9 }, { ...ctx, live });
+  assert.equal(own.exchangeRate, 4.9);
+  const none = normalise({ n: 1, spentOn: '2026-10-06', description: 'Hotel', payee: 'X', rawAmount: '100', currency: 'JPY' }, ctx);
+  assert.deepEqual(none.missing, ['exchangeRate']);
+  const text = format.addPreview([x], 'MANBAT');
+  assert.match(text, /• Rate: 1 GBP = 4\.86 AED _\(hourly market rate\)_\n• In AED: \*AED 419\.90\*/);
+  assert.match(format.ratesBubble([x]), /💱 \*RATES TO AED\*[\s\S]*1 GBP = \*4\.86 AED\*/);
+  assert.match(format.addPreview([none], 'MANBAT'), /No\. 1: 1 JPY to AED is\?/);
+});
+
+test('THEIR OWN RATE, in the ways people say it', () => {
+  const { readRates } = require('./reply');
+  assert.deepEqual(readRates('1 gbp to aed is 4.85'), { rates: { GBP: 4.85 } });
+  assert.deepEqual(readRates('£1 = 4.9 aed'), { rates: { GBP: 4.9 } });
+  assert.deepEqual(readRates('4.85 for pounds'), { rates: { GBP: 4.85 } });
+  assert.deepEqual(readRates('1 usd to aed is 3.67, 1 euro to aed is 4.1'), { rates: { USD: 3.67, EUR: 4.1 } });
+  assert.deepEqual(readRates('same as last time'), { lastUsed: true });
+  assert.equal(readRates('2 is £45'), null, 'an amount, not a rate');
 });

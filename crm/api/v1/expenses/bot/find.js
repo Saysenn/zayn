@@ -40,7 +40,9 @@ const asItem = (r) => ({
 
 // Split FIRST, then fold each word: fold() drops spaces, so "Stationery Sara"
 // folded whole was one word and "Sara" never matched (live 2026-10-07).
-const wordsOf = (s) => String(s ?? '').toLowerCase().split(/[^\p{L}\p{N}]+/u).map((w) => fold(w)).filter((w) => w.length >= 3 && !['the', 'and', 'for', 'one', 'expense', 'expenses', 'paid', 'yesterday', 'today'].includes(w));
+// One word, singular: "deliveries" is "delivery", "coffees" is "coffee".
+const stem = (w) => w.replace(/ies$/, 'y').replace(/(?<=[a-z]{3})(?:es|s)$/, (m, i, all) => (/(?:ss|us|is)$/.test(all) ? m : ''));
+const wordsOf = (s) => String(s ?? '').toLowerCase().split(/[^\p{L}\p{N}]+/u).map((w) => stem(fold(w))).filter((w) => w.length >= 3 && !['the', 'and', 'for', 'one', 'expense', 'expenses', 'paid', 'yesterday', 'today'].includes(w));
 
 /**
  * The saved expenses their words point at, in the last two months.
@@ -56,18 +58,27 @@ async function findTarget(group, target, { today, lastIds = [] } = {}) {
   const want = wordsOf(target.words);
   const amount = Number(String(target.amount ?? '').replace(/[^\d.]/g, ''));
   const close = (w, h) => h === w || (Math.min(w.length, h.length) >= 4 && (h.startsWith(w) || w.startsWith(h)));
+  const isDay = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v ?? ''));
   const scored = rows.map((r) => {
     if (target.date && r.spentOn !== target.date) return null;
+    // A RANGE THEY SAID ("this week", "in october") is kept to: "remove the
+    // coffees from this week" reached back to August (test sweep 2026-10-07).
+    if (isDay(target.from) && r.spentOn < target.from) return null;
+    if (isDay(target.to) && r.spentOn > target.to) return null;
     if (target.amount && Number.isFinite(amount) && amount > 0 && Math.abs(r.rawAmount - amount) > 0.005) return null;
-    if (!want.length) return target.date || target.amount ? { r, hits: 0 } : null;
+    if (!want.length) return target.date || target.amount || isDay(target.from) || isDay(target.to) ? { r, hits: 0 } : null;
     const have = wordsOf(`${r.description} ${r.payee}`);
     const hits = want.filter((w) => have.some((h) => close(w, h))).length;
-    return hits >= Math.ceil(want.length / 2) ? { r, hits } : null;
+    return hits > 0 ? { r, hits } : null;
   }).filter(Boolean);
-  // THE BEST MATCHES ONLY: "team dinner" is the Team dinner, not every
-  // expense with "team" in it.
-  const best = Math.max(0, ...scored.map((x) => x.hits));
-  return scored.filter((x) => x.hits === best).map((x) => x.r);
+  /**
+   * EVERY WORD: "water deliveries" is the water deliveries, not DEWA's
+   * "Electricity & water" bills that share one word.
+   */
+  // No partial fallback: "team dinner" reached every "Team lunch", and with
+  // "remove all" that is the wrong things gone. Nothing whole is "not found",
+  // which shows the latest so they can say which.
+  return scored.filter((x) => x.hits === want.length).map((x) => x.r);
 }
 
 /** The latest few, when nothing matched, so they can point at one. */

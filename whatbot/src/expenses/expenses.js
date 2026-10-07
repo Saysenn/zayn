@@ -130,6 +130,8 @@ const TurnReply = z.object({
   reply: z.string().nullable().optional(),
   // not about expenses: the normal agent answers it instead
   handOff: z.boolean().optional(),
+  // more than one bubble: the preview, then the rates to AED
+  replies: z.array(z.string()).optional(),
 });
 
 export async function expenseTurn({ phone, group, text, attachments = [], messageId }) {

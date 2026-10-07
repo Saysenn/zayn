@@ -54,8 +54,12 @@ const PROMPT = [
   'For single_edit fill: person (as written), group (only if named), everyDeal (true if they said all/both/every of that person\'s deals),',
   'field, op ("add" when moving BY an amount: add, deduct (negative value), plus, minus; "set" when giving the new value), value',
   '(a plain number for amounts/days; YYYY-MM-DD for dates; "true"/"false" for paid). "add/deduct N" with no field named is monthlyAmount.',
+  '"ALL GROUPS" (or "all groups") is the NAME of one group, never "every deal": "glorias deal in all groups" is group ALL GROUPS.',
+  'THIS MONTH ONLY ("only this month", "one-off", "not his monthly") is payableAmount, never monthlyAmount.',
   '"N days" is payableDays. Use "" for anything not given. sure: false if the message is unclear or could mean two things.',
   'A later month ("from next month", "in november") is never single_edit: use other.',
+  'ENDING a deal ("stop", "he left", "quit", "finished", "end his deal") or PARKING/scheduling ("park it") is never',
+  'single_edit and never a field: use other.',
   '"add X and Y" or "X plus Y" with NO amount means add up their totals: question. A change is never asked',
   'without a figure or a value to set. A bare name, group or month on its own is an answer to something earlier: other.',
 ].join('\n');
@@ -88,8 +92,27 @@ const NUMBER_FIELDS = new Set(['monthlyAmount', 'payableAmount', 'payableDays'])
  * (directEdit.js), so it takes the same road to the tool. Null when any part
  * is missing or not a clean value: then she reads it as before.
  */
-function asEdit(r) {
+/**
+ * A FIELD IS ONLY CHANGED WHEN ITS OWN WORD WAS SAID. "stop smurf, he left"
+ * came back as paid = true and was written; "park it" set the label to
+ * "park" (test sweep 2026-10-07). Money and days carry their figure; every
+ * other field needs a word that names it, or it is not read here.
+ */
+const SAID_FIELD = {
+  overridePaid: /\b(?:paid|unpaid|pay|payment)\b/i,
+  label: /\b(?:label|tag|labelled|labeled)\b/i,
+  notes: /\bnotes?\b/i,
+  currency: /\b(?:gbp|aed|eur|euros?|usd|dollars?|pounds?|dirhams?|currency)\b|[£€$]/i,
+  paymentMethod: /\b(?:cash|bank|crypto|transfer|usdt|method|wire)\b/i,
+  company: /\b(?:company|moved? to|now (?:at|with))\b/i,
+  phone: /\b(?:phone|number|mobile|whatsapp)\b/i,
+  roleLabel: /\b(?:role|director|mid|admin|position)\b/i,
+};
+
+function asEdit(r, said = '') {
   if (!r || r.kind !== 'single_edit' || !r.sure || !r.person || !r.field || !r.op || r.value === '') return null;
+  if (SAID_FIELD[r.field] && !SAID_FIELD[r.field].test(String(said))) return null;
+  if (/\b(?:stop|stopped|left|leaving|quit|finish(?:ed)?|ended|end (?:his|her|their|the) deal|park)\b/i.test(String(said))) return null;
   let value = r.value;
   if (NUMBER_FIELDS.has(r.field)) {
     value = Number(String(r.value).replace(/,/g, ''));

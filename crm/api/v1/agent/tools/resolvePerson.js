@@ -304,7 +304,11 @@ function uniqueLabels(rows) {
    * is them naming somebody imprecisely and it deserves the question.
    */
   const attempted = nameFragment(said, rows);
-  if (attempted && wanted && attempted !== wanted) {
+  // THE FULL NAME, SAID, IS NOT A FRAGMENT: "james heath has left" asked
+  // "James Heath or James King?" off the "james" in it (test sweep
+  // 2026-10-07). A name they wrote out in full is exact.
+  const saidInFull = wanted && wanted.length >= 6 && fold(said).includes(wanted);
+  if (attempted && wanted && attempted !== wanted && !saidInFull) {
     const reach = rows.filter((r) => fold(nameOf(r)).startsWith(attempted));
     const who = new Set(reach.map(personKey));
     if (who.size > 1) {

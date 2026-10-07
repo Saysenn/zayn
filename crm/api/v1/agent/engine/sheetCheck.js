@@ -368,7 +368,24 @@ function fromImportRows(rows = [], columns = []) {
  * THEIR ROWS AGAINST OURS. Code only. Groups first, since a renamed group
  * makes every deal in it look new.
  */
-function compare(read, deals, knownGroups) {
+/**
+ * THE SAME AMOUNT, WITH OR WITHOUT ITS CHARGES. The CRM's own export writes
+ * the monthly and the payable WITH the add-on, fee and crypto charge, while
+ * the deal holds them without. Checked against its own export, Paddy's
+ * 13,500 + 5% came back as a change to 14,175 (test sweep 2026-10-07). An
+ * amount equal to either figure is the same amount.
+ */
+function sameAsDeal(field, theirs, deal, rated) {
+  const ours = deal[FIELDS[field].column];
+  if (same(field, theirs, ours)) return true;
+  if (field !== 'monthlyAmount' && field !== 'payableAmount') return false;
+  return same(field, theirs, rated(ours, deal));
+}
+
+function compare(read, deals, knownGroups, { cryptoPercent = 0 } = {}) {
+  // eslint-disable-next-line global-require
+  const { ratedAmount } = require('../../shared/rates.helper');
+  const rated = (amount, deal) => ratedAmount(amount, deal, { cryptoPercent });
   const live = deals.filter((d) => !d.stopped_on);
   const groupOf = (g) => {
     if (!g) return null;
@@ -457,7 +474,7 @@ function compare(read, deals, knownGroups) {
     }
     const deal = cands[0];
     matchedIds.add(deal.id);
-    const diffs = COMPARED.filter((f) => r[f] !== undefined && !same(f, r[f], deal[FIELDS[f].column]))
+    const diffs = COMPARED.filter((f) => r[f] !== undefined && !sameAsDeal(f, r[f], deal, rated))
       .map((f) => ({ field: f, theirs: r[f], ours: deal[FIELDS[f].column] }));
     if (diffs.length) mismatched.push({ row: r, deal, diffs });
   }
@@ -484,7 +501,7 @@ function compare(read, deals, knownGroups) {
     matchedIds.add(deal.id);
     notOnSheet.splice(notOnSheet.indexOf(r), 1);
     respelled.push({ row: r, deal });
-    const diffs = COMPARED.filter((f) => r[f] !== undefined && !same(f, r[f], deal[FIELDS[f].column]))
+    const diffs = COMPARED.filter((f) => r[f] !== undefined && !sameAsDeal(f, r[f], deal, rated))
       .map((f) => ({ field: f, theirs: r[f], ours: deal[FIELDS[f].column] }));
     if (diffs.length) mismatched.push({ row: r, deal, diffs });
   }
@@ -523,7 +540,7 @@ function compare(read, deals, knownGroups) {
     const at = missing.indexOf(deal);
     if (at >= 0) missing.splice(at, 1);
     moved.push({ row: r, deal, from: deal.group_name, to: r.group });
-    const diffs = COMPARED.filter((f) => r[f] !== undefined && !same(f, r[f], deal[FIELDS[f].column]))
+    const diffs = COMPARED.filter((f) => r[f] !== undefined && !sameAsDeal(f, r[f], deal, rated))
       .map((f) => ({ field: f, theirs: r[f], ours: deal[FIELDS[f].column] }));
     if (diffs.length) mismatched.push({ row: r, deal, diffs });
   }

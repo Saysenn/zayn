@@ -7,8 +7,15 @@ const r = (over) => ({ kind: 'single_edit', sure: true, person: 'zayn', group: '
 test('A SURE SINGLE EDIT becomes the edit the parser would read', () => {
   assert.deepEqual(asEdit(r()), { person: 'zayn', group: null, allDeals: false, field: 'payableDays', op: 'add', value: 5 });
   assert.deepEqual(asEdit(r({ field: 'monthlyAmount', op: 'add', value: '-1,500', group: 'INDIGO' })).value, -1500);
-  assert.equal(asEdit(r({ field: 'overridePaid', op: 'set', value: 'true' })).value, true);
-  assert.equal(asEdit(r({ field: 'notes', op: 'set', value: 'checked' })).value, 'checked');
+  assert.equal(asEdit(r({ field: 'overridePaid', op: 'set', value: 'true' }), 'mark zayn paid').value, true);
+  assert.equal(asEdit(r({ field: 'notes', op: 'set', value: 'checked' }), 'zayn notes checked').value, 'checked');
+});
+
+test('A FIELD IS ONLY CHANGED WHEN ITS WORD WAS SAID; stopping and parking are never field edits', () => {
+  assert.equal(asEdit(r({ person: 'smurf', field: 'overridePaid', op: 'set', value: 'true' }), 'stop smurf, he left'), null);
+  assert.equal(asEdit(r({ person: 'smurf', field: 'label', op: 'set', value: 'park' }), 'his deal is id 1, park it'), null);
+  assert.equal(asEdit(r({ field: 'overridePaid', op: 'set', value: 'true' }), 'zayn is all good'), null, 'no word for paid');
+  assert.equal(asEdit(r(), 'add 5 days to zayn').value, 5, 'money and days carry their own figure');
 });
 
 test('ANYTHING IT IS NOT SURE OF, OR MISSING, goes to her as before', () => {
