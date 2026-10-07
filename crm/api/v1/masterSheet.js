@@ -967,8 +967,8 @@ const attachUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024, files: 1 },
   fileFilter(req, file, cb) {
-    if (!/\.(xlsx|csv|txt|tsv|json|docx)$/i.test(file.originalname)) {
-      return cb(new AppError(400, `Diane can read Excel, CSV, text, JSON or Word files, not ${file.originalname}.`));
+    if (!/\.(xlsx|csv|txt|tsv|json|docx|pptx)$/i.test(file.originalname)) {
+      return cb(new AppError(400, `Diane can read Excel, CSV, text, JSON, Word or PowerPoint files, not ${file.originalname}.`));
     }
     cb(null, true);
   },

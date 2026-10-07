@@ -14,6 +14,9 @@ export const numbersConfig = {
 
   /** where the login sessions live. this folder IS the link — back it up. */
   authDir: env.WHATSAPP_AUTH_DIR,
+
+  /** `qr` or `code`: how an unlinked number is linked. */
+  linkWith: env.WHATSAPP_LINK_WITH,
 };
 
 /** the same map the other way round. built once, never changes while running. */

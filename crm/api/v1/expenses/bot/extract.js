@@ -230,7 +230,12 @@ async function extract(msg, { today, client, groups = [] } = {}) {
   for (const d of docs) {
     // eslint-disable-next-line no-await-in-loop
     const got = await intake({ buffer: Buffer.from(d.base64, 'base64'), filename: d.filename }).catch((err) => ({ error: err.message }));
-    if (got.error) { notes.push(`${d.filename}: could not open it (${got.error})`); continue; }
+    if (got.error) {
+      notes.push(/not a kind of file I can read/.test(got.error)
+        ? `I can't read ${String(d.filename).split('.').pop().toUpperCase()} files. Send a photo, PDF, Excel, CSV, Word or PowerPoint file`
+        : `${d.filename}: could not open it (${got.error})`);
+      continue;
+    }
     if (got.tables?.length) {
       // eslint-disable-next-line no-await-in-loop
       const read = await fromTables(got.tables, { today, client });

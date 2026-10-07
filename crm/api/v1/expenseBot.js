@@ -97,8 +97,8 @@ const attachUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024, files: 1 },
   fileFilter(req, file, cb) {
-    if (!/\.(jpe?g|png|webp|heic|pdf|xlsx|csv|txt|tsv|json|docx)$/i.test(file.originalname)) {
-      return cb(new AppError(400, `For expenses I can read photos, PDFs, Excel, CSV, Word or text files, not ${file.originalname}.`));
+    if (!/\.(jpe?g|png|webp|heic|pdf|xlsx|csv|txt|tsv|json|docx|pptx)$/i.test(file.originalname)) {
+      return cb(new AppError(400, `For expenses I can read photos, PDFs, Excel, CSV, Word, PowerPoint or text files, not ${file.originalname}.`));
     }
     cb(null, true);
   },

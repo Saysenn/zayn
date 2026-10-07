@@ -2059,8 +2059,8 @@ export default function AgentOverlay({ open, onClose }) {
                     ref={fileRef}
                     type="file"
                     accept={context === 'expenses'
-                      ? 'image/*,.pdf,.xlsx,.csv,.txt,.tsv,.json,.docx'
-                      : '.xlsx,.csv,.txt,.tsv,.json,.docx'}
+                      ? 'image/*,.pdf,.xlsx,.csv,.txt,.tsv,.json,.docx,.pptx'
+                      : '.xlsx,.csv,.txt,.tsv,.json,.docx,.pptx'}
                     className="hidden"
                     onChange={(e) => attachFile(e.target.files?.[0])}
                   />

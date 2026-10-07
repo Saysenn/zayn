@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import makeWASocket, {
+  Browsers,
   DisconnectReason,
   useMultiFileAuthState,
 } from "@whiskeysockets/baileys";
@@ -15,6 +16,9 @@ import { logger } from "../system/logger.js";
 import { publishStatus } from "./status.js";
 import { downloadVoiceNote, isVoiceNote, voiceSeconds } from "./voiceNote.js";
 import { isExpenseAdmin, mediaOf, saveMedia } from "../expenses/expenses.js";
+
+// Groups already sent a linking code this run: one code per start.
+const pairingAsked = new Set();
 
 /**
  * The 5 WhatsApp connections, one per group.
@@ -95,7 +99,9 @@ async function connect(groupId, onMessage, attempt = 0) {
     auth: state,
     // this is the name shown on the phone under Linked devices.
     // naming it makes it obvious which entry is the bot.
-    browser: ["whatbot", "Chrome", "1.0.0"],
+    // LINKING BY CODE needs a real system name: WhatsApp answered "couldn't
+    // link device" to the custom one (2026-10-07). A QR takes either.
+    browser: numbersConfig.linkWith === "code" ? Browsers.macOS("Chrome") : ["whatbot", "Chrome", "1.0.0"],
     // don't show as online. we answer every message anyway, and a number that's
     // online 24/7 doesn't look like a person.
     markOnlineOnConnect: false,
@@ -109,7 +115,25 @@ async function connect(groupId, onMessage, attempt = 0) {
     const { qr, connection, lastDisconnect } = update;
 
     // ---- first run, or the link expired ----
-    if (qr) {
+    if (qr && numbersConfig.linkWith === "code") {
+      /**
+       * A CODE INSTEAD OF A QR, asked for once per start. A QR drawn in a
+       * terminal often will not scan (a dark theme inverts it, a small
+       * window squashes it). On the group phone: WhatsApp → Linked devices
+       * → Link a device → Link with phone number instead → type this.
+       */
+      if (!pairingAsked.has(groupId)) {
+        pairingAsked.add(groupId);
+        socket
+          .requestPairingCode(ourNumber.replace(/^\+/, ""))
+          .then((code) => {
+            const shown = String(code).replace(/^(.{4})(.{4})$/, "$1-$2");
+            logger.warn({ groupId, number: ourNumber, code: shown }, "type this code on the group phone");
+            process.stdout.write(`\n  ${groupId} (${ourNumber}): on that phone open WhatsApp → Linked devices → Link a device →\n  Link with phone number instead, and type:  ${shown}\n\n`);
+          })
+          .catch((err) => logger.error({ err: err.message, groupId }, "could not get a linking code"));
+      }
+    } else if (qr) {
       // printed rather than logged, because you have to actually scan it
       logger.warn(
         { groupId, number: ourNumber },

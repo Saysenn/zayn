@@ -56,6 +56,11 @@ const EnvSchema = z
      * account — back it up, never commit it, treat it like a password.
      */
     WHATSAPP_AUTH_DIR: z.string().default("auth_info"),
+    // How an unlinked number is linked: `qr` prints a QR to scan, `code`
+    // prints an 8 character code to type on the phone (Linked devices →
+    // Link a device → Link with phone number instead). For when the QR in a
+    // terminal will not scan.
+    WHATSAPP_LINK_WITH: z.enum(["qr", "code"]).default("qr"),
 
     OPENAI_API_KEY: z.string().min(1),
     OPENAI_MODEL: z.string().default("gpt-4.1-mini"),

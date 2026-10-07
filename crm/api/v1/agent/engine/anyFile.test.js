@@ -435,3 +435,14 @@ test('TWO-ROW HEADERS: a band over columns, and sub-labels on the row below', ()
   ], 'S');
   assert.deepEqual(title[0].headers, ['Name', 'Company', 'Monthly'], 'a title in one cell prefixes nothing');
 });
+
+test('A POWERPOINT is read slide by slide; a file nothing here reads is refused plainly', async () => {
+  const JSZip = require('jszip');
+  const zip = new JSZip();
+  zip.file('ppt/slides/slide2.xml', '<p:sld><a:p><a:r><a:t>Lunch 120 at Zuma</a:t></a:r></a:p></p:sld>');
+  zip.file('ppt/slides/slide1.xml', '<p:sld><a:p><a:r><a:t>Taxi 45 &amp; parking 20</a:t></a:r></a:p></p:sld>');
+  const pptx = await zip.generateAsync({ type: 'nodebuffer' });
+  const got = await intake({ buffer: pptx, filename: 'october.pptx' });
+  assert.equal(got.text, 'Slide 1:\nTaxi 45 & parking 20\n\nSlide 2:\nLunch 120 at Zuma');
+  await assert.rejects(intake({ buffer: pptx, filename: 'archive.zip' }), /not a kind of file I can read/);
+});

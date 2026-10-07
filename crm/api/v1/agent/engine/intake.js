@@ -132,6 +132,38 @@ async function docxText(buffer) {
 }
 
 /**
+ * A POWERPOINT'S TEXT, slide by slide. Live 2026-10-07: a .pptx was read
+ * as plain text, which is a zip, and thousands of garbled characters broke
+ * the read. Each slide's words, in slide order, a line per paragraph.
+ */
+async function pptxText(buffer) {
+  const zip = await JSZip.loadAsync(buffer);
+  const slides = Object.keys(zip.files)
+    .filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n))
+    .sort((a, b) => Number(a.match(/\d+/)[0]) - Number(b.match(/\d+/)[0]));
+  const out = [];
+  for (const [i, n] of slides.entries()) {
+    // eslint-disable-next-line no-await-in-loop
+    const xml = await zip.file(n).async('string');
+    const text = xml
+      .replace(/<\/a:p>/g, '\n')
+      .replace(/<a:tab\/>/g, '\t')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+      .split('\n').map((l) => l.trim()).filter(Boolean).join('\n');
+    if (text) out.push(`Slide ${i + 1}:\n${text}`);
+  }
+  return out.join('\n\n');
+}
+
+/**
+ * NOT A FILE ANY READER HERE UNDERSTANDS: a zip, an image, audio, video, a
+ * binary. Said plainly, never read as text (garbage in breaks the read).
+ */
+const READS = /\.(xlsx|csv|tsv|txt|json|docx|pptx|md)$/i;
+class UnreadableFile extends Error {}
+
+/**
  * @param {{ buffer?: Buffer, filename?: string, text?: string }} input
  * @returns {Promise<{ tables: object[], text: string, kind: string }>}
  *   `text` is what is NOT in a table, for the model to read.
@@ -156,7 +188,11 @@ async function intake({ buffer = null, filename = '', text = null }) {
   }
   let raw = text;
   if (raw == null && buffer) {
+    if (!READS.test(name) && (buffer.includes(0) || buffer.subarray(0, 2).toString('latin1') === 'PK')) {
+      throw new UnreadableFile(`${filename || 'that file'} is not a kind of file I can read`);
+    }
     if (/\.docx$/.test(name)) raw = await docxText(buffer);
+    else if (/\.pptx$/.test(name)) raw = await pptxText(buffer);
     else if (/\.json$/.test(name)) raw = buffer.toString('utf8');
     else raw = buffer.toString('utf8');
   }
@@ -200,4 +236,6 @@ async function intake({ buffer = null, filename = '', text = null }) {
   return { tables, text: rest.trim() ? rest : '', kind: tables.length ? 'table text' : 'text' };
 }
 
-module.exports = { intake, gridOfText, tablesIn, cellOf };
+module.exports = {
+  intake, gridOfText, tablesIn, cellOf, UnreadableFile,
+};
