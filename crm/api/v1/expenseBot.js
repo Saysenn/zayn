@@ -186,6 +186,18 @@ async function dianeTurn(history, send) {
   }
   const out = await brain.turn({ text, attachments: atts.map((a) => a.file) }, { channel: 'diane' });
   if (out.card) send({ type: 'list', list: out.card });
+  // A RECEIPT ASKED FOR: a photo shows in her chat (and Attachments); a PDF
+  // or sheet is opened from the Expenses page
+  if (out.receipt && /^image\//.test(out.receipt.mime)) {
+    try {
+      const caption = `Receipt · ${new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}`;
+      send({ type: 'image', image: { id: await keepImage(out.receipt, caption), caption } });
+    } catch (err) {
+      require('../configs/logger').warn({ err: err.message }, 'diane: could not show the receipt');
+    }
+  } else if (out.receipt) {
+    out.reply = `${out.reply ?? ''} It is a file: open it from the Expenses page.`.trim();
+  }
   // THE PICTURE under the card, in the style picked in Settings. Kept in the
   // CRM so it can be opened again from the conversation's Attachments.
   if (out.image) {

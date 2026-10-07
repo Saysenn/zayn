@@ -90,6 +90,24 @@ router.get('/expenses', async (req, res, next) => {
   }
 });
 
+/**
+ * AN EXPENSE'S RECEIPT, as it was kept (expenses/bot/receipts.js): a photo
+ * shrunk to JPEG, a PDF or a sheet as sent. 404 once its month is cleared
+ * (receipts are kept for the current month and the two before).
+ */
+router.get('/expenses/:id/receipt', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(404).json({ error: 'No receipt.' });
+    // eslint-disable-next-line global-require
+    const file = await require('./expenses/bot/receipts').fileOf(id);
+    if (file.missing) return res.status(404).json({ error: file.missing === 'cleared' ? 'This receipt was cleared: receipts are kept for 3 months.' : 'This expense has no receipt.' });
+    res.set({ 'Content-Type': file.mime, 'Content-Disposition': `inline; filename="${file.filename}"`, 'Cache-Control': 'private, max-age=3600' }).send(file.buffer);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // One call for every dropdown plus the rate suggestion, so opening the page
 // or the add form is not five round trips.
 router.get('/expenses/options', async (req, res, next) => {

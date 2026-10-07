@@ -5,11 +5,18 @@ Intended to be built. Numbers are stable identifiers cited elsewhere
 renumber. Delete an entry when it ships. The full designs these entries
 came from are in this file's git history (before 2026-10-06).
 
-0. **Expenses: keep a few months, back up and clear the rest.** Unlike the
-   master sheet. Default: keep 3 past months (his note: "4 months maximum",
-   i.e. this month plus 3). Settings picks 3, 6 or 12 months. Older months
-   are backed up (snapshot, figures not recipes) and then cleared, snapshot
-   first and clear only if it succeeded, like `masterSheet/closeMonth.js`.
+0. **Expenses: keep 3 months, back up and clear the rest.** A FIXED rule,
+   no setting: the current month and the 2 before (in October: August,
+   September, October), rolling each month. Applies to the expense rows AND
+   their receipt files (receipts already follow it: `expenses/bot/receipts.js`).
+   Older months are backed up (snapshot, figures not recipes) and then
+   cleared, snapshot first and clear only if it succeeded, like
+   `masterSheet/closeMonth.js`. His call 2026-10-07: no 6 or 12 months for
+   expenses.
+   **The master sheet is a different rule:** its 3, 6 or 12 months of kept
+   history is chosen in Settings. Its dashboard always shows 2 past months,
+   the current month and the next (recall and forecast), moving with the
+   current month.
 3. **Electron .exe on one always-on PC.** Load `http://localhost:3000`,
    never `file://`. A `Secure` cookie is refused over plain http to a LAN
    address: pick same-PC, a self-signed cert, or dropping `secure`. Decide
@@ -56,3 +63,10 @@ came from are in this file's git history (before 2026-10-06).
     keeps the rate frozen into its snapshot, so old totals never move. A
     rate saved by hand in Settings still wins (an agreed rate). The free
     open.er-api.com stays the backup when the key or the service is down.
+14. **A nightly cleanup runner, inside the CRM.** One scheduled job, run in
+    the app itself (not on a developer's Mac), that does every clear-out:
+    expense rows and receipts past the 3 month window (item 0), held
+    receipt files from previews nobody answered, Diane's pictures past 30
+    days. Each part is safe to run twice, logs what it cleared, and writes
+    nothing when there is nothing to clear. Receipts already have their own
+    6-hourly keeper (`startReceiptsKeeper`); it moves into this runner.

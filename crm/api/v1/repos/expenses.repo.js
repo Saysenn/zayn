@@ -29,6 +29,8 @@ const COLUMN_FOR = {
 const WRITABLE = [
   'spentOn', 'description', 'payee', 'currency',
   'rawAmount', 'exchangeRate', 'groupName', 'spentBy',
+  // fuel, travel, food, office, bills or other (migration 075)
+  'category',
 ];
 
 // ===============================

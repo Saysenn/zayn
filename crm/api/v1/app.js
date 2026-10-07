@@ -47,6 +47,8 @@ settingsRepo
 
 queueSummaryRepair();
 startBackupScheduler();
+// RECEIPTS: the 3 month clear and the backup copy, every 6 hours
+require('./expenses/bot/receipts').startReceiptsKeeper();
 startSnapshotScheduler();
 
 // Behind nginx in production: without this, every request looks like it

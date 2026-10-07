@@ -16,8 +16,9 @@ const { fold } = require('../../masterSheet/dealKey');
 const LINE = {
   type: 'object',
   additionalProperties: false,
-  required: ['groupName', 'spentOn', 'description', 'payee', 'rawAmount', 'currency', 'spentBy', 'source', 'doubt'],
+  required: ['groupName', 'spentOn', 'description', 'payee', 'rawAmount', 'currency', 'spentBy', 'source', 'doubt', 'category'],
   properties: {
+    category: { type: 'string', enum: ['', 'fuel', 'travel', 'food', 'office', 'bills', 'other'] },
     groupName: { type: 'string' },
     spentOn: { type: 'string' },
     description: { type: 'string' },
@@ -54,7 +55,9 @@ function rules(today, groups = []) {
     'rawAmount: the number only, no symbols or commas ("1250.50"). For a receipt, the final total paid.',
     'currency: ONLY if said or printed (AED, GBP, EUR, USD, £, €, $, "dirhams"). "" if not shown.',
     'spentBy: only if they say someone else spent it ("Ali paid", "spent by Sara"). "" otherwise.',
-    'source: where it came from: "message", "photo 1", "photo 2", "pdf".',
+    'source: where it came from: "message", "photo 1", "photo 2", "pdf 1", "pdf 2", exactly as labelled.',
+    'category: fuel (petrol, ENOC, ADNOC), travel (taxi, Careem, parking, Salik, train, flight, hotel), food (meals, coffee, groceries),',
+    'office (stationery, ink, furniture, equipment, software), bills (electricity, water, internet, phone, rent), else other.',
     'doubt: "" or a short note when something is unclear or hard to read ("total hard to read", "two totals on receipt").',
     'NEVER invent a value. Anything not given is "". If it is not an expense at all, return no expenses.',
     'A payroll list, salaries, a master sheet of deals or a list of staff and their monthly pay is NOT expenses: return none.',
@@ -74,6 +77,7 @@ async function fromText(text, { today, client, groups } = {}) {
  */
 async function fromMedia(media, caption, { today, client, groups } = {}) {
   let photo = 0;
+  let pdf = 0;
   const parts = [{ type: 'text', text: `Their message with it: "${caption || '(none)'}"` }];
   for (const m of media) {
     if (/^image\//.test(m.mime)) {
@@ -81,12 +85,22 @@ async function fromMedia(media, caption, { today, client, groups } = {}) {
       parts.push({ type: 'text', text: `photo ${photo}:` });
       parts.push({ type: 'image_url', image_url: { url: `data:${m.mime};base64,${m.base64}`, detail: 'high' } });
     } else if (/pdf/.test(m.mime)) {
-      parts.push({ type: 'text', text: 'pdf:' });
+      pdf += 1;
+      parts.push({ type: 'text', text: `pdf ${pdf}:` });
       parts.push({ type: 'file', file: { filename: m.filename || 'receipt.pdf', file_data: `data:application/pdf;base64,${m.base64}` } });
     }
   }
   const got = await ask({ name: 'expenses', system: rules(today, groups), user: parts, schema: LINES, client });
-  return got.expenses ?? [];
+  // WHICH FILE EACH CAME FROM, so its receipt is kept with it: "photo 2" is
+  // the second picture of this handful, "pdf 1" the first PDF
+  const pics = media.filter((m) => /^image\//.test(m.mime));
+  const pdfs = media.filter((m) => !/^image\//.test(m.mime));
+  return (got.expenses ?? []).map((x) => {
+    const m = /^(photo|pdf)\s*(\d+)?/i.exec(String(x.source ?? '').trim());
+    const list = m && /pdf/i.test(m[1]) ? pdfs : pics;
+    const file = m ? list[Math.max(0, Number(m[2] ?? 1) - 1)] : media.length === 1 ? media[0] : null;
+    return { ...x, file: file ?? null };
+  });
 }
 
 // ---- a spreadsheet, CSV or Word table ----
@@ -217,6 +231,7 @@ async function fromTables(tables, { today, client, groups = [] } = {}) {
         spentBy: get('spentBy') == null ? '' : String(get('spentBy')),
         source: `${t.sheet ? `${t.sheet} ` : ''}line ${r.line}`,
         doubt: rawDay && !spentOn ? `date "${rawDay}" not understood` : '',
+        category: '',
       });
     }
   }
@@ -245,11 +260,11 @@ async function extract(msg, { today, client, groups = [] } = {}) {
     if (got.tables?.length) {
       // eslint-disable-next-line no-await-in-loop
       const read = await fromTables(got.tables, { today, client, groups });
-      out.push(...read.items);
+      out.push(...read.items.map((x) => ({ ...x, file: d })));
       notes.push(...read.skipped);
     } else if (String(got.text ?? '').trim()) {
       // eslint-disable-next-line no-await-in-loop
-      out.push(...(await fromText(`${msg.text ? `${msg.text}\n\n` : ''}From the file ${d.filename}:\n${got.text}`, { today, client, groups })));
+      out.push(...(await fromText(`${msg.text ? `${msg.text}\n\n` : ''}From the file ${d.filename}:\n${got.text}`, { today, client, groups })).map((x) => ({ ...x, file: d })));
     } else {
       notes.push(`${d.filename}: nothing in it to read`);
     }

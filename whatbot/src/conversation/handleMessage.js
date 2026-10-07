@@ -179,6 +179,7 @@ export async function handleMessage(input) {
           ...(extra.length ? { more: extra } : {}),
           ...(out.image ? { image: out.image } : {}),
           ...(out.moreImages?.length ? { moreImages: out.moreImages } : {}),
+          ...(out.receipt ? { receipt: out.receipt } : {}),
         };
       }
       // NOT ABOUT EXPENSES ("how much am I getting paid?"): answered as a

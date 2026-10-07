@@ -177,6 +177,10 @@ export const apiService = {
   expenseStyle: {
     preview: (style) => api.download(`${apiPath}/expense-style/preview/${encodeURIComponent(style)}`),
   },
+  // A saved expense's receipt, as kept. Resolves { blob }.
+  expenseReceipt: {
+    get: (id) => api.download(`${apiPath}/expenses/${encodeURIComponent(id)}/receipt`),
+  },
   agentImages: {
     get: (id) => api.download(`${apiPath}/agent-images/${encodeURIComponent(id)}`),
   },

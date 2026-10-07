@@ -53,7 +53,7 @@ function totalLine(items) {
 }
 
 const LABEL = {
-  exchangeRate: 'rate to AED', groupName: 'group', spentOn: 'date', description: 'what it was for', rawAmount: 'amount', currency: 'currency', payee: 'paid to', spentBy: 'spent by',
+  exchangeRate: 'rate to AED', groupName: 'group', spentOn: 'date', description: 'what it was for', rawAmount: 'amount', currency: 'currency', payee: 'paid to', spentBy: 'spent by', category: 'category',
 };
 // What to ask for each missing field.
 const ASK = {
@@ -83,6 +83,7 @@ function block(x, { group = false } = {}) {
   out.push(`• Date: ${x.spentOn && has('spentOn') ? dayFull(x.spentOn) : MISSING}`);
   out.push(`• Paid to: ${x.payee && has('payee') ? x.payee : MISSING}`);
   out.push(`• Spent by: ${x.spentBy && has('spentBy') ? x.spentBy : MISSING}`);
+  if (x.category) out.push(`• Category: ${x.category.charAt(0).toUpperCase()}${x.category.slice(1)}${x.receipt ? ' · 🧾 receipt kept' : ''}`);
   if (x.currency && x.currency !== 'AED') {
     out.push(`• Rate: ${x.exchangeRate ? `1 ${x.currency} = ${x.exchangeRate} AED _(${x.rateSource ?? 'rate'})_` : MISSING}`);
     if (x.exchangeRate && x.rawAmount != null) out.push(`• In AED: *${money('AED', Math.round(x.rawAmount * x.exchangeRate * 100) / 100)}*`);
@@ -120,6 +121,7 @@ function questions(live) {
     for (const d of x.doubts ?? []) {
       if (/^same as \d+/.test(d)) put('§copies', x.n);
       else if (/^looks already saved/.test(d)) put('§saved', x.n);
+      else if (/^same receipt as one saved/.test(d)) put(`§receipt:${d}`, x.n);
       else if (/^another .+: new, or a change/.test(d)) put('another expense to the same payee that day: new, or a change to that one?', x.n);
       else put(`_${d}_`, x.n);
     }
@@ -128,6 +130,7 @@ function questions(live) {
     const nums = `No. ${ranges(ns)}`;
     if (q === '§copies') return `• ${nums}: ${ns.length === 1 ? 'a copy of an earlier one' : 'copies of earlier ones'} (reply *skip copies*)`;
     if (q === '§saved') return `• ${nums}: ${ns.length === 1 ? 'looks' : 'look'} already saved (reply *skip saved*, or *yes* to save anyway)`;
+    if (q.startsWith('§receipt:')) return `• ${nums}: _${q.slice(9)}_ (reply *skip saved*, or *yes* to save again)`;
     return `• ${nums}: ${q}`;
   });
   return lines.length > QUESTIONS_SHOWN

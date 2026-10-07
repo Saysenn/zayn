@@ -250,3 +250,10 @@ test('AN EXACT COPY is the same day, amount, currency, payee and description', (
   assert.equal(exactCopy(a, { ...a, rawAmount: 46 }), false);
   assert.equal(exactCopy(a, { ...a, description: 'Taxi home' }), false);
 });
+
+test('A YES IN THEIR OWN WORDS is a yes; "save the rest" saves the ready ones', () => {
+  const pending = { kind: 'add', items: [1, 2, 3].map((n) => ({ n, missing: [], doubts: [] })) };
+  for (const q of ['I like them, save them', 'looks good, go ahead', 'all good, confirm']) assert.deepEqual(readReply(q, pending), { kind: 'yes' }, q);
+  for (const q of ['save the rest', 'just save the ready ones', 'save what\'s ready']) assert.deepEqual(readReply(q, pending), { kind: 'saveReady' }, q);
+  for (const q of ['save all except 3', 'dont save them', 'looks good but change 2']) assert.notDeepEqual(readReply(q, pending), { kind: 'yes' }, q);
+});

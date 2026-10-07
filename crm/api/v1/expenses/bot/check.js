@@ -84,6 +84,24 @@ function spenderOf(value, admin, known) {
   return canonical(v, known);
 }
 
+/**
+ * A CATEGORY BY ITS WORDS when the reading gave none (a sheet's rows, a
+ * typed line): the payee and description against what each one covers.
+ * Shown in the preview, so a wrong one is one reply away ("4 is travel").
+ */
+const CATEGORIES = ['fuel', 'travel', 'food', 'office', 'bills', 'other'];
+const CATEGORY_WORDS = [
+  ['fuel', /\b(?:fuel|petrol|diesel|gas station|enoc|adnoc|eppco|emarat)\b/i],
+  ['travel', /\b(?:taxi|cab|careem|uber|rta|parking|salik|train|trainline|flight|airline|emirates|flydubai|hotel|metro|bus|toll|travel)\b/i],
+  ['food', /\b(?:lunch|dinner|breakfast|coffee|tea|meal|food|restaurant|cafe|starbucks|shake shack|pret|groceries|grocery|carrefour|lulu|talabat|deliveroo|water bottles?)\b/i],
+  ['bills', /\b(?:dewa|electricity|water bill|utility|internet|du|etisalat|phone|mobile|sim|rent|bill|subscription)\b/i],
+  ['office', /\b(?:office|stationery|ink|paper|printer|amazon|ikea|laptop|computer|furniture|chairs?|desk|software|equipment|supplies|cleaner|cleaning)\b/i],
+];
+function categoryOf(raw) {
+  const words = `${raw.description ?? ''} ${raw.payee ?? ''}`;
+  return CATEGORY_WORDS.find(([, re]) => re.test(words))?.[0] ?? 'other';
+}
+
 function normalise(raw, { admin, group, groups = [], rates = {}, live = {}, known = {}, today = currentDay() }) {
   const said = currencyOf(raw.currency);
   // FROM THE COMMAND CENTER ('*'): no bot number says the group and no
@@ -99,6 +117,9 @@ function normalise(raw, { admin, group, groups = [], rates = {}, live = {}, know
     groupName: anyGroup ? groupOf(raw.groupName, groups) : group,
     spentBy: spenderOf(raw.spentBy, admin, known.spentBy ?? []) ?? admin?.name ?? null,
     source: raw.source ?? null,
+    category: CATEGORIES.includes(raw.category) ? raw.category : categoryOf(raw),
+    // the receipt it came from, held until "yes" (receipts.js)
+    receipt: raw.receipt ?? null,
     skipped: Boolean(raw.skipped),
     ok: Boolean(raw.ok),
   };
@@ -177,5 +198,5 @@ function duplicates(items, saved = []) {
 const ready = (items) => items.filter((x) => !x.skipped).every((x) => x.missing.length === 0);
 
 module.exports = {
-  normalise, duplicates, ready, currencyOf, groupOf, canonical, spenderOf, REQUIRED, num, iso, exactCopy,
+  normalise, duplicates, ready, currencyOf, groupOf, canonical, spenderOf, REQUIRED, num, iso, exactCopy, CATEGORIES, categoryOf,
 };

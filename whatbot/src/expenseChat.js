@@ -82,6 +82,11 @@ for await (const line of rl) {
       const file = `/tmp/whatbot-expense-${Date.now()}.png`;
       await writeFile(file, Buffer.from(reply.image.base64, "base64"));
       say(`      [picture sent with the text above as its caption: ${file}]`);
+      if (reply.receipt) {
+        const r = `/tmp/whatbot-receipt-${Date.now()}-${reply.receipt.filename ?? "receipt"}`;
+        await writeFile(r, Buffer.from(reply.receipt.base64, "base64"));
+        say(`      [receipt sent: ${r}]`);
+      }
       for (const [i, page] of (reply.moreImages ?? []).entries()) {
         const more = `/tmp/whatbot-expense-${Date.now()}-${i + 2}.png`;
         await writeFile(more, Buffer.from(page.base64, "base64"));

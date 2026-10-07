@@ -53,6 +53,12 @@ function bareValue(rest, year, groups = []) {
   // "NEW" answers "new, or a change to that one?": it is a separate expense.
   if (/^(?:fine|ok(?:ay)?|right|correct|good|real|new|a new one|new one|separate|different|not a duplicate|not the same|keep it|it'?s right)$/i.test(v)) return { ok: true };
   if (/^(?:today|yesterday)$/i.test(v)) return { field: 'spentOn', value: v.toLowerCase() };
+  // "4 is travel": a category, by its own word
+  const cat = /^(?:a |an |the )?(fuel|petrol|travel|transport|food|meals?|office|bills?|utilities|other)(?: category| expense)?$/i.exec(v);
+  if (cat) {
+    const word = cat[1].toLowerCase();
+    return { field: 'category', value: { petrol: 'fuel', transport: 'travel', meal: 'food', meals: 'food', bill: 'bills', utilities: 'bills' }[word] ?? word };
+  }
   const d = dayOf(v, year);
   if (d && /[a-z]|\/|-/i.test(v)) return { field: 'spentOn', value: d };
   const c = currencyOf(v);
@@ -122,6 +128,20 @@ function readReply(said, pending, { year = new Date().getUTCFullYear(), groups =
   if (!text || !pending) return null;
   const bare = text.toLowerCase().replace(/[!.]+$/, '').replace(/,? ?(?:please|pls|thanks|thank you)$/, '').trim();
   if (YES.test(bare)) return { kind: 'yes' };
+  /**
+   * "SAVE THE REST": the ready ones now, the ones still missing something
+   * kept waiting (his report 2026-10-07: 141 ready and 4 missing a payee,
+   * and nothing could be saved).
+   */
+  if (/^(?:(?:ok(?:ay)?|yes|so)[,\s]+)?(?:just\s+)?save\s+(?:the\s+)?(?:rest|ready(?: ones)?|ones? (?:that are |)ready|what'?s ready|the others|everything else|all the (?:rest|ready ones|others))(?:\s+(?:now|first|please|pls))*[.!]*$/i.test(bare)) return { kind: 'saveReady' };
+  /**
+   * A YES IN THEIR OWN WORDS: "I like them, save them", "looks good, go
+   * ahead", "all good, confirm". It went to the reader as a change, with all
+   * 145 expenses in the request, and came back as the same six pictures
+   * (live 2026-10-07). A save word, no figures, nothing to change.
+   */
+  if (/\b(?:save|confirm|go ahead|looks? (?:good|great|right|fine)|all (?:good|correct|fine)|approve|that'?s (?:right|correct|fine)|perfect|good to go)\b/i.test(bare)
+    && !/\d|\b(?:don'?t|do not|not|never|except|but|change|wrong|skip|cancel|without|instead|only|remove|leave out)\b/i.test(bare)) return { kind: 'yes' };
   if (NO.test(bare)) return { kind: 'no' };
   // "MODIFY" on its own: they want to change something, and say what next.
   if (/^(?:modify|change|change (?:it|something|that)|edit|amend|fix(?: it)?|correct(?: it)?)$/i.test(bare)) return { kind: 'modify' };
@@ -149,7 +169,7 @@ function readReply(said, pending, { year = new Date().getUTCFullYear(), groups =
   const bulk = /^(?:skip|drop|remove|leave out)\s+(?:all\s+)?(?:the\s+)?(copies|copy|duplicates?|dupes?|repeats?|(?:already\s+)?saved(?:\s+ones)?|ones? already saved)$/i.exec(bare);
   if (bulk) {
     const saved = /saved/i.test(bulk[1]);
-    const which = pending.items.filter((x) => !x.skipped && (x.doubts ?? []).some((d) => (saved ? /^looks already saved/ : /^same as \d+/).test(d))).map((x) => x.n);
+    const which = pending.items.filter((x) => !x.skipped && (x.doubts ?? []).some((d) => (saved ? /^looks already saved|^same receipt as one saved/ : /^same as \d+/).test(d))).map((x) => x.n);
     return { kind: 'skip', which, bulk: saved ? 'saved' : 'copies' };
   }
   // "skip 3 to 6" / "skip 3-6": a range is every number in it.

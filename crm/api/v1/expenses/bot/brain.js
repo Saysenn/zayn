@@ -10,6 +10,7 @@ const { readReply } = require('./reply');
 const { route, revise } = require('./understand');
 const find = require('./find');
 const { liveRates } = require('./rates');
+const receipts = require('./receipts');
 const { renderCards } = require('./card');
 const { renderTable, worthAPicture } = require('../../pictures/table');
 const settingsRepo = require('../../repos/settings.repo');
@@ -67,6 +68,7 @@ const ALREADY = 'Those were all already in your preview, so nothing was added. H
 // "SHOW ME THE IMAGE" re-sends the open preview (his report 2026-10-07: it
 // went to the pay side and came back "I can't find your number")
 const SHOW_PREVIEW = /^(?:(?:can you |could you |pls |please )?(?:show|send|resend|re-send|give)(?: me)?(?: it| them)?(?: the| my| that)?\s*(?:image|picture|pic|photo|preview|list|expenses|it|them|again)(?: to me| for me)?(?: again| please| pls)?|(?:where(?:'s| is) )?(?:the |my )?(?:image|picture|preview)\??)[!.? ]*$/i;
+const RECEIPT_ASK = /\b(?:show|send|see|view|give|open|where(?:'s| is))\b[^?]*\breceipts?\b/i;
 const UNDO = /^(?:undo(?: (?:that|it|this|last|the last one))?|take (?:it|that|them) back|put (?:it|that) back|revert(?: that| it)?)[!. ]*$/i;
 
 /**
@@ -121,9 +123,25 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
      * so. Only for a message with figures in it, never "yes" or "show it".
      */
     const heldAfter = state.pending?.kind === 'add' ? JSON.stringify(state.pending.items.map(({ n, spentOn, rawAmount, currency, payee, description, skipped }) => [n, spentOn, rawAmount, currency, payee, description, skipped])) : null;
-    if (heldBefore && heldBefore === heldAfter && !files.length && /\d/.test(said) && said.split(/\s+/).length >= 3
-      && /_Not saved yet_/.test(String(reply ?? '')) && !/^Just to be sure/.test(String(reply ?? ''))) {
+    const unchanged = heldBefore && heldBefore === heldAfter && !files.length
+      && /_Not saved yet_/.test(String(reply ?? '')) && !/^Just to be sure/.test(String(reply ?? '')) && !String(reply ?? '').startsWith(ALREADY) && !SHOW_PREVIEW.test(said);
+    if (unchanged && /\d/.test(said) && said.split(/\s+/).length >= 3) {
+      // the same expenses typed again: the preview is shown again
       reply = `${ALREADY}${format.addPreview(state.pending.items, group)}`;
+    } else if (unchanged) {
+      /**
+       * NOTHING CHANGED: said in a line, never the whole preview again with
+       * its pictures (live 2026-10-07: "I like them, save them" re-sent six
+       * pictures). What is still open, and how to answer it.
+       */
+      const live = state.pending.items.filter((x) => !x.skipped);
+      const qs = format.questions(live);
+      reply = [
+        `Nothing in your preview changed (${live.length} ${live.length === 1 ? 'expense' : 'expenses'}, not saved yet).`,
+        ...(qs.length ? ['', '⚠️ *Still open*', ...qs] : []),
+        '',
+        'Reply *yes* to save · *save the rest* to save the ready ones · *show me the preview* · *cancel*',
+      ].join('\n');
     }
   } catch (err) {
     if (err.code === 'NO_AI') reply = 'I can\'t read that right now (my reading service is off). Nothing was saved. Try again later.';
@@ -147,7 +165,8 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
   if (expired && reply) reply = `${expired}${reply}`;
   // Was the open preview the last thing they saw? A "yes" counts only then.
   if (state.pending) state.pending.at = state.pending.at ?? Date.now();
-  if (state.pending) state.pending.shownLast = PREVIEWS.test(String(reply ?? ''));
+  // looking at a receipt is not looking away: a yes after it still counts
+  if (state.pending) state.pending.shownLast = PREVIEWS.test(String(reply ?? '')) || (/^🧾 Receipt for/.test(String(reply ?? '')) && Boolean(state.pending.shownLast));
   state.history = [...(state.history ?? []), { said: said || (files.length ? `[${files.length} file(s)]` : ''), reply }].slice(-HISTORY);
   if (msg.messageId) state.seen = [...(state.seen ?? []), { id: msg.messageId, reply }].slice(-30);
   // The saved batch is drawn once (below), never kept in the conversation.
@@ -174,7 +193,9 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
       if (pngs.length) {
         [image, ...extraImages] = pngs.map((png, i) => ({ base64: png.toString('base64'), mime: 'image/png', filename: `expenses-${i + 1}.png`, saved: Boolean(savedNow) }));
         const lead = /^(?:Added \d+ more|Those (?:were|are) (?:all )?already)[^\n]*\n\n/.exec(String(reply))?.[0] ?? '';
-        text = `${lead}${format.caption(items, group, { saved: Boolean(savedNow) })}`;
+        // what is STILL WAITING after "save the rest" rides under the caption
+        const tail = /\n\n⏳[\s\S]*$/.exec(String(reply))?.[0] ?? '';
+        text = `${lead}${format.caption(items, group, { saved: Boolean(savedNow) })}${tail}`;
       }
     } else if (ctx.answer?.table) {
       // A SPENDING REPORT of 4+ rows: the table as a picture (pages when
@@ -194,6 +215,7 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
     extraImages = [];
     text = reply;
   }
+  const receiptOut = ctx.receiptOut ? { base64: ctx.receiptOut.buffer.toString('base64'), mime: ctx.receiptOut.mime, filename: ctx.receiptOut.filename } : null;
   if (channel === 'diane') {
     // Diane keeps her card (it can be read and searched); the picture goes
     // under it, to open large and to find again in Attachments.
@@ -201,12 +223,12 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
     // a report picture carries the list, so her text is just its caption
     if (image?.kind === 'report') view.reply = forDiane.plainText(text);
     return {
-      registered: true, ...view, ...(image ? { image } : {}), ...(extraImages.length ? { moreImages: extraImages } : {}),
+      registered: true, ...view, ...(image ? { image } : {}), ...(extraImages.length ? { moreImages: extraImages } : {}), ...(receiptOut ? { receipt: receiptOut } : {}),
       reply: [view.reply, ...more.map(forDiane.plainText)].filter(Boolean).join('\n\n'),
     };
   }
   return {
-    registered: true, reply: text, replies: [text, ...more], ...(image ? { image } : {}), ...(extraImages.length ? { moreImages: extraImages } : {}),
+    registered: true, reply: text, replies: [text, ...more], ...(image ? { image } : {}), ...(extraImages.length ? { moreImages: extraImages } : {}), ...(receiptOut ? { receipt: receiptOut } : {}),
   };
 }
 
@@ -245,6 +267,8 @@ async function answerTurn(said, files, ctx) {
     return ctx.channel === 'diane' ? format.HELP_DIANE : format.HELP(admin.name.split(' ')[0], group);
   }
   if (THANKS.test(said) && !pending) return 'You\'re welcome 🙂';
+  // "SHOW ME THE RECEIPT FOR 4" / "...for the careem taxi" (his call 2026-10-07)
+  if (RECEIPT_ASK.test(said)) return receiptFor(said, ctx);
   if (SHOW_PREVIEW.test(said)) {
     return pending?.kind === 'add' ? format.addPreview(pending.items, group) : 'There is no preview open right now. Send an expense, a receipt photo or a file and I\'ll show you one.';
   }
@@ -277,13 +301,58 @@ async function answerTurn(said, files, ctx) {
       return `${text}${ctx.answer.note}`;
     }
     case 'undo': return startUndo(ctx);
-    case 'chat': return THANKS.test(said) ? 'You\'re welcome 🙂' : ctx.channel === 'diane' ? format.HELP_DIANE : format.HELP(admin.name.split(' ')[0], group);
+    case 'chat': {
+      if (THANKS.test(said)) return 'You\'re welcome 🙂';
+      // A PREVIEW IS WAITING: say that, not the whole help (2026-10-07)
+      if (pending?.kind === 'add') {
+        const live = pending.items.filter((x) => !x.skipped);
+        const open = format.questions(live);
+        return [`${live.length} ${live.length === 1 ? 'expense is' : 'expenses are'} still waiting, not saved yet.`, ...(open.length ? open : []), '', 'Reply *yes* to save · *show me the preview* · *cancel*'].join('\n');
+      }
+      return ctx.channel === 'diane' ? format.HELP_DIANE : format.HELP(admin.name.split(' ')[0], group);
+    }
     default:
       if (ctx.channel === 'diane') return 'That isn\'t about expenses. Switch the context to Master sheet for deals, people and companies.';
       // NOT ABOUT EXPENSES ("how much am I getting paid?"): WhatBot's own
       // agent answers it, his call 2026-10-07. Nothing here is touched.
       return HAND_OFF;
   }
+}
+
+/**
+ * THE RECEIPT ITSELF, sent back: by its number in the open preview, else
+ * the latest saved expense their words name ("the careem taxi"), else the
+ * last one saved. ctx.receiptOut carries the file to the sender.
+ */
+async function receiptFor(said, ctx) {
+  const { pending } = ctx.state;
+  const n = Number(/\b(?:no\.?|number|#)?\s*(\d{1,3})\b/i.exec(said.replace(/\breceipts?\b/i, ''))?.[1] ?? 0);
+  if (pending?.kind === 'add' && n) {
+    const x = pending.items.find((i) => i.n === n);
+    if (!x) return `There is no number ${n} in your preview.`;
+    const file = await receipts.heldFile(x.receipt);
+    if (!file) return `No. ${n} came from a typed message, so there is no receipt for it.`;
+    ctx.receiptOut = file;
+    return `🧾 Receipt for *${n}. ${x.description}* (not saved yet).`;
+  }
+  const pool = require('../../../configs/db');
+  const words = said.replace(RECEIPT_ASK, ' ').replace(/\b(?:me|the|a|for|of|my|please|pls|that|this|one|last|latest)\b/gi, ' ').trim().split(/\s+/).filter((w) => w.length >= 3);
+  const scope = ctx.group === '*' ? [] : [ctx.group];
+  const { rows } = await pool.query(
+    `SELECT id, description, payee, spent_on, currency, raw_amount, receipt_path, receipt_cleared_at FROM tb_expenses
+      WHERE archived_at IS NULL ${scope.length ? 'AND group_name = $1' : ''}
+        ${words.length ? `AND (${words.map((_, i) => `(description ILIKE $${i + 1 + scope.length} OR payee ILIKE $${i + 1 + scope.length})`).join(' AND ')})` : ''}
+      ORDER BY spent_on DESC, id DESC LIMIT 1`,
+    [...scope, ...words.map((w) => `%${w}%`)],
+  );
+  const row = rows[0] ?? (ctx.state.lastIds?.length ? (await pool.query('SELECT id, description, payee, spent_on, currency, raw_amount, receipt_path, receipt_cleared_at FROM tb_expenses WHERE id = $1', [ctx.state.lastIds.at(-1)])).rows[0] : null);
+  if (!row) return 'I couldn\'t find that expense. Say which one, like _receipt for the careem taxi_.';
+  const what = `*${row.description}* · ${format.money(row.currency, Number(row.raw_amount))} · ${format.day(String(row.spent_on instanceof Date ? row.spent_on.toISOString() : row.spent_on).slice(0, 10))}`;
+  const file = await receipts.fileOf(row.id);
+  if (file.missing === 'cleared') return `${what}: its receipt was cleared (receipts are kept for 3 months).`;
+  if (file.missing) return `${what} has no receipt: it was typed, not sent as a photo or file.`;
+  ctx.receiptOut = file;
+  return `🧾 Receipt for ${what}.`;
 }
 
 /** Their words name a SAVED expense, not one in the open preview. */
@@ -326,7 +395,24 @@ async function recheck(items, ctx) {
     .map((x, i) => ({ ...x, modelDoubt: items[i].modelDoubt ?? null }));
   const dates = out.map((x) => x.spentOn).filter(Boolean).sort();
   const saved = dates.length ? await find.between(ctx.group, minus(dates[0], 1), dates.at(-1)) : [];
-  return duplicates(out, saved);
+  const checked = duplicates(out, saved);
+  /**
+   * THE SAME RECEIPT, SAVED BEFORE (his call 2026-10-07): its fingerprint is
+   * kept forever, so a receipt sent again weeks later is caught even once
+   * its file is cleared. A question, never a silent drop.
+   */
+  for (const x of checked) {
+    if (!x.receipt || x.ok || x.skipped) continue;
+    // eslint-disable-next-line no-await-in-loop
+    const hit = await receipts.seenBefore(x.receipt).catch(() => null);
+    if (hit) {
+      // the receipt says it better than "looks already saved": one note
+      x.doubts = x.doubts.filter((d) => !/^looks already saved/.test(d));
+      x.doubts.push(`same receipt as one saved on ${format.day(String(hit.spent_on instanceof Date ? hit.spent_on.toISOString() : hit.spent_on).slice(0, 10))} (${hit.payee || 'no payee'}, ${format.money(hit.currency, Number(hit.raw_amount))})`);
+      x.flag = true;
+    }
+  }
+  return checked;
 }
 
 async function addFrom(msg, ctx) {
@@ -340,7 +426,16 @@ async function addFrom(msg, ctx) {
   // MORE FOR THE SAME PREVIEW: receipts arrive one photo per message, so a
   // new batch joins the one still open rather than replacing it.
   const open = ctx.state.pending?.kind === 'add' ? ctx.state.pending.items : [];
-  let fresh = got.items.map((x, i) => ({ ...x, n: open.length + i + 1, modelDoubt: x.doubt || null }));
+  // EACH FILE HELD ONCE (shrunk, fingerprinted), and every expense read
+  // from it carries its receipt; the file's bytes never go into the chat
+  const heldFor = new Map();
+  for (const x of got.items) {
+    if (x.file && !heldFor.has(x.file)) {
+      // eslint-disable-next-line no-await-in-loop
+      heldFor.set(x.file, await receipts.hold(x.file).catch((err) => { logger.warn({ err: err.message }, 'expense bot: a receipt could not be held'); return null; }));
+    }
+  }
+  let fresh = got.items.map(({ file, ...x }, i) => ({ ...x, receipt: file ? heldFor.get(file) ?? null : null, n: open.length + i + 1, modelDoubt: x.doubt || null }));
   let items = await recheck([...open, ...fresh], ctx);
   /**
    * AN EXACT COPY OF ONE ALREADY IN THE PREVIEW ADDS NOTHING (his call
@@ -425,17 +520,46 @@ async function reviseFrom(said, ctx) {
   return format.addPreview(checked, ctx.group);
 }
 
-async function saveAdd(ctx) {
-  const items = ctx.state.pending.items.filter((x) => !x.skipped);
-  if (!items.length) { ctx.state.pending = null; return 'Nothing left to save, so nothing was saved.'; }
-  if (!ready(items)) {
-    const need = items.filter((x) => x.missing.length);
-    return `I still need ${need.map((x) => `*${x.n}* (${x.missing.map((f) => format.LABEL[f]).join(', ')})`).join(', ')} before I can save. Answer them, or *skip ${need[0].n}*.`;
+async function saveAdd(ctx, { readyOnly = false } = {}) {
+  const live = ctx.state.pending.items.filter((x) => !x.skipped);
+  const waiting = live.filter((x) => x.missing.length);
+  const items = readyOnly ? live.filter((x) => !x.missing.length) : live;
+  if (!items.length) {
+    if (readyOnly && waiting.length) return `None of them is ready yet: all ${waiting.length} still need an answer.`;
+    ctx.state.pending = null;
+    return 'Nothing left to save, so nothing was saved.';
+  }
+  /**
+   * NOT EVERYTHING IS READY: said in a few lines, never the whole preview
+   * again (live 2026-10-07: six pictures re-sent, the four missing payees
+   * never named). What is missing, by number, and the ways out.
+   */
+  if (!readyOnly && waiting.length) {
+    const ready = live.length - waiting.length;
+    // COPIES AND ONES SAVED BEFORE would be saved twice by "save the rest":
+    // said first, with their one-word way out
+    const copies = live.filter((x) => (x.doubts ?? []).some((d) => /^same as \d+/.test(d))).length;
+    const before = live.filter((x) => (x.doubts ?? []).some((d) => /^looks already saved|^same receipt as one saved/.test(d))).length;
+    const first = [copies ? `*skip copies* (${copies})` : '', before ? `*skip saved* (${before})` : ''].filter(Boolean);
+    return [
+      `I can't save all ${live.length} yet: ${waiting.length} still ${waiting.length === 1 ? 'needs' : 'need'} an answer.`,
+      ...(first.length ? [`First reply ${first.join(' and ')}, so nothing is saved twice.`] : []),
+      ...format.questions(waiting).filter((l) => !/copies|already saved|same receipt/.test(l)),
+      '',
+      `Reply with the answers (like *${waiting[0].n} paid to Careem*), *skip ${format.ranges(waiting.map((x) => x.n))}*${ready ? `, or *save the rest* to save the ${ready} ready ${ready === 1 ? 'one' : 'ones'} now and keep ${waiting.length === 1 ? 'that one' : 'these'} waiting` : ''}.`,
+    ].join('\n');
   }
   const made = await expensesRepo.createMany(items.map((x) => ({
     spentOn: x.spentOn, description: x.description, payee: x.payee, currency: x.currency, rawAmount: x.rawAmount,
-    exchangeRate: x.exchangeRate, groupName: x.groupName ?? ctx.group, spentBy: x.spentBy,
+    exchangeRate: x.exchangeRate, groupName: x.groupName ?? ctx.group, spentBy: x.spentBy, category: x.category ?? null,
   })));
+  // THE RECEIPTS GO WITH THEM, into this month's folder (receipts.js). A
+  // receipt that cannot be kept never undoes a saved expense; it is logged.
+  for (const [i, x] of items.entries()) {
+    if (!x.receipt || !made[i]) continue;
+    // eslint-disable-next-line no-await-in-loop
+    await receipts.keep(x.receipt, made[i]).catch((err) => logger.warn({ err: err.message, id: made[i].id }, 'expense bot: a receipt could not be kept'));
+  }
   // VERIFIED: read back from the table, never assumed.
   const check = await Promise.all(made.map((m) => expensesRepo.findById(m.id)));
   if (check.some((c) => !c) || made.length !== items.length) {
@@ -447,10 +571,16 @@ async function saveAdd(ctx) {
     summary: `${made.map((m) => `${m.description} · ${format.money(m.currency, m.raw_amount)}`).slice(0, 4).join(', ')}${made.length > 4 ? ` and ${made.length - 4} more` : ''}`,
   });
   broadcast(null, EVENT, { action: 'imported', count: made.length, via: 'whatbot' });
-  ctx.state.pending = null;
+  // SAVED THE READY ONES: the rest stay open, numbered again from 1
+  ctx.state.pending = readyOnly && waiting.length
+    ? { kind: 'add', items: waiting.map((x, i) => ({ ...x, n: i + 1 })), shownLast: true }
+    : null;
   ctx.state.lastIds = made.map((m) => m.id);
   ctx.state.lastSaved = items;
-  return format.saved(items, ctx.group);
+  const still = readyOnly && waiting.length
+    ? `\n\n⏳ *${waiting.length} still waiting* (now ${waiting.length === 1 ? 'no. 1' : `numbered 1–${waiting.length}`}): ${format.questions(ctx.state.pending.items).map((l) => l.replace(/^• /, '').replace(/[?.]$/, '')).join('; ')}? Answer ${waiting.length === 1 ? 'it' : 'them'}, or *cancel* to drop ${waiting.length === 1 ? 'it' : 'them'}.`
+    : '';
+  return `${format.saved(items, ctx.group)}${still}`;
 }
 
 // ---- answers to what is open, read in code ----
@@ -468,6 +598,10 @@ async function onReply(r, ctx) {
     const row = await expensesRepo.findById(id);
     if (!row) { ctx.state.pending = null; return 'That expense is no longer there. Nothing was changed.'; }
     return pending.then.kind === 'edit' ? editPreviewFor(row, pending.then.changes, ctx) : removePreviewFor([row], ctx);
+  }
+  if (r.kind === 'saveReady') {
+    if (pending.kind !== 'add') return 'There is nothing waiting to save.';
+    return saveAdd(ctx, { readyOnly: true });
   }
   if (r.kind === 'yes') {
     // ONLY WHAT WAS SHOWN LAST. Another reply came in between, so this yes

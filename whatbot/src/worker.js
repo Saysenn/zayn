@@ -131,6 +131,17 @@ const messageWorker = new Worker(
     // a second or third bubble (the expense bot's rates), in order
     for (const t of reply.more ?? []) await sendText(from, to, t);
 
+    // THE RECEIPT THEY ASKED FOR, after the line that names it: a photo as a
+    // picture, a PDF or a sheet as a file. Only ever on their request.
+    if (reply.receipt) {
+      const content = Buffer.from(reply.receipt.base64, "base64");
+      if (/^image\//.test(reply.receipt.mime)) {
+        await sendImage(from, to, { content, caption: "", mimetype: reply.receipt.mime });
+      } else {
+        await sendDocument(from, to, { content, fileName: reply.receipt.filename ?? "receipt", mimetype: reply.receipt.mime, caption: "" });
+      }
+    }
+
     // The file goes SECOND. A document arriving before the sentence that
     // explains it is a file from a number you did not expect one from.
     if (reply.attachment) {

@@ -53,6 +53,46 @@ const STICKY = 'expenses';
 // One row of the table, so the column list is written once.
 const asList = (values) => values.map((v) => ({ value: v, label: v }));
 
+/**
+ * THE RECEIPT, OPENED IN A NEW TAB. Kept for the current month and the two
+ * before (expenses/bot/receipts.js); older says so rather than linking to
+ * nothing. Fetched with the sign-in cookie, so it is never a public link.
+ */
+function ReceiptLink({ row }) {
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  if (!row.receipt_path) {
+    return row.receipt_cleared_at
+      ? <span className="text-[11px] text-text-faint" title="Receipts are kept for 3 months">receipt cleared</span>
+      : null;
+  }
+  const open = async () => {
+    setBusy(true);
+    setFailed(false);
+    try {
+      const { blob } = await apiService.expenseReceipt.get(row.id);
+      window.open(URL.createObjectURL(blob), '_blank', 'noopener');
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={open}
+      disabled={busy}
+      title={failed ? 'Receipt unavailable' : 'View the receipt'}
+      aria-label={`View the receipt for ${row.description}`}
+      className="btn-quiet inline-flex h-6 min-h-0 items-center gap-1 rounded border border-border bg-surface px-1.5 py-0 text-[11px] font-medium text-accent-strong hover:border-accent disabled:opacity-50"
+    >
+      <ReceiptIcon width={12} height={12} />
+      {failed ? 'Unavailable' : busy ? '…' : 'Receipt'}
+    </button>
+  );
+}
+
 export default function ExpensesPage() {
   const [page, setPage] = useState(1);
   const [adding, setAdding] = useState(false);
@@ -322,6 +362,7 @@ export default function ExpensesPage() {
               <th className="th">Date</th>
               <th className="th">Description</th>
               <th className="th">Payee</th>
+              <th className="th">Category</th>
               <th className="th">Currency</th>
               <th className="th text-right tabular-nums">Raw amount</th>
               <th className="th text-right tabular-nums">Rate</th>
@@ -333,7 +374,7 @@ export default function ExpensesPage() {
           </thead>
           <tbody>
             {isLoading ? (
-              <TableSkeleton columns={11} />
+              <TableSkeleton columns={12} />
             ) : rows?.length ? rows.map((row) => (
               <tr
                 key={row.id}
@@ -376,6 +417,14 @@ export default function ExpensesPage() {
                   value={row.payee}
                   onSave={(v) => saveCell(row, 'payee', v)}
                 />
+                {/* CATEGORY AND RECEIPT, one compact cell beside the payee:
+                    two columns at the far end sat off screen (2026-10-07) */}
+                <td className="td whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="capitalize text-text-muted">{row.category ?? NO_VALUE}</span>
+                    <ReceiptLink row={row} />
+                  </span>
+                </td>
                 <EditableCell
                   type="suggest"
                   suggestions={currencyOptions}
@@ -439,7 +488,7 @@ export default function ExpensesPage() {
             )) : !error && (
               <EmptyState
                 asRow
-                colSpan={11}
+                colSpan={12}
                 icon={ReceiptIcon}
                 title={filterCount > 0 || q ? 'No expense matches these filters' : 'Nothing here yet'}
                 hint={filterCount > 0 || q ? undefined : `Nothing recorded for ${when ?? 'this month'} yet.`}

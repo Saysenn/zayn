@@ -35,7 +35,7 @@ async function between(group, from, to) {
 
 /** Saved expenses as the bot shows them (camel case). */
 const asItem = (r) => ({
-  groupName: r.group_name, id: r.id, spentOn: iso(r.spent_on), description: r.description, payee: r.payee, rawAmount: Number(r.raw_amount), currency: r.currency, spentBy: r.spent_by, aed: r.aed_amount == null ? null : Number(r.aed_amount),
+  groupName: r.group_name, id: r.id, spentOn: iso(r.spent_on), description: r.description, payee: r.payee, rawAmount: Number(r.raw_amount), currency: r.currency, spentBy: r.spent_by, aed: r.aed_amount == null ? null : Number(r.aed_amount), category: r.category ?? null,
 });
 
 // Split FIRST, then fold each word: fold() drops spaces, so "Stationery Sara"
@@ -103,7 +103,12 @@ async function answer(scopeGroup, query, { today, out = null }) {
   const to = /^\d{4}-\d{2}-\d{2}$/.test(query.to) ? query.to : today;
   let rows = (await between(group, from, to)).map(asItem);
   const want = wordsOf(query.words);
-  if (want.length) rows = rows.filter((r) => want.some((w) => wordsOf(`${r.description} ${r.payee} ${r.spentBy}`).some((h) => h === w || h.startsWith(w))));
+  // A CATEGORY WORD is the category ("how much on fuel"), not a search
+  const CATEGORY_WORD = { fuel: 'fuel', petrol: 'fuel', travel: 'travel', transport: 'travel', food: 'food', meal: 'food', office: 'office', bill: 'bills', utility: 'bills', other: 'other' };
+  const cats = want.map((w) => CATEGORY_WORD[w]).filter(Boolean);
+  if (cats.length) rows = rows.filter((r) => cats.includes(r.category));
+  const rest = want.filter((w) => !CATEGORY_WORD[w]);
+  if (rest.length) rows = rows.filter((r) => rest.some((w) => wordsOf(`${r.description} ${r.payee} ${r.spentBy}`).some((h) => h === w || h.startsWith(w))));
   const span = from === to ? format.day(from) : `${format.day(from)} – ${format.day(to)}`;
   const scope = `${group === ALL ? 'all groups' : group}${want.length ? ` · "${query.words}"` : ''} · ${span}`;
   if (!rows.length) return `No expenses found for ${scope}.`;
@@ -114,7 +119,7 @@ async function answer(scopeGroup, query, { today, out = null }) {
   const totalLine = `*${format.money('AED', Math.round(aedTotal * 100) / 100)}* (${rows.length} ${rows.length === 1 ? 'expense' : 'expenses'})${noRate ? ` _· ${noRate} with no AED rate not counted_` : ''}`;
 
   if (query.groupBy) {
-    const key = { group: (r) => r.groupName, payee: (r) => r.payee || 'no payee', spentBy: (r) => r.spentBy || 'nobody', day: (r) => format.day(r.spentOn), currency: (r) => r.currency, description: (r) => r.description }[query.groupBy];
+    const key = { group: (r) => r.groupName, payee: (r) => r.payee || 'no payee', spentBy: (r) => r.spentBy || 'nobody', day: (r) => format.day(r.spentOn), currency: (r) => r.currency, description: (r) => r.description, category: (r) => (r.category ? `${r.category.charAt(0).toUpperCase()}${r.category.slice(1)}` : 'Not set') }[query.groupBy];
     const groups = new Map();
     for (const r of rows) {
       const k = key(r);
@@ -126,12 +131,12 @@ async function answer(scopeGroup, query, { today, out = null }) {
     const sorted = [...groups].sort((a, b) => b[1].aed - a[1].aed);
     const lines = sorted.slice(0, 20)
       .map(([k, g]) => `• ${k}: *${format.money('AED', Math.round(g.aed * 100) / 100)}* (${g.n})`);
-    const by = { group: 'GROUP', payee: 'PAYEE', spentBy: 'PERSON', day: 'DAY', currency: 'CURRENCY', description: 'ITEM' }[query.groupBy];
+    const by = { group: 'GROUP', payee: 'PAYEE', spentBy: 'PERSON', day: 'DAY', currency: 'CURRENCY', description: 'ITEM', category: 'CATEGORY' }[query.groupBy];
     const head = `📊 *SPENDING BY ${by}* · ${scope}`;
     if (out) {
       out.table = {
         title: `Spending by ${by.toLowerCase()}`, subtitle: `${scope} · ${rows.length} expenses`,
-        columns: [{ label: { group: 'Group', payee: 'Paid to', spentBy: 'Person', day: 'Day', currency: 'Currency', description: 'Item' }[query.groupBy], weight: 3 }, { label: 'Expenses', weight: 1, align: 'right' }, { label: 'AED', weight: 1.6, align: 'right' }],
+        columns: [{ label: { group: 'Group', payee: 'Paid to', spentBy: 'Person', day: 'Day', currency: 'Currency', description: 'Item', category: 'Category' }[query.groupBy], weight: 3 }, { label: 'Expenses', weight: 1, align: 'right' }, { label: 'AED', weight: 1.6, align: 'right' }],
         sections: [{ rows: sorted.map(([k, g]) => ({ cells: [k, String(g.n), format.money('AED', Math.round(g.aed * 100) / 100)] })) }],
         total: { value: format.money('AED', Math.round(aedTotal * 100) / 100), ...(noRate ? { sub: `${noRate} with no AED rate not counted` } : {}) },
       };
