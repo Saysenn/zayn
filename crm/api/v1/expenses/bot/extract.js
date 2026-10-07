@@ -16,8 +16,9 @@ const { fold } = require('../../masterSheet/dealKey');
 const LINE = {
   type: 'object',
   additionalProperties: false,
-  required: ['spentOn', 'description', 'payee', 'rawAmount', 'currency', 'spentBy', 'source', 'doubt'],
+  required: ['groupName', 'spentOn', 'description', 'payee', 'rawAmount', 'currency', 'spentBy', 'source', 'doubt'],
   properties: {
+    groupName: { type: 'string' },
     spentOn: { type: 'string' },
     description: { type: 'string' },
     payee: { type: 'string' },
@@ -37,9 +38,10 @@ const LINES = {
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-function rules(today) {
+function rules(today, groups = []) {
   const wd = WEEKDAYS[new Date(`${today}T00:00:00Z`).getUTCDay()];
   return [
+    groups.length ? `groupName: the company group it is for, ONLY if they name one of: ${groups.join(', ')}. "" otherwise.` : 'groupName: always "".',
     'You read business EXPENSES (money spent) sent by an admin to a company bot. Output JSON only.',
     `Today is ${wd} ${today}. Dates as YYYY-MM-DD: "today", "yesterday", "monday" mean the most recent such day.`,
     'Day-first dates (UK and UAE): 06/10 is 6 October. A receipt date is the date of the expense.',
@@ -59,8 +61,8 @@ function rules(today) {
 }
 
 /** From their words. */
-async function fromText(text, { today, client } = {}) {
-  const got = await ask({ name: 'expenses', system: rules(today), user: String(text), schema: LINES, client });
+async function fromText(text, { today, client, groups } = {}) {
+  const got = await ask({ name: 'expenses', system: rules(today, groups), user: String(text), schema: LINES, client });
   return got.expenses ?? [];
 }
 
@@ -69,7 +71,7 @@ async function fromText(text, { today, client } = {}) {
  * all of them, so "these are yesterday's" applies to every one.
  * @param {{ mime: string, base64: string, filename?: string }[]} media
  */
-async function fromMedia(media, caption, { today, client } = {}) {
+async function fromMedia(media, caption, { today, client, groups } = {}) {
   let photo = 0;
   const parts = [{ type: 'text', text: `Their message with it: "${caption || '(none)'}"` }];
   for (const m of media) {
@@ -82,13 +84,13 @@ async function fromMedia(media, caption, { today, client } = {}) {
       parts.push({ type: 'file', file: { filename: m.filename || 'receipt.pdf', file_data: `data:application/pdf;base64,${m.base64}` } });
     }
   }
-  const got = await ask({ name: 'expenses', system: rules(today), user: parts, schema: LINES, client });
+  const got = await ask({ name: 'expenses', system: rules(today, groups), user: parts, schema: LINES, client });
   return got.expenses ?? [];
 }
 
 // ---- a spreadsheet, CSV or Word table ----
 
-const FIELDS = ['spentOn', 'description', 'payee', 'rawAmount', 'currency', 'spentBy', 'other'];
+const FIELDS = ['groupName', 'spentOn', 'description', 'payee', 'rawAmount', 'currency', 'spentBy', 'other'];
 const MAP = {
   type: 'object',
   additionalProperties: false,
@@ -174,7 +176,7 @@ async function fromTables(tables, { today, client } = {}) {
     name: 'expense_columns',
     system: [
       'You read the LAYOUT of tables from a file of business expenses. For each table say if it lists expenses',
-      '(isExpenses), and what each column means: spentOn (date), description (what for), payee (paid to / vendor /',
+      '(isExpenses), and what each column means: groupName (company group / team), spentOn (date), description (what for), payee (paid to / vendor /',
       'merchant), rawAmount (amount / cost / total), currency, spentBy (who spent / paid by / staff), or other.',
       'currency: the currency the whole table is in if a header or title says so ("Amount (AED)"), else "".',
       'Decide from the headers and rows only; never invent.',
@@ -200,6 +202,7 @@ async function fromTables(tables, { today, client } = {}) {
       const rawDay = get('spentOn');
       const spentOn = dayOf(rawDay, year);
       items.push({
+        groupName: get('groupName') == null ? '' : String(get('groupName')),
         spentOn: spentOn ?? '',
         description: description == null ? '' : String(description),
         payee: get('payee') == null ? '' : String(get('payee')),
@@ -218,7 +221,7 @@ async function fromTables(tables, { today, client } = {}) {
  * Everything they sent this turn, as expense lines.
  * @param {{ text?: string, attachments?: { filename, mime, base64 }[] }} msg
  */
-async function extract(msg, { today, client } = {}) {
+async function extract(msg, { today, client, groups = [] } = {}) {
   const files = msg.attachments ?? [];
   const media = files.filter((f) => /^image\//.test(f.mime) || /pdf/.test(f.mime));
   const docs = files.filter((f) => !media.includes(f));
@@ -235,13 +238,13 @@ async function extract(msg, { today, client } = {}) {
       notes.push(...read.skipped);
     } else if (String(got.text ?? '').trim()) {
       // eslint-disable-next-line no-await-in-loop
-      out.push(...(await fromText(`${msg.text ? `${msg.text}\n\n` : ''}From the file ${d.filename}:\n${got.text}`, { today, client })));
+      out.push(...(await fromText(`${msg.text ? `${msg.text}\n\n` : ''}From the file ${d.filename}:\n${got.text}`, { today, client, groups })));
     } else {
       notes.push(`${d.filename}: nothing in it to read`);
     }
   }
-  if (media.length) out.push(...(await fromMedia(media, msg.text, { today, client })));
-  else if (!docs.length && String(msg.text ?? '').trim()) out.push(...(await fromText(msg.text, { today, client })));
+  if (media.length) out.push(...(await fromMedia(media, msg.text, { today, client, groups })));
+  else if (!docs.length && String(msg.text ?? '').trim()) out.push(...(await fromText(msg.text, { today, client, groups })));
   return { items: out.map((x, i) => ({ ...x, n: i + 1 })), notes };
 }
 

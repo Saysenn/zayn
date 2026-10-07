@@ -10,7 +10,7 @@ const { ask } = require('./ai');
 // value is checked by code before anything is written.
 
 const KINDS = ['add', 'edit', 'remove', 'question', 'undo', 'answer', 'chat', 'other'];
-const FIELDS = ['spentOn', 'description', 'payee', 'rawAmount', 'currency', 'spentBy'];
+const FIELDS = ['groupName', 'spentOn', 'description', 'payee', 'rawAmount', 'currency', 'spentBy'];
 
 const TARGET = {
   type: 'object',
@@ -44,11 +44,12 @@ const ROUTE = {
     query: {
       type: 'object',
       additionalProperties: false,
-      required: ['from', 'to', 'groupBy', 'measure', 'words'],
+      required: ['from', 'to', 'groupBy', 'measure', 'words', 'group'],
       properties: {
         from: { type: 'string' },
         to: { type: 'string' },
-        groupBy: { type: 'string', enum: ['', 'payee', 'spentBy', 'day', 'currency', 'description'] },
+        group: { type: 'string' },
+        groupBy: { type: 'string', enum: ['', 'group', 'payee', 'spentBy', 'day', 'currency', 'description'] },
         measure: { type: 'string', enum: ['list', 'total', 'count', 'biggest'] },
         words: { type: 'string' },
       },
@@ -56,8 +57,9 @@ const ROUTE = {
   },
 };
 
-function routePrompt(today, pending) {
+function routePrompt(today, pending, groups = []) {
   return [
+    ...(groups.length ? [`Company groups: ${groups.join(', ')}. query.group = one of them if the question names it, else "".`] : ['query.group: always "".']),
     'Classify ONE WhatsApp message sent by a company admin to an EXPENSES bot. Answer only from the choices.',
     `Today is ${today}. Dates as YYYY-MM-DD.`,
     'add: they give NEW expenses to save (something bought/paid with an amount): "taxi 45", "paid 300 to DEWA".',
@@ -77,9 +79,9 @@ function routePrompt(today, pending) {
   ].join('\n');
 }
 
-async function route(text, { today, pending = false, lastReply = '', client } = {}) {
+async function route(text, { today, pending = false, lastReply = '', client, groups = [] } = {}) {
   const user = lastReply ? `The bot's last message:\n${String(lastReply).slice(0, 700)}\n\nTheir message:\n${text}` : String(text);
-  return ask({ light: true, name: 'route', system: routePrompt(today, pending), user, schema: ROUTE, client });
+  return ask({ light: true, name: 'route', system: routePrompt(today, pending, groups), user, schema: ROUTE, client });
 }
 
 // ---- an answer to the preview that code could not read ----
@@ -109,9 +111,9 @@ const REVISE = {
 };
 
 /** Their answer to the open preview, as changes code then checks. */
-async function revise(text, items, { today, client } = {}) {
+async function revise(text, items, { today, client, groups = [] } = {}) {
   const shown = items.filter((x) => !x.skipped).map((x) => ({
-    n: x.n, spentOn: x.spentOn, description: x.description, payee: x.payee, rawAmount: x.rawAmount, currency: x.currency, spentBy: x.spentBy, missing: x.missing, doubts: x.doubts,
+    n: x.n, groupName: x.groupName, spentOn: x.spentOn, description: x.description, payee: x.payee, rawAmount: x.rawAmount, currency: x.currency, spentBy: x.spentBy, missing: x.missing, doubts: x.doubts,
   }));
   return ask({
     name: 'revise',
@@ -123,6 +125,7 @@ async function revise(text, items, { today, client } = {}) {
       'cancel: true if they drop the whole thing. newExpenses: extra expenses they add now (same fields as the rest,',
       '"" for anything not given; source "message"). unclear: a short question if you cannot tell what they mean, else "".',
       'Never invent a value. Only change what they said.',
+      ...(groups.length ? [`groupName is one of: ${groups.join(', ')}.`] : []),
     ].join('\n'),
     user: `The expenses shown:\n${JSON.stringify(shown)}\n\nTheir reply:\n${text}`,
     schema: REVISE,

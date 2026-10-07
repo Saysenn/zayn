@@ -1,5 +1,6 @@
 const { dayOf } = require('./extract');
-const { currencyOf, num } = require('./check');
+const { fold } = require('../../masterSheet/dealKey');
+const { currencyOf, num, groupOf } = require('./check');
 
 // ***************************************************
 // * THEIR ANSWER TO A PREVIEW, READ IN CODE
@@ -30,6 +31,7 @@ function valueFor(field, raw, year) {
 }
 
 const FIELD_WORDS = [
+  [/^(?:group)\s*(?:is|=|:)?\s+(.+)$/i, 'groupName'],
   [/^(?:amount|cost|price|total)\s*(?:is|=|:)?\s+(.+)$/i, 'rawAmount'],
   [/^(?:date|day|on)\s*(?:is|=|:)?\s+(.+)$/i, 'spentOn'],
   [/^(?:paid to|payee|to|at|from|vendor|shop)\s*(?:is|=|:)?\s+(.+)$/i, 'payee'],
@@ -42,8 +44,10 @@ const FIELD_WORDS = [
  * "150", "5 Oct", "GBP", "fine": a bare value after "2 is". What it looks
  * like decides the field; something that could be two things is not read.
  */
-function bareValue(rest, year) {
+function bareValue(rest, year, groups = []) {
   const v = rest.trim();
+  const g = groupOf(v, groups);
+  if (g && fold(v) === fold(g)) return { field: 'groupName', value: g };
   if (/^(?:fine|ok(?:ay)?|right|correct|good|real|not a duplicate|keep it)$/i.test(v)) return { ok: true };
   if (/^(?:today|yesterday)$/i.test(v)) return { field: 'spentOn', value: v.toLowerCase() };
   const d = dayOf(v, year);
@@ -59,7 +63,7 @@ function bareValue(rest, year) {
 }
 
 /** One "2 is 150" / "all paid to Careem" part, or null. */
-function onePart(part, count, year) {
+function onePart(part, count, year, groups = []) {
   const m = /^(?:#|no\.?\s*|number\s+)?(\d+|all|every(?:one| one)?|both)\s*(?:is|=|:|-|was|should be)?\s*(.+)$/i.exec(part.trim());
   if (!m) return null;
   const which = /^\d+$/.test(m[1]) ? [Number(m[1])] : Array.from({ length: count }, (_, i) => i + 1);
@@ -72,7 +76,7 @@ function onePart(part, count, year) {
       return value === null ? null : { which, fixes: [{ field, value }] };
     }
   }
-  const bare = bareValue(rest, year);
+  const bare = bareValue(rest, year, groups);
   if (!bare) return null;
   if (bare.ok) return { which, ok: true };
   return { which, fixes: bare.fixes ?? [{ field: bare.field, value: bare.value }] };
@@ -83,7 +87,7 @@ function onePart(part, count, year) {
  * @param {object} pending the preview waiting on them
  * @returns {null | { kind: 'yes'|'no'|'skip'|'only'|'fix'|'pick', ... }}
  */
-function readReply(said, pending, { year = new Date().getUTCFullYear() } = {}) {
+function readReply(said, pending, { year = new Date().getUTCFullYear(), groups = [] } = {}) {
   const text = String(said ?? '').trim().replace(/\s+/g, ' ');
   if (!text || !pending) return null;
   const bare = text.toLowerCase().replace(/[!.]+$/, '').replace(/,? ?(?:please|pls|thanks|thank you)$/, '').trim();
@@ -117,7 +121,7 @@ function readReply(said, pending, { year = new Date().getUTCFullYear() } = {}) {
 
   // FIXES, one or several: "2 is 150, 3 paid to Careem", one per line too.
   const parts = text.split(/\s*(?:[;\n]|,\s*(?=(?:#|no\.?\s*)?\d+\b|all\b)|\band\s+(?=(?:#|no\.?\s*)?\d+\s))\s*/i).filter(Boolean);
-  const read = parts.map((p) => onePart(p, count, year));
+  const read = parts.map((p) => onePart(p, count, year, groups));
   if (read.length && read.every(Boolean)) {
     const oks = read.filter((r) => r.ok);
     return { kind: 'fix', parts: read.filter((r) => !r.ok), ok: oks.flatMap((r) => r.which) };

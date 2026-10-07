@@ -37,13 +37,13 @@ function totals(items) {
 }
 
 const LABEL = {
-  spentOn: 'date', description: 'what it was for', rawAmount: 'amount', currency: 'currency', payee: 'paid to', spentBy: 'spent by',
+  groupName: 'group', spentOn: 'date', description: 'what it was for', rawAmount: 'amount', currency: 'currency', payee: 'paid to', spentBy: 'spent by',
 };
 
 /** One expense as two short lines. */
-function line(x, { number = true } = {}) {
+function line(x, { number = true, group = false } = {}) {
   const head = `${number ? `${x.n}. ` : ''}${x.flag ? '⚠️ ' : ''}${x.description || '_no description_'} · *${x.rawAmount == null ? '? ' : money(x.currency, x.rawAmount)}*`;
-  const bits = [x.spentOn ? day(x.spentOn) : null, x.payee ? `paid to ${x.payee}` : null, x.spentBy ? `by ${x.spentBy}` : null].filter(Boolean);
+  const bits = [group ? x.groupName || null : null, x.spentOn ? day(x.spentOn) : null, x.payee ? `paid to ${x.payee}` : null, x.spentBy ? `by ${x.spentBy}` : null].filter(Boolean);
   const notes = [
     ...(x.missing ?? []).map((f) => `${LABEL[f] ?? f} missing`),
     ...(x.doubts ?? []),
@@ -60,7 +60,8 @@ function line(x, { number = true } = {}) {
 function addPreview(items, group) {
   const live = items.filter((x) => !x.skipped);
   const problems = live.filter((x) => x.flag);
-  const out = [`*${live.length} ${live.length === 1 ? 'expense' : 'expenses'} for ${group}* (not saved yet)`];
+  const all = group === '*';
+  const out = [`*${live.length} ${live.length === 1 ? 'expense' : 'expenses'}${all ? '' : ` for ${group}`}* (not saved yet)`];
   if (problems.length) {
     const asks = problems.filter((x) => x.missing?.length).length;
     out.push('', asks ? `⚠️ *${problems.length} ${problems.length === 1 ? 'needs' : 'need'} an answer*` : `⚠️ *${problems.length} to check*`);
@@ -70,13 +71,14 @@ function addPreview(items, group) {
     }
   }
   out.push('');
-  for (const x of live.slice(0, SHOWN)) out.push(line(x));
+  for (const x of live.slice(0, SHOWN)) out.push(line(x, { group: all }));
   if (live.length > SHOWN) out.push(`_…and ${live.length - SHOWN} more, saved together with these._`);
   out.push('', `Total ${totals(live)}`);
   const n = problems[0]?.n ?? live.at(-1)?.n ?? 1;
   const missing = live.filter((x) => x.missing?.length);
   const m = missing[0];
-  const example = m && (m.missing.includes('spentOn') ? `*${m.n} is 5 Oct*` : m.missing.includes('payee') ? `*${m.n} paid to Careem*`
+  const example = m && (m.missing.includes('groupName') ? `*${m.n} is MANBAT*` : m.missing.includes('spentBy') ? `*${m.n} by Gary*`
+    : m.missing.includes('spentOn') ? `*${m.n} is 5 Oct*` : m.missing.includes('payee') ? `*${m.n} paid to Careem*`
     : m.missing.includes('rawAmount') ? `*${m.n} is 150*` : `*${m.n} description Taxi*`);
   out.push('', missing.length
     ? `Answer the ⚠️ ones (like ${example}), *skip ${m.n}* to leave one out, or *cancel*.`
@@ -86,28 +88,28 @@ function addPreview(items, group) {
   return out.join('\n');
 }
 
-const FIELD = { spentOn: 'date', description: 'description', rawAmount: 'amount', currency: 'currency', payee: 'paid to', spentBy: 'spent by' };
+const FIELD = { groupName: 'group', spentOn: 'date', description: 'description', rawAmount: 'amount', currency: 'currency', payee: 'paid to', spentBy: 'spent by' };
 const shown = (field, v) => (v == null || v === '' ? 'blank' : field === 'spentOn' ? day(v) : field === 'rawAmount' ? amount(v) : String(v));
 
 /** A change to one saved expense, before → after. */
-function editPreview(expense, fields) {
-  const out = ['*Change this expense?* (not saved yet)', '', line({ ...expense, n: null }, { number: false }), ''];
+function editPreview(expense, fields, { group = false } = {}) {
+  const out = ['*Change this expense?* (not saved yet)', '', line({ ...expense, n: null }, { number: false, group }), ''];
   for (const [f, v] of Object.entries(fields)) out.push(`• ${FIELD[f] ?? f}: ${shown(f, expense[f])} → *${shown(f, v)}*`);
   out.push('', 'Reply *yes* to change it, or *cancel*.');
   return out.join('\n');
 }
 
-function removePreview(list) {
+function removePreview(list, { group = false } = {}) {
   const out = [`*Remove ${list.length === 1 ? 'this expense' : `these ${list.length} expenses`}?* (not removed yet)`, ''];
-  for (const x of list) out.push(line({ ...x, n: null }, { number: false }));
+  for (const x of list) out.push(line({ ...x, n: null }, { number: false, group }));
   out.push('', `Total ${totals(list)}`, '', `Reply *yes* to remove ${list.length === 1 ? 'it' : 'them'}, or *cancel*. You can *undo* afterwards.`);
   return out.join('\n');
 }
 
 /** Which one did they mean: numbered, newest first. */
-function pickList(list, what) {
+function pickList(list, what, { group = false } = {}) {
   const out = [`*Which one ${what}?*`, ''];
-  list.forEach((x, i) => out.push(line({ ...x, n: i + 1 })));
+  list.forEach((x, i) => out.push(line({ ...x, n: i + 1 }, { group })));
   out.push('', `Reply with the number, like *${Math.min(2, list.length)}*, or *cancel*.`);
   return out.join('\n');
 }
@@ -117,8 +119,8 @@ function undoPreview(action) {
   return [`*Undo this?* (nothing changed yet)`, '', `${verb[0].toUpperCase()}${verb.slice(1)}: ${action.summary}`, '', 'Reply *yes* to undo, or *cancel*.'].join('\n');
 }
 
-const saved = (items, group) => `✅ *Saved ${items.length} ${items.length === 1 ? 'expense' : 'expenses'}* · ${totals(items)} · ${group}\nReply *undo* to take ${items.length === 1 ? 'it' : 'them'} back.`;
-const changed = (x) => `✅ *Changed.*\n${line({ ...x, n: null }, { number: false })}\nReply *undo* to put it back.`;
+const saved = (items, group) => `✅ *Saved ${items.length} ${items.length === 1 ? 'expense' : 'expenses'}* · ${totals(items)} · ${group === '*' ? [...new Set(items.map((x) => x.groupName))].join(', ') : group}\nReply *undo* to take ${items.length === 1 ? 'it' : 'them'} back.`;
+const changed = (x, { group = false } = {}) => `✅ *Changed.*\n${line({ ...x, n: null }, { number: false, group })}\nReply *undo* to put it back.`;
 const removed = (list) => `✅ *Removed ${list.length === 1 ? 'it' : `${list.length} expenses`}.* Reply *undo* to bring ${list.length === 1 ? 'it' : 'them'} back.`;
 
 const HELP = (name, group) => [
@@ -133,6 +135,18 @@ const HELP = (name, group) => [
   'Type *payments* to ask about your own pay instead.',
 ].join('\n');
 
+const HELP_DIANE = [
+  'Expenses, for any group. Tell me what was spent and I\'ll save it.',
+  '',
+  '• "taxi to office 45 for MANBAT, paid to Careem, by Gary"',
+  '• Attach a receipt photo, a PDF or a spreadsheet',
+  '• "change the taxi to 50" · "remove yesterday\'s lunch"',
+  '• "how much did INDIGO spend this month?"',
+  '',
+  'I show what I read before anything is saved.',
+].join('\n');
+
 module.exports = {
+  HELP_DIANE,
   day, amount, money, totals, line, addPreview, editPreview, removePreview, pickList, undoPreview, saved, changed, removed, HELP, LABEL,
 };

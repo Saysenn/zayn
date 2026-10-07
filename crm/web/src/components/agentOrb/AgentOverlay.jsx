@@ -1274,10 +1274,16 @@ export default function AgentOverlay({ open, onClose }) {
   // Their words, and the file if one is held: the transcript shows its name.
   function sendTyped() {
     if (!attached) return sendMessage(input);
-    if (!input.trim() || isSending) return undefined;
+    // A RECEIPT NEEDS NO WORDS: in expenses the photo is the message.
+    if ((!input.trim() && !attached.fileId) || isSending) return undefined;
     const file = attached;
     setAttached(null);
-    return sendMessage(`📎 ${file.filename}\n${input.trim()}`, history, { attachment: { filename: file.filename, text: file.text, tables: file.tables } });
+    const said = `📎 ${file.filename}${input.trim() ? `\n${input.trim()}` : ''}`;
+    return sendMessage(said, history, {
+      attachment: file.fileId
+        ? { filename: file.filename, fileId: file.fileId }
+        : { filename: file.filename, text: file.text, tables: file.tables },
+    });
   }
 
   /**
@@ -1362,18 +1368,25 @@ export default function AgentOverlay({ open, onClose }) {
   const fileRef = useRef(null);
   const [attaching, setAttaching] = useState(false);
   const [attached, setAttached] = useState(null);
+  // A file belongs to the context it was attached in: a deals sheet held
+  // when switching to Expenses (or a receipt the other way) is dropped.
+  useEffect(() => { setAttached(null); }, [context]);
   async function attachFile(file) {
     if (!file || isSending || attaching) return;
     setAttaching(true);
     try {
       const body = new FormData();
       body.append('file', file);
-      const res = await whenReachable(() => fetch(`${BASE_URL}/api/v1/master-sheet/agent/attach`, { method: 'POST', credentials: 'include', body }));
+      // EXPENSES: a receipt photo, a PDF or a sheet, held on the server by id
+      // and read by the expense brain when the message goes.
+      const forExpenses = context === 'expenses';
+      const route = forExpenses ? 'expenses/agent/attach' : 'master-sheet/agent/attach';
+      const res = await whenReachable(() => fetch(`${BASE_URL}/api/v1/${route}`, { method: 'POST', credentials: 'include', body }));
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || data.message || `I couldn't open ${file.name}. Is it an Excel, CSV or text file?`);
-      setAttached({
-        filename: data.filename, text: data.text ?? '', lines: data.lines, tables: data.tables ?? [],
-      });
+      setAttached(forExpenses
+        ? { filename: data.filename, fileId: data.fileId, kind: /^image\//.test(data.mime) ? 'photo' : /pdf/.test(data.mime) ? 'PDF' : 'file' }
+        : { filename: data.filename, text: data.text ?? '', lines: data.lines, tables: data.tables ?? [] });
       inputRef.current?.focus?.();
     } catch (err) {
       // In words, never the browser's own: "Failed to fetch" was shown raw.
@@ -1957,7 +1970,7 @@ export default function AgentOverlay({ open, onClose }) {
                 <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-diane-signal/50 bg-diane-signal/10 px-3 py-1 text-[11px] text-diane-signal">
                   <PaperclipIcon width={12} height={12} />
                   <span className="truncate max-w-[16rem]">{attached.filename}</span>
-                  <span className="text-white/40">· {attached.lines} lines</span>
+                  <span className="text-white/40">· {attached.fileId ? attached.kind : `${attached.lines} lines`}</span>
                   <button
                     type="button"
                     onClick={() => setAttached(null)}
@@ -2005,7 +2018,9 @@ export default function AgentOverlay({ open, onClose }) {
                   <input
                     ref={fileRef}
                     type="file"
-                    accept=".xlsx,.csv,.txt,.tsv,.json,.docx"
+                    accept={context === 'expenses'
+                      ? 'image/*,.pdf,.xlsx,.csv,.txt,.tsv,.json,.docx'
+                      : '.xlsx,.csv,.txt,.tsv,.json,.docx'}
                     className="hidden"
                     onChange={(e) => attachFile(e.target.files?.[0])}
                   />
@@ -2014,8 +2029,10 @@ export default function AgentOverlay({ open, onClose }) {
                     onClick={() => fileRef.current?.click()}
                     disabled={isSending || attaching || Boolean(attached)}
                     className="shrink-0 w-11 h-11 rounded-full flex items-center justify-center border min-h-0 p-0 transition-colors disabled:opacity-30 border-diane-line/60 bg-transparent text-diane-signal hover:border-diane-signal"
-                    aria-label="Attach a sheet for Diane to check"
-                    title="Attach a sheet (.xlsx, .csv, .txt) to check against the CRM"
+                    aria-label={context === 'expenses' ? 'Attach a receipt or file for Diane' : 'Attach a sheet for Diane to check'}
+                    title={context === 'expenses'
+                      ? 'Attach a receipt photo, PDF or sheet of expenses'
+                      : 'Attach a sheet (.xlsx, .csv, .txt) to check against the CRM'}
                   >
                     <PaperclipIcon width={17} height={17} />
                   </button>
@@ -2026,7 +2043,7 @@ export default function AgentOverlay({ open, onClose }) {
                   <button
                     type="submit"
                     className="shrink-0 w-11 h-11 rounded-full flex items-center justify-center border min-h-0 p-0 transition-colors disabled:opacity-30 border-diane-signal/50 bg-transparent text-diane-signal hover:bg-diane-signal/10"
-                    disabled={isSending || !input.trim()}
+                    disabled={isSending || (!input.trim() && !attached?.fileId)}
                     aria-label="Send"
                   >
                     <SendIcon width={17} height={17} />

@@ -24,9 +24,8 @@ came from are in this file's git history (before 2026-10-06).
    own when asked about HMRC, tax, employment law or company processes,
    and back out after. Its own prompt and knowledge, read-only on CRM data,
    and it says plainly it is guidance, not legal or tax advice.
-9. **Diane's Expenses and Debts contexts.** Shown greyed out as "coming
-   soon" in the command center selector. Expenses reading and WhatBot intake
-   are planned in `whatbot-crm-expenses.md`; Debts waits on 7.
+9. **Diane's Debts context.** Shown greyed out as "coming soon" in the
+   command center selector; waits on 7. (Expenses opened 2026-10-07.)
 10. **Diane's wake and sleep words.** She always listens, but only answers
     once woken. A greeting ("hi", "hello", "hey Diane", "good morning")
     wakes her: she glows and works as normal. She goes back to sleep after
@@ -42,3 +41,8 @@ came from are in this file's git history (before 2026-10-06).
     the room uses. Read by meaning, the router way, not word matching.
     **Hands free, never forced:** no pressing space to talk. Typing a request
     and the space key / deactivate button still work as now.
+11. **Diane switches context by voice or text.** Say the context's name
+    ("expenses", "debts", "master sheet", "go to expenses", "switch to
+    debts") and she switches, no clicking: the selector moves and she says
+    which one she is on. Any wording, read by meaning like her wake words
+    (10). A context still "coming soon" gets a plain "not ready yet".

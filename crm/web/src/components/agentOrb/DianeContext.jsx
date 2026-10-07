@@ -22,12 +22,12 @@ const DianeCtx = createContext(null);
 /**
  * WHAT SHE IS FOCUSED ON, one major area at a time so figures never mix.
  * The admin's call 2026-10-06: the master sheet now (deals, people,
- * companies: everything she does today), expenses and debts to come. The
- * two not built yet are shown, greyed, as coming soon.
+ * companies: everything she does today), expenses (opened 2026-10-07: the
+ * same expense brain WhatBot's admins use) and debts to come, shown greyed.
  */
 export const CONTEXTS = Object.freeze([
   { key: 'master-sheet', label: 'Master sheet' },
-  { key: 'expenses', label: 'Expenses', soon: true },
+  { key: 'expenses', label: 'Expenses' },
   { key: 'debts', label: 'Debts', soon: true },
 ]);
 const DEFAULT_CONTEXT = 'master-sheet';

@@ -1063,7 +1063,13 @@ router.post('/master-sheet/agent', async (req, res, next) => {
     res.on('close', () => { open = false; });
 
     try {
-      const result = await runAgent(trimmed, context, (e) => { if (open) send(e); });
+      // ANOTHER WORKSPACE answers its own context (agent/workspaces.js);
+      // the master sheet's is runAgent, as it always was.
+      // eslint-disable-next-line global-require
+      const elsewhere = require('./agent/workspaces').handlerFor(context);
+      const result = elsewhere
+        ? await elsewhere(trimmed, (e) => { if (open) send(e); })
+        : await runAgent(trimmed, context, (e) => { if (open) send(e); });
       // The canonical reply, whole and post-processed. The client replaces
       // whatever it accumulated from tokens with this, so a cleaning pass
       // that shortened the text mid-stream cannot leave it out of step.

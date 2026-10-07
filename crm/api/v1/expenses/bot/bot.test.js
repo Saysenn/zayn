@@ -113,6 +113,35 @@ test('NOT ABOUT EXPENSES: the router is told an admin\'s own pay is "other", han
   const src = require('fs').readFileSync(require.resolve('./understand'), 'utf8');
   assert.match(src, /other: anything NOT about the business\\'s expenses, above all the admin\\'s OWN pay/);
   const brain = require('fs').readFileSync(require.resolve('./brain'), 'utf8');
-  assert.match(brain, /default:\s*\/\/ NOT ABOUT EXPENSES[\s\S]*?return HAND_OFF;/);
+  assert.match(brain, /default:[\s\S]{0,250}\/\/ NOT ABOUT EXPENSES[\s\S]*?return HAND_OFF;/);
   assert.match(brain, /if \(reply === HAND_OFF\)[\s\S]*?return \{ registered: true, handOff: true \};[\s\S]*?if \(expired && reply\)/, 'checked before anything adds text to it');
+});
+
+test('FROM THE COMMAND CENTER: any group, read or asked; spent by asked, never assumed', () => {
+  const all = { admin: { name: null }, group: '*', groups: ['INDIGO', 'MANBAT'], today: '2026-10-06' };
+  const x = normalise({ n: 1, spentOn: '2026-10-06', description: 'Taxi', payee: 'Careem', rawAmount: '45', groupName: 'manbat' }, all);
+  assert.equal(x.groupName, 'MANBAT', 'as the CRM spells it');
+  assert.deepEqual(x.missing, ['spentBy']);
+  const y = normalise({ n: 2, spentOn: '2026-10-06', description: 'Taxi', payee: 'Careem', rawAmount: '45', spentBy: 'Gary', groupName: 'Narnia' }, all);
+  assert.deepEqual(y.missing, ['groupName']);
+  assert.match(y.doubts[0], /"Narnia" is not a group/);
+  const r = readReply('1 is MANBAT, 2 by Ali', { kind: 'add', items: [{ n: 1 }, { n: 2 }] }, { year: 2026, groups: ['INDIGO', 'MANBAT'] });
+  assert.deepEqual(r.parts.map((p) => p.fixes[0]), [{ field: 'groupName', value: 'MANBAT' }, { field: 'spentBy', value: 'Ali' }]);
+});
+
+test('DIANE\'S VIEW: a preview is a card, the reply plain, and nothing becomes a deal link', () => {
+  const { forDiane, plain } = require('./forDiane');
+  const all = { admin: { name: null }, group: '*', groups: ['MANBAT'], today: '2026-10-06' };
+  const items = [
+    normalise({ n: 1, spentOn: '2026-10-06', description: 'Taxi', payee: 'Careem', rawAmount: '45', spentBy: 'Gary', groupName: 'MANBAT' }, all),
+    normalise({ n: 2, spentOn: '', description: 'Ink', payee: 'Amazon', rawAmount: '180', spentBy: 'Gary', groupName: 'MANBAT' }, all),
+  ];
+  const state = { pending: { kind: 'add', items } };
+  const out = forDiane(format.addPreview(items, '*'), state);
+  assert.equal(out.card.kind, 'plan');
+  assert.equal(out.card.title, '2 expenses · AED 225');
+  assert.deepEqual(out.card.sections.map((s) => s.label), ['Needs an answer · 1', 'Ready · 1']);
+  assert.equal(out.card.sections[1].rows[0].where, 'MANBAT · 06 Oct · paid to Careem · by Gary');
+  assert.ok(!/[*_#]/.test(out.reply), out.reply);
+  assert.equal(plain('✅ *Saved 1 expense* · _ok_ #3'), '✅ Saved 1 expense · ok no. 3');
 });

@@ -1,4 +1,7 @@
 const { Router } = require('express');
+const multer = require('multer');
+const files = require('./expenses/bot/files');
+const { messages } = require('./shared/messages');
 const store = require('./expenses/bot/store');
 const brain = require('./expenses/bot/brain');
 const { meter } = require('./expenses/bot/ai');
@@ -85,4 +88,49 @@ admin.delete('/expense-admins/:id', async (req, res, next) => {
   }
 });
 
-module.exports = { agent, admin };
+/**
+ * A FILE FOR DIANE'S EXPENSES CONTEXT: a receipt photo, a PDF, or a sheet.
+ * Held briefly by id (expenses/bot/files.js), never put in the chat, which
+ * is posted whole every turn.
+ */
+const attachUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024, files: 1 },
+  fileFilter(req, file, cb) {
+    if (!/\.(jpe?g|png|webp|heic|pdf|xlsx|csv|txt|tsv|json|docx)$/i.test(file.originalname)) {
+      return cb(new AppError(400, `For expenses I can read photos, PDFs, Excel, CSV, Word or text files, not ${file.originalname}.`));
+    }
+    cb(null, true);
+  },
+});
+admin.post('/expenses/agent/attach', (req, res, next) => {
+  attachUpload.single('file')(req, res, (err) => {
+    if (err) return next(err instanceof AppError ? err : new AppError(400, err.message));
+    if (!req.file) return next(new AppError(400, messages.noFile));
+    const name = req.file.originalname;
+    const mime = req.file.mimetype && req.file.mimetype !== 'application/octet-stream'
+      ? req.file.mimetype
+      : /\.pdf$/i.test(name) ? 'application/pdf' : /\.png$/i.test(name) ? 'image/png' : 'image/jpeg';
+    const fileId = files.hold({ buffer: req.file.buffer, filename: name, mime });
+    res.json({ fileId, filename: name, mime });
+  });
+});
+
+/**
+ * ONE TURN OF DIANE'S EXPENSES CONTEXT, for agent/workspaces.js: the last
+ * thing they said (and the file with it, by id) to the expense brain, for
+ * every group and with no spender assumed. A preview goes out as a card.
+ */
+async function dianeTurn(history, send) {
+  const last = [...history].reverse().find((m) => m.role === 'user') ?? {};
+  const text = String(last.content ?? '').replace(/^📎 [^\n]*\n?/, '').trim();
+  const att = last.attachment?.fileId ? files.get(last.attachment.fileId) : null;
+  if (last.attachment?.fileId && !att) {
+    return { reply: `I no longer have ${last.attachment.filename ?? 'that file'} (files are kept for an hour). Attach it again.` };
+  }
+  const out = await brain.turn({ text, attachments: att ? [att] : [] }, { channel: 'diane' });
+  if (out.card) send({ type: 'list', list: out.card });
+  return { reply: out.reply ?? '' };
+}
+
+module.exports = { agent, admin, dianeTurn };

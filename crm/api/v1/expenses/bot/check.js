@@ -45,8 +45,18 @@ const num = (v) => {
  * @param {object} raw what the model or the file gave
  * @param {{ admin: object, group: string, rates?: object, today?: string }} ctx
  */
-function normalise(raw, { admin, group, rates = {}, today = currentDay() }) {
+/** A group they named, as the CRM spells it. Null when it is not one. */
+function groupOf(value, groups = []) {
+  const v = fold(String(value ?? ''));
+  if (!v) return null;
+  return groups.find((g) => fold(g) === v) ?? groups.find((g) => fold(g).startsWith(v) && v.length >= 3) ?? null;
+}
+
+function normalise(raw, { admin, group, groups = [], rates = {}, today = currentDay() }) {
   const said = currencyOf(raw.currency);
+  // FROM THE COMMAND CENTER ('*'): no bot number says the group and no
+  // admin is the spender, so both are read from their words or asked.
+  const anyGroup = group === '*';
   const x = {
     n: raw.n,
     spentOn: iso(raw.spentOn),
@@ -54,15 +64,17 @@ function normalise(raw, { admin, group, rates = {}, today = currentDay() }) {
     payee: clean(raw.payee),
     rawAmount: num(raw.rawAmount),
     currency: said ?? 'AED',
-    groupName: group,
-    spentBy: clean(raw.spentBy) ?? admin.name,
+    groupName: anyGroup ? groupOf(raw.groupName, groups) : group,
+    spentBy: clean(raw.spentBy) ?? admin?.name ?? null,
     source: raw.source ?? null,
     skipped: Boolean(raw.skipped),
     ok: Boolean(raw.ok),
   };
   x.exchangeRate = x.currency === 'AED' ? 1 : rates[x.currency]?.rate ?? null;
-  x.missing = REQUIRED.filter((f) => x[f] === null || x[f] === undefined || x[f] === '');
+  x.missing = [...(anyGroup ? ['groupName'] : []), ...REQUIRED, ...(x.spentBy ? [] : ['spentBy'])]
+    .filter((f) => x[f] === null || x[f] === undefined || x[f] === '');
   x.doubts = [];
+  if (anyGroup && clean(raw.groupName) && !x.groupName) x.doubts.push(`"${raw.groupName}" is not a group`);
   if (raw.currency && !said) x.doubts.push(`currency "${raw.currency}" not recognised, read as AED`);
   if (x.rawAmount !== null && x.rawAmount <= 0) x.doubts.push('amount is not above 0');
   if (x.rawAmount !== null && x.rawAmount >= LARGE) x.doubts.push('a large amount: is it right?');
@@ -111,4 +123,6 @@ function duplicates(items, saved = []) {
 /** What may be saved now: nothing missing. Doubts were shown; a yes accepts them. */
 const ready = (items) => items.filter((x) => !x.skipped).every((x) => x.missing.length === 0);
 
-module.exports = { normalise, duplicates, ready, currencyOf, REQUIRED, num, iso };
+module.exports = {
+  normalise, duplicates, ready, currencyOf, groupOf, REQUIRED, num, iso,
+};

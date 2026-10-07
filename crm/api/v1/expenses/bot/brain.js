@@ -9,6 +9,7 @@ const { normalise, duplicates, ready, currencyOf, num } = require('./check');
 const { readReply } = require('./reply');
 const { route, revise } = require('./understand');
 const find = require('./find');
+const { forDiane } = require('./forDiane');
 
 // ***************************************************
 // * THE EXPENSE BOT: ONE MESSAGE IN, ONE REPLY OUT
@@ -75,9 +76,12 @@ function showAgain(ctx) {
   return again ? `Just to be sure, this is still waiting:\n\n${again}` : 'Okay.';
 }
 
-async function turn(msg, { client = null, today = currentDay() } = {}) {
-  // 1. THE GUARD. Before anything is read.
-  const admin = await store.adminFor(msg.phone, msg.group);
+async function turn(msg, { client = null, today = currentDay(), channel = 'whatsapp' } = {}) {
+  // 1. THE GUARD. Before anything is read. The command center has its own:
+  // the admin's signed-in session, every group, and no spender assumed.
+  const admin = channel === 'diane'
+    ? { name: null, phone: 'diane', group_name: find.ALL }
+    : await store.adminFor(msg.phone, msg.group);
   if (!admin) return { registered: false };
   const phone = admin.phone;
   const group = admin.group_name;
@@ -95,7 +99,7 @@ async function turn(msg, { client = null, today = currentDay() } = {}) {
   }
   const said = String(msg.text ?? '').trim();
   const files = (msg.attachments ?? []).filter((f) => f && f.base64);
-  const ctx = { admin, group, phone, state, today, client };
+  const ctx = { admin, group, phone, state, today, client, channel, groups: channel === 'diane' ? await knownGroups() : [] };
 
   let reply;
   try {
@@ -119,6 +123,7 @@ async function turn(msg, { client = null, today = currentDay() } = {}) {
   state.history = [...(state.history ?? []), { said: said || (files.length ? `[${files.length} file(s)]` : ''), reply }].slice(-HISTORY);
   if (msg.messageId) state.seen = [...(state.seen ?? []), { id: msg.messageId, reply }].slice(-30);
   await store.saveChat(phone, group, state);
+  if (channel === 'diane') return { registered: true, ...forDiane(reply, state) };
   return { registered: true, reply };
 }
 
@@ -128,13 +133,13 @@ async function answerTurn(said, files, ctx) {
 
   // 2. CODE FIRST: an answer to what is open.
   if (pending && !files.length) {
-    const r = readReply(said, pending, { year: year(today) });
+    const r = readReply(said, pending, { year: year(today), groups: ctx.groups });
     if (r) return onReply(r, ctx);
   }
   // New expenses in a photo or a file: always an add, no router needed.
   if (files.length) return addFrom({ text: said, attachments: files }, ctx);
   if (!said) return null;
-  if (GREETING.test(said)) return format.HELP(admin.name.split(' ')[0], group);
+  if (GREETING.test(said)) return ctx.channel === 'diane' ? format.HELP_DIANE : format.HELP(admin.name.split(' ')[0], group);
   if (THANKS.test(said) && !pending) return 'You\'re welcome 🙂';
   if (UNDO.test(said)) return startUndo(ctx);
 
@@ -144,7 +149,7 @@ async function answerTurn(said, files, ctx) {
 
   // 3. THE ROUTER.
   const lastReply = state.history?.at(-1)?.reply ?? '';
-  const r = await route(said, { today, pending: pending?.kind === 'add', lastReply, client: ctx.client });
+  const r = await route(said, { today, pending: pending?.kind === 'add', lastReply, client: ctx.client, groups: ctx.groups });
   logger.info({ group, kind: r.kind, sure: r.sure }, 'expense bot: routed');
   switch (r.kind) {
     case 'answer': return pending?.kind === 'add' ? reviseFrom(said, ctx) : addFrom({ text: said }, ctx);
@@ -162,8 +167,9 @@ async function answerTurn(said, files, ctx) {
       return waiting ? `${text}\n\n_Not counted: ${waiting} in your preview, not saved yet._` : text;
     }
     case 'undo': return startUndo(ctx);
-    case 'chat': return THANKS.test(said) ? 'You\'re welcome 🙂' : format.HELP(admin.name.split(' ')[0], group);
+    case 'chat': return THANKS.test(said) ? 'You\'re welcome 🙂' : ctx.channel === 'diane' ? format.HELP_DIANE : format.HELP(admin.name.split(' ')[0], group);
     default:
+      if (ctx.channel === 'diane') return 'That isn\'t about expenses. Switch the context to Master sheet for deals, people and companies.';
       // NOT ABOUT EXPENSES ("how much am I getting paid?"): WhatBot's own
       // agent answers it, his call 2026-10-07. Nothing here is touched.
       return HAND_OFF;
@@ -178,6 +184,16 @@ function savedTargetOutsidePreview(r, pending) {
   return !inPreview;
 }
 
+/** The CRM's groups, from the deals and the expenses, for the command center. */
+async function knownGroups() {
+  const pool = require('../../../configs/db');
+  const { rows } = await pool.query(
+    `SELECT DISTINCT group_name AS g FROM tb_mastersheet WHERE group_name IS NOT NULL AND btrim(group_name) <> ''
+     UNION SELECT DISTINCT group_name FROM tb_expenses WHERE group_name IS NOT NULL AND btrim(group_name) <> ''`,
+  );
+  return rows.map((r) => r.g).sort();
+}
+
 // ---- adding ----
 
 async function rates() {
@@ -187,7 +203,7 @@ async function rates() {
 /** Check every item again: fields, defaults, duplicates against what is saved. */
 async function recheck(items, ctx) {
   const r = await rates();
-  const out = items.map((x) => normalise({ ...x, doubt: x.modelDoubt }, { admin: ctx.admin, group: ctx.group, rates: r, today: ctx.today }))
+  const out = items.map((x) => normalise({ ...x, doubt: x.modelDoubt }, { admin: ctx.admin, group: ctx.group, groups: ctx.groups, rates: r, today: ctx.today }))
     .map((x, i) => ({ ...x, modelDoubt: items[i].modelDoubt ?? null }));
   const dates = out.map((x) => x.spentOn).filter(Boolean).sort();
   const saved = dates.length ? await find.between(ctx.group, minus(dates[0], 1), dates.at(-1)) : [];
@@ -195,7 +211,7 @@ async function recheck(items, ctx) {
 }
 
 async function addFrom(msg, ctx) {
-  const got = await extract(msg, { today: ctx.today, client: ctx.client });
+  const got = await extract(msg, { today: ctx.today, client: ctx.client, groups: ctx.groups });
   if (!got.items.length) {
     const why = got.notes.length ? `\n_${got.notes.join('; ')}_` : '';
     return msg.attachments?.length
@@ -236,7 +252,7 @@ function applyFix(items, part, today) {
 
 async function reviseFrom(said, ctx) {
   const { pending } = ctx.state;
-  const got = await revise(said, pending.items, { today: ctx.today, client: ctx.client });
+  const got = await revise(said, pending.items, { today: ctx.today, client: ctx.client, groups: ctx.groups });
   if (got.cancel) { ctx.state.pending = null; return 'Okay, cancelled. Nothing was saved.'; }
   if (got.unclear && !got.updates.length && !got.skip.length && !got.newExpenses.length && !got.ok.length) return got.unclear;
   const items = pending.items.map((x) => ({ ...x }));
@@ -259,7 +275,7 @@ async function saveAdd(ctx) {
   }
   const made = await expensesRepo.createMany(items.map((x) => ({
     spentOn: x.spentOn, description: x.description, payee: x.payee, currency: x.currency, rawAmount: x.rawAmount,
-    exchangeRate: x.exchangeRate, groupName: ctx.group, spentBy: x.spentBy,
+    exchangeRate: x.exchangeRate, groupName: x.groupName ?? ctx.group, spentBy: x.spentBy,
   })));
   // VERIFIED: read back from the table, never assumed.
   const check = await Promise.all(made.map((m) => expensesRepo.findById(m.id)));
@@ -340,7 +356,7 @@ function editPreviewFor(row, changes, ctx) {
   const fields = Object.fromEntries(Object.entries(changes).filter(([f, v]) => String(before[f] ?? '') !== String(v)));
   if (!Object.keys(fields).length) { ctx.state.pending = null; return 'It already says that, so nothing needs changing.'; }
   ctx.state.pending = { kind: 'edit', id: row.id, before, fields };
-  return format.editPreview(find.asItem(row), fields);
+  return format.editPreview(find.asItem(row), fields, { group: ctx.group === find.ALL });
 }
 
 /** Not on a row that moved since they were shown it. */
@@ -364,7 +380,7 @@ async function saveEdit(ctx) {
   broadcast(null, EVENT, { action: 'updated', id, via: 'whatbot' });
   ctx.state.pending = null;
   ctx.state.lastIds = [id];
-  return format.changed(find.asItem(check));
+  return format.changed(find.asItem(check), { group: ctx.group === find.ALL });
 }
 
 // ---- removing ----
@@ -379,7 +395,7 @@ async function startRemove(r, ctx) {
 
 function removePreviewFor(rows, ctx) {
   ctx.state.pending = { kind: 'remove', ids: rows.map((r) => r.id), before: rows.map(SNAP) };
-  return format.removePreview(rows.map(find.asItem));
+  return format.removePreview(rows.map(find.asItem), { group: ctx.group === find.ALL });
 }
 
 async function saveRemove(ctx) {
@@ -455,13 +471,14 @@ async function saveUndo(ctx) {
 function pick(hits, then, what, ctx) {
   const list = hits.slice(0, 8);
   ctx.state.pending = { kind: 'pick', choices: list.map((h) => h.id), then };
-  return format.pickList(list, what);
+  return format.pickList(list, what, { group: ctx.group === find.ALL });
 }
 
 async function notFound(ctx) {
   const recent = await find.latest(ctx.group, ctx.today);
-  if (!recent.length) return `I couldn't find that. There are no *${ctx.group}* expenses in the last 2 months.`;
-  return [`I couldn't find that in *${ctx.group}*'s expenses from the last 2 months. The latest:`, '', ...recent.map((r) => format.line({ ...r, n: null }, { number: false })), '', 'Say which one, like _change the taxi on 6 Oct to 50_.'].join('\n');
+  const whose = ctx.group === find.ALL ? 'the' : `*${ctx.group}*'s`;
+  if (!recent.length) return `I couldn't find that. There are no expenses ${ctx.group === find.ALL ? '' : `for *${ctx.group}* `}in the last 2 months.`;
+  return [`I couldn't find that in ${whose} expenses from the last 2 months. The latest:`, '', ...recent.map((r) => format.line({ ...r, n: null }, { number: false, group: ctx.group === find.ALL })), '', 'Say which one, like _change the taxi on 6 Oct to 50_.'].join('\n');
 }
 
 module.exports = { turn, SNAP, editish };

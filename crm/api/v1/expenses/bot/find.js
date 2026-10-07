@@ -13,20 +13,29 @@ const format = require('./format');
 const iso = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v ?? '').slice(0, 10));
 const minus = (day, n) => new Date(Date.parse(`${day}T00:00:00Z`) - n * 86400000).toISOString().slice(0, 10);
 
+/** Every group: Diane's command center, which is no one group's number. */
+const ALL = '*';
+
 /** The group's expenses between two days, newest first. */
 async function between(group, from, to) {
-  const { rows } = await pool.query(
-    `SELECT * FROM tb_expenses
-      WHERE lower(group_name) = lower($1) AND spent_on >= $2 AND spent_on <= $3
-      ORDER BY spent_on DESC, id DESC LIMIT 2000`,
-    [group, from, to],
-  );
+  const { rows } = group === ALL
+    ? await pool.query(
+      `SELECT * FROM tb_expenses WHERE spent_on >= $1 AND spent_on <= $2
+        ORDER BY spent_on DESC, id DESC LIMIT 2000`,
+      [from, to],
+    )
+    : await pool.query(
+      `SELECT * FROM tb_expenses
+        WHERE lower(group_name) = lower($1) AND spent_on >= $2 AND spent_on <= $3
+        ORDER BY spent_on DESC, id DESC LIMIT 2000`,
+      [group, from, to],
+    );
   return rows;
 }
 
 /** Saved expenses as the bot shows them (camel case). */
 const asItem = (r) => ({
-  id: r.id, spentOn: iso(r.spent_on), description: r.description, payee: r.payee, rawAmount: Number(r.raw_amount), currency: r.currency, spentBy: r.spent_by, aed: r.aed_amount == null ? null : Number(r.aed_amount),
+  groupName: r.group_name, id: r.id, spentOn: iso(r.spent_on), description: r.description, payee: r.payee, rawAmount: Number(r.raw_amount), currency: r.currency, spentBy: r.spent_by, aed: r.aed_amount == null ? null : Number(r.aed_amount),
 });
 
 // Split FIRST, then fold each word: fold() drops spaces, so "Stationery Sara"
@@ -71,22 +80,25 @@ async function latest(group, today, n = 5) {
 function firstOfMonth(day) { return `${day.slice(0, 8)}01`; }
 
 /** "SPENT AED 1,245 ON 12 EXPENSES", worked out here. */
-async function answer(group, query, { today }) {
+async function answer(scopeGroup, query, { today }) {
+  // From the command center, "how much did MANBAT spend" narrows to it.
+  const group = scopeGroup === ALL && query.group ? query.group : scopeGroup;
   const from = /^\d{4}-\d{2}-\d{2}$/.test(query.from) ? query.from : firstOfMonth(today);
   const to = /^\d{4}-\d{2}-\d{2}$/.test(query.to) ? query.to : today;
   let rows = (await between(group, from, to)).map(asItem);
   const want = wordsOf(query.words);
   if (want.length) rows = rows.filter((r) => want.some((w) => wordsOf(`${r.description} ${r.payee} ${r.spentBy}`).some((h) => h === w || h.startsWith(w))));
   const span = from === to ? format.day(from) : `${format.day(from)} – ${format.day(to)}`;
-  const scope = `${group}${want.length ? ` · "${query.words}"` : ''} · ${span}`;
+  const scope = `${group === ALL ? 'all groups' : group}${want.length ? ` · "${query.words}"` : ''} · ${span}`;
   if (!rows.length) return `No expenses found for ${scope}.`;
+  const allGroups = group === ALL;
 
   const aedTotal = rows.reduce((n, r) => n + (r.aed ?? 0), 0);
   const noRate = rows.filter((r) => r.aed == null).length;
   const totalLine = `*${format.money('AED', Math.round(aedTotal * 100) / 100)}* across ${rows.length} ${rows.length === 1 ? 'expense' : 'expenses'}${noRate ? ` _(${noRate} with no AED rate not counted)_` : ''}`;
 
   if (query.groupBy) {
-    const key = { payee: (r) => r.payee || 'no payee', spentBy: (r) => r.spentBy || 'nobody', day: (r) => format.day(r.spentOn), currency: (r) => r.currency, description: (r) => r.description }[query.groupBy];
+    const key = { group: (r) => r.groupName, payee: (r) => r.payee || 'no payee', spentBy: (r) => r.spentBy || 'nobody', day: (r) => format.day(r.spentOn), currency: (r) => r.currency, description: (r) => r.description }[query.groupBy];
     const groups = new Map();
     for (const r of rows) {
       const k = key(r);
@@ -97,17 +109,19 @@ async function answer(group, query, { today }) {
     }
     const lines = [...groups].sort((a, b) => b[1].aed - a[1].aed).slice(0, 20)
       .map(([k, g]) => `• ${k}: *${format.money('AED', Math.round(g.aed * 100) / 100)}* (${g.n})`);
-    return [`*Expenses by ${{ payee: 'payee', spentBy: 'person', day: 'day', currency: 'currency', description: 'item' }[query.groupBy]}* · ${scope}`, '', ...lines, '', `Total ${totalLine}`].join('\n');
+    return [`*Expenses by ${{ group: 'group', payee: 'payee', spentBy: 'person', day: 'day', currency: 'currency', description: 'item' }[query.groupBy]}* · ${scope}`, '', ...lines, '', `Total ${totalLine}`].join('\n');
   }
   if (query.measure === 'count') return `*${rows.length}* ${rows.length === 1 ? 'expense' : 'expenses'} · ${scope}`;
   if (query.measure === 'total') return `Spent ${totalLine}\n_${scope}_`;
   const list = query.measure === 'biggest' ? [...rows].sort((a, b) => (b.aed ?? 0) - (a.aed ?? 0)).slice(0, 5) : rows.slice(0, 15);
   return [
     `*${query.measure === 'biggest' ? 'Biggest expenses' : 'Expenses'}* · ${scope}`, '',
-    ...list.map((r) => format.line({ ...r, n: null }, { number: false })),
+    ...list.map((r) => format.line({ ...r, n: null }, { number: false, group: allGroups })),
     ...(query.measure !== 'biggest' && rows.length > 15 ? [`_…and ${rows.length - 15} more on the Expenses page._`] : []),
     '', `Total ${totalLine}`,
   ].join('\n');
 }
 
-module.exports = { findTarget, latest, answer, between, asItem, iso };
+module.exports = {
+  findTarget, latest, answer, between, asItem, iso, ALL,
+};
