@@ -168,6 +168,13 @@ export const apiService = {
       api.download(`${apiPath}/export/xlsx${toQueryString(params)}`, onProgress)
     ),
   },
+  // Who may send expenses to each group's WhatBot number.
+  expenseAdmins: {
+    list: () => api.get(`${apiPath}/expense-admins`),
+    add: (body) => api.post(`${apiPath}/expense-admins`, body),
+    update: (id, fields) => api.patch(`${apiPath}/expense-admins/${id}`, fields),
+    remove: (id) => api.delete(`${apiPath}/expense-admins/${id}`),
+  },
   settings: {
     get: () => api.get(`${apiPath}/settings`),
     // Every location the DEALS carry, with whether each is classed local.

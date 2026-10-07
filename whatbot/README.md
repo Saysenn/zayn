@@ -32,6 +32,7 @@ force a fresh scan for that number.
 |---|---|
 | `npm run dev` / `dev:worker` | watch mode |
 | `npm run chat` | terminal chat — no WhatsApp needed |
+| `npm run chat:expenses -- +44… GROUP` | talk to the expense bot as a registered admin; `/file <path> \| caption` sends a receipt or file |
 | `npm run smoke` | a scripted set of questions through the real handler |
 | `npm test` | vitest (428 tests, no API calls) |
 | `npm run eval` | tool-selection evals — **calls the real API, costs money** |

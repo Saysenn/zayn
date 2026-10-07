@@ -10,6 +10,7 @@ import LocalLocations from '../components/settings/LocalLocations';
 import PaymentStartRules from '../components/settings/PaymentStartRules';
 import ConversionRates from '../components/settings/ConversionRates';
 import ThemePicker from '../components/settings/ThemePicker';
+import ExpenseAdmins from '../components/settings/ExpenseAdmins';
 import Button, { FileButton, LinkButton } from '../components/buttons/Button';
 import Toggle from '../components/forms/Toggle';
 import Select from '../components/forms/Select';
@@ -458,6 +459,15 @@ export default function SettingsPage() {
                   off="Payday answers are being ignored"
                 />
               )}
+            </Card>
+          )}
+
+          {section === 'whatbot' && (
+            <Card
+              title="Expense admins"
+              description="Who may send expenses to WhatBot, and on which group's number. Only these numbers can save, change or remove expenses, and only for that group: anyone else is ignored. The bot shows what it read and saves nothing until they reply yes."
+            >
+              <ExpenseAdmins />
             </Card>
           )}
 

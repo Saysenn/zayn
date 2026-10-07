@@ -17,7 +17,8 @@
     "sync:crm": "node -e \"import('./src/sheet/syncToCrm.js').then(m=>m.syncToCrm()).then(r=>{console.log(r);process.exit(0)})\"",
     "pull:master-sheet": "node -e \"import('./src/sheet/pullMasterSheet.js').then(m=>m.pullMasterSheet()).then(r=>{console.log(r);process.exit(0)})\"",
     "eval": "node src/agent/evals/runEvals.js",
-    "payday": "node src/payday.js"
+    "payday": "node src/payday.js",
+    "chat:expenses": "node src/expenseChat.js"
   },
   "license": "ISC",
   "dependencies": {

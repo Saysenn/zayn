@@ -43,6 +43,7 @@ import {
 } from "../payday/paydayMessages.js";
 import { scriptedReply } from "./scriptedReply.js";
 import { replier } from "./sendReply.js";
+import { expenseTurn, isExpenseAdmin } from "../expenses/expenses.js";
 
 /**
  * Their answer to the payday check. Three ways in, because people use all
@@ -80,11 +81,25 @@ const words = (text) => ({ text });
  * WhatsApp and `npm run chat` both call this, which is why the terminal
  * proves something: same path, no WhatsApp attached.
  *
- * Order below is deliberate: stop > opted out > rate limit > who are you >
+ * Order below is deliberate: expense admin > stop > opted out > rate limit > who are you >
  * payday reply > answered in code > the model.
  */
 export async function handleMessage(input) {
-  const { phone, channelGroup, text } = input;
+  const { phone, channelGroup, text, attachments = [], messageId } = input;
+
+  /**
+   * A REGISTERED EXPENSE ADMIN on this group's number goes to the CRM's
+   * expense brain: expenses in, a preview, saved on their yes. FIRST, before
+   * the opt-out words: to an admin "cancel" and "stop" mean "drop that
+   * preview", and read as an opt-out they silenced the bot (live 2026-10-07).
+   * Before the per-minute limit too: a pile of receipts is one photo per message.
+   * The CRM checks the registration again; if it says no, they are handled
+   * below exactly as before. See expenses/expenses.js.
+   */
+  if (await isExpenseAdmin(phone, channelGroup)) {
+    const out = await expenseTurn({ phone, group: channelGroup, text, attachments, messageId });
+    if (out.registered !== false) return out.reply ? words(out.reply) : NO_REPLY;
+  }
 
   // STOP first, before anything. it must never be treated as a question.
   const intent = optOutIntent(text);

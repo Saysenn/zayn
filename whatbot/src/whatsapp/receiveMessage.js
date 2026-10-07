@@ -15,7 +15,7 @@ import { sendText } from "./sendMessage.js";
  * that number.
  */
 export async function receiveMessage(msg) {
-  const { messageId, from, to, groupId, text, voice } = msg;
+  const { messageId, from, to, groupId, text, voice, attachments } = msg;
 
   // Buffers do not survive JSON. See the note on InboundMessageJob.
   const queuedVoice = voice && {
@@ -38,6 +38,8 @@ export async function receiveMessage(msg) {
           groupId,
           text,
           ...(queuedVoice ? { voice: queuedVoice } : {}),
+          // paths to receipts on disk, never the bytes: see expenses.js
+          ...(attachments?.length ? { attachments } : {}),
           receivedAt: new Date().toISOString(),
         },
         // through jobIdOf because BullMQ rejects a colon and the ID is Baileys'

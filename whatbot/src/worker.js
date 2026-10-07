@@ -79,7 +79,7 @@ const PAYDAY_RETRY_EVERY_MS = 5 * 60_000;
 const messageWorker = new Worker(
   INBOUND_QUEUE,
   async (job) => {
-    const { from, to, text, voice, groupId, messageId } = job.data;
+    const { from, to, text, voice, groupId, messageId, attachments } = job.data;
     logger.info({ messageId, groupId }, "processing message");
 
     // A voice note becomes a question HERE, not earlier: transcription is
@@ -99,6 +99,9 @@ const messageWorker = new Worker(
       phone: from,
       channelGroup: groupId,
       text: question,
+      attachments: attachments ?? [],
+      // the expense brain's dedupe key: a redelivery never saves twice
+      messageId,
     });
 
     // they opted out. say nothing at all, not even "you've opted out".

@@ -152,33 +152,71 @@ The same family as Diane's engine:
 
 ---
 
-## Plan (to be checked before building)
+## Built 2026-10-07: expenses through WhatBot
 
-1. **Expense brain (CRM)**
-   - Read text, receipt photos, Excel, CSV, Word and PDF into expense rows.
-   - Flag every column: missing group, person, date, amount, currency; a
-     duplicate of an existing expense; a doubtful read.
-   - A clean numbered summary, plus extra notes ("3 are missing a group").
-   - Fixes by reply ("2 and 4 are INDIGO, spent by Gloria"), saved on "yes",
-     one undo.
-2. **Security**: a list of registered admin numbers. Only those can send
-   expenses; everyone else is refused and the attempt is logged.
-3. **WhatBot connection**: expense messages from registered numbers go to the
-   CRM brain; the summary, flags and questions come back as WhatsApp bubbles;
-   saved on "yes".
-4. **Payday check**: install WhatBot's packages, run its tests, dry run it
-   against the clone, then one real send with `--only` the admin's own number,
-   and confirm the paid tick lands on the master sheet. See "Testing the
-   payday check" above for the options and the one rule (never a real send
-   without `--only`).
-5. **Later**: Diane's Expenses context uses the same brain.
+Tested on the clone, through WhatBot's own `handleMessage` from the terminal.
+
+| Piece                 | Where                                          |
+| --------------------- | ---------------------------------------------- |
+| Expense brain         | `crm/api/v1/expenses/bot/` (brain.js runs a turn) |
+| WhatBot routes        | `crm/api/v1/expenseBot.js`, `/api/v1/agent/expenses/*` |
+| Registered numbers    | Settings → Whatbot → Expense admins            |
+| Tables                | migration `072_expense_bot.sql`                |
+| WhatBot side          | `whatbot/src/expenses/expenses.js`             |
+| Terminal tester       | `npm run chat:expenses -- +447700900001 MANBAT` (in `whatbot/`) |
+
+**Decisions (his, 2026-10-07):**
+
+1. Each group's WhatBot number takes expenses only from the admins registered
+   on it in Settings. The group of an expense is the number it was sent to.
+   Anyone else gets nothing from the expense side: nothing downloaded, nothing
+   read, no model called. Their text still gets WhatBot's old replies.
+2. Every field is required: date, description, amount, currency, group,
+   spent by, paid to. Currency defaults to **AED**. Spent by defaults to the
+   admin who sent it, shown in the preview so it can be changed.
+3. Nothing is saved before "yes". Change, remove and undo all preview first.
+4. Replies use WhatsApp's own formatting (*bold*, _italic_, numbered lines),
+   written by code from templates, never by the model.
+
+**How a message flows (the same formula as Diane):**
+
+1. The guard (registered on this group's number?), before anything else,
+   including WhatBot's opt-out words: to an admin "cancel" means cancel.
+2. Code first: "yes", "cancel", "skip 2", "only 1 and 3", "2 is 150",
+   "3 is 5 Oct", "2 paid to Careem", "all today", "3 is fine", "undo", "hi".
+   A plain new expense ("taxi 45 paid to Careem") skips the router too.
+3. The router (gpt-4.1-mini, strict schema): add, edit, remove, question,
+   undo, answer to the open preview, chat. 28/30 on labelled messages, and
+   both misses still end correctly.
+4. Reading (gpt-4.1): text, receipt photos, PDFs; a spreadsheet's columns
+   are mapped from a sample and code reads every row (totals rows skipped).
+5. Code checks every expense: missing fields (asked, all at once), a date in
+   the future or over two months old, a large amount, looks already saved,
+   twice in one batch, same payee on the same day with another amount.
+6. Save is verified by reading the rows back; every action is logged in
+   `tb_expense_actions` so "undo" puts it back exactly.
+
+**Safety:** a "yes" saves only if the preview was the last thing shown; a
+change or removal is refused if the expense changed since it was shown; an
+unsaved preview expires after 6 hours; a WhatsApp redelivery (same message
+id) never saves twice; an unreachable CRM always says nothing was saved.
+
+**Before it goes live:**
+
+1. Register the real admins in Settings → Whatbot → Expense admins.
+2. Run migration 072 on the live database.
+3. WhatBot's `.env`: `REDIS_URL` points at an Upstash host that no longer
+   exists; `CRM_AGENT_API_KEY` does not match the CRM's `AGENT_API_KEY`;
+   `OPENAI_BASE_URL=` is empty, which WhatBot's settings check rejects.
+4. The CRM's `TIMEZONE` is `America/Los_Angeles`, so "today" for a receipt
+   is the US date. Dubai is up to 12 hours ahead.
+5. Photos and files from real WhatsApp have only been tested through the
+   terminal (same path after download); the download itself needs a linked
+   number to try.
 
 ## Open questions
 
-1. Registered numbers: managed on the CRM Settings page, or a fixed list in
-   WhatBot's config for now?
-2. Default currency when a receipt does not say: AED?
-3. Required to save an expense: date, description, amount, currency, group,
-   spent by? Payee optional?
+1. ~~Registered numbers~~: Settings page. 2. ~~Default currency~~: AED.
+3. ~~Required fields~~: all of them.
 4. Payday testing: option A, B or C (see "Testing the payday check"). For B,
    which number is the admin's own?

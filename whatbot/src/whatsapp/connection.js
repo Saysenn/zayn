@@ -14,6 +14,7 @@ import {
 import { logger } from "../system/logger.js";
 import { publishStatus } from "./status.js";
 import { downloadVoiceNote, isVoiceNote, voiceSeconds } from "./voiceNote.js";
+import { isExpenseAdmin, mediaOf, saveMedia } from "../expenses/expenses.js";
 
 /**
  * The 5 WhatsApp connections, one per group.
@@ -194,9 +195,35 @@ async function connect(groupId, onMessage, attempt = 0) {
 
       const text = textOf(m.message);
       const voice = isVoiceNote(m.message);
+      const media = mediaOf(m.message);
 
-      // nothing we can read and nothing we can listen to — a sticker, a photo,
-      // a location. Not a question, so there is nothing to answer.
+      /**
+       * A RECEIPT PHOTO OR FILE, from a registered expense admin on this
+       * group's number only. The guard runs BEFORE downloading: from anyone
+       * else a photo is ignored, as it always was. Fetched here because the
+       * key that decrypts it lives on this message object.
+       */
+      if (media) {
+        const from = fromJid(senderJid);
+        void isExpenseAdmin(from, groupId)
+          .then(async (ok) => {
+            if (!ok) return;
+            const file = await saveMedia(m, media);
+            await onMessage({
+              messageId: m.key.id ?? `${m.key.remoteJid}:${m.messageTimestamp}`,
+              from,
+              to: ourNumber,
+              groupId,
+              text: media.caption,
+              attachments: file ? [file] : [],
+            });
+          })
+          .catch((err) => logger.error({ err, groupId }, "failed to handle expense media"));
+        continue;
+      }
+
+      // nothing we can read and nothing we can listen to — a sticker, a
+      // location. Not a question, so there is nothing to answer.
       if (!text && !voice) continue;
 
       const deliver = (extra = {}) =>

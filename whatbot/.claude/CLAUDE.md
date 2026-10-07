@@ -28,6 +28,8 @@ src/
                   export a defineTool() and it is live, no list to join
                   shared/ the contract + common arguments · format/ builds every figure
                   and every file
+  expenses/       expenses — the guard (registered admins, from the CRM), receipt
+                  media, and one message to the CRM's expense brain. The brain is the CRM's
   employee/       access · storage · types — assignments, and who may read them
   sheet/          syncSheet · parseSheet · fakes/ (sample data only)
                   source is excel (local .xlsx), sheets, or fake — all read-only

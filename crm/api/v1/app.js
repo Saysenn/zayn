@@ -13,6 +13,7 @@ const { router: concernsRouter } = require('./concerns');
 const { router: messagesRouter } = require('./messages');
 const { router: peopleRouter } = require('./people');
 const { router: settingsRouter } = require('./settings');
+const expenseBot = require('./expenseBot');
 const { router: conversationsRouter } = require('./conversations');
 const { router: logsRouter } = require('./logs');
 const { router: masterSheetRouter } = require('./masterSheet');
@@ -62,6 +63,9 @@ app.use(pinoHttp({ logger }));
 // a server-side cache that would have to be expired — and a 96-row sheet
 // of 31 columns is comfortably over 100kb. It failed as a bare 413 with no
 // body, which reads like the route not existing.
+// EXPENSES THROUGH WHATBOT, before the 2mb parser: a message can carry
+// receipt photos and files, sent as base64. WhatBot's key, never a session.
+app.use('/api/v1/agent/expenses', requireApiKey, express.json({ limit: '25mb' }), expenseBot.agent);
 app.use(express.json({ limit: '2mb' }));
 app.use(cookieParser);
 
@@ -76,6 +80,7 @@ app.use('/api/v1', companiesRouter);
 app.use('/api/v1', concernsRouter);
 app.use('/api/v1', messagesRouter);
 app.use('/api/v1', settingsRouter);
+app.use('/api/v1', expenseBot.admin);
 app.use('/api/v1', conversationsRouter);
 app.use('/api/v1', logsRouter);
 app.use('/api/v1', masterSheetRouter);
