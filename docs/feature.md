@@ -27,3 +27,18 @@ came from are in this file's git history (before 2026-10-06).
 9. **Diane's Expenses and Debts contexts.** Shown greyed out as "coming
    soon" in the command center selector. Expenses reading and WhatBot intake
    are planned in `whatbot-crm-expenses.md`; Debts waits on 7.
+10. **Diane's wake and sleep words.** She always listens, but only answers
+    once woken. A greeting ("hi", "hello", "hey Diane", "good morning")
+    wakes her: she glows and works as normal. She goes back to sleep after
+    5 minutes idle, or on a sleep word ("deactivate", "close", "stop", "bye",
+    "that's all"). Asleep, she hears but never answers. Stops her
+    answering room talk that was not meant for her.
+    **Woken by mistake** (people greeting each other, "hey bro"): when what
+    follows is clearly not for her, or someone says "not you", she says a
+    short sorry ("Sorry, I thought you meant me") and goes back to sleep.
+    **Any wording, not a fixed list:** she understands every kind of
+    greeting and goodbye ("yo", "morning", "you there?", "salam", "ok we're
+    done", "go to sleep", "thanks that's all"), in any accent or language
+    the room uses. Read by meaning, the router way, not word matching.
+    **Hands free, never forced:** no pressing space to talk. Typing a request
+    and the space key / deactivate button still work as now.

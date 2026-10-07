@@ -64,7 +64,9 @@ const EnvSchema = z
      * so switching provider is just this line plus the model name — none of the
      * agent code changes. Leave empty for OpenAI itself.
      */
-    OPENAI_BASE_URL: z.url().optional(),
+    // EMPTY MEANS UNSET, as the line above says. `OPENAI_BASE_URL=` with
+    // nothing after it failed as "Invalid URL" and stopped the server.
+    OPENAI_BASE_URL: z.preprocess((v) => (v === "" ? undefined : v), z.url().optional()),
     /**
      * `mock` picks tools by keyword instead of calling the LLM. Everything else
      * still runs for real, so you can test the whole thing when a free tier
