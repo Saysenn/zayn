@@ -11,6 +11,7 @@ const { route, revise } = require('./understand');
 const find = require('./find');
 const { liveRates } = require('./rates');
 const receipts = require('./receipts');
+const { readIntent, summaryOf } = require('./intent');
 const { renderCards } = require('./card');
 const { renderTable, worthAPicture } = require('../../pictures/table');
 const settingsRepo = require('../../repos/settings.repo');
@@ -166,7 +167,7 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
   // Was the open preview the last thing they saw? A "yes" counts only then.
   if (state.pending) state.pending.at = state.pending.at ?? Date.now();
   // looking at a receipt is not looking away: a yes after it still counts
-  if (state.pending) state.pending.shownLast = PREVIEWS.test(String(reply ?? '')) || (/^🧾 Receipt for/.test(String(reply ?? '')) && Boolean(state.pending.shownLast));
+  if (state.pending) state.pending.shownLast = PREVIEWS.test(String(reply ?? '')) || (/^(?:🧾 Receipt for|Sure, take your time|Okay, kept them|Drop all \d+ without saving)/.test(String(reply ?? '')) && Boolean(state.pending.shownLast));
   state.history = [...(state.history ?? []), { said: said || (files.length ? `[${files.length} file(s)]` : ''), reply }].slice(-HISTORY);
   if (msg.messageId) state.seen = [...(state.seen ?? []), { id: msg.messageId, reply }].slice(-30);
   // The saved batch is drawn once (below), never kept in the conversation.
@@ -248,6 +249,34 @@ async function answerTurn(said, files, ctx) {
     }
     const r = readReply(said, pending, { year: year(today), groups: ctx.groups });
     if (r) return onReply(r, ctx);
+    /**
+     * NOT ONE CODE KNOWS: the reply reader picks what it is, from their words
+     * and a one line summary only (intent.js). Sure of it, it is acted on;
+     * not sure, or a question, it goes on to the router as before.
+     */
+    if (pending.kind === 'add' || pending.kind === 'edit' || pending.kind === 'remove' || pending.kind === 'undo') {
+      const it = await readIntent(said, summaryOf(pending), { client: ctx.client }).catch(() => null);
+      logger.info({ group, intent: it?.intent, sure: it?.sure }, 'expense bot: reply read');
+      if (it?.sure) {
+        const changeSaid = /\d|\b(?:was|were|is|should|to|from|paid|date|amount|payee|change|wrong)\b/i.test(said);
+        switch (it.intent) {
+          case 'confirm': return onReply({ kind: 'yes' }, ctx);
+          case 'cancel': return onReply({ kind: 'no' }, ctx);
+          case 'wait': return onReply({ kind: 'hold' }, ctx);
+          case 'show': if (pending.kind === 'add') return format.addPreview(pending.items, group); break;
+          case 'save_ready': if (pending.kind === 'add') return onReply({ kind: 'saveReady' }, ctx); break;
+          case 'skip_copies': case 'skip_saved': {
+            const bulk = readReply(it.intent === 'skip_copies' ? 'skip copies' : 'skip saved', pending, { year: year(today), groups: ctx.groups });
+            if (bulk) return onReply(bulk, ctx);
+            break;
+          }
+          case 'change':
+            if (pending.kind === 'add' && changeSaid) return reviseFrom(said, ctx);
+            return onReply({ kind: 'modify' }, ctx);
+          default: break;
+        }
+      }
+    }
   }
   // "NO, CANCEL THAT" WITH NOTHING OPEN: nothing to cancel, said so, never
   // read as "undo the last thing" or "not about expenses".
@@ -591,6 +620,22 @@ async function onReply(r, ctx) {
     return pending.kind === 'add'
       ? 'Sure, what should change? Just say it, like _the taxi was 50_, _the lunch was yesterday_ or _leave out the parking_.'
       : 'Sure, what should it be instead? Just say it, like _make it 50_ or _it was on 5 Oct_.';
+  }
+  /**
+   * A BIG PREVIEW IS NOT DROPPED ON ONE WORD (his call 2026-10-07): 20 or
+   * more waiting, a cancel asks once. Its "yes" then means drop, its "no"
+   * keeps them, anything else carries on as normal.
+   */
+  if (pending.confirmDrop) {
+    delete pending.confirmDrop;
+    if (r.kind === 'yes') { ctx.state.pending = null; return 'Okay, dropped them all. Nothing was saved.'; }
+    if (r.kind === 'no') return 'Okay, kept them. Reply *yes* to save, *modify* to change, or *cancel*.';
+  }
+  if (r.kind === 'hold') return 'Sure, take your time. Your preview is waiting.';
+  if (r.kind === 'no' && pending.kind === 'add' && pending.items.filter((x) => !x.skipped).length >= 20) {
+    pending.confirmDrop = true;
+    const n = pending.items.filter((x) => !x.skipped).length;
+    return `Drop all ${n} without saving any? Reply *yes* to drop them, or *no* to keep them.`;
   }
   if (r.kind === 'no') { ctx.state.pending = null; return `Okay, cancelled. Nothing was ${pending.kind === 'remove' ? 'removed' : pending.kind === 'add' ? 'saved' : 'changed'}.`; }
   if (pending.kind === 'pick') {

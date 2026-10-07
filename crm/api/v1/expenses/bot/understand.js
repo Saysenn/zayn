@@ -118,9 +118,12 @@ const REVISE = {
 
 /** Their answer to the open preview, as changes code then checks. */
 async function revise(text, items, { today, client, groups = [] } = {}) {
-  const shown = items.filter((x) => !x.skipped).map((x) => ({
-    n: x.n, groupName: x.groupName, spentOn: x.spentOn, description: x.description, payee: x.payee, rawAmount: x.rawAmount, currency: x.currency, spentBy: x.spentBy, missing: x.missing, doubts: x.doubts,
-  }));
+  /**
+   * COMPACT: one short line per expense, not its whole record (his call
+   * 2026-10-07: a 145 expense preview sent everything with every reply).
+   * The numbers they say are all the reader needs to point at.
+   */
+  const shown = items.filter((x) => !x.skipped).map((x) => `${x.n}. ${x.spentOn ?? '?'} | ${x.description ?? ''} | ${x.payee ?? '?'} | ${x.currency ?? ''} ${x.rawAmount ?? '?'}${x.groupName ? ` | ${x.groupName}` : ''}${x.spentBy ? ` | by ${x.spentBy}` : ''}`).join('\n');
   return ask({
     name: 'revise',
     system: [
@@ -133,7 +136,7 @@ async function revise(text, items, { today, client, groups = [] } = {}) {
       'Never invent a value. Only change what they said.',
       ...(groups.length ? [`groupName is one of: ${groups.join(', ')}.`] : []),
     ].join('\n'),
-    user: `The expenses shown:\n${JSON.stringify(shown)}\n\nTheir reply:\n${text}`,
+    user: `The expenses shown (no. date | what | paid to | amount | group | by):\n${shown}\n\nTheir reply:\n${text}`,
     schema: REVISE,
     client,
   });

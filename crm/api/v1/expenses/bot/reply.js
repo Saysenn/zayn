@@ -13,10 +13,12 @@ const { currencyOf, num, groupOf } = require('./check');
 // and the whole message goes to the model instead. A wrong read is worse
 // than no read.
 
-const YES = /^(?:y|ye|yes+|yeah|yep|yup|ok(?:ay)?|k|sure|confirm(?:ed)?|go(?: ahead)?|save(?: (?:it|them|all))?|do it|correct|approved?|👍|✅|yes(?: please| pls| save(?: it| them)?)?)$/i;
+const YES = /^(?:y|ye|yes+|yeah|yep|yup|ok(?:ay)?|k|sure(?: thing)?|confirm(?:ed)?|go(?: ahead)?|ok go|save(?: (?:it|them|all))?|do it|correct|approved?|👍|✅|yes(?: please| pls| save(?: it| them)?)?|fine|proceed|send it|that'?s? (?:is )?(?:correct|right|fine)|all (?:correct|right)|sige|oo|tama|tamam|yalla|haan|theek hai|go for it|👌|👌🏻|👍🏻|👍🏼|👍🏽|🆗|✔️|☑️|🙏)$/iu;
+// "HOLD ON": nothing changes, it waits
+const HOLD = /^(?:hold on|wait|one sec(?:ond)?|1 sec|a sec|hang on|brb|give me a (?:sec|minute|moment)|let me check|one moment)[.!\s]*$/i;
 // "NO, CANCEL THAT" is a cancel. It went to the router as "undo" and offered
 // to take back the last save (test sweep 2026-10-07).
-const NO = /^(?:(?:no+|nope|nah)[,.!\s]*)?(?:no+|nope|nah|cancel|stop|never ?mind|nevermind|forget (?:it|that|about it)|don'?t|abort|leave (?:it|that|those|them|it alone)|scrap (?:it|that)|❌)(?:\s+(?:that|this|it|those|them|all|please|pls|thanks))*$/i;
+const NO = /^(?:(?:no+|nope|nah)[,.!\s]*)?(?:no+|nope|nah|cancel|stop|never ?mind|nevermind|forget (?:it|that|about it)|don'?t(?: save)?|do not save|abort|discard|not now|leave (?:it|that|those|them|it alone)|scrap (?:it|that)|❌)(?:\s+(?:that|this|it|those|them|all|please|pls|thanks))*$/i;
 
 const nums = (s) => (String(s).match(/\d+/g) ?? []).map(Number);
 
@@ -128,6 +130,9 @@ function readReply(said, pending, { year = new Date().getUTCFullYear(), groups =
   if (!text || !pending) return null;
   const bare = text.toLowerCase().replace(/[!.]+$/, '').replace(/,? ?(?:please|pls|thanks|thank you)$/, '').trim();
   if (YES.test(bare)) return { kind: 'yes' };
+  if (HOLD.test(bare)) return { kind: 'hold' };
+  // "EDIT 2" / "change 3" / "fix the date of 3": what should change is asked
+  if (/^(?:edit|change|fix|modify|correct|update)\s+(?:the\s+\w+\s+(?:of|on|for)\s+)?(?:no\.?\s*|number\s*|#)?\d+$/i.test(bare)) return { kind: 'modify' };
   /**
    * "SAVE THE REST": the ready ones now, the ones still missing something
    * kept waiting (his report 2026-10-07: 141 ready and 4 missing a payee,

@@ -257,3 +257,24 @@ test('A YES IN THEIR OWN WORDS is a yes; "save the rest" saves the ready ones', 
   for (const q of ['save the rest', 'just save the ready ones', 'save what\'s ready']) assert.deepEqual(readReply(q, pending), { kind: 'saveReady' }, q);
   for (const q of ['save all except 3', 'dont save them', 'looks good but change 2']) assert.notDeepEqual(readReply(q, pending), { kind: 'yes' }, q);
 });
+
+test('EVERYDAY CONFIRMS, CANCELS AND CHANGES are read in code, free', () => {
+  const pending = { kind: 'add', items: [1, 2, 3].map((n) => ({ n, missing: [], doubts: [] })) };
+  const kind = (q) => readReply(q, pending)?.kind;
+  for (const q of ['sure thing', 'ok go', 'fine', 'send it', 'proceed', 'that is correct', 'sige', 'oo', 'tama', 'tamam', 'yalla', '👌', '🙏']) assert.equal(kind(q), 'yes', q);
+  for (const q of ['dont save', 'discard', 'not now', 'nah forget it']) assert.equal(kind(q), 'no', q);
+  for (const q of ['hold on', 'one sec', 'let me check']) assert.equal(kind(q), 'hold', q);
+  for (const q of ['edit 2', 'fix the date of 3', 'change 1']) assert.equal(kind(q), 'modify', q);
+});
+
+test('THE REPLY READER sees a one line summary, never an expense', () => {
+  const { summaryOf } = require('./intent');
+  const items = [
+    { n: 1, missing: ['payee'], doubts: [], description: 'SECRET TAXI' },
+    { n: 2, missing: [], doubts: ['same as 1'] },
+    { n: 3, missing: [], doubts: ['looks already saved: Lunch on 02 Oct'] },
+  ];
+  const line = summaryOf({ items });
+  assert.equal(line, '3 expenses, not saved yet, 1 missing something, 1 copies, 1 look already saved');
+  assert.doesNotMatch(line, /SECRET/);
+});
