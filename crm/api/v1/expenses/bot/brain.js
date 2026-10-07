@@ -115,7 +115,7 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
 
   let reply;
   // what the open preview held before this message, to see if it changed
-  const heldBefore = state.pending?.kind === 'add' ? JSON.stringify(state.pending.items.map(({ n, spentOn, rawAmount, currency, payee, description, skipped }) => [n, spentOn, rawAmount, currency, payee, description, skipped])) : null;
+  const heldBefore = state.pending?.kind === 'add' ? JSON.stringify(state.pending.items.map(({ n, spentOn, rawAmount, currency, payee, description, skipped, ok, replaceId, category }) => [n, spentOn, rawAmount, currency, payee, description, skipped, ok, replaceId, category])) : null;
   try {
     reply = await answerTurn(said, files, ctx);
     /**
@@ -123,7 +123,7 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
      * typed while their preview is open re-showed it as if new. Now it says
      * so. Only for a message with figures in it, never "yes" or "show it".
      */
-    const heldAfter = state.pending?.kind === 'add' ? JSON.stringify(state.pending.items.map(({ n, spentOn, rawAmount, currency, payee, description, skipped }) => [n, spentOn, rawAmount, currency, payee, description, skipped])) : null;
+    const heldAfter = state.pending?.kind === 'add' ? JSON.stringify(state.pending.items.map(({ n, spentOn, rawAmount, currency, payee, description, skipped, ok, replaceId, category }) => [n, spentOn, rawAmount, currency, payee, description, skipped, ok, replaceId, category])) : null;
     const unchanged = heldBefore && heldBefore === heldAfter && !files.length
       && /_Not saved yet_/.test(String(reply ?? '')) && !/^Just to be sure/.test(String(reply ?? '')) && !String(reply ?? '').startsWith(ALREADY) && !SHOW_PREVIEW.test(said);
     if (unchanged && /\d/.test(said) && said.split(/\s+/).length >= 3) {
@@ -435,6 +435,7 @@ async function recheck(items, ctx) {
     // eslint-disable-next-line no-await-in-loop
     const hit = await receipts.seenBefore(x.receipt).catch(() => null);
     if (hit) {
+      x.repeatOf = hit.id;
       // the receipt says it better than "looks already saved": one note
       x.doubts = x.doubts.filter((d) => !/^looks already saved/.test(d));
       x.doubts.push(`same receipt as one saved on ${format.day(String(hit.spent_on instanceof Date ? hit.spent_on.toISOString() : hit.spent_on).slice(0, 10))} (${hit.payee || 'no payee'}, ${format.money(hit.currency, Number(hit.raw_amount))})`);
@@ -578,26 +579,46 @@ async function saveAdd(ctx, { readyOnly = false } = {}) {
       `Reply with the answers (like *${waiting[0].n} paid to Careem*), *skip ${format.ranges(waiting.map((x) => x.n))}*${ready ? `, or *save the rest* to save the ${ready} ready ${ready === 1 ? 'one' : 'ones'} now and keep ${waiting.length === 1 ? 'that one' : 'these'} waiting` : ''}.`,
     ].join('\n');
   }
-  const made = await expensesRepo.createMany(items.map((x) => ({
+  const fieldsOf = (x) => ({
     spentOn: x.spentOn, description: x.description, payee: x.payee, currency: x.currency, rawAmount: x.rawAmount,
     exchangeRate: x.exchangeRate, groupName: x.groupName ?? ctx.group, spentBy: x.spentBy, category: x.category ?? null,
-  })));
+  });
+  /**
+   * REPLACE THE SAVED ONE (his call 2026-10-07): the same receipt, its saved
+   * expense UPDATED to these values rather than a second copy. Its old
+   * values are recorded, so "undo" puts them back.
+   */
+  const replaced = [];
+  for (const x of items.filter((i) => i.replaceId)) {
+    /* eslint-disable no-await-in-loop */
+    const before = await expensesRepo.findById(x.replaceId);
+    if (!before) { x.replaceId = null; continue; }
+    const after = await expensesRepo.update(x.replaceId, fieldsOf(x));
+    if (x.receipt) await receipts.keep(x.receipt, after).catch(() => null);
+    replaced.push({ id: x.replaceId, before: SNAP(before), after: SNAP(after), replaced: true });
+    /* eslint-enable no-await-in-loop */
+  }
+  const fresh = items.filter((x) => !x.replaceId);
+  const made = await expensesRepo.createMany(fresh.map(fieldsOf));
   // THE RECEIPTS GO WITH THEM, into this month's folder (receipts.js). A
   // receipt that cannot be kept never undoes a saved expense; it is logged.
-  for (const [i, x] of items.entries()) {
+  for (const [i, x] of fresh.entries()) {
     if (!x.receipt || !made[i]) continue;
     // eslint-disable-next-line no-await-in-loop
     await receipts.keep(x.receipt, made[i]).catch((err) => logger.warn({ err: err.message, id: made[i].id }, 'expense bot: a receipt could not be kept'));
   }
   // VERIFIED: read back from the table, never assumed.
   const check = await Promise.all(made.map((m) => expensesRepo.findById(m.id)));
-  if (check.some((c) => !c) || made.length !== items.length) {
-    logger.error({ group: ctx.group, asked: items.length, made: made.length }, 'expense bot: save did not verify');
-    return `⚠️ Only ${check.filter(Boolean).length} of ${items.length} could be confirmed saved. Please check the Expenses page.`;
+  if (check.some((c) => !c) || made.length !== fresh.length) {
+    logger.error({ group: ctx.group, asked: fresh.length, made: made.length }, 'expense bot: save did not verify');
+    return `⚠️ Only ${check.filter(Boolean).length} of ${fresh.length} could be confirmed saved. Please check the Expenses page.`;
   }
+  // ONE ACTION for the batch: the new ones (undo removes them) and the
+  // replaced ones (undo puts their old values back)
+  const all = [...made.map((m) => ({ id: m.id, after: SNAP(m) })), ...replaced];
   await store.recordAction(require('../../../configs/db'), {
-    phone: ctx.phone, group: ctx.group, kind: 'add', changes: made.map((m) => ({ id: m.id, after: SNAP(m) })),
-    summary: `${made.map((m) => `${m.description} · ${format.money(m.currency, m.raw_amount)}`).slice(0, 4).join(', ')}${made.length > 4 ? ` and ${made.length - 4} more` : ''}`,
+    phone: ctx.phone, group: ctx.group, kind: 'add', changes: all,
+    summary: `${all.map((c) => `${c.after.description} · ${format.money(c.after.currency, c.after.raw_amount ?? c.after.rawAmount)}${c.replaced ? ' (replaced)' : ''}`).slice(0, 4).join(', ')}${all.length > 4 ? ` and ${all.length - 4} more` : ''}`,
   });
   broadcast(null, EVENT, { action: 'imported', count: made.length, via: 'whatbot' });
   // SAVED THE READY ONES: the rest stay open, numbered again from 1
@@ -679,7 +700,21 @@ async function onReply(r, ctx) {
     return r.bulk === 'saved' ? 'None of them look already saved, so nothing was skipped.' : 'There are no copies in this preview, so nothing was skipped.';
   }
   if (r.kind === 'skip') for (const n of r.which) items.find((x) => x.n === n).skipped = true;
-  if (r.kind === 'unskip') for (const n of r.which) items.find((x) => x.n === n).skipped = false;
+  // "KEEP 6": back in AND accepted as a new one (a lookalike they know is real)
+  if (r.kind === 'unskip') for (const n of r.which) { const x = items.find((i) => i.n === n); x.skipped = false; x.ok = true; x.modelDoubt = null; }
+  // 1 / 2 / 3 FOR THE SAME RECEIPTS: skip them, save again, or replace the saved ones
+  if (r.kind === 'repeats') {
+    for (const n of r.which) {
+      const x = items.find((i) => i.n === n);
+      if (r.choice === 'skip') x.skipped = true;
+      if (r.choice === 'keep') { x.ok = true; x.replaceId = null; }
+      if (r.choice === 'replace') { x.ok = true; x.replaceId = x.repeatOf; }
+    }
+  }
+  if (r.kind === 'mixed') {
+    for (const n of r.skip) items.find((x) => x.n === n).skipped = true;
+    for (const n of r.keep) { const x = items.find((i) => i.n === n); x.skipped = false; x.ok = true; x.modelDoubt = null; }
+  }
   if (r.kind === 'only') for (const x of items) x.skipped = !r.which.includes(x.n);
   if (r.kind === 'fix') {
     for (const part of r.parts) applyFix(items, part, ctx.today);
@@ -821,7 +856,9 @@ async function saveUndo(ctx) {
       const now = await expensesRepo.findById(c.id);
       if (!now) continue;
       if (!same(now, c.after)) { skipped.push(c.after.description); continue; }
-      await expensesRepo.remove(c.id);
+      // a REPLACED one goes back to what it was; a new one is taken back
+      if (c.replaced && c.before) await expensesRepo.update(c.id, c.before);
+      else await expensesRepo.remove(c.id);
       done.push(c.id);
     } else if (action.kind === 'edit') {
       const now = await expensesRepo.findById(c.id);

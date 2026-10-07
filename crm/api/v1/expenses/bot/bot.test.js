@@ -223,7 +223,7 @@ test('A BIG PREVIEW READS SHORT: questions grouped by kind, numbers as runs', ()
   assert.deepEqual(q, [
     '• No. 3, 10: paid to whom?'.replace('paid to whom?', q[0].split(': ')[1]),
     '• No. 21–35: copies of earlier ones (reply *skip copies*)',
-    '• No. 36–40: look already saved (reply *skip saved*, or *yes* to save anyway)',
+    '• No. 36–40: look like ones already saved (same shop, amount and day). *keep 36* for any that\'s new, or *skip saved* for all',
   ]);
 });
 
@@ -277,4 +277,20 @@ test('THE REPLY READER sees a one line summary, never an expense', () => {
   const line = summaryOf({ items });
   assert.equal(line, '3 expenses, not saved yet, 1 missing something, 1 copies, 1 look already saved');
   assert.doesNotMatch(line, /SECRET/);
+});
+
+test('THE SAME RECEIPTS AGAIN: one choice for all; lookalikes one by one', () => {
+  const items = [
+    { n: 1, missing: [], doubts: ['same receipt as one saved on 04 Oct (Carrefour, AED 139.91)'] },
+    { n: 2, missing: [], doubts: ['same receipt as one saved on 05 Oct (Careem, AED 45.00)'] },
+    { n: 3, missing: [], doubts: ['looks already saved: Taxi on 05 Oct'] },
+  ];
+  const q = format.questions(items);
+  assert.equal(q[0], '• No. 1, 2: the same receipts you already saved. Reply *1* skip them · *2* save again · *3* replace the saved ones');
+  assert.equal(q[1], "• No. 3: looks like one already saved (_Taxi on 05 Oct_): *keep 3* if it's a new one, or *skip 3*");
+  const pending = { kind: 'add', items };
+  assert.deepEqual(readReply('1', pending), { kind: 'repeats', choice: 'skip', which: [1, 2] });
+  assert.deepEqual(readReply('replace them', pending), { kind: 'repeats', choice: 'replace', which: [1, 2] });
+  assert.deepEqual(readReply('skip 1-2, keep 3', pending), { kind: 'mixed', skip: [1, 2], keep: [3] });
+  assert.deepEqual(readReply('keep 3', pending), { kind: 'unskip', which: [3] });
 });

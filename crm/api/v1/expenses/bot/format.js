@@ -120,17 +120,32 @@ function questions(live) {
     for (const f of x.missing ?? []) put(f === 'exchangeRate' ? `1 ${x.currency} to AED is?` : ASK[f] ?? `${LABEL[f] ?? f}?`, x.n);
     for (const d of x.doubts ?? []) {
       if (/^same as \d+/.test(d)) put('§copies', x.n);
-      else if (/^looks already saved/.test(d)) put('§saved', x.n);
-      else if (/^same receipt as one saved/.test(d)) put(`§receipt:${d}`, x.n);
+      // a lookalike is asked ONE BY ONE: two same taxis on a day can be real
+      else if (/^looks already saved/.test(d)) put(`§saved:${x.n}:${d.replace(/^looks already saved:\s*/, '')}`, x.n);
+      // the same receipt FILE is a resend: one choice for all of them
+      else if (/^same receipt as one saved/.test(d)) put('§receipt', x.n);
       else if (/^another .+: new, or a change/.test(d)) put('another expense to the same payee that day: new, or a change to that one?', x.n);
       else put(`_${d}_`, x.n);
     }
   }
+  // LOOKALIKES: one by one when there are a few, one line when there are many
+  const alike = [...by.keys()].filter((q) => q.startsWith('§saved:'));
+  if (alike.length > 3) {
+    const ns = alike.flatMap((q) => by.get(q));
+    for (const q of alike) by.delete(q);
+    by.set('§savedMany', ns);
+  }
   const lines = [...by].map(([q, ns]) => {
+    if (q === '§savedMany') return `• No. ${ranges(ns)}: look like ones already saved (same shop, amount and day). *keep ${ns[0]}* for any that's new, or *skip saved* for all`;
     const nums = `No. ${ranges(ns)}`;
     if (q === '§copies') return `• ${nums}: ${ns.length === 1 ? 'a copy of an earlier one' : 'copies of earlier ones'} (reply *skip copies*)`;
-    if (q === '§saved') return `• ${nums}: ${ns.length === 1 ? 'looks' : 'look'} already saved (reply *skip saved*, or *yes* to save anyway)`;
-    if (q.startsWith('§receipt:')) return `• ${nums}: _${q.slice(9)}_ (reply *skip saved*, or *yes* to save again)`;
+    if (q.startsWith('§saved:')) {
+      const [, n, what] = /^§saved:(\d+):(.*)$/.exec(q);
+      return `• No. ${n}: looks like one already saved (_${what}_): *keep ${n}* if it's a new one, or *skip ${n}*`;
+    }
+    if (q === '§receipt') {
+      return `• ${nums}: ${ns.length === 1 ? 'the same receipt you already saved' : 'the same receipts you already saved'}. Reply *1* skip ${ns.length === 1 ? 'it' : 'them'} · *2* save again · *3* replace the saved ${ns.length === 1 ? 'one' : 'ones'}`;
+    }
     return `• ${nums}: ${q}`;
   });
   return lines.length > QUESTIONS_SHOWN

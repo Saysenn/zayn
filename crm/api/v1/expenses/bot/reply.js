@@ -177,6 +177,26 @@ function readReply(said, pending, { year = new Date().getUTCFullYear(), groups =
     const which = pending.items.filter((x) => !x.skipped && (x.doubts ?? []).some((d) => (saved ? /^looks already saved|^same receipt as one saved/ : /^same as \d+/).test(d))).map((x) => x.n);
     return { kind: 'skip', which, bulk: saved ? 'saved' : 'copies' };
   }
+  /**
+   * THE SAME RECEIPTS AGAIN: 1 skip them, 2 save again, 3 replace the saved
+   * ones (his call 2026-10-07). Only while such repeats are in the preview,
+   * so a bare number means nothing anywhere else.
+   */
+  const repeats = pending.items.filter((x) => !x.skipped && (x.doubts ?? []).some((d) => /^same receipt as one saved/.test(d))).map((x) => x.n);
+  if (repeats.length) {
+    const choice = /^(?:1|skip(?: them| it)?|skip (?:the )?(?:repeats?|same ones)|skip all)[.!]*$/i.test(bare) ? 'skip'
+      : /^(?:2|save (?:them|it) again|save again|keep (?:them|it|all)|add (?:them|it) again)[.!]*$/i.test(bare) ? 'keep'
+        : /^(?:3|replace(?: them| it| the saved ones?)?|overwrite(?: them| it)?|update the saved ones?)[.!]*$/i.test(bare) ? 'replace' : null;
+    if (choice) return { kind: 'repeats', choice, which: repeats };
+  }
+  // "SKIP 1-5, KEEP 6": skips and keeps in one reply
+  const ops = bare.split(/\s*(?:,|;|\band\b|\bthen\b)\s*(?=skip|keep|save)/i).map((p) => /^(skip|keep|save)\s+(?:no\.?\s*|#)?(\d+)(?:\s*(?:to|-|–)\s*(\d+))?(?:\s+again)?$/i.exec(p.trim()));
+  if (ops.length > 1 && ops.every(Boolean)) {
+    const span = (m) => (m[3] ? Array.from({ length: Math.max(0, Number(m[3]) - Number(m[2]) + 1) }, (_, i) => Number(m[2]) + i) : [Number(m[2])]);
+    const skip = ops.filter((m) => /skip/i.test(m[1])).flatMap(span);
+    const keep = ops.filter((m) => !/skip/i.test(m[1])).flatMap(span);
+    if ([...skip, ...keep].every((n) => n >= 1 && n <= count)) return { kind: 'mixed', skip, keep };
+  }
   // "skip 3 to 6" / "skip 3-6": a range is every number in it.
   const span = /^(?:skip|drop|remove|delete|without|leave out|not)\s+(?:#|no\.?\s*|numbers?\s+)?(\d+)\s*(?:to|-|–|through|thru|till)\s*(\d+)$/i.exec(bare);
   if (span && Number(span[2]) >= Number(span[1])) {

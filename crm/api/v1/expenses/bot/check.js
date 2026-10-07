@@ -120,6 +120,10 @@ function normalise(raw, { admin, group, groups = [], rates = {}, live = {}, know
     category: CATEGORIES.includes(raw.category) ? raw.category : categoryOf(raw),
     // the receipt it came from, held until "yes" (receipts.js)
     receipt: raw.receipt ?? null,
+    // the saved expense this one is the same receipt as, and whether to
+    // REPLACE it on yes instead of saving a second copy
+    repeatOf: raw.repeatOf ?? null,
+    replaceId: raw.replaceId ?? null,
     skipped: Boolean(raw.skipped),
     ok: Boolean(raw.ok),
   };
@@ -147,7 +151,7 @@ function normalise(raw, { admin, group, groups = [], rates = {}, live = {}, know
   if (x.spentOn && daysBetween(x.spentOn, today) > 1) x.doubts.push('the date is in the future');
   if (x.spentOn && daysBetween(today, x.spentOn) > 62) x.doubts.push('the date is over 2 months ago');
   // A NOTE, not a doubt: nothing to answer, and it does not stop a save.
-  x.notes = [];
+  x.notes = x.replaceId ? ['will replace the one already saved'] : [];
   // A RATE THEY GAVE far from the market's is worth a second look.
   const market = live[x.currency]?.rate;
   if (given > 0 && market && Math.abs(given - market) / market > 0.1) x.doubts.push(`your rate ${given} is far from the market's ${market}`);
