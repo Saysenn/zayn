@@ -21,7 +21,8 @@ vi.mock("../system/rateLimit.js", () => ({
   checkRateLimit: async () => ({ allowed: true }),
   RATE_LIMIT_MESSAGES: {},
 }));
-vi.mock("../employee/access.js", () => ({ identify: async () => null }));
+const identify = vi.fn(async () => null);
+vi.mock("../employee/access.js", () => ({ identify: (...a) => identify(...a) }));
 
 const turn = vi.fn();
 vi.mock("./expenses.js", () => ({
@@ -62,10 +63,17 @@ describe("a registered admin chooses the side by one word", () => {
     expect(turn).toHaveBeenCalledTimes(1);
   });
 
-  it("not about expenses: answered by the normal side this once, and said so", async () => {
+  it("not about expenses, from an admin who is NOT on the master sheet: what the expense side can do, never \"can't find your number\"", async () => {
+    turn.mockResolvedValue({ registered: true, handOff: true });
+    const out = await admin("show the image to me");
+    expect(out.text).not.toContain(UNKNOWN_SENDER);
+    expect(out.text).toMatch(/I can only help with \*MANBAT\* expenses here/);
+  });
+
+  it("not about expenses, from an admin who IS on the master sheet: the pay side answers, and says so", async () => {
+    identify.mockResolvedValueOnce({ person: { personId: "gary", personName: "Gary Test" } }).mockResolvedValueOnce(null);
     turn.mockResolvedValue({ registered: true, handOff: true });
     const out = await admin("how much am I getting paid?");
-    expect(out.text.startsWith(UNKNOWN_SENDER)).toBe(true);
     expect(out.text).toMatch(/isn't an expense, so I answered it as a payments question/);
   });
 

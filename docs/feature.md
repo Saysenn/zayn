@@ -47,3 +47,12 @@ came from are in this file's git history (before 2026-10-06).
     which one she is on. Any wording, read by meaning like her wake words
     (10). A context still "coming soon" gets a plain "not ready yet".
 12. **HSBC mode.**
+13. **Live exchange rates for the master sheet and its exports.** The
+    expense bot already gets hourly rates from Open Exchange Rates
+    (`OPENEXCHANGERATES_APP_ID`, `crm/api/v1/expenses/bot/rates.js`). Use the
+    same source for the master sheet's USD and currency totals and the
+    exported files' totals, instead of rates saved by hand in Settings. The
+    current month uses the live rate (shown with its time); a CLOSED month
+    keeps the rate frozen into its snapshot, so old totals never move. A
+    rate saved by hand in Settings still wins (an agreed rate). The free
+    open.er-api.com stays the backup when the key or the service is down.

@@ -20,7 +20,7 @@ const FAILED = Symbol('speech request failed');
  * whichever's actually available without changing how either is called.
  *
  * `level` here is REAL playback amplitude (Web Audio API AnalyserNode on
- * the actual <audio> element), not an envelope hack — the one advantage
+ * what is actually playing), not an envelope hack — the one advantage
  * server-side audio has over SpeechSynthesis, which never exposes a
  * waveform at all. Same technique useMicLevel.js already uses for the
  * microphone side.
@@ -30,12 +30,12 @@ export function useOpenaiSpeech() {
   const [speaking, setSpeaking] = useState(false);
   const [level, setLevel] = useState(0);
 
-  const audioRef = useRef(null);
+  // the clip playing now (an AudioBufferSourceNode), so cancel can stop it
+  const sourceRef = useRef(null);
   const audioCtxRef = useRef(null);
   const analyserRef = useRef(null);
   const dataRef = useRef(null);
   const rafRef = useRef(null);
-  const objectUrlRef = useRef(null);
   // The tail of the utterance queue. See speak().
   const queueRef = useRef(Promise.resolve());
   // Bumped by cancel(). A chain built before the bump stops at its next
@@ -69,10 +69,7 @@ export function useOpenaiSpeech() {
 
   function teardownAudio() {
     cancelAnimationFrame(rafRef.current);
-    if (objectUrlRef.current) {
-      URL.revokeObjectURL(objectUrlRef.current);
-      objectUrlRef.current = null;
-    }
+    sourceRef.current = null;
   }
 
   function tickLevel() {
@@ -181,49 +178,62 @@ export function useOpenaiSpeech() {
     }
     teardownAudio();
 
-    objectUrlRef.current = URL.createObjectURL(blob);
-
-    if (!audioRef.current) audioRef.current = new Audio();
-    const audio = audioRef.current;
-    audio.src = objectUrlRef.current;
-
-    // Built once, reused every utterance — a fresh AudioContext per speak()
-    // call is both wasteful and hits Chrome's per-page context limit
-    // eventually. createMediaElementSource can only ever be called once
-    // per <audio> element, which is exactly why audioRef is a stable ref
-    // and not recreated per call.
+    /**
+     * ===============================
+     * * PLAYED THROUGH THE AUDIO ENGINE, NOT AN <audio> ELEMENT
+     * ===============================
+     * His report 2026-10-07: "she stopped reading when I closed the command
+     * center". Each sentence is its own clip, and Chrome holds a NEW clip
+     * on an <audio> element while the page is not on screen (another tab,
+     * the window behind another app): the clip sat "loading" at 0:00 and
+     * the answer stopped at the end of the sentence playing. Decoded and
+     * played by the AudioContext, a clip plays to its end hidden or not
+     * (tested in a hidden tab: 11.4 seconds of 11.4).
+     */
     if (!audioCtxRef.current) {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       audioCtxRef.current = new AudioContext();
       analyserRef.current = audioCtxRef.current.createAnalyser();
       analyserRef.current.fftSize = 256;
       dataRef.current = new Uint8Array(analyserRef.current.frequencyBinCount);
-      const source = audioCtxRef.current.createMediaElementSource(audio);
-      source.connect(analyserRef.current);
       analyserRef.current.connect(audioCtxRef.current.destination);
     }
-    if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume();
-
-    audio.onplay = () => { setSpeaking(true); tickLevel(); };
-    // EVERY exit calls done(), or the chain never advances and she stays
-    // silent for the rest of the session.
-    audio.onended = () => { setSpeaking(false); setLevel(0); teardownAudio(); done(); };
-    audio.onerror = () => { setSpeaking(false); setLevel(0); teardownAudio(); done(); };
-
-    audio.play().catch(() => { setSpeaking(false); setLevel(0); done(); });
+    const ctx = audioCtxRef.current;
+    try {
+      if (ctx.state === 'suspended') await ctx.resume();
+      const buffer = await ctx.decodeAudioData(await blob.arrayBuffer());
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(analyserRef.current);
+      sourceRef.current = source;
+      // EVERY exit calls done(), or the chain never advances and she stays
+      // silent for the rest of the session.
+      source.onended = () => {
+        if (sourceRef.current === source) { setSpeaking(false); setLevel(0); teardownAudio(); }
+        done();
+      };
+      setSpeaking(true);
+      source.start();
+      tickLevel();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('diane: a spoken clip could not be played', err);
+      setSpeaking(false);
+      setLevel(0);
+      teardownAudio();
+      done();
+    }
   }
 
   function cancel() {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-    }
+    const playing = sourceRef.current;
+    sourceRef.current = null;
+    try { playing?.stop(); } catch { /* already finished */ }
     setSpeaking(false);
     setLevel(0);
     teardownAudio();
-    // THE QUEUE IS RESET TOO. Pausing the element never fires `onended`,
-    // so the promise for the utterance being cancelled would never
-    // resolve, and everything queued behind it would wait on it forever.
+    // THE QUEUE IS RESET TOO, so nothing queued behind the stopped clip
+    // waits on it.
     // Muting mid-sentence has to leave her able to speak next turn.
     queueRef.current = Promise.resolve();
     // And a part still in flight must not play when it lands.

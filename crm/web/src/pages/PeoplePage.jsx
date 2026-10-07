@@ -135,6 +135,11 @@ function PersonRow({ person, onOpen, selected, onSelect }) {
       </td>
       <td className="td sticky-col sticky-edge">
         <span className="font-medium text-text">{person.display_name}</span>
+        {/* HER DIFFERENCE IS HERS (his call 2026-10-07): "Gloria difference"
+            is listed under Gloria, and says so in small print. */}
+        {person.includes?.length > 0 && (
+          <span className="block text-[11px] text-text-muted">incl. {person.includes.join(', ')}</span>
+        )}
         {/* An icon, not a "REVIEW" chip. A chip is a word with no
             explanation behind it, and it changes the column's width row by
             row, which is the same thing that pushed the master sheet's
@@ -203,7 +208,7 @@ function PersonCard({ person, onOpen, selected, onSelect }) {
       selectLabel={`Select ${person.display_name}`}
       icon={UsersIcon}
       title={person.display_name}
-      subtitle={summarizeList(person.roles)}
+      subtitle={person.includes?.length ? `${summarizeList(person.roles)} · incl. ${person.includes.join(', ')}` : summarizeList(person.roles)}
       lead={<MoneyTotals totals={person.monthly_totals} label="A month, every currency" />}
       leadLabel="a month"
       onOpen={() => onOpen(person.person_id)}

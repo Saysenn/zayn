@@ -48,5 +48,7 @@ export const MODE_REPLIES = {
     "💷 *Payments mode.* Ask about your pay as usual.\nType *expense* to send expenses again.",
   switchedForFile: () =>
     `📒 _Switched to expense mode for this file. Type *payments* to switch back._\n\n`,
+  notForExpenses: (group) =>
+    `I can only help with *${group}* expenses here: send one as text, a receipt photo or a file, ask *show me the preview*, or ask what was spent (like _how much this month?_).`,
   handedOver: "\n\n_That one isn't an expense, so I answered it as a payments question. Type *payments* to stay on pay, or keep sending expenses._",
 };

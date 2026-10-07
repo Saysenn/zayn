@@ -184,6 +184,13 @@ export async function handleMessage(input) {
       // NOT ABOUT EXPENSES ("how much am I getting paid?"): answered as a
       // payments question this once, and said so.
       if (out.handOff) {
+        // NOT ON THE MASTER SHEET, so the pay side has nothing for them:
+        // "show the image to me" came back "I can't find your number"
+        // (2026-10-07). An admin who is not an employee gets what the
+        // expense side CAN do instead.
+        if (!(await employees.identify(phone, channelGroup).catch(() => null))) {
+          return words(MODE_REPLIES.notForExpenses(channelGroup));
+        }
         const answered = await answerAsEmployee(input);
         return answered === NO_REPLY ? answered : { ...answered, text: `${answered.text}${MODE_REPLIES.handedOver}` };
       }

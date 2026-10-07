@@ -62,6 +62,11 @@ function editish(said) {
   if (words.some((w) => /'s$/.test(w))) return true;
   return words.some((w) => w.length >= 4 && EDIT_VERBS.some((v) => v.length >= 4 && (w === v || oneTypo(w, v))));
 }
+// a note above the preview it re-sends
+const ALREADY = 'Those were all already in your preview, so nothing was added. Here it is again:\n\n';
+// "SHOW ME THE IMAGE" re-sends the open preview (his report 2026-10-07: it
+// went to the pay side and came back "I can't find your number")
+const SHOW_PREVIEW = /^(?:(?:can you |could you |pls |please )?(?:show|send|resend|re-send|give)(?: me)?(?: it| them)?(?: the| my| that)?\s*(?:image|picture|pic|photo|preview|list|expenses|it|them|again)(?: to me| for me)?(?: again| please| pls)?|(?:where(?:'s| is) )?(?:the |my )?(?:image|picture|preview)\??)[!.? ]*$/i;
 const UNDO = /^(?:undo(?: (?:that|it|this|last|the last one))?|take (?:it|that|them) back|put (?:it|that) back|revert(?: that| it)?)[!. ]*$/i;
 
 /**
@@ -118,8 +123,7 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
     const heldAfter = state.pending?.kind === 'add' ? JSON.stringify(state.pending.items.map(({ n, spentOn, rawAmount, currency, payee, description, skipped }) => [n, spentOn, rawAmount, currency, payee, description, skipped])) : null;
     if (heldBefore && heldBefore === heldAfter && !files.length && /\d/.test(said) && said.split(/\s+/).length >= 3
       && /_Not saved yet_/.test(String(reply ?? '')) && !/^Just to be sure/.test(String(reply ?? ''))) {
-      const live = state.pending.items.filter((x) => !x.skipped).length;
-      reply = `Those are already in your preview, so nothing changed. It still has ${live} ${live === 1 ? 'expense' : 'expenses'}: reply *yes*, *modify* or *cancel*.`;
+      reply = `${ALREADY}${format.addPreview(state.pending.items, group)}`;
     }
   } catch (err) {
     if (err.code === 'NO_AI') reply = 'I can\'t read that right now (my reading service is off). Nothing was saved. Try again later.';
@@ -169,7 +173,7 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
       const pngs = renderCards(items, { group, saved: Boolean(savedNow), style, today });
       if (pngs.length) {
         [image, ...extraImages] = pngs.map((png, i) => ({ base64: png.toString('base64'), mime: 'image/png', filename: `expenses-${i + 1}.png`, saved: Boolean(savedNow) }));
-        const lead = /^Added \d+ more[^\n]*\n\n/.exec(String(reply))?.[0] ?? '';
+        const lead = /^(?:Added \d+ more|Those (?:were|are) (?:all )?already)[^\n]*\n\n/.exec(String(reply))?.[0] ?? '';
         text = `${lead}${format.caption(items, group, { saved: Boolean(savedNow) })}`;
       }
     } else if (ctx.answer?.table) {
@@ -241,6 +245,9 @@ async function answerTurn(said, files, ctx) {
     return ctx.channel === 'diane' ? format.HELP_DIANE : format.HELP(admin.name.split(' ')[0], group);
   }
   if (THANKS.test(said) && !pending) return 'You\'re welcome 🙂';
+  if (SHOW_PREVIEW.test(said)) {
+    return pending?.kind === 'add' ? format.addPreview(pending.items, group) : 'There is no preview open right now. Send an expense, a receipt photo or a file and I\'ll show you one.';
+  }
   if (UNDO.test(said)) return startUndo(ctx);
 
   // A PLAIN NEW EXPENSE ("taxi 45 paid to Careem") needs no router: an
@@ -348,8 +355,9 @@ async function addFrom(msg, ctx) {
     if (dropped) {
       fresh = fresh.filter((_, i) => keep[i]).map((x, i) => ({ ...x, n: open.length + i + 1 }));
       if (!fresh.length) {
-        const live = open.filter((x) => !x.skipped).length;
-        return `Those ${dropped === 1 ? 'were' : `${dropped} were`} all already in your preview, so nothing was added. It still has ${live} ${live === 1 ? 'expense' : 'expenses'}: reply *yes*, *modify* or *cancel*.`;
+        // THE PREVIEW AGAIN, picture and all (his report 2026-10-07: the
+        // note came alone and the preview was nowhere to be seen)
+        return `${ALREADY}${format.addPreview(open, ctx.group)}`;
       }
       items = await recheck([...open, ...fresh], ctx);
     }
@@ -405,8 +413,7 @@ async function reviseFrom(said, ctx) {
     if (copies.length) {
       const kept = items.slice(before).filter((_, i) => !copies.includes(fresh[i])).map((x, i) => ({ ...x, n: before + i + 1 }));
       if (!kept.length && !got.updates.length && !got.skip.length && !got.ok.length) {
-        const live = open.length;
-        return `Those ${copies.length === 1 ? 'is' : 'are'} already in your preview, so nothing was added. It still has ${live} ${live === 1 ? 'expense' : 'expenses'}: reply *yes*, *modify* or *cancel*.`;
+        return `${ALREADY}${format.addPreview(pending.items, ctx.group)}`;
       }
       checked = await recheck([...items.slice(0, before), ...kept], ctx);
     }

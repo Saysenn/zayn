@@ -121,6 +121,24 @@ function dealFilters({ role, group, company, method, currency, status, needsRevi
  * GBP, AED and EURO, and a single added-up number across the three would
  * be meaningless. Comes back as {"GBP": 8900, "AED": 3675}.
  */
+/**
+ * ===============================
+ * * "GLORIA DIFFERENCE" IS GLORIA'S, ON THE PEOPLE PAGE TOO
+ * ===============================
+ * His call 2026-10-07. The sheet pays a top up as its own "person"; Diane
+ * already counts it as the person's (agent/tools/resolvePerson.js, baseOf).
+ * Here a deal's OWNER is the person whose name it extends with "difference"
+ * (or "diff"), when that person exists; anyone else owns their own deals.
+ * The deal rows are not touched: only who they are listed under.
+ */
+const DIFF = '\\s+(difference|differnce|differance|diff)\\s*$';
+const ownerSql = (t) => `COALESCE((
+  SELECT b.person_id FROM tb_mastersheet b
+  WHERE ${t}.person_name ~* '${DIFF}'
+    AND lower(trim(b.person_name)) = lower(trim(regexp_replace(${t}.person_name, '${DIFF}', '', 'i')))
+    AND b.person_id <> ${t}.person_id
+  LIMIT 1), ${t}.person_id)`;
+
 async function findAll(filters = {}) {
   const { page = 1, pageSize = 25, cryptoPercent = 0 } = filters;
   const params = [];
@@ -131,17 +149,17 @@ async function findAll(filters = {}) {
 
   const result = await pool.query(
     `WITH deals AS (
-       SELECT *, ${paymentPeriodSql('')} AS payment_period, ${personRatesSql()}
+       SELECT *, ${paymentPeriodSql('')} AS payment_period, ${personRatesSql()}, ${ownerSql('tb_mastersheet')} AS owner_id
        FROM tb_mastersheet WHERE ${whereSql}
      ),
      -- THE PARTS, not a SUM: add on first and the fee off the total is not
      -- a sum SQL should own. rates.helper rates them below.
      totals AS (
-       SELECT person_id, currency, jsonb_agg(jsonb_build_object(
+       SELECT owner_id AS person_id, currency, jsonb_agg(jsonb_build_object(
          'monthly_amount', monthly_amount, 'payment_method', payment_method,
          'addon_percent', addon_percent, 'fee_percent', fee_percent,
          'person_addon_percent', person_addon_percent, 'person_fee_percent', person_fee_percent)) AS parts
-       FROM deals WHERE stopped_on IS NULL GROUP BY person_id, currency -- a stopped deal is owed nothing
+       FROM deals WHERE stopped_on IS NULL GROUP BY owner_id, currency -- a stopped deal is owed nothing
      ),
      totals_json AS (
        SELECT person_id, jsonb_object_agg(currency, parts) AS monthly_parts
@@ -149,8 +167,10 @@ async function findAll(filters = {}) {
      ),
      agg AS (
        SELECT
-         d.person_id,
-         MAX(d.person_name)                                     AS person_name,
+         d.owner_id                                              AS person_id,
+         COALESCE(MAX(d.person_name) FILTER (WHERE d.person_id = d.owner_id), MAX(d.person_name)) AS person_name,
+         -- whose deals are listed here as well: "Gloria difference"
+         ARRAY_REMOVE(ARRAY_AGG(DISTINCT d.person_name) FILTER (WHERE d.person_id <> d.owner_id), NULL) AS includes,
          ARRAY_AGG(DISTINCT d.role_label ORDER BY d.role_label)  AS roles,
          ARRAY_AGG(DISTINCT d.group_name ORDER BY d.group_name)  AS groups,
          COUNT(DISTINCT ${companyKeySql()})::int                 AS company_count,
@@ -181,7 +201,7 @@ async function findAll(filters = {}) {
          -- open the person to find out.
          ARRAY_REMOVE(ARRAY_AGG(DISTINCT d.review_reason)
            FILTER (WHERE d.needs_review AND d.review_reason <> ''), NULL) AS review_reasons
-       FROM deals d GROUP BY d.person_id
+       FROM deals d GROUP BY d.owner_id
      ),
      joined AS (
        SELECT a.*, COALESCE(t.monthly_parts, '{}'::jsonb) AS monthly_parts, ${PERSON_COLUMNS}
@@ -221,7 +241,7 @@ async function findById(personId) {
        -- every figure it shows, and without them it showed the deal's half
        -- of a stacked rate and said nothing. See shared/rates.helper.js.
        SELECT *, ${paymentPeriodSql('')} AS payment_period, ${personRatesSql()}
-       FROM tb_mastersheet WHERE person_id = $1
+       FROM tb_mastersheet WHERE person_id = $1 OR ${ownerSql('tb_mastersheet')} = $1
      ),
      totals AS (
        SELECT currency, SUM(monthly_amount) AS subtotal FROM deals WHERE stopped_on IS NULL GROUP BY currency
