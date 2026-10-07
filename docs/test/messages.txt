@@ -1,0 +1,25 @@
+# One message per block. Send each as its own message. Expected results in README.md.
+
+taxi to the office 45 paid to careem today
+
+lunch with the team 320 at zuma yesterday, parking 20 RTA
+
+paid dewa 919.28 for september, and du internet 471.45
+
+Ali bought printer paper 62.50 from office depot on 3 oct
+
+coffee 18 starbucks
+
+uber 32 to dubai mall yesterday, both of us so split it? (it was just one trip)
+
+phone top up 100 etisalat today
+
+flowers for reception 150 (no idea who we paid)
+
+train to leeds £86.40 trainline 6 oct
+
+new laptop 25000 apple store today
+
+cleaner 250 cash 7 oct paid to ahmed
+
+water delivery 45 at masafi on the 1st, 2nd and 3rd of oct

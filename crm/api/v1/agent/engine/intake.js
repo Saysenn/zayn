@@ -96,10 +96,14 @@ function tablesIn(rawGrid, sheet) {
 }
 
 /** Split text into a grid when it has a separator; null when it has none. */
-function gridOfText(text) {
+function gridOfText(text, { tabsOnly = false } = {}) {
   const lines = String(text ?? '').split(/\r?\n/);
   const sample = lines.filter((l) => l.trim()).slice(0, 20);
-  const sep = [['\t', /\t/], ['|', /\|/], [',', /,/], [';', /;/]]
+  // WORD AND POWERPOINT are sentences, and a sentence has commas: only a
+  // real table (tab separated, as docxText writes one) is a table there.
+  // "Monday 5 Oct: taxi, AED 52, paid by Gary" was cut into columns.
+  const seps = tabsOnly ? [['\t', /\t/]] : [['\t', /\t/], ['|', /\|/], [',', /,/], [';', /;/]];
+  const sep = seps
     .find(([, re]) => sample.filter((l) => re.test(l)).length >= Math.max(2, sample.length * 0.6));
   if (!sep) return null;
   const splitCsv = (line) => {
@@ -212,7 +216,7 @@ async function intake({ buffer = null, filename = '', text = null }) {
       }
     } catch { /* not JSON after all: read as text */ }
   }
-  const grid = gridOfText(raw);
+  const grid = gridOfText(raw, { tabsOnly: /\.(docx|pptx)$/.test(name) });
   // IN TEXT EVERY CELL IS TEXT, so "a row of words" cannot find the header
   // the way it does in a spreadsheet: the first row with two or more cells
   // is the header, as in every CSV.
