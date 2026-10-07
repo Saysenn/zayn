@@ -5,11 +5,11 @@ Intended to be built. Numbers are stable identifiers cited elsewhere
 renumber. Delete an entry when it ships. The full designs these entries
 came from are in this file's git history (before 2026-10-06).
 
-0. **Expenses: snapshot and burn.** The page shipped (see `state.md`,
-   `expense.md`). Left: a period snapshot, then a burn, in its own Settings
-   section, copying `masterSheet/closeMonth.js` (snapshot first, burn only if
-   it succeeded, typed confirm). Undecided: period or whole table; do archived
-   rows burn.
+0. **Expenses: keep a few months, back up and clear the rest.** Unlike the
+   master sheet. Default: keep 3 past months (his note: "4 months maximum",
+   i.e. this month plus 3). Settings picks 3, 6 or 12 months. Older months
+   are backed up (snapshot, figures not recipes) and then cleared, snapshot
+   first and clear only if it succeeded, like `masterSheet/closeMonth.js`.
 3. **Electron .exe on one always-on PC.** Load `http://localhost:3000`,
    never `file://`. A `Secure` cookie is refused over plain http to a LAN
    address: pick same-PC, a self-signed cert, or dropping `secure`. Decide

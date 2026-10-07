@@ -36,6 +36,7 @@ import {
   DownloadIcon, ResetIcon, PaperclipIcon,
 } from '../icons';
 import { BASE_URL } from '../../helpers/api.helper';
+import { readSwitch } from './contextSwitch';
 
 // THE PARTICLES ORB, here and on the welcome page (his calls 2026-09-27 and
 // 2026-09-28). The loading screen keeps the particle field.
@@ -871,9 +872,48 @@ export default function AgentOverlay({ open, onClose }) {
    * from this render, so a `setHistory` in the same tick has not landed and
    * the retry would send the very pair it just dropped.
    */
-  async function sendMessage(text, base = history, extra = null) {
+  /**
+   * SAY THE CONTEXT, SHE SWITCHES (docs/feature.md 11). "expenses", "go to
+   * debts", "back to the master sheet", typed or spoken: read in code, the
+   * selector moves and she says so. Anything after it ("go to expenses,
+   * taxi 45") is sent in the new context. True when it was handled here.
+   */
+  async function switchByWords(trimmed, base) {
+    let sw = readSwitch(trimmed, CONTEXTS);
+    if (!sw) return false;
+    if (sw.maybe) {
+      const guess = await apiService.agentContext.guess(sw.maybe, CONTEXTS.map((c) => ({ key: c.key, label: c.label })))
+        .catch(() => ({ key: '' }));
+      const ctx = CONTEXTS.find((c) => c.key === guess?.key);
+      if (!ctx) return false;
+      sw = { key: ctx.key, soon: Boolean(ctx.soon), rest: sw.rest };
+    }
+    const target = CONTEXTS.find((c) => c.key === sw.key);
+    const here = CONTEXTS.find((c) => c.key === context);
+    const said = sw.soon
+      ? `${target.label} isn't ready yet, so I'm staying on ${here?.label ?? 'this'}.`
+      : sw.key === context ? `We're already on ${target.label}.` : `Switched to ${target.label}.`;
+    const next = [...base, { role: 'user', content: trimmed }, { role: 'assistant', content: said }];
+    stuckRef.current = true;
+    setHistory(next);
+    setInput('');
+    inputRef.current?.clear();
+    tts.cancel?.();
+    if (!sw.soon && sw.key !== context) setContext(sw.key);
+    if (!sw.rest) {
+      if (!muted) tts.speak(said);
+      return true;
+    }
+    // THE REST, in the context they just picked (the selector's state has
+    // not caught up yet, so it is passed in).
+    sendMessage(sw.rest, next, null, sw.soon ? context : sw.key);
+    return true;
+  }
+
+  async function sendMessage(text, base = history, extra = null, inContext = null) {
     const trimmed = text.trim();
     if (!trimmed || isSending) return;
+    if (!extra && !inContext && await switchByWords(trimmed, base)) return;
 
     const nextHistory = [...base, { role: 'user', content: trimmed, ...(extra ?? {}) }];
     // They just spoke, so they are reading the bottom: follow the answer.
@@ -916,7 +956,7 @@ export default function AgentOverlay({ open, onClose }) {
         reply, claims = [], offer = null, spoken = null,
       } = await whenReachable(() => apiService.masterSheet.agentTurn(
         nextHistory,
-        context,
+        inContext ?? context,
         (event) => {
           if (signedOutRef.current) return;
           // REPLACE, never append. Each event carries the whole cleaned

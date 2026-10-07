@@ -264,6 +264,21 @@ the same migration. If it marks them instead, it is already there.
 Nothing is at risk either way: a nullable column nothing writes costs one
 `IS NULL` nobody runs.
 
+## 30. Stage 4: retire Diane's old one-off patches
+
+`runAgent.js` still carries guards written for single incidents that the
+plan engine, the router and the code-first edit reader (`directEdit.js`)
+now handle. Removing them would tidy the code and make turns slightly
+faster. Nothing new for the admin.
+
+**Parked because it is risky (2026-10-07).** The file is very large and
+some patches guard rare cases the free tests may not cover, so removing one
+could quietly bring an old bug back. The benefit is small.
+
+**What unblocks it, the safe way:** log which old patches are still reached,
+let Diane run normally for a week or two, then remove only the ones never
+hit, one at a time, with the free suite after each and a test on the clone.
+
 ## Settled NO. Closed, not deferred
 
 Do not list these as open or unverified again.

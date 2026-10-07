@@ -59,6 +59,12 @@ async function patch(body) {
   return { sent, failure, events: sent.map((s) => s.event) };
 }
 
+// THE MONTH WE ARE IN: a fixed date stopped counting once the month turned.
+const THIS_MONTH = `${require('./shared/presetMonth.helper').currentMonth()}-01`;
+// 15 of this month's days of a 1000 monthly: 500 in a 30 day month, 483.87 in a 31.
+const DAYS_NOW = new Date(Date.UTC(Number(THIS_MONTH.slice(0, 4)), Number(THIS_MONTH.slice(5, 7)), 0)).getUTCDate();
+const HALF_MONTH = Math.round((1000 * 15 / DAYS_NOW) * 100) / 100;
+
 test('a rate change broadcasts for the MASTER SHEET as well as people', async () => {
   for (const body of [{ addonPercent: 5 }, { feePercent: 2 }, { addonPercent: 0, feePercent: 3 }]) {
     const { events, failure } = await patch(body);
@@ -111,8 +117,8 @@ test('the person detail total is recalculated from preset days, not stored payab
         payable_days: 15,
         payable_amount: 99999,
         currency: 'GBP',
-        preset_on: '2026-09-01',
-        payment_start_on: '2026-09-01',
+        preset_on: THIS_MONTH,
+        payment_start_on: THIS_MONTH,
       }],
     }),
   });
@@ -124,5 +130,5 @@ test('the person detail total is recalculated from preset days, not stored payab
     (e) => { throw e; },
   );
 
-  assert.deepEqual(payload.person.monthly_totals, { GBP: 500 });
+  assert.deepEqual(payload.person.monthly_totals, { GBP: HALF_MONTH });
 });

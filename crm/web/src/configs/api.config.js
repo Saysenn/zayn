@@ -168,6 +168,10 @@ export const apiService = {
       api.download(`${apiPath}/export/xlsx${toQueryString(params)}`, onProgress)
     ),
   },
+  // A short "take me to the money stuff": which of her contexts, or none.
+  agentContext: {
+    guess: (text, contexts) => api.post(`${apiPath}/agent-context/guess`, { text, contexts }),
+  },
   // Who may send expenses to each group's WhatBot number.
   expenseAdmins: {
     list: () => api.get(`${apiPath}/expense-admins`),

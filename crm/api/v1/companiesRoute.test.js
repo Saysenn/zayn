@@ -77,6 +77,12 @@ async function call(handler, req) {
   return { payload, failure };
 }
 
+// THE MONTH WE ARE IN: a fixed date stopped counting once the month turned.
+const THIS_MONTH = `${require('./shared/presetMonth.helper').currentMonth()}-01`;
+// 15 of this month's days of a 1000 monthly: 500 in a 30 day month, 483.87 in a 31.
+const DAYS_NOW = new Date(Date.UTC(Number(THIS_MONTH.slice(0, 4)), Number(THIS_MONTH.slice(5, 7)), 0)).getUTCDate();
+const HALF_MONTH = Math.round((1000 * 15 / DAYS_NOW) * 100) / 100;
+
 test('oldGroup in the body reaches the repo', async () => {
   let got = null;
   const router = loadRoute({
@@ -167,8 +173,8 @@ test('the company detail total is recalculated from preset days, not stored paya
         payable_days: 15,
         payable_amount: 99999,
         currency: 'GBP',
-        preset_on: '2026-09-01',
-        payment_start_on: '2026-09-01',
+        preset_on: THIS_MONTH,
+        payment_start_on: THIS_MONTH,
       }],
     }),
   });
@@ -177,7 +183,7 @@ test('the company detail total is recalculated from preset days, not stored paya
     params: { key: 'a j rayson' },
   });
 
-  assert.deepEqual(payload.company.monthly_totals, { GBP: 500 });
+  assert.deepEqual(payload.company.monthly_totals, { GBP: HALF_MONTH });
 });
 
 /**

@@ -440,7 +440,7 @@ const cancelParked = {
   writes: true,
   description:
     'CALL OFF something PARKED for a later month before it runs. Use for "cancel the November '
-    + 'bump", "don\'t do the gloria one", "scrap what is scheduled for relia pa". Name it with '
+    + 'bump", "don\'t do the Blake Example one", "scrap what is scheduled for Northstar Care". Name it with '
     + '`match` (the person, company or change, as they said it) or `id` from list_parked_work. '
     + 'First call previews; call again with confirmed true after they say yes.',
   parameters: {

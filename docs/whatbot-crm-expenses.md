@@ -214,9 +214,11 @@ id) never saves twice; an unreachable CRM always says nothing was saved.
 
 1. Register the real admins in Settings → Whatbot → Expense admins.
 2. Run migration 072 on the live database.
-3. WhatBot's `.env`: `REDIS_URL` points at an Upstash host that no longer
-   exists; `CRM_AGENT_API_KEY` does not match the CRM's `AGENT_API_KEY`;
-   `OPENAI_BASE_URL=` is empty, which WhatBot's settings check rejects.
+3. WhatBot's Redis, on whichever PC runs it (fixed locally 2026-10-07): one
+   container that keeps its data on disk and starts with Docker, then
+   `REDIS_URL=redis://127.0.0.1:6390` in WhatBot's `.env`:
+   `docker run -d --name whatbot-redis --restart unless-stopped -p 6390:6379 -v whatbot-redis-data:/data redis:7-alpine redis-server --appendonly yes`
+   (`CRM_AGENT_API_KEY` and the empty `OPENAI_BASE_URL` are fixed too.)
 4. The CRM's `TIMEZONE` is `America/Los_Angeles`, so "today" for a receipt
    is the US date. Dubai is up to 12 hours ahead.
 5. Photos and files from real WhatsApp have only been tested through the

@@ -10612,7 +10612,7 @@ const undoChange = {
       last: {
         type: 'integer',
         description: 'HOW MANY of the most recent changes to put back, newest first: "undo the last 2 '
-          + 'changes", "revert the past 3 updates for Zayn" (with people [Zayn]). One preview, one yes. '
+          + 'changes", "revert the past 3 updates for Alex Example" (with people [Alex Example]). One preview, one yes. '
           + 'Leave it out for just the latest.',
       },
       confirmed: { type: 'boolean', description: 'Only on the SECOND call, after they agreed to THAT row.' },
