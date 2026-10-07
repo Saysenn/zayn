@@ -356,3 +356,66 @@ test('SEVERAL TO REMOVE IN ONE MESSAGE: typed, with days, or the list copied bac
   assert.deepEqual(strip(targetsIn('Remove\n• Cleaner payment · AED 250.00 · 07 Oct · Ahmed (cleaner) · by Zayn', 2026)), [{ words: 'Cleaner payment', amount: '250.00', date: '2026-10-07' }]);
   assert.deepEqual(targetsIn('remove both', 2026), [], '"both" names nothing new');
 });
+
+test('A "WHICH ONE" LIST: one, several, or a yes that is not a pick (his sweep 2026-10-07)', () => {
+  const pick = { kind: 'pick', choices: [11, 12, 13], then: { kind: 'remove' } };
+  assert.deepEqual(readReply('2', pick), { kind: 'pick', n: 2 });
+  assert.deepEqual(readReply('1 and 2', pick), { kind: 'pickMany', ns: [1, 2] });
+  assert.deepEqual(readReply('1-3', pick), { kind: 'pickMany', ns: [1, 2, 3] });
+  assert.deepEqual(readReply('all of them', pick), { kind: 'pickMany', ns: [1, 2, 3] });
+  assert.deepEqual(readReply('yes', pick), { kind: 'yes' }, 'a yes is read as one, and the brain asks which');
+  assert.equal(readReply('5', pick), null);
+});
+
+test('"YESTERDAY\'S LUNCH" IS A DAY, and words around a target are not part of it', () => {
+  const { targetsIn, wordsOf } = require('./find');
+  assert.deepEqual(targetsIn("also yesterday's lunch", 2026, '2026-10-07').map(({ said, ...t }) => t), [{ date: '2026-10-06', words: 'lunch' }]);
+  assert.deepEqual(wordsOf('actually the cleaner instead'), ['cleaner']);
+});
+
+test('A NAME ONE LETTER OFF is suggested, never linked', () => {
+  const { matchName } = require('../spender');
+  assert.deepEqual(matchName('Abe Lincon', [{ personId: 'al', name: 'Abe Lincoln', groups: [] }]), { status: 'near', choices: ['Abe Lincoln'] });
+});
+
+test('THE COMMON ASKS IN CODE (his call 2026-10-07: as efficient as Diane): the router only for the rest', () => {
+  const { quickRoute } = require('./quick');
+  const q = (t) => quickRoute(t, { today: '2026-10-07', group: 'MANBAT' });
+  assert.deepEqual([q('remove the cleaner').kind, q('remove the cleaner').target.words], ['remove', 'cleaner']);
+  assert.equal(q('delete the taxi on 5 Oct').target.date, '2026-10-05');
+  assert.equal(q('remove the 45 one').target.amount, '45');
+  assert.equal(q('remove it').target.last, true);
+  assert.deepEqual(q('change the taxi on 5 Oct to 50').changes, [{ field: 'rawAmount', value: '50' }]);
+  assert.deepEqual(q('make the team lunch on 6 Oct 35').kind, 'edit', 'a change, never a new expense');
+  assert.deepEqual(q('change the date of the petrol to 5 Oct').changes, [{ field: 'spentOn', value: '2026-10-05' }]);
+  assert.deepEqual(q('how much this month?').query, { from: '2026-10-01', to: '2026-10-07', group: '', groupBy: '', measure: 'total', words: '' });
+  assert.equal(q('how much on fuel this week').query.from, '2026-10-05', 'the week starts on Monday');
+  assert.equal(q('how much did MANBAT spend this month').query.words, '', 'its own group is not a search word');
+  for (const t of ['how much by category', 'what about august', 'remove the cleaner and the petrol', 'change the taxi', 'remove all the taxis']) assert.equal(q(t), null, t);
+});
+
+test('"UPDATE ZAYN EXPENSES" asks which, in code; never handed to the pay side (his report 2026-10-07)', () => {
+  const src = require('fs').readFileSync(require.resolve('./brain'), 'utf8');
+  const re = new RegExp(/const CHANGE_WHICH = \/(.*)\/iu;/.exec(src)[1], 'iu');
+  for (const t of ['update zayn expenses', 'update expenses', 'modify expenses', "edit Zayn's expenses", 'i want to change some expenses']) assert.ok(re.test(t), t);
+  for (const t of ['change the taxi to 50', 'update the cleaner to 200']) assert.ok(!re.test(t), t);
+  assert.match(src, /if \(\/\\bexpen\[cs\]\\w\*\\b\/i\.test\(said\)\)/, 'a message that says expense is never handed off');
+});
+
+test('EVERY UK ENGLISH WAY OF SAYING REMOVE, CHANGE AND SHOW, typos too (his calls 2026-10-07)', () => {
+  const { canonicalVerbs } = require('./quick');
+  const cases = {
+    'bin the cleaner': 'remove the cleaner',
+    'cross off the petrol': 'remove the petrol',
+    'get rid of the taxi': 'remove the taxi',
+    'could you remove the cleaner please': 'remove the cleaner',
+    'the taxi on 5 Oct, remove it': 'remove the taxi on 5 Oct',
+    'delte the taxi': 'remove the taxi',
+    'tweak the taxi to 50': 'change the taxi to 50',
+    'amend the date of the petrol to 6 Oct': 'change the date of the petrol to 6 Oct',
+    'upadte expenses': 'change expenses',
+    "pull up today's expenses": "show today's expenses",
+  };
+  for (const [said, want] of Object.entries(cases)) assert.equal(canonicalVerbs(said), want, said);
+  assert.equal(canonicalVerbs('drop off fee 30 paid to Ali'), 'drop off fee 30 paid to Ali', 'a new expense is never a request');
+});

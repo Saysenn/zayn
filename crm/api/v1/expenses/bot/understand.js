@@ -86,7 +86,7 @@ function routePrompt(today, pending, groups = []) {
 }
 
 async function route(text, { today, pending = false, lastReply = '', client, groups = [] } = {}) {
-  const user = lastReply ? `The bot's last message:\n${String(lastReply).slice(0, 700)}\n\nTheir message:\n${text}` : String(text);
+  const user = lastReply ? `The bot's last message:\n${String(lastReply).slice(0, 400)}\n\nTheir message:\n${text}` : String(text);
   return ask({ light: true, name: 'route', system: routePrompt(today, pending, groups), user, schema: ROUTE, client });
 }
 

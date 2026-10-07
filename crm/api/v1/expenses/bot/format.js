@@ -117,6 +117,8 @@ function reasonOf(d) {
   if (alike) return `looks like one already saved (${alike[1]}), different receipt`;
   const copy = /^same as (\d+)/.exec(d);
   if (copy) return `a copy of No. ${copy[1]}`;
+  const near = /^did you mean (.+?)\? \((.+)\)$/.exec(d);
+  if (near) return `"${near[2]}" is not on the master sheet. Did you mean *${near[1]}*?`;
   const which = /^which (.+?)\? (.+)$/.exec(d);
   if (which) return `which ${which[1]}? *${which[2].split(' or ').join('* or *')}*`;
   if (/^another .+: new, or a change/.test(d)) return d.replace(/^another (.+?) on .*$/, 'another $1 that day: new, or a change to that one?');

@@ -115,7 +115,7 @@ function spenderAnswer(rest, which, items) {
   if (ME.test(rest)) return { which, fixes: [{ field: 'spentBy', value: 'me' }] };
   const waiting = which.every((n) => {
     const x = items.find((i) => i.n === n);
-    return x && ((x.missing ?? []).includes('spentBy') || (x.doubts ?? []).some((d) => /^which /.test(d)));
+    return x && ((x.missing ?? []).includes('spentBy') || (x.doubts ?? []).some((d) => /^which |^did you mean /.test(d)));
   });
   if (waiting && /^[a-z][a-z .'-]{1,40}$/i.test(rest) && rest.split(/\s+/).length <= 4) return { which, fixes: [{ field: 'spentBy', value: rest }] };
   return null;
@@ -210,7 +210,17 @@ function readReply(said, pending, { year = new Date().getUTCFullYear(), groups =
   if (pending.kind === 'pick') {
     const m = /^(?:#|no\.?\s*|number\s+|the\s+)?(\d+)(?:st|nd|rd|th)?(?: one)?$/.exec(bare);
     const n = m ? Number(m[1]) : null;
-    return n && n >= 1 && n <= pending.choices.length ? { kind: 'pick', n } : null;
+    if (n && n >= 1 && n <= pending.choices.length) return { kind: 'pick', n };
+    // SEVERAL: "1 and 2", "1, 3", "1-3", "both", "all of them"
+    const count = pending.choices.length;
+    if (/^(?:(?:remove|delete)\s+)?(?:both|all|all of them|every one|them all|both of them)$/i.test(bare)) {
+      return { kind: 'pickMany', ns: Array.from({ length: count }, (_, i) => i + 1) };
+    }
+    const run = /^(\d+)\s*(?:-|–|to)\s*(\d+)$/.exec(bare);
+    const ns = run ? Array.from({ length: Math.max(0, Number(run[2]) - Number(run[1]) + 1) }, (_, i) => Number(run[1]) + i)
+      : /^[\d\s,&]+(?:and\s+\d+)?$/i.test(bare) || /^\d+(?:\s*(?:,|&|and)\s*\d+)+$/i.test(bare) ? nums(bare) : [];
+    if (ns.length > 1 && ns.every((x) => x >= 1 && x <= count)) return { kind: 'pickMany', ns: [...new Set(ns)] };
+    return null;
   }
   if (pending.kind !== 'add') return null;
 

@@ -107,6 +107,16 @@ function lastAction(phone, group) {
   ).then((r) => r.rows[0] ?? null);
 }
 
+/** Their latest actions still undoable, newest first: "undo the cleaner removal". */
+function recentActions(phone, group, n = 15) {
+  return pool.query(
+    `SELECT * FROM tb_expense_actions
+      WHERE phone = $1 AND group_name = $2 AND undone_at IS NULL AND kind <> 'undo'
+      ORDER BY created_at DESC, id DESC LIMIT $3`,
+    [phone, group, n],
+  ).then((r) => r.rows);
+}
+
 module.exports = {
-  e164, listAdmins, adminFor, addAdmin, updateAdmin, removeAdmin, getChat, saveChat, recordAction, lastAction,
+  e164, listAdmins, adminFor, addAdmin, updateAdmin, removeAdmin, getChat, saveChat, recordAction, lastAction, recentActions,
 };

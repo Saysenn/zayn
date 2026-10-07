@@ -42,7 +42,9 @@ const asItem = (r) => ({
 // folded whole was one word and "Sara" never matched (live 2026-10-07).
 // One word, singular: "deliveries" is "delivery", "coffees" is "coffee".
 const stem = (w) => w.replace(/ies$/, 'y').replace(/(?<=[a-z]{3})(?:es|s)$/, (m, i, all) => (/(?:ss|us|is)$/.test(all) ? m : ''));
-const wordsOf = (s) => String(s ?? '').toLowerCase().split(/[^\p{L}\p{N}]+/u).map((w) => stem(fold(w))).filter((w) => w.length >= 3 && !['the', 'and', 'for', 'one', 'expense', 'expenses', 'paid', 'yesterday', 'today'].includes(w));
+const wordsOf = (s) => String(s ?? '').toLowerCase().split(/[^\p{L}\p{N}]+/u).map((w) => stem(fold(w))).filter((w) => w.length >= 3 && !['the', 'and', 'for', 'one', 'expense', 'expenses', 'paid', 'yesterday', 'today',
+  // said around a target, never part of one ("actually change the cleaner to 200 instead")
+  'actually', 'instead', 'also', 'please', 'pls', 'just', 'that', 'this', 'those', 'these', 'too', 'again', 'wait', 'sorry', 'yes', 'okay', 'mate', 'cheers'].includes(w));
 
 /**
  * The saved expenses their words point at, in the last two months.
@@ -93,7 +95,7 @@ const DAY_MONTH = new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(${MON})\\b\\.?`,
 const MONTH_DAY = new RegExp(`\\b(${MON})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`, 'i');
 const FILLER = /\b(?:yes|yeah|yep|ok(?:ay)?|sure|please|pls|and|also|too|as well|plus|remove|remo[a-z]{0,3}|delete|drop|take out|the|that|this|those|these|one|ones|lets|let's|on|of|it|them|both|all|expenses?|by \w+)\b/gi;
 
-function targetsIn(text, year) {
+function targetsIn(text, year, today = null) {
   const { dayOf } = require('./extract');
   const parts = String(text ?? '').split(/\n+|\s*•\s*|\s*;\s*|,\s*(?=(?:and\s+)?(?:also\s+)?(?:remove|delete|the)\b)|\s+and\s+(?:also\s+)?(?:remove|delete)\s+|\s+(?:and\s+)?also\s+(?:remove\s+|delete\s+)?|\s+and\s+(?=the\b)/i);
   const out = [];
@@ -112,6 +114,8 @@ function targetsIn(text, year) {
         if (d) t.date = d;
       }
     } else {
+      if (today && /\byesterday'?s?\b/i.test(part)) { t.date = minus(today, 1); part = part.replace(/\byesterday'?s?\b/i, ' '); }
+      if (today && /\btoday'?s?\b/i.test(part)) { t.date = today; part = part.replace(/\btoday'?s?\b/i, ' '); }
       const dm = DAY_MONTH.exec(part);
       const md = !dm && MONTH_DAY.exec(part);
       if (dm) { t.date = dayOf(`${dm[1]} ${dm[2]}`, year); part = part.replace(dm[0], ' '); }
@@ -120,9 +124,18 @@ function targetsIn(text, year) {
       if (money) { t.amount = money[1] ?? money[2]; part = part.replace(money[0], ' '); }
       t.words = part.replace(FILLER, ' ').replace(/\s+/g, ' ').trim();
     }
-    if (wordsOf(t.words).length || t.date) out.push({ ...t, said: String(raw).trim() });
+    // a word, a day or an amount is enough to point at one ("the 45 one")
+    if (wordsOf(t.words).length || t.date || t.amount) out.push({ ...t, said: String(raw).trim() });
   }
   return out;
+}
+
+/** The last N SAVED in this group, newest first: "remove the last 3". */
+async function lastSaved(group, n) {
+  const { rows } = group === ALL
+    ? await pool.query('SELECT * FROM tb_expenses WHERE archived_at IS NULL ORDER BY created_at DESC, id DESC LIMIT $1', [n])
+    : await pool.query('SELECT * FROM tb_expenses WHERE archived_at IS NULL AND group_name = $1 ORDER BY created_at DESC, id DESC LIMIT $2', [group, n]);
+  return rows.map(asItem);
 }
 
 /** The latest few, when nothing matched, so they can point at one. */
@@ -221,5 +234,5 @@ async function answer(scopeGroup, query, { today, out = null }) {
 }
 
 module.exports = {
-  findTarget, latest, answer, between, asItem, iso, ALL, targetsIn, wordsOf,
+  findTarget, latest, lastSaved, answer, between, asItem, iso, ALL, targetsIn, wordsOf,
 };

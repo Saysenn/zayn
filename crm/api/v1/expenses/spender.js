@@ -38,7 +38,7 @@ async function people() {
 
 /**
  * A NAME TO ONE PERSON, or why not. Pure, so it is tested without a database.
- * @returns {{ status: 'linked'|'ambiguous'|'none', personId?: string, name?: string, choices?: string[], firstName?: boolean }}
+ * @returns {{ status: 'linked'|'ambiguous'|'near'|'none', personId?: string, name?: string, choices?: string[], firstName?: boolean }}
  */
 function matchName(typed, list, group = null) {
   const want = fold(String(typed ?? '').replace(DIFFERENCE, ''));
@@ -57,6 +57,14 @@ function matchName(typed, list, group = null) {
   if (exact.length) return decide(exact, false);
   const first = want.length >= 3 && !want.includes(' ') ? list.filter((p) => fold(p.name).split(' ')[0] === want) : [];
   if (first.length) return decide(first, true);
+  // ONE LETTER OFF in each word ("Abe Lincon"): suggested, never linked
+  const { oneTypo } = require('../agent/tools/resolvePerson');
+  const said = want.split(' ');
+  const near = list.filter((p) => {
+    const words = fold(p.name).split(' ');
+    return words.length === said.length && words.every((w, i) => w === said[i] || (w.length >= 4 && oneTypo(said[i], w)));
+  });
+  if (near.length) return { status: 'near', choices: narrow(near).map((p) => p.name).sort() };
   return { status: 'none' };
 }
 
