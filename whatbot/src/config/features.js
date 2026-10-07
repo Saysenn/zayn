@@ -34,6 +34,14 @@ export const features = {
    * check. A wage is something people re-read.
    */
   voice: env.FEATURE_VOICE,
+
+  /**
+   * The expense bot's previews and "saved" notes as a picture, with the
+   * reply line in its caption. The one picture sent without being asked for,
+   * his call 2026-10-07: it reads better than text, and he accepted that it
+   * lands in the phone's gallery. Off: the same preview as text.
+   */
+  expenseImages: env.FEATURE_EXPENSE_IMAGES,
 };
 
 /** settings that only matter when `voice` is on */

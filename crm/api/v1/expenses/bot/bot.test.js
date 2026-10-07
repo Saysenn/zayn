@@ -195,3 +195,19 @@ test('THEIR OWN RATE, in the ways people say it', () => {
   assert.deepEqual(readRates('same as last time'), { lastUsed: true });
   assert.equal(readRates('2 is £45'), null, 'an amount, not a rate');
 });
+
+test('THE PICTURE: a PNG drawn by code, and a short caption that can still be answered', () => {
+  const { renderCard } = require('./card');
+  const items = [
+    normalise({ n: 1, spentOn: '2026-10-06', description: 'Taxi', payee: 'Careem', rawAmount: '45' }, ctx),
+    normalise({ n: 2, spentOn: '', description: 'Ink', payee: 'Amazon', rawAmount: '180' }, ctx),
+  ];
+  const png = renderCard(items, { group: 'MANBAT' });
+  assert.equal(png.subarray(1, 4).toString(), 'PNG');
+  assert.ok(png.length > 5000, 'a real picture');
+  const cap = format.caption(items, 'MANBAT');
+  assert.match(cap, /^\*2 EXPENSES · MANBAT\* _\(not saved yet\)_\n\*TOTAL:\* \*AED 225\.00\*/);
+  assert.match(cap, /• No\. 2: what date\?/);
+  assert.match(cap, /Reply with the answers/);
+  assert.match(format.caption(items, 'MANBAT', { saved: true }), /^✅ \*SAVED · 2 expenses · MANBAT\*[\s\S]*Reply \*undo\*/);
+});

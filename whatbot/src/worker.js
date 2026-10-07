@@ -28,6 +28,7 @@ import { redis } from "./system/redis.js";
 import { recordMessage } from "./system/crmClient.js";
 import { sendText } from "./whatsapp/sendMessage.js";
 import { sendDocument } from "./whatsapp/sendDocument.js";
+import { sendImage } from "./whatsapp/sendImage.js";
 import { startConnections, closeConnections } from "./whatsapp/connection.js";
 import { receiveMessage } from "./whatsapp/receiveMessage.js";
 import { buildAdminReplyApp } from "./http/adminReplyApp.js";
@@ -109,7 +110,12 @@ const messageWorker = new Worker(
     if (reply === NO_REPLY) return;
 
     // reply FROM the number they messaged, or it shows up as a different chat
-    await sendText(from, to, reply.text);
+    // THE EXPENSE PREVIEW AS A PICTURE, its text as the caption.
+    if (reply.image && features.expenseImages) {
+      await sendImage(from, to, { content: Buffer.from(reply.image.base64, "base64"), caption: reply.text, mimetype: reply.image.mime });
+    } else {
+      await sendText(from, to, reply.text);
+    }
     // a second or third bubble (the expense bot's rates), in order
     for (const t of reply.more ?? []) await sendText(from, to, t);
 

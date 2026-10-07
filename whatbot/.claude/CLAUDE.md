@@ -83,7 +83,9 @@ Only repos touch the database.
 - Figures are formatted in code and appended below the model's prose. The model
   writes the sentence, never a number
 - Attachments follow the same rule as figures: built in code, never seen by the model,
-  and only ever on an explicit request. A file persists on the device and in its
+  and only ever on an explicit request. ONE EXCEPTION, his call 2026-10-07: the expense
+  bot's previews and "saved" notes go as a picture (FEATURE_EXPENSE_IMAGES) with the
+  reply line in the caption. A file persists on the device and in its
   backups long after a message would have been scrolled past — never attach one to
   anything unprompted. Text goes first, the file second, so a document never arrives
   ahead of the sentence explaining it

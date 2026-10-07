@@ -227,7 +227,30 @@ function ratesBubble(items) {
         : `Reply *yes* to save with these, or send your own (like *1 ${first} to aed is 4.85*)`].join('\n');
 }
 
+/**
+ * THE CAPTION beside the preview picture: the summary, what needs an
+ * answer, and the reply line, so it can be answered and searched.
+ */
+function caption(items, group, { saved = false } = {}) {
+  const live = items.filter((x) => !x.skipped);
+  const head = saved
+    ? `✅ *SAVED · ${live.length} ${live.length === 1 ? 'expense' : 'expenses'} · ${group === '*' ? [...new Set(live.map((x) => x.groupName))].join(', ') : group}*`
+    : `*${live.length} ${live.length === 1 ? 'EXPENSE' : 'EXPENSES'}${group === '*' ? '' : ` · ${group}`}* _(not saved yet)_`;
+  const out = [head, totalLine(live)];
+  if (saved) return [...out, '', `Reply *undo* to take ${live.length === 1 ? 'it' : 'them'} back.`].join('\n');
+  const missing = live.filter((x) => x.missing?.length);
+  const doubts = live.filter((x) => !x.missing?.length && x.doubts?.length);
+  if (missing.length || doubts.length) {
+    out.push('', missing.length ? '⚠️ *Needs an answer*' : '⚠️ *Please check*');
+    for (const x of missing) out.push(`• No. ${x.n}: ${x.missing.map((f) => (f === 'exchangeRate' ? `1 ${x.currency} to AED is?` : ASK[f] ?? `${LABEL[f] ?? f}?`)).join(' ')}`);
+    for (const x of doubts) out.push(`• No. ${x.n}: _${x.doubts.join('; ')}_`);
+  }
+  // the same last line as the text preview
+  out.push('', addPreview(items, group).split('\n').at(-1));
+  return out.join('\n');
+}
+
 module.exports = {
-  HELP_DIANE, SEP, ratesBubble,
+  HELP_DIANE, SEP, ratesBubble, caption,
   day, dayFull, amount, money, totals, line, block, addPreview, editPreview, removePreview, pickList, undoPreview, saved, changed, removed, HELP, LABEL,
 };

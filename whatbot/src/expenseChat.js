@@ -17,7 +17,7 @@
 import readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { extname, basename } from "node:path";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { redis } from "./system/redis.js";
 import { handleMessage, NO_REPLY } from "./conversation/handleMessage.js";
 import { isExpenseAdmin } from "./expenses/expenses.js";
@@ -70,6 +70,11 @@ for await (const line of rl) {
   try {
     const reply = await handleMessage({ phone, channelGroup: group, text: message, attachments, messageId: `terminal-${Date.now()}-${n}` });
     say(reply === NO_REPLY ? "bot > (no reply)" : `bot > ${reply.text.split("\n").join("\n      ")}`);
+    if (reply !== NO_REPLY && reply.image) {
+      const file = `/tmp/whatbot-expense-${Date.now()}.png`;
+      await writeFile(file, Buffer.from(reply.image.base64, "base64"));
+      say(`      [picture sent with the text above as its caption: ${file}]`);
+    }
     for (const t of reply.more ?? []) say(`bot > ${t.split("\n").join("\n      ")}`);
   } catch (err) {
     say(`bot > error: ${err instanceof Error ? err.message : err}`);

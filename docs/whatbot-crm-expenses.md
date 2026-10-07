@@ -162,7 +162,10 @@ Tested on the clone, through WhatBot's own `handleMessage` from the terminal.
 | WhatBot routes        | `crm/api/v1/expenseBot.js`, `/api/v1/agent/expenses/*` |
 | Registered numbers    | Settings → Whatbot → Expense admins            |
 | Tables                | migration `072_expense_bot.sql`                |
-| WhatBot side          | `whatbot/src/expenses/expenses.js`             |
+| WhatBot side          | `whatbot/src/expenses/` (expenses, mode, batch) |
+| Rates to AED          | `crm/api/v1/expenses/bot/rates.js`             |
+| Preview picture       | `crm/api/v1/expenses/bot/card.js`, `whatbot/src/whatsapp/sendImage.js` |
+| Diane's Expenses context | the same brain, `crm/api/v1/expenseBot.js` (`dianeTurn`) |
 | Terminal tester       | `npm run chat:expenses -- +447700900001 MANBAT` (in `whatbot/`) |
 
 **Decisions (his, 2026-10-07):**
@@ -175,8 +178,27 @@ Tested on the clone, through WhatBot's own `handleMessage` from the terminal.
    spent by, paid to. Currency defaults to **AED**. Spent by defaults to the
    admin who sent it, shown in the preview so it can be changed.
 3. Nothing is saved before "yes". Change, remove and undo all preview first.
-4. Replies use WhatsApp's own formatting (*bold*, _italic_, numbered lines),
-   written by code from templates, never by the model.
+4. Replies use WhatsApp's own formatting (*bold*, _italic_), written by code
+   from templates, never by the model: one field per line, `====` separators,
+   amounts with two decimals, full dates, a bold total, and one reply line,
+   **yes · modify · cancel** ("modify" asks what to change, in their words).
+5. **Previews and "saved" notes go as a picture** (a clean note-card, drawn by
+   code) with a short caption carrying the summary, what needs an answer and
+   the reply line. Accepted: it lands in the phone's gallery. Switch:
+   `FEATURE_EXPENSE_IMAGES` (false = the same preview as text).
+6. **Rates to AED** for any other currency, saved on the expense: hourly from
+   Open Exchange Rates (`OPENEXCHANGERATES_APP_ID`), the free daily
+   open.er-api.com as backup, else asked ("1 GBP to AED is?"). Shown in the
+   preview and in a second bubble; their own rate wins ("1 gbp to aed is
+   4.85", "gbp 4.85 and euro 4.2", "4.85 for pounds", "same as last time").
+7. **A batch is one reply:** photos or files sent together are collected (6
+   seconds of quiet after the last), read together (up to 20, photos six per
+   model call) and answered once.
+8. Names are matched to ones already used ("sara" is Sara K, "Amazon.ae" is
+   Amazon, "me" is the admin). A tab named after a group is that group.
+9. **For pay questions** WhatBot knows a person only by the number on the
+   master sheet. Numbers are cleaned on the way in (spaces, 07…, 00…);
+   anything that is not a number ("Handled internally") recognises nobody.
 
 **Two modes for a registered admin (his call, 2026-10-07):** typing
 *expense* sends everything to the CRM expense brain; typing *payments* sends
@@ -205,6 +227,11 @@ normal agent once, with a hint to type *payments*. Code:
 6. Save is verified by reading the rows back; every action is logged in
    `tb_expense_actions` so "undo" puts it back exactly.
 
+**Diane's Expenses context** (command center) uses the same brain for every
+group: the group and the spender are read from the message or asked; previews
+are cards; the paperclip takes several photos and files at once (one preview);
+"go to expenses" / "back to the master sheet" switches by words.
+
 **Safety:** a "yes" saves only if the preview was the last thing shown; a
 change or removal is refused if the expense changed since it was shown; an
 unsaved preview expires after 6 hours; a WhatsApp redelivery (same message
@@ -213,7 +240,7 @@ id) never saves twice; an unreachable CRM always says nothing was saved.
 **Before it goes live:**
 
 1. Register the real admins in Settings → Whatbot → Expense admins.
-2. Run migration 072 on the live database.
+2. ~~Run migration 072 on the live database~~ (done 2026-10-07).
 3. WhatBot's Redis, on whichever PC runs it (fixed locally 2026-10-07): one
    container that keeps its data on disk and starts with Docker, then
    `REDIS_URL=redis://127.0.0.1:6390` in WhatBot's `.env`:
@@ -221,9 +248,11 @@ id) never saves twice; an unreachable CRM always says nothing was saved.
    (`CRM_AGENT_API_KEY` and the empty `OPENAI_BASE_URL` are fixed too.)
 4. The CRM's `TIMEZONE` is `America/Los_Angeles`, so "today" for a receipt
    is the US date. Dubai is up to 12 hours ahead.
-5. Photos and files from real WhatsApp have only been tested through the
-   terminal (same path after download); the download itself needs a linked
-   number to try.
+5. Real WhatsApp: a .pptx was received and read on MILKMAN's number; batches,
+   the picture and the rates bubble are tested through the terminal path only.
+6. Only MILKMAN's number is linked; the other groups need their numbers in
+   `WHATSAPP_NUMBERS` (linking: `WHATSAPP_LINK_WITH=code` prints a code to type
+   on the phone).
 
 ## Open questions
 

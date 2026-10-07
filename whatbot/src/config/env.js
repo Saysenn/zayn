@@ -142,6 +142,12 @@ const EnvSchema = z
       .enum(["true", "false"])
       .default("false")
       .transform((v) => v === "true"),
+    // The expense bot's previews as a picture with a caption (his call
+    // 2026-10-07). Off sends the same preview as text.
+    FEATURE_EXPENSE_IMAGES: z
+      .enum(["true", "false"])
+      .default("true")
+      .transform((v) => v === "true"),
 
     /**
      * Answering voice notes. Off by default.

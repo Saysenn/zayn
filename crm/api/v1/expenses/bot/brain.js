@@ -10,6 +10,7 @@ const { readReply } = require('./reply');
 const { route, revise } = require('./understand');
 const find = require('./find');
 const { liveRates } = require('./rates');
+const { renderCard } = require('./card');
 const { forDiane } = require('./forDiane');
 
 // ***************************************************
@@ -130,12 +131,36 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
   if (state.pending) state.pending.shownLast = PREVIEWS.test(String(reply ?? ''));
   state.history = [...(state.history ?? []), { said: said || (files.length ? `[${files.length} file(s)]` : ''), reply }].slice(-HISTORY);
   if (msg.messageId) state.seen = [...(state.seen ?? []), { id: msg.messageId, reply }].slice(-30);
+  // The saved batch is drawn once (below), never kept in the conversation.
+  const savedItems = state.lastSaved ?? null;
+  delete state.lastSaved;
   await store.saveChat(phone, group, state);
   if (channel === 'diane') {
     const view = forDiane(reply, state);
     return { registered: true, ...view, reply: [view.reply, ...more.map(forDiane.plainText)].filter(Boolean).join('\n\n') };
   }
-  return { registered: true, reply, replies: [reply, ...more] };
+  /**
+   * THE PICTURE (his call 2026-10-07, "always"): a preview or a saved batch
+   * goes as a clean note with a short caption. Text stays the fallback: a
+   * picture that cannot be drawn never costs them the message.
+   */
+  let image = null;
+  let text = reply;
+  try {
+    const savedNow = /^✅ \*SAVED ·/.test(String(reply ?? '')) && savedItems?.length;
+    const previewNow = state.pending?.kind === 'add' && /_Not saved yet_/.test(String(reply ?? '')) && !/^Just to be sure/.test(String(reply ?? ''));
+    if (previewNow || savedNow) {
+      const items = savedNow ? savedItems : state.pending.items;
+      image = { base64: renderCard(items, { group, saved: Boolean(savedNow) }).toString('base64'), mime: 'image/png', filename: 'expenses.png' };
+      const lead = /^Added \d+ more[^\n]*\n\n/.exec(String(reply))?.[0] ?? '';
+      text = `${lead}${format.caption(items, group, { saved: Boolean(savedNow) })}`;
+    }
+  } catch (err) {
+    logger.warn({ err: err.message }, 'expense bot: could not draw the picture, sending text');
+    image = null;
+    text = reply;
+  }
+  return { registered: true, reply: text, replies: [text, ...more], ...(image ? { image } : {}) };
 }
 
 async function answerTurn(said, files, ctx) {
@@ -163,7 +188,15 @@ async function answerTurn(said, files, ctx) {
   // New expenses in a photo or a file: always an add, no router needed.
   if (files.length) return addFrom({ text: said, attachments: files }, ctx);
   if (!said) return null;
-  if (GREETING.test(said)) return ctx.channel === 'diane' ? format.HELP_DIANE : format.HELP(admin.name.split(' ')[0], group);
+  // THE HELP ONCE, then a short hello: "hi" three times gave the same block
+  // three times (2026-10-07).
+  if (GREETING.test(said)) {
+    const lastBot = String(state.history?.at(-1)?.reply ?? '');
+    if (/I'll save it|I'll save them to the CRM|Hi again/.test(lastBot)) {
+      return pending ? 'Hi again! Your preview is still waiting: reply *yes*, *modify* or *cancel*.' : 'Hi again! Send an expense whenever you\'re ready.';
+    }
+    return ctx.channel === 'diane' ? format.HELP_DIANE : format.HELP(admin.name.split(' ')[0], group);
+  }
   if (THANKS.test(said) && !pending) return 'You\'re welcome 🙂';
   if (UNDO.test(said)) return startUndo(ctx);
 
@@ -325,6 +358,7 @@ async function saveAdd(ctx) {
   broadcast(null, EVENT, { action: 'imported', count: made.length, via: 'whatbot' });
   ctx.state.pending = null;
   ctx.state.lastIds = made.map((m) => m.id);
+  ctx.state.lastSaved = items;
   return format.saved(items, ctx.group);
 }
 
