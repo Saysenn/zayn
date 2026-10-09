@@ -58,6 +58,20 @@ const METHOD_MARK = [
 const markFor = (value) => METHOD_MARK.find(([re]) => re.test(String(value ?? '')))?.[1] ?? null;
 
 /**
+ * PAYMENT RECEIVED IN WORDS, never whatbot's code. The server sends the
+ * words now; a card kept from before the rename still carries the code
+ * under "Outcome". His call 2026-10-08.
+ */
+const RECEIVED_WORDS = {
+  confirmed: 'Paid',
+  not_received: 'Unpaid',
+  partial: 'Unpaid (portion, flagged for review)',
+  sent: 'Awaiting',
+  no_response: 'Awaiting',
+};
+const RECEIVED_LABELS = new Set(['Payment received', 'Outcome']);
+
+/**
  * ===============================
  * * THE EFFECTIVE ANSWER, and nothing else
  * ===============================
@@ -107,15 +121,21 @@ const TONES = {
   alert: 'border-diane-alert/50 bg-diane-alert/10 text-diane-alert',
 };
 
+// DISPLAY ONLY, and said so on hover. His call 2026-10-08: both switches are
+// set per PERSON on the People page and written to every live deal.
+const PILL_HINT = 'Set per person on the People page, for all their live deals';
+
 function Pill({ value, fallback, editField }) {
   const words = PILL_WORDS[editField];
   if (!words) return null;
   const shown = value === null || value === undefined ? Boolean(fallback) : Boolean(value);
 
   return (
-    <span className={`rounded-full border px-2 py-px text-[9px] font-semibold ${
-      shown ? TONES.signal : TONES[words.noTone]
-    }`}
+    <span
+      title={PILL_HINT}
+      className={`cursor-help rounded-full border px-2 py-px text-[9px] font-semibold ${
+        shown ? TONES.signal : TONES[words.noTone]
+      }`}
     >
       {shown ? words.yes : words.no}
     </span>
@@ -185,7 +205,8 @@ function Cell({ cell, onEdit, disabled }) {
    * for `<input type="date">`, and `formatDate` returns the ORIGINAL TEXT
    * for anything unparseable, so the sheet's own "Ongoing" survives.
    */
-  const shown = cell.input === 'date' && cell.value ? formatDate(cell.value) : cell.value;
+  const shown = cell.input === 'date' && cell.value ? formatDate(cell.value)
+    : RECEIVED_LABELS.has(cell.label) ? (RECEIVED_WORDS[cell.value] ?? cell.value) : cell.value;
 
   return (
     <div className={ROW}>
@@ -294,7 +315,10 @@ export default function DealCard({ card, onEdit, disabled, expanded = false }) {
               so a switch added server side cannot draw a blank pill.
 
               Still behind payableThisMonth. On a row owed nothing this
-              month, "Not paid" is not a fact anybody has to act on. */}
+              month, "Not paid" is not a fact anybody has to act on.
+
+              READ ONLY: set per person on the People page (2026-10-08),
+              which the hover says. */}
           {card.payableThisMonth && (card.switches ?? [])
             .map((item) => <Pill key={item.editField} {...item} />)}
           {card.needsReview && (

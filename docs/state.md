@@ -17,6 +17,54 @@ fifth company status plus `end_note` and `review_monthly` on
 `pay_this_month`, renamed the next day). Security findings are in
 `sec-audit.md`.
 
+## Pay is the person's; Payment received is what they said (2026-10-08)
+
+His calls, one day. The master sheet is about deals; whether a PERSON
+should be paid, has been paid and says the money arrived belongs to the
+People pages. Storage did not move: everything is still on each deal, and
+the People pages sum it, so nothing can drift. No migration.
+
+**Should be paid and Paid are set per person.** Gone from the master sheet
+(column, bulk bar, filters, the add/edit form). On People: a switch column
+each, Yes/No in the bulk bar, and yes / no / mixed filters; on a person's
+page, the same two switches in the Person card. A switch writes every LIVE
+deal the person holds (stopped deals skipped). "Mixed" means their deals
+disagree and shows as a faded switch. Read from
+`shared/personPayState.helper.js`; written by `web/hooks/usePersonPay.js`
+through the bulk update. The export's "should not be paid" fix sets the
+whole person too (`wholePerson` on the bulk update).
+
+**Payment received** (was "Confirmed") is the payday answer, `payment_outcome`:
+
+| Stored                | Deal     | Person (summed over live deals)             |
+|-----------------------|----------|---------------------------------------------|
+| `confirmed`           | Paid     | Paid when every answered deal is            |
+| `not_received`        | Unpaid   | Unpaid when every answered deal is          |
+| `partial`             | Unpaid   | Portion (also for a mix of Paid and Unpaid) |
+| `sent`, `no_response` | Awaiting | Awaiting when nothing is answered yet       |
+| null                  | —        | — (never asked)                             |
+
+Shown on the master sheet, People, the person page and the company page
+(`components/badges/PaymentReceived.jsx`). An admin sets a deal to Paid or
+Unpaid only.
+
+**A portion, or a changed answer, waits for an admin.** `partial` no longer
+turns Paid on. It, and a real answer replaced by a different one ("Paid to
+Unpaid"), set `needs_review` with a reason starting `payday`
+(`shared/paydayFlag.helper.js`). A no that whatbot's follow up upgrades to
+partial is a portion, not a change. **Only setting the deal's Payment
+received clears it.** A sheet upload carries it over, and "Save and mark it
+sorted" clears the import's reasons only.
+
+**Diane** reads people (`agent/tools/people.js`: `list_people`,
+`show_person`), filters deals by Payment received and by payday flag, marks
+a person paid / should be paid across all their live deals by default, sets
+a deal's Payment received, and adds a person to several companies in one
+preview.
+
+**The briefing** has a Payday answers line, says "need a check" rather than
+"the import", and its unpaid line opens People filtered to Paid: no.
+
 ## A group name sent as the company (2026-09-24)
 
 Zayn holds two deals, BOTH on the company "Workforce", one in INDIGO and
@@ -503,10 +551,11 @@ flagged rows is the router's business. Written twice as a contract,
 `briefing.helper.js` `SAY` and `web/agentOrb/briefingAnswer.js`, each side
 pinning its own four keys.
 
-**Unpaid does NOT link to a "not paid" filter, because there is none.** The
-Paid checkbox narrows to PAID by design, so seeding it false would be a
-filter running with its own control reading off. It lands on the deals in
-period, where the Paid switches are.
+**Unpaid lands on People, filtered to Paid: no** (since 2026-10-08). Paid is
+the person's now, and the People filter offers yes / no / mixed as real
+choices, so "no" is a filter with its own control showing it. Before that it
+landed on the master sheet's deals in period, because the master sheet's
+Paid checkbox could only narrow to PAID.
 
 **Voice only for the yes or no**, and that is safe only because the side
 lines and Skip exist: a denied microphone loses the question, never the way
@@ -1325,9 +1374,10 @@ been read.
   permanently, three saturated colours side by side, disabled for as long
   as nothing was selected. A traffic light showing all three lamps at once
   is not a signal. Ticking a row arms them, so that is when they appear,
-  and the colour then means something. The bar says `N selected`, which is
-  what the button in front of it will touch: not the waiting count and not
-  the money, both of which are still where his 2026-09-17 call put them.
+  and the colour then means something. Not the waiting count and not the
+  money, both of which are still where his 2026-09-17 call put them. (The
+  bar's own `N selected` count was removed on every page, 2026-10-08: the
+  ticked rows already say it.)
 - **HISTORY RIDES THE TAB RULE, hard right.** It was fourth in a row of
   three answers that stop people being paid, then briefly a `PageHeader`
   action, which is correct for a page level control and a long way from the

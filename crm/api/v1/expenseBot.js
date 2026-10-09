@@ -39,6 +39,58 @@ agent.post('/message', async (req, res, next) => {
 });
 
 /**
+ * THE EXPENSES CHECK (his calls 2026-10-08, migration 078). WhatBot asks
+ * for it right after a person answers their payday check, and sends the
+ * text back as its own message. Only for the person that verified phone IS
+ * on the master sheet, in that group. `{ check: null }` when the switch is
+ * off or nothing is waiting to be refunded.
+ */
+agent.post('/check', async (req, res, next) => {
+  try {
+    // eslint-disable-next-line global-require
+    const checks = require('./repos/expenseChecks.repo');
+    const { period, personId, group, phone, name } = req.body ?? {};
+    if (!/^\d{4}-\d{2}$/.test(String(period ?? '')) || !personId || !group || !/^\+\d{7,15}$/.test(String(phone ?? ''))) {
+      return res.status(400).json({ error: 'period, personId, group and phone are required' });
+    }
+    const onSheet = (await pool.query(
+      `SELECT 1 FROM tb_mastersheet WHERE person_id = $1 AND upper(group_name) = upper($2) AND regexp_replace(phone, '\\D', '', 'g') = $3 LIMIT 1`,
+      [String(personId), String(group), String(phone).replace(/\D/g, '')],
+    )).rows.length > 0;
+    if (!onSheet) return res.status(404).json({ error: 'not found' });
+    const got = await checks.startCheck({ period, personId: String(personId), group: String(group), phone, name: name ? String(name) : null });
+    res.json(got ? { check: { id: got.check.id, count: got.rows.length }, text: got.text } : { check: null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Their answer to it: yes / no / partial / mistake. The reply to send is in the answer. */
+agent.post('/check/answer', async (req, res, next) => {
+  try {
+    // eslint-disable-next-line global-require
+    const checks = require('./repos/expenseChecks.repo');
+    const { checkId, phone, group, answer, note } = req.body ?? {};
+    if (!['yes', 'no', 'partial', 'mistake'].includes(answer)) return res.status(400).json({ error: 'answer must be yes, no, partial or mistake' });
+    const { rows } = await pool.query('SELECT phone, group_name FROM tb_expense_checks WHERE id = $1', [Number(checkId)]);
+    // the check is theirs: the same phone, the same group
+    if (!rows[0] || String(rows[0].phone ?? '').replace(/\D/g, '') !== String(phone ?? '').replace(/\D/g, '') || String(rows[0].group_name).toUpperCase() !== String(group ?? '').toUpperCase()) {
+      return res.status(404).json({ error: 'not found' });
+    }
+    const out = await checks.answerCheck(Number(checkId), answer, note ? String(note).slice(0, 500) : null);
+    if (out?.moved || answer !== 'yes') {
+      // eslint-disable-next-line global-require
+      const { broadcast } = require('./sockets/index');
+      broadcast(null, 'expenses:changed', { action: 'settled', via: 'check' });
+      if (answer !== 'yes') broadcast(null, 'concern:new', { category: 'expense-refund' });
+    }
+    res.json({ reply: out?.reply ?? null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * HOW MANY ARE IN THE OPEN PREVIEW, for WhatBot's "adding them to your open
  * preview (141 so far)" while it reads a new batch. A count only.
  */
@@ -117,7 +169,10 @@ agent.get('/mine', async (req, res, next) => {
     const rows = await require('./repos/expenses.repo').spentByPerson(
       { personId: onSheet ? personId : null, phone: asAdmin ? asAdmin.phone : null, group, month },
     );
-    res.json({ month, rows });
+    // REFUNDED OR NOT, per expense (migration 078): "3 refunded · 2 in the next check"
+    // eslint-disable-next-line global-require
+    const checks = require('./repos/expenseChecks.repo');
+    res.json({ month, rows: rows.map((r) => ({ ...r, settle_tag: checks.tagOf(r, month), from_month: checks.fromMonth(r) })) });
   } catch (err) {
     next(err);
   }

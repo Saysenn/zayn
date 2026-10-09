@@ -1,6 +1,7 @@
 const pool = require('../../../configs/db');
 const { fold } = require('../../masterSheet/dealKey');
 const format = require('./format');
+const { currentDay } = require('../../shared/presetMonth.helper');
 
 // ***************************************************
 // * THEIR GROUP'S SAVED EXPENSES: FIND ONE, OR ANSWER A QUESTION
@@ -16,7 +17,11 @@ const minus = (day, n) => new Date(Date.parse(`${day}T00:00:00Z`) - n * 86400000
 /** Every group: Diane's command center, which is no one group's number. */
 const ALL = '*';
 
-/** The group's expenses between two days, newest first. */
+/**
+ * The group's expenses between two days, newest first. ON A GROUP'S NUMBER
+ * (his call 2026-10-08) that is this month and anything still not refunded:
+ * a settled month is closed to WhatsApp. Diane (every group) sees it all.
+ */
 async function between(group, from, to) {
   const { rows } = group === ALL
     ? await pool.query(
@@ -27,8 +32,9 @@ async function between(group, from, to) {
     : await pool.query(
       `SELECT * FROM tb_expenses
         WHERE lower(group_name) = lower($1) AND spent_on >= $2 AND spent_on <= $3
+          AND (spent_on >= $4 OR settle_status <> 'settled')
         ORDER BY spent_on DESC, id DESC LIMIT 2000`,
-      [group, from, to],
+      [group, from, to, `${currentDay().slice(0, 8)}01`],
     );
   return rows;
 }
@@ -48,7 +54,11 @@ const wordsOf = (s) => String(s ?? '').toLowerCase().split(/[^\p{L}\p{N}]+/u).ma
   // what any expense is, never which one ("the dewa bill" is DEWA's)
   'bill', 'invoice', 'receipt', 'payment', 'purchase', 'transaction', 'entry', 'item', 'thing',
   // around a date or a request, never a name ("the cleaner payment from 7 oct")
-  'from', 'dated', 'with', 'about', 'regarding'].includes(w));
+  'from', 'dated', 'with', 'about', 'regarding',
+  // HOW THEY ASK FOR A LIST, never what is in it: "total expenses logged this
+  // month so far" searched for "logged" and found nothing (two agent test
+  // 2026-10-09). Stemmed forms, as the words are compared after stem().
+  'logged', 'log', 'recorded', 'entered', 'saved', 'added', 'far', 'total', 'all', 'show', 'list', 'month', 'week', 'far', 'until', 'now', 'far', 'got', 'have', 'there', 'any', 'how', 'much', 'many', 'what', 'tell'].includes(w));
 
 /**
  * The saved expenses their words point at, in the last two months.
@@ -177,6 +187,33 @@ async function latest(group, today, n = 5) {
 
 // ---- questions, answered by code ----
 
+/** The rows as they will be once a waiting draft is saved: changed, removed, split. */
+function withOverlay(rows, { items = [], removes = [] }) {
+  const gone = new Set(removes.map((r) => r.id));
+  const out = [];
+  for (const r of rows) {
+    if (gone.has(r.id)) continue;
+    const x = items.find((i) => i.id === r.id);
+    if (!x) { out.push(r); continue; }
+    const f = x.fields;
+    const scale = (v) => (r.aed == null || !(r.rawAmount > 0) ? null : Math.round((r.aed * Number(v)) / r.rawAmount * 100) / 100);
+    const amount = f.rawAmount ?? r.rawAmount;
+    out.push({ ...r, ...['description', 'payee', 'spentBy', 'category', 'spentOn'].reduce((o, k) => (k in f ? { ...o, [k]: f[k] } : o), {}), rawAmount: Number(amount), aed: scale(amount) });
+    for (const p of x.splits ?? []) out.push({ ...r, id: null, rawAmount: Number(p.rawAmount), spentBy: p.spentBy, aed: scale(p.rawAmount) });
+  }
+  return out;
+}
+
+/** "sort by amount": a list in the order they asked, else newest first. */
+function sortRows(rows, sort) {
+  if (!sort) return rows;
+  const [by, dir] = String(sort).split(':');
+  const key = { amount: (r) => r.aed ?? r.rawAmount, date: (r) => r.spentOn, description: (r) => String(r.description ?? '').toLowerCase(), payee: (r) => String(r.payee ?? '').toLowerCase(), spentBy: (r) => String(r.spentBy ?? '').toLowerCase(), category: (r) => String(r.category ?? '') }[by];
+  if (!key) return rows;
+  const up = dir === 'asc';
+  return [...rows].sort((a, b) => { const x = key(a); const y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * (up ? 1 : -1); });
+}
+
 function firstOfMonth(day) { return `${day.slice(0, 8)}01`; }
 
 /** "SPENT AED 1,245 ON 12 EXPENSES", worked out here. */
@@ -185,12 +222,14 @@ function firstOfMonth(day) { return `${day.slice(0, 8)}01`; }
  *   spec for a picture (pictures/table.js), and `caption`, the short text
  *   that goes with it. Set only for a list or a breakdown.
  */
-async function answer(scopeGroup, query, { today, out = null }) {
+async function answer(scopeGroup, query, { today, out = null, overlay = null }) {
   // From the command center, "how much did MANBAT spend" narrows to it.
   const group = scopeGroup === ALL && query.group ? query.group : scopeGroup;
   const from = /^\d{4}-\d{2}-\d{2}$/.test(query.from) ? query.from : firstOfMonth(today);
   const to = /^\d{4}-\d{2}-\d{2}$/.test(query.to) ? query.to : today;
   let rows = (await between(group, from, to)).map(asItem);
+  // AS IF THE WAITING CHANGES WERE SAVED (his list 2026-10-08): "gloria's total after this?"
+  if (overlay) rows = withOverlay(rows, overlay);
   const want = wordsOf(query.words);
   // A CATEGORY WORD is the category ("how much on fuel"), not a search
   const CATEGORY_WORD = { fuel: 'fuel', petrol: 'fuel', travel: 'travel', transport: 'travel', food: 'food', meal: 'food', office: 'office', bill: 'bills', utility: 'bills', other: 'other' };
@@ -236,21 +275,25 @@ async function answer(scopeGroup, query, { today, out = null }) {
   }
   if (query.measure === 'count') return `📊 *${rows.length} ${rows.length === 1 ? 'EXPENSE' : 'EXPENSES'}* · ${scope}`;
   if (query.measure === 'total') return [`📊 *SPENDING* · ${scope}`, format.SEP, `*TOTAL:* ${totalLine}`].join('\n');
-  const list = query.measure === 'biggest' ? [...rows].sort((a, b) => (b.aed ?? 0) - (a.aed ?? 0)).slice(0, 5) : rows.slice(0, 15);
+  const sorted = sortRows(query.measure === 'biggest' ? [...rows].sort((a, b) => (b.aed ?? 0) - (a.aed ?? 0)).slice(0, 5) : rows, query.sort);
+  const list = sorted.slice(0, 15);
+  // THE NUMBERS MEAN SOMETHING (his list 2026-10-08): "1-3 spent by gloria" after a list
+  if (out) out.listIds = sorted.map((r) => r.id);
   const head = `📋 *${query.measure === 'biggest' ? 'BIGGEST EXPENSES' : 'EXPENSES'}* · ${scope}`;
   if (out) {
     // THE PICTURE HOLDS EVERY ROW, not the first 15: that is what it is for.
-    const shown = query.measure === 'biggest' ? list : rows;
+    const shown = sorted;
     out.table = {
       title: query.measure === 'biggest' ? 'Biggest expenses' : 'Expenses', subtitle: `${scope} · ${rows.length} ${rows.length === 1 ? 'expense' : 'expenses'}`,
       columns: [
+        { label: 'No.', weight: 0.5 },
         { label: 'Date', weight: 1 },
         ...(allGroups ? [{ label: 'Group', weight: 1.4 }] : []),
         { label: 'What', weight: 2.6 }, { label: 'Paid to', weight: 1.7 }, { label: 'Spent by', weight: 1.3 }, { label: 'Amount', weight: 1.7, align: 'right' },
       ],
       sections: [{
-        rows: shown.map((r) => ({
-          cells: [format.day(r.spentOn), ...(allGroups ? [r.groupName] : []), r.description, r.payee, r.spentBy, format.money(r.currency, r.rawAmount)],
+        rows: shown.map((r, i) => ({
+          cells: [String(i + 1), format.day(r.spentOn), ...(allGroups ? [r.groupName] : []), r.description, r.payee, r.spentBy, format.money(r.currency, r.rawAmount)],
           ...(r.currency !== 'AED' ? { sub: r.aed == null ? 'no AED rate' : `≈ ${format.money('AED', Math.round(r.aed * 100) / 100)}` } : {}),
         })),
       }],
@@ -260,12 +303,12 @@ async function answer(scopeGroup, query, { today, out = null }) {
   }
   return [
     head, format.SEP,
-    ...list.map((r) => format.line({ ...r, n: null }, { number: false, group: allGroups })),
-    ...(query.measure !== 'biggest' && rows.length > 15 ? [`_…and ${rows.length - 15} more on the Expenses page._`] : []),
+    ...list.map((r, i) => format.line({ ...r, n: i + 1 }, { number: true, group: allGroups })),
+    ...(query.measure !== 'biggest' && rows.length > 15 ? [`_…and ${rows.length - 15} more · reply *show all* to list every one_`] : []),
     format.SEP, `*TOTAL:* ${totalLine}`,
   ].join('\n');
 }
 
 module.exports = {
-  findTarget, latest, lastSaved, answer, between, asItem, iso, ALL, targetsIn, wordsOf,
+  findTarget, latest, lastSaved, answer, between, asItem, iso, ALL, targetsIn, wordsOf, sortRows,
 };

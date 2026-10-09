@@ -68,7 +68,8 @@ describe("the answer", () => {
     expect(out.text).toMatch(/1\. 04 Oct · Groceries · Carrefour · \*AED 139.91\*/);
     expect(out.text).toMatch(/\*Total:\* AED 139.91 \+ £19 \(about AED 232.06\)/);
     expect(out.image?.mime).toBe("image/png");
-  });
+    // the first picture loads its fonts: ~3s alone, more in the full run
+  }, 20_000);
 
   it("someone else's or another month: a polite no, and the CRM is never asked", async () => {
     const calls = crm();
@@ -99,5 +100,5 @@ describe("the first hello's menu", () => {
     const off = await scriptedReply("hi", c);
     expect(on?.offer?.choices.map((x) => x.label)).toContain("My expenses this month");
     expect(off?.offer?.choices.map((x) => x.label)).not.toContain("My expenses this month");
-  });
+  }, 20_000);
 });

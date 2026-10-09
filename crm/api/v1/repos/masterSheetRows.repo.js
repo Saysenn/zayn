@@ -24,6 +24,8 @@ const { GOING_CONCERN } = require('../shared/endNote.helper');
 const {
   dealStatusWrites, dealStatusSql, DEAL_STATUS_VALUES,
 } = require('../shared/dealStatus.helper');
+// Which payday answers flag a deal, and carrying that flag across an upload.
+const { PAYDAY_REASON, paydayFlag, keepingPayday } = require('../shared/paydayFlag.helper');
 
 /**
  * tb_mastersheet — the deals. One row is one person, on one company, in
@@ -318,7 +320,7 @@ function listValues(raw, allowed = null) {
  * Both the page's rows and the unfiltered total come from one round trip.
  */
 async function findAll({
-  group, company, roleLabel, tier, source, needsReview, status, shouldBePaid, paid,
+  group, company, roleLabel, tier, source, needsReview, paydayFlagged, status, shouldBePaid, paid,
   missingPerson, missingCompany, missingPhone, missingBank, presetWhen, paymentStartWhen, endWhen, endSoonMonths, appointmentWhen,
   acceptingPostals, label, paymentOutcome, oldGroup, sheetShouldBePaid, sheetPaid,
   amountField, amountMin, amountMax, amountMinStrict = false, amountMaxStrict = false, payableVsMonthly, q, searchField,
@@ -479,6 +481,13 @@ async function findAll({
   if (needsReview !== undefined) {
     params.push(needsReview);
     where.push(`needs_review = $${params.length}`);
+  }
+  // FLAGGED BY THE PAYDAY ANSWER, not the import: a portion, or an answer
+  // changed after the fact. See shared/paydayFlag.helper.
+  if (paydayFlagged !== undefined) {
+    where.push(paydayFlagged
+      ? "(needs_review AND review_reason ~* 'payday')"
+      : "NOT (needs_review AND COALESCE(review_reason, '') ~* 'payday')");
   }
   const statuses = listValues(status);
   if (statuses?.length) {
@@ -988,6 +997,89 @@ async function runSearchFuzzy({
 }
 
 /**
+ * Every live deal held by the people these deals belong to, and any of the
+ * given deals that has no person, so nothing asked for is dropped.
+ */
+function liveDealIdsOfPeople(ids) {
+  return pool
+    .query(
+      `SELECT id FROM tb_mastersheet
+        WHERE stopped_on IS NULL
+          AND person_id IN (SELECT person_id FROM tb_mastersheet WHERE id = ANY($1::int[]) AND person_id IS NOT NULL)
+       UNION
+       SELECT id FROM tb_mastersheet WHERE id = ANY($1::int[]) AND person_id IS NULL
+       ORDER BY id`,
+      [ids],
+    )
+    .then((r) => r.rows.map((row) => row.id));
+}
+
+/**
+ * AN UPLOAD DOES NOT ANSWER A PAYDAY QUESTION. See shared/paydayFlag.helper. needs_review and
+ * review_reason are rewritten by every upload (importColumns ALWAYS_WRITTEN),
+ * which used to wipe the payday flag with them. The payday part is carried
+ * over; only setting Payment received clears it (clearPaydayFlag).
+ *
+ * `value` is the SQL the upload would write; tb_mastersheet is the old row.
+ */
+const OLD_PAYDAY_SQL = `COALESCE(substring(tb_mastersheet.review_reason from '${PAYDAY_REASON.source}'), '')`;
+function keepingPaydaySql(column, value) {
+  if (column === 'needs_review') return `(${value}) OR ${OLD_PAYDAY_SQL} <> ''`;
+  if (column !== 'review_reason') return value;
+  return `CASE WHEN ${OLD_PAYDAY_SQL} = '' THEN ${value}
+               WHEN COALESCE(${value}, '') = '' THEN ${OLD_PAYDAY_SQL}
+               ELSE (${value}) || ', ' || ${OLD_PAYDAY_SQL} END`;
+}
+
+/**
+ * "SAVE AND MARK IT SORTED" IS NOT A PAYDAY ANSWER. His call 2026-10-08:
+ * clearing the row's flag clears the import's reasons only. A payday reason
+ * stays, flag and all, until Payment received is set (clearPaydayFlag).
+ */
+function keepPaydayFlag(id) {
+  cache.invalidate();
+  return pool
+    .query(
+      `UPDATE tb_mastersheet
+          SET needs_review = true,
+              review_reason = substring(review_reason from '${PAYDAY_REASON.source}'),
+              updated_at = now()
+        WHERE id = $1 AND review_reason ~* 'payday'
+        RETURNING ${COLUMNS}`,
+      [id],
+    )
+    .then((r) => r.rows[0] ?? null);
+}
+
+// review_reason with any earlier payday reason cut out, then `reasonSql`
+// appended when given. Same comma tidy as clearOrphanFlags.
+function withPaydayReasonSql(reasonSql = null) {
+  const kept = `btrim(regexp_replace(regexp_replace(COALESCE(review_reason, ''), '${PAYDAY_REASON.source}', '', 'gi'), '(,\\s*){2,}', ', ', 'g'), ', ')`;
+  if (!reasonSql) return kept;
+  return `CASE WHEN ${kept} = '' THEN ${reasonSql} ELSE ${kept} || ', ' || ${reasonSql} END`;
+}
+
+/**
+ * AN ADMIN SETTING PAYMENT RECEIVED IS THE REVIEW. Marking a portion's deals
+ * Paid or Unpaid is exactly what the flag asked for, so it clears the payday
+ * reason, and the row's flag with it when nothing else is left.
+ */
+function clearPaydayFlag(id) {
+  cache.invalidate();
+  return pool
+    .query(
+      `UPDATE tb_mastersheet
+          SET review_reason = ${withPaydayReasonSql()},
+              needs_review = needs_review AND ${withPaydayReasonSql()} <> '',
+              updated_at = now()
+        WHERE id = $1 AND review_reason ~* 'payday'
+        RETURNING ${COLUMNS}`,
+      [id],
+    )
+    .then((r) => r.rows[0] ?? null);
+}
+
+/**
  * whatbot's payday write, landing directly on the deal.
  *
  * Used to be a mirror: whatbot wrote a `payment_status` row keyed to an
@@ -1029,18 +1121,26 @@ async function applyPaydayOutcome(id, { outcome, note, repliedAt, paid }) {
     }
     const old = before.rows[0];
 
+    const params = [id, outcome, note ?? null, repliedAt ?? new Date()];
     // override_paid_at is a real timestamp, set the moment paid turns
     // true and cleared when it turns false — not just a boolean's shadow.
-    const paidSql =
-      paid === undefined
-        ? ''
-        : ', override_paid = $5, override_paid_at = CASE WHEN $5 THEN now() ELSE NULL END';
-    const params = [id, outcome, note ?? null, repliedAt ?? new Date()];
-    if (paid !== undefined) params.push(paid);
+    let paidSql = '';
+    if (paid !== undefined) {
+      params.push(paid);
+      paidSql = `, override_paid = $${params.length}, override_paid_at = CASE WHEN $${params.length} THEN now() ELSE NULL END`;
+    }
+    // A portion, or an answer changed after the fact, waits for an admin.
+    // Any earlier payday reason is replaced, never stacked. See paydayFlag.
+    const flag = paydayFlag(old.payment_outcome, outcome);
+    let flagSql = '';
+    if (flag) {
+      params.push(flag);
+      flagSql = `, needs_review = true, review_reason = ${withPaydayReasonSql(`$${params.length}`)}`;
+    }
 
     const after = await client.query(
       `UPDATE tb_mastersheet
-          SET payment_outcome = $2, payment_note = $3, payment_replied_at = $4${paidSql},
+          SET payment_outcome = $2, payment_note = $3, payment_replied_at = $4${paidSql}${flagSql},
               updated_at = now()
         WHERE id = $1
         RETURNING ${COLUMNS}`,
@@ -1923,9 +2023,23 @@ async function update(id, fields, changedVia = 'admin', { derived = [], batchId 
    * either all leave the two in step. 2026-10-06.
    */
   if (typeof fields.groupName === 'string' && fields.groupName.trim()) {
-    params.push(fields.groupName.trim().toLowerCase());
-    sets.push(`sync_key = CASE WHEN position('|' in sync_key) > 0
-      THEN $${params.length} || substring(sync_key from position('|' in sync_key)) ELSE sync_key END`);
+    /**
+     * A KEY ALREADY TAKEN in the new group gets the deal's own id on the end.
+     * Two groups merged where one person had the same deal in both made two
+     * identical keys, and the second move failed on the unique constraint
+     * (upload test 2026-10-10: "Done 35 of 36", one deal left behind).
+     */
+    const { rows: [k] } = await pool.query(
+      `SELECT CASE WHEN position('|' in sync_key) > 0
+         THEN $1 || substring(sync_key from position('|' in sync_key)) ELSE sync_key END AS key
+         FROM tb_mastersheet WHERE id = $2`,
+      [fields.groupName.trim().toLowerCase(), id],
+    );
+    if (k) {
+      const taken = (await pool.query('SELECT 1 FROM tb_mastersheet WHERE sync_key = $1 AND id <> $2 LIMIT 1', [k.key, id])).rows.length > 0;
+      params.push(taken ? `${k.key}|d${id}` : k.key);
+      sets.push(`sync_key = $${params.length}`);
+    }
   }
 
   if (sets.length === 0) return findById(id);
@@ -2800,10 +2914,13 @@ async function syncUpsert(rows, origin, { columns, respectOverrides = true } = {
     // box. Everything with no human in the loop, whatbot's sync and the
     // one-shot upload included, keeps it.
     const writable = columns ? UPSERT_COLUMNS.filter((c) => columns.includes(c)) : UPSERT_COLUMNS;
-    const setSql = writable.map((c) => (respectOverrides
-      ? `${c} = CASE WHEN '${c}' = ANY(tb_mastersheet.manually_overridden_fields)
-                     THEN tb_mastersheet.${c} ELSE EXCLUDED.${c} END`
-      : `${c} = EXCLUDED.${c}`)).join(', ');
+    const setSql = writable.map((c) => {
+      const value = respectOverrides
+        ? `CASE WHEN '${c}' = ANY(tb_mastersheet.manually_overridden_fields)
+                THEN tb_mastersheet.${c} ELSE EXCLUDED.${c} END`
+        : `EXCLUDED.${c}`;
+      return `${c} = ${keepingPaydaySql(c, value)}`;
+    }).join(', ');
     // An empty SET is a syntax error, not a no-op, so a file carrying only
     // the identity columns falls through to DO NOTHING rather than taking
     // the upload down.
@@ -2894,7 +3011,7 @@ async function syncUpsert(rows, origin, { columns, respectOverrides = true } = {
           // unless the guard is off, in which case it does change and the
           // log has to carry it or History and Undo cannot reach it.
           if (respectOverrides && claimed.has(col)) continue;
-          const next = values[UPSERT_COLUMNS.indexOf(col) + 1];
+          const next = keepingPayday(col, values[UPSERT_COLUMNS.indexOf(col) + 1], old);
           if (sameStoredValue(old[col], next)) continue;
           changeRows.push([
             old.id, old.person_name, FIELD_FOR_COLUMN[col] ?? col,
@@ -3179,6 +3296,9 @@ module.exports = {
   findAll,
   searchFuzzy,
   applyPaydayOutcome,
+  clearPaydayFlag,
+  keepPaydayFlag,
+  liveDealIdsOfPeople,
   findBySyncKey,
   findMatchingDeals,
   findByPersonId,

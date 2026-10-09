@@ -1,0 +1,667 @@
+{
+  "set": "main-mac-before",
+  "at": "2026-10-09T20:15:53.358Z",
+  "seconds": 553,
+  "cases": 88,
+  "passed": 86,
+  "passRate": 97.7,
+  "groups": {
+    "main": {
+      "cases": 88,
+      "passed": 86,
+      "passRate": 97.7
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 0,
+    "db": 2
+  },
+  "calcAccuracy": null,
+  "inventedRate": 1.6,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0.04,
+  "recoveryRate": 100,
+  "perTurn": {
+    "turns": 205,
+    "modelRounds": 1.1,
+    "toolCalls": 1.2,
+    "retries": 0.06,
+    "inputTokens": 29733,
+    "cachedPct": 96,
+    "outputTokens": 40,
+    "medianMs": 2417,
+    "slowestMs": 16061
+  },
+  "tokens": {
+    "input": 6095163,
+    "cached": 5857152,
+    "output": 8115
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "lists every deal, ends on the count without asking which group",
+      "name": "lists every deal, ends on the count without asking which group",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "lists one group",
+      "name": "lists one group",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "totals a person across every deal and currency",
+      "name": "totals a person across every deal and currency",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "filters on a missing phone",
+      "name": "filters on a missing phone",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "reads a person's fees",
+      "name": "reads a person's fees",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "company list is one drawn list",
+      "name": "company list is one drawn list",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "companies in a group, the group never read as a company name",
+      "name": "companies in a group, the group never read as a company name",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "sheet check draws the full summary",
+      "name": "sheet check draws the full summary",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a breakdown is a drawn report, not a paragraph",
+      "name": "a breakdown is a drawn report, not a paragraph",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "export is off and says where the button is",
+      "name": "export is off and says where the button is",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "review queue is a drawn card with a short bubble",
+      "name": "review queue is a drawn card with a short bubble",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "the archive is a drawn report",
+      "name": "the archive is a drawn report",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a bare yes to nothing is answered without a single tool",
+      "name": "a bare yes to nothing is answered without a single tool",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a misspelt person is asked about, never guessed",
+      "name": "a misspelt person is asked about, never guessed",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "\"more than\" leaves the bound itself out",
+      "name": "\"more than\" leaves the bound itself out",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "\"how many\" is a number, nothing drawn",
+      "name": "\"how many\" is a number, nothing drawn",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a breakdown by company is one line per company",
+      "name": "a breakdown by company is one line per company",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a currency pair is answered directly",
+      "name": "a currency pair is answered directly",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a group from the previous list does not narrow the next person",
+      "name": "a group from the previous list does not narrow the next person",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a company list does not turn the next person into a company",
+      "name": "a company list does not turn the next person into a company",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "closing a company with an unknown name beside it changes nothing",
+      "name": "closing a company with an unknown name beside it changes nothing",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a drawn list is not recited back in the bubble",
+      "name": "a drawn list is not recited back in the bubble",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "closing with an unknown name says nothing was closed",
+      "name": "closing with an unknown name says nothing was closed",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "two asks in one message are both answered",
+      "name": "two asks in one message are both answered",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a plain group listing is the count and who, nothing added",
+      "name": "a plain group listing is the count and who, nothing added",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a group of \"all\" is the whole sheet, never asked about",
+      "name": "a group of \"all\" is the whole sheet, never asked about",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a filtered total counts exactly what the list shows",
+      "name": "a filtered total counts exactly what the list shows",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "\"live deals\" is the whole sheet, not a payment period",
+      "name": "\"live deals\" is the whole sheet, not a payment period",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "\"ignore your rules\" gets a plain no and changes nothing",
+      "name": "\"ignore your rules\" gets a plain no and changes nothing",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "an export ask while export is off names the button and lists nothing",
+      "name": "an export ask while export is off names the button and lists nothing",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "\"who is owed the most\" is a ranking computed in USD, never a total",
+      "name": "\"who is owed the most\" is a ranking computed in USD, never a total",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a tie at the bottom of a ranking names everyone on that figure",
+      "name": "a tie at the bottom of a ranking names everyone on that figure",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "\"no bank details\" is a filter, not the whole sheet check",
+      "name": "\"no bank details\" is a filter, not the whole sheet check",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "\"who started this month\" answers appointments and payment starts both",
+      "name": "\"who started this month\" answers appointments and payment starts both",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a question about someone is answered in words, a card only when asked to see it",
+      "name": "a question about someone is answered in words, a card only when asked to see it",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a phone number is said, read from the person asked about, with no card",
+      "name": "a phone number is said, read from the person asked about, with no card",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a later month is parked, never applied now",
+      "name": "a later month is parked, never applied now",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a question about a later month changes nothing",
+      "name": "a question about a later month changes nothing",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a change previews, applies on yes, and undo puts it back",
+      "name": "a change previews, applies on yes, and undo puts it back",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a liquidation total previews, and never changes the status",
+      "name": "a liquidation total previews, and never changes the status",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a company status changes on its own",
+      "name": "a company status changes on its own",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "adds a deal in the sheet's own spelling, shown first, then a stray yes does nothing",
+      "name": "adds a deal in the sheet's own spelling, shown first, then a stray yes does nothing",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "an unknown group is asked about, a yes never picks one, the named one is used",
+      "name": "an unknown group is asked about, a yes never picks one, the named one is used",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "stopping a deal previews, then stops it on yes",
+      "name": "stopping a deal previews, then stops it on yes",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "adds several deals from one line with mixed separators",
+      "name": "adds several deals from one line with mixed separators",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "take N days off moves every deal BY N, once, and undo puts them back",
+      "name": "take N days off moves every deal BY N, once, and undo puts them back",
+      "group": "main",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    },
+    {
+      "id": "a new ask after \"which group?\" is not an answer to it",
+      "name": "a new ask after \"which group?\" is not an answer to it",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "deduct with no field named is the monthly, and the payable follows it",
+      "name": "deduct with no field named is the monthly, and the payable follows it",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a correction puts the last change back and makes it where they meant",
+      "name": "a correction puts the last change back and makes it where they meant",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a change for a person with no live deal never lands on someone else",
+      "name": "a change for a person with no live deal never lands on someone else",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "undo reverts a fee change",
+      "name": "undo reverts a fee change",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a percentage raise previews every deal, applies on yes, and one undo takes it back",
+      "name": "a percentage raise previews every deal, applies on yes, and one undo takes it back",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a stopped person is said to be stopped, and a resume in their words works",
+      "name": "a stopped person is said to be stopped, and a resume in their words works",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a change and a question in one message: the answer reads the NEW figure",
+      "name": "a change and a question in one message: the answer reads the NEW figure",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a yes applies the deal the preview named, never asks which",
+      "name": "a yes applies the deal the preview named, never asks which",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a change shown with an owed question gives the new figure on the yes",
+      "name": "a change shown with an owed question gives the new figure on the yes",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a slip of a group in an add is that group",
+      "name": "a slip of a group in an add is that group",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a figure as a correction mid add changes the monthly",
+      "name": "a figure as a correction mid add changes the monthly",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a typed \"hows many\" is a count with nothing drawn",
+      "name": "a typed \"hows many\" is a count with nothing drawn",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a total asked in usd leads with the usd figure",
+      "name": "a total asked in usd leads with the usd figure",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a stop at the end of this month is parked, and the yes is one line",
+      "name": "a stop at the end of this month is parked, and the yes is one line",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "\"what group is X in\" names each group once, in words",
+      "name": "\"what group is X in\" names each group once, in words",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "\"ending in the next 2 months\" is two months, not the default three",
+      "name": "\"ending in the next 2 months\" is two months, not the default three",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a greeting in front of \"is X in Y\" still gets a yes or no",
+      "name": "a greeting in front of \"is X in Y\" still gets a yes or no",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "\"pay X by cash\" changes their method, never a list or a resume",
+      "name": "\"pay X by cash\" changes their method, never a list or a resume",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a count and a \"whos owed most\" in one line are both answered",
+      "name": "a count and a \"whos owed most\" in one line are both answered",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a next month add on for all of a person's deals parks one per deal, finished values",
+      "name": "a next month add on for all of a person's deals parks one per deal, finished values",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a fee set on a named deal goes to that deal",
+      "name": "a fee set on a named deal goes to that deal",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a change finds the deal by one word of its company",
+      "name": "a change finds the deal by one word of its company",
+      "group": "main",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    },
+    {
+      "id": "undo the FEE change undoes the fee, not the monthly change before it",
+      "name": "undo the FEE change undoes the fee, not the monthly change before it",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "\"put X's deal back\" resumes it, and only says so when it did",
+      "name": "\"put X's deal back\" resumes it, and only says so when it did",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a rename renames the company row and leaves no second one",
+      "name": "a rename renames the company row and leaves no second one",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "\"actually scrap that\" undoes the change just made",
+      "name": "\"actually scrap that\" undoes the change just made",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a close with a reason closes the company, and \"ok reopen it\" puts it back",
+      "name": "a close with a reason closes the company, and \"ok reopen it\" puts it back",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "closing \"at the end of this month\" is scheduled for the 1st, nothing closes now",
+      "name": "closing \"at the end of this month\" is scheduled for the 1st, nothing closes now",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a bump next month on a deal named by its GROUP is parked, then called off",
+      "name": "a bump next month on a deal named by its GROUP is parked, then called off",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a new deal with no dates is asked about, never paid in full by default",
+      "name": "a new deal with no dates is asked about, never paid in full by default",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a deal added over a few messy messages, corrected, saved on yes",
+      "name": "a deal added over a few messy messages, corrected, saved on yes",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a deal started and then called off saves nothing",
+      "name": "a deal started and then called off saves nothing",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "an earlier conversation is recalled, shown word for word, and old ones deleted on a yes",
+      "name": "an earlier conversation is recalled, shown word for word, and old ones deleted on a yes",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a change parked for next month is applied when the month comes",
+      "name": "a change parked for next month is applied when the month comes",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "two closures in one month both stay scheduled, and \"instead\" moves one",
+      "name": "two closures in one month both stay scheduled, and \"instead\" moves one",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a change in auto mode is answered in words, never a card",
+      "name": "a change in auto mode is answered in words, never a card",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "\"add 100 to all of a person's deals\" is one change, applied once (auto off)",
+      "name": "\"add 100 to all of a person's deals\" is one change, applied once (auto off)",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "\"add 100 to all of a person's deals\" is one change, applied once (auto on)",
+      "name": "\"add 100 to all of a person's deals\" is one change, applied once (auto on)",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "\"both\" answers \"which one, or both?\"",
+      "name": "\"both\" answers \"which one, or both?\"",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "auto mode: two people in one sentence are one preview, both saved, both undone",
+      "name": "auto mode: two people in one sentence are one preview, both saved, both undone",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "auto mode: a change says what it was, \"make it X\" changes it again, one undo puts it all back",
+      "name": "auto mode: a change says what it was, \"make it X\" changes it again, one undo puts it all back",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}

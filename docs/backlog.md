@@ -44,7 +44,9 @@ file's git history (before 2026-10-07).
     6. Mobile layout beyond cards.
     7. Field captions on detail pages vs floating labels in modals.
     8. Remove the hidden Chat page and its socket code properly.
-    9. Partial payday answers (one problem flags all of a person's companies).
+    9. Partial payday answers flag every deal in that group, and the admin
+       marks each Paid or Unpaid (2026-10-08). Open: let the person say
+       which companies were short.
     10. WhatBot recognising "my payment is wrong" outside the menu.
 26. **SQLite instead of Postgres.** Would work at this size; weigh against
     `feature.md` 3.

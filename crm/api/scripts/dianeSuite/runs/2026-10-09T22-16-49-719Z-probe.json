@@ -1,0 +1,54 @@
+{
+  "set": "probe",
+  "at": "2026-10-09T22:16:49.719Z",
+  "seconds": 5,
+  "cases": 1,
+  "passed": 1,
+  "passRate": 100,
+  "groups": {
+    "main": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 0,
+    "db": 0
+  },
+  "calcAccuracy": null,
+  "inventedRate": null,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0,
+  "recoveryRate": null,
+  "perTurn": {
+    "turns": 4,
+    "modelRounds": 0.5,
+    "toolCalls": 0.8,
+    "retries": 0,
+    "inputTokens": 15633,
+    "cachedPct": 97,
+    "outputTokens": 10,
+    "medianMs": 857,
+    "slowestMs": 2881
+  },
+  "tokens": {
+    "input": 62531,
+    "cached": 60928,
+    "output": 39
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "\"actually scrap that\" undoes the change just made",
+      "name": "\"actually scrap that\" undoes the change just made",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}

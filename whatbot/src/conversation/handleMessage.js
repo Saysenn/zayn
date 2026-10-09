@@ -49,6 +49,7 @@ import { scriptedReply } from "./scriptedReply.js";
 import { replier } from "./sendReply.js";
 import { expenseTurn, isExpenseAdmin, openPreviewSize, unreadableReply } from "../expenses/expenses.js";
 import { collect, firstOfBurst } from "../expenses/batch.js";
+import { answerExpenseCheckIfOpen, expenseCheckAfterPayday } from "../expenses/expenseCheck.js";
 import {
   EXPENSE,
   EXPENSE_WORD,
@@ -81,6 +82,12 @@ function paydayAnswer(text) {
   if (AMOUNT_WRONG.test(t) && !NOTHING_ARRIVED.test(t)) return "partial";
   const { verdict, rest } = classifyReply(text);
   return rest ? "other" : verdict;
+}
+
+/** The payday reply, and the Expenses check after it as its own message, when there is one. */
+async function withExpenseCheck(reply, person, group, phone, period) {
+  const next = await expenseCheckAfterPayday(person, group, phone, period);
+  return next ? { ...reply, more: [...(reply.more ?? []), next] } : reply;
 }
 
 /** send nothing at all. used for opted-out people — silence, not an explanation. */
@@ -284,7 +291,8 @@ async function answerAsEmployee(input) {
       // push that fails leaves crmSynced false for the outbox sweep to
       // retry, so an unreachable CRM costs a delay and never the outcome.
       void pushOutcome(ctx.person, channelGroup, openPeriod, "confirmed");
-      return words(paydayReplies.confirmed);
+      // THE EXPENSES CHECK, its own message, right after (never cold)
+      return withExpenseCheck(words(paydayReplies.confirmed), ctx.person, channelGroup, phone, openPeriod);
     }
     if (answer === "no") {
       await recordReply(
@@ -377,16 +385,28 @@ async function answerAsEmployee(input) {
         },
         "payday follow-up answered",
       );
-      return words(
-        outcome === "partial"
-          ? paydayReplies.detailNoted
-          : paydayReplies.nothingArrived,
+      return withExpenseCheck(
+        words(
+          outcome === "partial"
+            ? paydayReplies.detailNoted
+            : paydayReplies.nothingArrived,
+        ),
+        ctx.person,
+        channelGroup,
+        phone,
+        clarifyPeriod,
       );
     }
     // Neither. It's a real question, so answer it and leave the follow-up
     // outstanding — they may still come back to it, and the TTL closes it
     // if they don't.
   }
+
+  // THE EXPENSES CHECK: their yes / no / partial, or "sorry, that was a
+  // mistake" after a yes. Asked only after the payday check is answered, so
+  // it never cuts across one.
+  const expenseReply = await answerExpenseCheckIfOpen(channelGroup, phone, text);
+  if (expenseReply) return words(expenseReply);
 
   // Changing an answer already given. Only reachable with no check open,
   // so it can never cut across one they're in the middle of answering.
@@ -472,14 +492,10 @@ async function answerAsEmployee(input) {
 
   await setState(phone, "idle");
 
-  // Identical figures to the ones just sent. Four different questions can
-  // land on one tool, and nobody reads the fourth identical wall. They are
-  // still one message up the thread, so nothing is hidden.
-  if (reply.hadDisplay && send.lastReply.startsWith(reply.text)) {
-    return words(
-      await send.say("Same as I've just sent you, nothing's changed 🙂"),
-    );
-  }
+  // ASKED AGAIN, SENT AGAIN, his call 2026-10-08. Identical figures used to
+  // get "Same as I've just sent you": but the turn above is remembered before
+  // WhatsApp delivers it, so a job retried after a stall refused a breakdown
+  // that never arrived, and someone asking on purpose was refused too.
 
   if (reply.offer && reply.offer.choices.length > 0) {
     // remember what each number will run, or the menu is decoration

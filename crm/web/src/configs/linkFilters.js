@@ -17,6 +17,9 @@ export const LINK_FILTER = Object.freeze({
   // needing a check, the other is a deal past its term. The param is named
   // for what it filters so the two cannot be confused in a link.
   needsReview: 'needsReview',
+  // People only: the person's Paid across their live deals, yes / no /
+  // mixed. His call 2026-10-08, Paid is the person's.
+  paid: 'paid',
   // NO `reviewPanel`. It opened the monthly review as a modal over the
   // master sheet; the review is a page now, so a link to it is `/review`
   // and there is nothing to seed. Removed 2026-09-29.

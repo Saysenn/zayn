@@ -2,7 +2,6 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Button from '../buttons/Button';
 import { ChevronIcon, CloseIcon } from '../icons';
-import { countOf } from '../../helpers/pluralNoun';
 
 // ***************************************************
 // * The bulk bar: what you can do to the ticked rows
@@ -17,11 +16,13 @@ import { countOf } from '../../helpers/pluralNoun';
  * Toaster reads that and lifts itself above the bar, and pages pad their
  * bottom by it, so the last row is never hidden underneath.
  *
- *   <BulkBar count={sel.count} noun="deal" onClear={sel.clear}>
+ *   <BulkBar count={sel.count} onClear={sel.clear}>
  *     <BulkAction icon={StopHandIcon} onClick={…}>Stop</BulkAction>
  *   </BulkBar>
  */
-export default function BulkBar({ count, noun = 'row', onClear, children }) {
+// NO "N SELECTED" COUNT, his call 2026-10-08: the ticked rows already say
+// it. `count` only decides whether the bar is up.
+export default function BulkBar({ count, onClear, children }) {
   const ref = useRef(null);
   const open = count > 0;
 
@@ -57,14 +58,10 @@ export default function BulkBar({ count, noun = 'row', onClear, children }) {
   return createPortal(
     <div className="bulk-bar-wrap" role="region" aria-label="Bulk actions">
       <div ref={ref} className="bulk-bar">
-        <span className="shrink-0 whitespace-nowrap text-sm font-semibold text-text tabular-nums">
-          {countOf(count, noun)} selected
-        </span>
-        <span className="hidden sm:block h-5 w-px bg-border" aria-hidden="true" />
         <div className="bulk-bar-actions">{children}</div>
         <Button size="sm" onClick={onClear} aria-label="Clear selection" title="Clear selection (Esc)">
           <CloseIcon width={16} height={16} />
-          <span className="hidden sm:inline">Clear</span>
+          <span className="hidden sm:inline">Clear selection</span>
         </Button>
       </div>
     </div>,

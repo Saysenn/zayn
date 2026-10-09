@@ -74,7 +74,29 @@ function subLabels(headers, below) {
 /** The tables in one grid (rows of cells), each row with its line number. */
 function tablesIn(rawGrid, sheet) {
   const grid = foldBands(rawGrid);
-  return findTables(grid).map((t, k) => {
+  /**
+   * A BLANK LINE IS NOT A NEW TABLE. Messy file 2026-10-08: a data row of
+   * plain words after a blank line ("INDIGO | Mid 1 | BYG | DIVERSE REC
+   * PAYROLL | cash") looked like a header, started a "table" of its own and
+   * was eaten as its header: four deals unread, and offered as STOPS. A block
+   * that really is another table repeats the labels (Role, Name…); one whose
+   * "header" shares no label with the header above is that table's data.
+   */
+  const label = (v) => (blank(v) ? '' : String(v).trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim());
+  const found = [];
+  for (const t of findTables(grid)) {
+    const prev = found[found.length - 1];
+    if (prev && Math.abs(prev.firstCol - t.firstCol) <= 1 && Math.abs(prev.lastCol - t.lastCol) <= 1) {
+      const prevLabels = new Set((grid[prev.headerRow] ?? []).slice(prev.firstCol, prev.lastCol + 1).map(label).filter(Boolean));
+      const mine = (grid[t.headerRow] ?? []).slice(t.firstCol, t.lastCol + 1).map(label).filter(Boolean);
+      if (prevLabels.size >= 2 && !mine.some((l) => prevLabels.has(l))) {
+        prev.lastRow = Math.max(prev.lastRow, t.lastRow);
+        continue;
+      }
+    }
+    found.push({ ...t });
+  }
+  return found.map((t, k) => {
     // A HEADER OVER TWO ROWS ("Monthly" above "Amount", or a merged label
     // with blanks under it): a blank header takes the label above it.
     const above = (grid[t.headerRow - 1] ?? []).slice(t.firstCol, t.lastCol + 1);

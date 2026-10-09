@@ -235,8 +235,17 @@ test('THE IMPORT LINE IS needsReview, never flagged', async () => {
     rows: [{ ...OWED, needs_review: true, person_name: 'Paddy' }],
   }).briefing('2026-09');
   assert.equal(out.items.find((i) => i.key === 'flagged'), undefined);
-  assert.equal(out.items.find((i) => i.key === 'needsReview').sentence,
-    '1 row came off the last import needing a check.');
+  assert.equal(out.items.find((i) => i.key === 'needsReview').sentence, '1 row needs a check.');
+});
+
+// His call 2026-10-08: a portion or a changed answer is its own line, by person.
+test('A PAYDAY FLAG IS THE PAYDAY LINE, not the check line', async () => {
+  const out = await load({
+    rows: [{ ...OWED, needs_review: true, person_name: 'Paddy', review_reason: 'payday says only part of the pay arrived' }],
+  }).briefing('2026-09');
+  assert.equal(out.items.find((i) => i.key === 'needsReview'), undefined);
+  assert.equal(out.items.find((i) => i.key === 'payday').sentence,
+    '1 person said only part of their pay arrived, or changed their payday answer.');
 });
 
 test('AND A STOPPED ROW IS NOT WAITING FOR A CHECK', async () => {
@@ -256,10 +265,10 @@ test('AND A STOPPED ROW IS NOT WAITING FOR A CHECK', async () => {
  * components/agentOrb/briefingAnswer.test.js, which pins that every one of
  * these has a route.
  */
-test('THE EIGHT KEYS, and a new one is a deliberate change on BOTH sides', () => {
+test('THE NINE KEYS, and a new one is a deliberate change on BOTH sides', () => {
   const { SAY } = require('./briefing.helper');
   assert.deepEqual(Object.keys(SAY).sort(), [
-    'concerns', 'liquidating', 'needsReview', 'pastYear', 'payableOver', 'reviewMonthly', 'specialCase', 'unpaid',
+    'concerns', 'liquidating', 'needsReview', 'pastYear', 'payableOver', 'payday', 'reviewMonthly', 'specialCase', 'unpaid',
   ]);
 });
 

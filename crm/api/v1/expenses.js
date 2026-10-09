@@ -16,6 +16,7 @@ const { currentMonth } = require('./shared/presetMonth.helper');
 const { sessionUser } = require('./shared/session.helper');
 const spender = require('./expenses/spender');
 const receipts = require('./expenses/bot/receipts');
+const checks = require('./repos/expenseChecks.repo');
 
 // ***************************************************
 // * /expenses
@@ -68,6 +69,7 @@ function filtersFrom(query) {
     amountMax: query.amountMax,
     savedBy: query.savedBy,
     linked: ['yes', 'no'].includes(query.linked) ? query.linked : undefined,
+    settle: query.settle,
   };
 }
 
@@ -119,12 +121,17 @@ router.get('/expenses', async (req, res, next) => {
   try {
     const { page, pageSize } = parsePagination(req.query);
     const month = viewMonth(req.query.month);
+    // THIS MONTH SHOWS ANY FROM BEFORE STILL NOT REFUNDED (his call
+    // 2026-10-08); a past month picked shows only itself
+    const carry = month === currentMonth() && req.query.carry !== '0';
     const result = await expensesRepo.findAll({
-      ...filtersFrom(req.query), month, page, pageSize,
+      ...filtersFrom(req.query), month, page, pageSize, carry,
     });
+    // each row's badge: settled, review, late / unpaid / overdue (from Sep)
+    const rows = result.rows.map((r) => ({ ...r, settle_tag: checks.tagOf(r), from_month: checks.fromMonth(r) }));
     // NAMED in the response, so the page can say which month it is showing
     // rather than leaving the reader to work it out; `current` is this month.
-    res.json({ ...result, month, current: currentMonth(), page, pageSize });
+    res.json({ ...result, rows, month, current: currentMonth(), page, pageSize, carry });
   } catch (err) {
     next(err);
   }
@@ -302,8 +309,16 @@ router.post('/expenses', async (req, res, next) => {
   }
 });
 
+/**
+ * A SETTLED EXPENSE IS LOCKED (his call 2026-10-08): refunded is final, so
+ * it is reopened (Unsettle) before anything about it can change.
+ */
+const LOCKED = 'This expense is settled (refunded), so it is locked. Unsettle it first to change or delete it.';
+const isLocked = (row) => row?.settle_status === 'settled';
+
 router.patch('/expenses/:id', async (req, res, next) => {
   try {
+    if (isLocked(await expensesRepo.findById(req.params.id))) return next(new AppError(409, LOCKED));
     const expense = await expensesRepo.update(req.params.id, await whoFrom(req.body, req));
     if (!expense) return next(new AppError(404, messages.notFound.expense));
 
@@ -318,6 +333,7 @@ router.delete('/expenses/:id', async (req, res, next) => {
   try {
     // the page has no undo: the receipt goes with the expense
     const row = await expensesRepo.findById(req.params.id);
+    if (isLocked(row)) return next(new AppError(409, LOCKED));
     const removed = await expensesRepo.remove(req.params.id);
     if (!removed) return next(new AppError(404, messages.notFound.expense));
     await receipts.forget(row);
@@ -340,13 +356,16 @@ router.post('/expenses/bulk-update', async (req, res, next) => {
     const ids = bulkIds(req.body);
     const fields = await whoFrom(req.body?.fields || {}, req);
     const updated = [];
+    const locked = [];
     for (const id of ids) {
+      // eslint-disable-next-line no-await-in-loop
+      if (isLocked(await expensesRepo.findById(id))) { locked.push(id); continue; }
       // eslint-disable-next-line no-await-in-loop
       const expense = await expensesRepo.update(id, fields);
       if (expense) updated.push(expense.id);
     }
     broadcast(null, EVENT, { action: 'bulk-updated', ids: updated });
-    res.json({ updated });
+    res.json({ updated, locked });
   } catch (err) {
     next(err);
   }
@@ -356,9 +375,11 @@ router.post('/expenses/bulk-delete', async (req, res, next) => {
   try {
     const ids = bulkIds(req.body);
     const deleted = [];
+    const locked = [];
     for (const id of ids) {
       // eslint-disable-next-line no-await-in-loop
       const row = await expensesRepo.findById(id);
+      if (isLocked(row)) { locked.push(id); continue; }
       // eslint-disable-next-line no-await-in-loop
       const removed = await expensesRepo.remove(id);
       if (removed) {
@@ -368,7 +389,36 @@ router.post('/expenses/bulk-delete', async (req, res, next) => {
       }
     }
     broadcast(null, EVENT, { action: 'bulk-deleted', ids: deleted });
-    res.json({ deleted });
+    res.json({ deleted, locked });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * REFUNDED OR NOT, BY HAND (his calls 2026-10-08): the CRM admin settles
+ * (paid in cash, off the cycle, no WhatsApp, nobody linked), reopens, or
+ * marks for review. Every move is logged with who did it.
+ */
+const SETTLE_TO = { settle: 'settled', unsettle: 'unsettled', review: 'review' };
+router.post('/expenses/:action(settle|unsettle|review)', async (req, res, next) => {
+  try {
+    const ids = bulkIds(req.body);
+    if (!ids.length) return next(new AppError(400, 'Pick at least one expense.'));
+    const to = SETTLE_TO[req.params.action];
+    const note = req.body?.note ? String(req.body.note).slice(0, 300) : null;
+    const moved = await checks.setStatus(ids, to, { by: sessionUser(req), via: 'crm', note });
+    broadcast(null, EVENT, { action: req.params.action, ids: moved.map((r) => r.id) });
+    res.json({ moved: moved.map((r) => r.id), unchanged: ids.length - moved.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** One expense's settle history, newest first. */
+router.get('/expenses/:id/settle-log', async (req, res, next) => {
+  try {
+    res.json({ log: await checks.logFor(Number(req.params.id)) });
   } catch (err) {
     next(err);
   }

@@ -28,6 +28,8 @@ const DianeCtx = createContext(null);
 export const CONTEXTS = Object.freeze([
   { key: 'master-sheet', label: 'Master sheet' },
   { key: 'expenses', label: 'Expenses' },
+  // Opened 2026-10-10: HMRC and CIS questions, from GOV.UK and our own notes
+  { key: 'hmrc', label: 'HMRC & CIS' },
   { key: 'debts', label: 'Debts', soon: true },
 ]);
 const DEFAULT_CONTEXT = 'master-sheet';

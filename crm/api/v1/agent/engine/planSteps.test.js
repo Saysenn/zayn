@@ -67,3 +67,24 @@ test('THE CARD says what each step is, and marks a stop', () => {
   assert.equal(card.title, '3 changes');
   assert.match(card.sections[2].label, /⛔ Stop/);
 });
+
+// THE BOX'S PREVIEW, 2026-10-08: what she understood, in one plain line.
+test('THE PREVIEW SAYS WHAT SHE UNDERSTOOD, by action, with the names', () => {
+  const card = planCard({ ...plan, status: 'preview' });
+  assert.match(card.note, /I understood: change \d+ deals? for [^;]+; stop 1 deal for Juno Park\./);
+  assert.doesNotMatch(planCard({ ...plan, status: 'done' }).note, /I understood/, 'a finished plan says what was done instead');
+});
+
+test('AN UNUSUAL ITEM IS NAMED UNDER "CHECK FIRST", by its number', () => {
+  const odd = { ...plan, status: 'preview', steps: plan.steps.map((s, i) => (i === 1 ? { ...s, lines: [{ ...(s.lines?.[0] ?? {}), detail: 'this deal is stopped' }] } : s)) };
+  assert.match(planCard(odd).note, /Check first: 2 \(/);
+  assert.doesNotMatch(planCard({ ...plan, status: 'preview' }).note, /Check first/, 'nothing unusual, no line');
+});
+
+test('A PLAN LEFT 30 MINUTES IS CLOSED: a yes then is not to it', () => {
+  const card = planCard({ ...plan, status: 'preview' });
+  const history = [{ role: 'user', content: 'do it all' }, { role: 'assistant', content: '[listed]', list: card }, { role: 'user', content: 'yes' }];
+  assert.ok(pendingPlan(history), 'fresh, it waits');
+  const old = { ...card, plan: { ...card.plan, at: Date.now() - 31 * 60 * 1000 } };
+  assert.equal(pendingPlan([history[0], { ...history[1], list: old }, history[2]]), null);
+});

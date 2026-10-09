@@ -783,6 +783,24 @@ async function compareHandler(rawArgs) {
     ]);
     live = { rows, settings, rates, fx };
   }
+  /**
+   * A FIRST NAME IS THE ONE PERSON WHO HAS IT. Library 2026-10-08: "what was
+   * felix on last month" matched no full name and answered "nothing, saved
+   * actual". Only when exactly one person has that first name: "john" with
+   * three Johns stays as said, and is never three people added up. The
+   * names are the ones these months hold: a past month is read from its
+   * snapshot alone, never from live deals (unit test, 2026-10-08).
+   */
+  if (args.person && !/\s/.test(String(args.person).trim())) {
+    const names = [...new Set([
+      ...[...saved.values()].flatMap((s) => (s.totals?.deals ?? []).map((d) => d.personName)),
+      ...(live?.rows ?? []).map((r) => r.person_name),
+    ].filter(Boolean))];
+    if (!names.some((n) => fold(n) === fold(args.person))) {
+      const hits = names.filter((n) => fold(String(n).trim().split(/\s+/)[0]) === fold(args.person));
+      if (hits.length === 1) args.person = hits[0];
+    }
+  }
 
   const records = months.map((month) => {
     if (month < now) {

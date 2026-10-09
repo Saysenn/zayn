@@ -127,7 +127,7 @@ test('THE LOG FIELD IS THE ONE HISTORY WRITES UNDER', () => {
   assert.equal(REVIEW_ANSWER_LOG_FIELD, 'reviewAnswer');
   const list = readFileSync(new URL('../components/history/HistoryList.jsx', import.meta.url), 'utf8');
   assert.match(list, /\[REVIEW_ANSWER_LOG_FIELD\]: 'monthly review answer'/);
-  assert.match(list, /VALUE_LABELS = \{ \[REVIEW_ANSWER_LOG_FIELD\]: REVIEW_ANSWER_LABEL \}/);
+  assert.match(list, /VALUE_LABELS = \{[^}]*\[REVIEW_ANSWER_LOG_FIELD\]: REVIEW_ANSWER_LABEL,/);
 });
 
 /**

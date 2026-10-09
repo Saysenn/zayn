@@ -45,6 +45,10 @@ server.listen(env.port, () => {
   // request pay a ~15s cold TLS handshake to Supabase. Not awaited: the
   // server must still come up if the database is momentarily unreachable.
   pool.warmUp();
+  // DIANE'S HMRC & CIS KNOWLEDGE, refreshed from GOV.UK once a day (off with
+  // HMRC_AUTO_REFRESH=off; never on a database with no knowledge loaded)
+  // eslint-disable-next-line global-require
+  require('./v1/agent/hmrc/knowledge').startAutoRefresh();
   // The rates too, and for the same reason plus one: a failed fetch is
   // SILENT otherwise, showing up later as a currency nobody can convert.
   // See shared/fxRates.helper.

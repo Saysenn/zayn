@@ -15,12 +15,12 @@ const {
 // and the whole message goes to the model instead. A wrong read is worse
 // than no read.
 
-const YES = /^(?:sorted|all sorted|done|all done|all good|crack on|go on|good to go|that'?s it|thats it|spot on|bang on|y|ye|yes+|yeah|yep|yup|ok(?:ay)?|k|sure(?: thing)?|confirm(?:ed)?|go(?: ahead)?|ok go|save(?: (?:it|them|all))?|do it|correct|approved?|👍|✅|yes(?: please| pls| save(?: it| them)?)?|fine|proceed|send it|that'?s? (?:is )?(?:correct|right|fine)|all (?:correct|right)|sige|oo|tama|tamam|yalla|haan|theek hai|go for it|👌|👌🏻|👍🏻|👍🏼|👍🏽|🆗|✔️|☑️|🙏)$/iu;
+const YES = /^(?:sorted|all sorted|done|all done|all good|crack on|go on|good to go|that'?s it|thats it|spot on|bang on|y|ye|yes+|yse|yess+|yeas|yeah|yea|yep|yup|ok(?:ay)?|k|sure(?: thing)?|confirm(?:ed)?|go(?: ahead)?|ok go|save(?: (?:it|them|all))?|do it|correct|approved?|👍|✅|yes(?: please| pls| save(?: it| them)?)?|fine|proceed|send it|that'?s? (?:is )?(?:correct|right|fine)|all (?:correct|right)|sige|oo|tama|tamam|yalla|haan|theek hai|go for it|👌|👌🏻|👍🏻|👍🏼|👍🏽|🆗|✔️|☑️|🙏)$/iu;
 // "HOLD ON": nothing changes, it waits
 const HOLD = /^(?:hold on|wait|one sec(?:ond)?|1 sec|a sec|hang on|brb|give me a (?:sec|minute|moment)|let me check|one moment)[.!\s]*$/i;
 // "NO, CANCEL THAT" is a cancel. It went to the router as "undo" and offered
 // to take back the last save (test sweep 2026-10-07).
-const NO = /^(?:(?:wait|hold on|oh|hmm+|actually|oops)[,.!\s]+)?(?:(?:no+|nope|nah)[,.!\s]*)?(?:no+|nope|nah|cancel|stop|never ?mind|nevermind|forget (?:it|that|about it)|don'?t(?: save)?|do not save|abort|discard|not now|leave (?:it|that|those|them|it alone)|scrap (?:it|that)|❌)(?:\s+(?:that|this|it|those|them|all|please|pls|thanks))*$/i;
+const NO = /^(?:(?:wait|hold on|oh|hmm+|actually|oops)[,.!\s]+)?(?:(?:no+|nope|nah)[,.!\s]*)?(?:no+|nope|nah|cancel|cancle|cancell?|cansel|cacnel|canel|stop|never ?mind|nevermind|forget (?:it|that|about it)|don'?t(?: save)?|do not save|abort|discard|not now|leave (?:it|that|those|them|it alone)|scrap (?:it|that)|❌)(?:\s+(?:that|this|it|those|them|all|please|pls|thanks))*$/i;
 
 const nums = (s) => (String(s).match(/\d+/g) ?? []).map(Number);
 
@@ -53,6 +53,59 @@ function readChoices(bare, pending) {
   // a single "skip 3" / "keep 3" keeps its old reading (skip / unskip)
   if (found.length === 1 && !found[0][1]) return null;
   return out;
+}
+
+/** "1-3", "1 to 3, 5 and 7", "#2 & #4": every number in it, or null if anything else is there. */
+function numberSet(s) {
+  const t = String(s).replace(/#|\bno\.?\s*(?=\d)|\bnumbers?\s+/gi, '').trim();
+  const RUN = '\\d+(?:\\s*(?:-|–|to|through|thru|till)\\s*\\d+)?';
+  if (!new RegExp(`^${RUN}(?:\\s*(?:,|&|\\+|and)\\s*${RUN})*$`, 'i').test(t)) return null;
+  const out = [];
+  for (const m of t.matchAll(/(\d+)(?:\s*(?:-|–|to|through|thru|till)\s*(\d+))?/gi)) {
+    const a = Number(m[1]);
+    const b = m[2] ? Number(m[2]) : a;
+    if (b < a || b - a > 200) return null;
+    for (let n = a; n <= b; n += 1) out.push(n);
+  }
+  return [...new Set(out)];
+}
+
+const WORD_N = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+
+/**
+ * SOME LINES OF A PREVIEW, BY NUMBER (his report 2026-10-08: six changes
+ * waiting, "pls only 1-3" got "say yes or cancel"). Keep some: "only 1-3",
+ * "1-3 only", "just 1, 2 and 5", "only the first 3". Leave some out: "not
+ * 4-6", "except 5", "skip 2", "all but 6". { keep, out } (the numbers kept
+ * and left out, out named when they said what to leave), { bad } when one is
+ * not in the preview, or null when it is not this at all.
+ */
+function linesPicked(bare, count, { removeWords = false } = {}) {
+  const t = bare.replace(/^(?:(?:ok(?:ay)?|so|actually|wait|sorry|pls|please|hmm+|oh|um+|no)[,!.\s]+)+/i, '')
+    .replace(/\s+(?:please|pls|thanks|thank you)$/i, '').replace(/\s+ones?$/i, '').trim();
+  const all = Array.from({ length: count }, (_, i) => i + 1);
+  const fits = (ns) => ns.every((n) => n >= 1 && n <= count);
+  const kept = (ns) => (fits(ns) ? { keep: ns, out: all.filter((n) => !ns.includes(n)), said: 'keep' } : { bad: true });
+  const firstLast = /^(?:(?:only|just)(?:\s+(?:do|change|update|remove|delete|keep|save))?\s+)?(?:the\s+)?(first|top|last)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)(?:\s+ones?)?(?:\s+only)?$/i.exec(t);
+  if (firstLast && (/^(?:only|just)\b/i.test(t) || /\bonly$/i.test(t))) {
+    const k = WORD_N[firstLast[2].toLowerCase()] ?? Number(firstLast[2]);
+    if (k < 1 || k > count) return { bad: true };
+    return kept(/^last$/i.test(firstLast[1]) ? all.slice(-k) : all.slice(0, k));
+  }
+  const keep = /^(?:(?:only|just)(?:\s+(?:do|change|update|remove|delete|keep|save))?|(?:do|change|update|remove|delete|keep|save)\s+only)\s+(?:the\s+)?(?:ones?\s+)?(.+?)(?:\s+only)?$/i.exec(t)
+    ?? /^(.+?)\s+only$/i.exec(t);
+  if (keep) {
+    const ns = numberSet(keep[1]);
+    return ns ? kept(ns) : null;
+  }
+  const verbs = `not|but not|except|skip|drop|leave out|without|exclude|take out|all but|all except|everything except|everything but|apart from|other than|don'?t change|don'?t remove${removeWords ? '|remove|delete' : ''}`;
+  const out = new RegExp(`^(?:(?:all|everything|them all|do all|change all|remove all)\\s+)?(?:${verbs})\\s+(?:the\\s+)?(.+)$`, 'i').exec(t);
+  if (out) {
+    const ns = numberSet(out[1]);
+    if (!ns) return null;
+    return fits(ns) ? { keep: all.filter((n) => !ns.includes(n)), out: ns, said: 'out' } : { bad: true };
+  }
+  return null;
 }
 
 /** A value for a field, worked out from what it looks like. */
@@ -113,6 +166,10 @@ function bareValue(rest, year, groups = []) {
  */
 function spenderAnswer(rest, which, items) {
   if (ME.test(rest)) return { which, fixes: [{ field: 'spentBy', value: 'me' }] };
+  // A FIELD THEY NAMED is that field, never a spender's name: "1-2 paid to
+  // Taxii" (the bot's own suggested reply) was saved as spent by "paid to
+  // Taxii" while who spent it was also asked. Two agent test 2026-10-09.
+  if (FIELD_WORDS.some(([re]) => re.test(rest))) return null;
   const waiting = which.every((n) => {
     const x = items.find((i) => i.n === n);
     return x && ((x.missing ?? []).includes('spentBy') || (x.doubts ?? []).some((d) => /^which |^did you mean /.test(d)));
@@ -246,6 +303,16 @@ function readReply(said, pending, { year = new Date().getUTCFullYear(), groups =
     if (ns.length > 1 && ns.every((x) => x >= 1 && x <= count)) return { kind: 'pickMany', ns: [...new Set(ns)] };
     return null;
   }
+  // CHANGES OR REMOVALS WAITING: some of their lines, by number
+  if (pending.kind === 'edit' || pending.kind === 'remove') {
+    const lines = pending.kind === 'remove' ? pending.ids.length : (pending.items?.length ?? (pending.id ? 1 : 0)) + (pending.removes ?? []).length;
+    // "YES 25": the yes a big change asks for, with how many it is
+    const yesN = /^(?:yes|yep|yeah|ok(?:ay)?|confirm(?:ed)?|go(?: ahead)?|do it)[,\s]+(?:all\s+)?(\d{1,4})(?:\s+of them)?$/i.exec(bare);
+    if (yesN) return { kind: 'yes', n: Number(yesN[1]) };
+    const got = lines > 1 ? linesPicked(bare, lines) : null;
+    if (!got) return null;
+    return got.bad ? { kind: 'lineOut', count: lines, byLines: true } : { kind: 'lines', keep: got.keep, byLines: true };
+  }
   if (pending.kind !== 'add') return null;
 
   const count = pending.items.length;
@@ -318,6 +385,9 @@ function readReply(said, pending, { year = new Date().getUTCFullYear(), groups =
     const which = nums(only[1]);
     return which.length && which.every((n) => n >= 1 && n <= count) ? { kind: 'only', which } : null;
   }
+  // RANGES AND "1-3 ONLY", "ALL EXCEPT 4" (his report 2026-10-08)
+  const picked = linesPicked(bare, count, { removeWords: true });
+  if (picked && !picked.bad) return picked.said === 'keep' ? { kind: 'only', which: picked.keep, byLines: true } : { kind: 'skip', which: picked.out, byLines: true };
 
   // "ALL NEW", "they're all new ones", "all fine": every doubt looked at.
   if (/^(?:(?:they(?:'?re| are)|these are|it'?s|all are)\s+)?(?:all\s+)?(?:new|new ones?|fine|correct|ok(?:ay)?|right|separate|different)(?:\s+ones?)?$/i.test(bare)
@@ -365,5 +435,5 @@ function readReply(said, pending, { year = new Date().getUTCFullYear(), groups =
 }
 
 module.exports = {
-  readReply, onePart, bareValue, readRates,
+  readReply, onePart, bareValue, readRates, numberSet, linesPicked,
 };

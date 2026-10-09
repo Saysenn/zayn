@@ -64,7 +64,8 @@ const EVIDENCE = {
   dealStatus: /\bgoing concern|\breviewed|\breview|\bdeal status|\bactive\b/i,
   specialCaseDeal: /\bspecial/i,
   acceptingPostals: /\bpost/i,
-  paymentOutcome: /\bconfirm|\bpartial|\breceived|\bdidn'?t (?:get|receive)|\bsent\b|\bno (?:response|reply)|\brespond|\brepl|\bwhatsapp|\bsaid\b|\banswer/i,
+  paymentOutcome: /\bconfirm|\bpartial|\breceived|\bdidn'?t (?:get|receive)|\bsent\b|\bno (?:response|reply)|\brespond|\brepl|\bwhatsapp|\bsaid\b|\banswer|\bportion|\bunpaid\b|\bpayment received|\bawait/i,
+  paydayFlagged: /\bpayday|\bflag|\bportion|\bchanged?\b|\breview/i,
   sheetShouldBePaid: /\bsheet|\bcolumn|\bboss|\bsays?\b/i,
   sheetPaid: /\bsheet|\bcolumn|\bboss|\bsays?\b/i,
   source: /\bsync|\bimport|\bmanual|\bby hand|\bourselves\b|\bupload|\badded\b/i,
@@ -83,6 +84,46 @@ const PAID_OUT = /\b(?:already|marked|been|got|were|was|not|un|still|have|has|is
 const PAID_WORD = /\bpaid\b|\bunpaid\b|\boutstanding\b|\bsettled\b|\bowe[sd]?\b/i;
 
 const list = (v) => (Array.isArray(v) ? v : [v]);
+
+// ***************************************************
+// * PAYMENT RECEIVED IS WHAT THEY ANSWERED, NOT THE PAID SWITCH
+// ***************************************************
+// His call 2026-10-08. The column is payment_outcome; the words on screen
+// are Paid, Unpaid, Portion and Awaiting. A portion is Unpaid on the deal
+// until an admin marks it, so Unpaid reaches it too.
+const RECEIVED_OUTCOMES = Object.freeze({
+  paid: ['confirmed'],
+  unpaid: ['not_received', 'partial'],
+  portion: ['partial'],
+  awaiting: ['sent', 'no_response'],
+});
+const OUTCOME_CODES = ['confirmed', 'partial', 'not_received', 'sent', 'no_response'];
+
+/** The words, or the codes, as the codes the column holds. */
+function outcomeCodes(raw) {
+  const out = list(raw).flatMap((v) => {
+    const key = String(v ?? '').trim().toLowerCase().replace(/\s+/g, '_');
+    return RECEIVED_OUTCOMES[key] ?? (OUTCOME_CODES.includes(key) ? [key] : []);
+  });
+  return [...new Set(out)];
+}
+
+// "who hasn't confirmed payment", "who said portion", "payment received unpaid"
+// "who has not answered the payday check" too: library 2026-10-08.
+const ASKS_RECEIVED = /\b(?:confirm\w*|received?)\s+(?:the\s+|their\s+|his\s+|her\s+)?payment\b|\bpayment\s+(?:received|confirm\w*)\b|\bportion\b|\bawaiting\b|\bsaid\s+(?:un)?paid\b|\b(?:answer\w*|repl\w*|respond\w*)\b[^.?!]*\bpayday\b|\bpayday\b[^.?!]*\b(?:answer\w*|repl\w*|respond\w*)\b/i;
+
+/** Which answers their words ask for. "Hasn't confirmed" is unpaid AND awaiting. */
+// `people` is the same ask in the People page's own words (list_people).
+function receivedAsked(text) {
+  const t = String(text ?? '');
+  if (/\bportion\b|\bpart(?:ial(?:ly)?)?\b/i.test(t)) return { codes: RECEIVED_OUTCOMES.portion, word: 'Portion', people: ['portion'] };
+  if (/\bawaiting\b|\bno (?:answer|reply|response)\b|\bnot (?:yet )?(?:answered|replied)\b/i.test(t)) return { codes: RECEIVED_OUTCOMES.awaiting, word: 'Awaiting', people: ['awaiting'] };
+  if (/\bunpaid\b/i.test(t)) return { codes: RECEIVED_OUTCOMES.unpaid, word: 'Unpaid', people: ['unpaid'] };
+  if (/\b(?:has|have|did|does|do|is|are|was|were)n'?t\b|\bnot\b|\bnever\b|\bunconfirmed\b|\byet to\b/i.test(t)) {
+    return { codes: [...RECEIVED_OUTCOMES.unpaid, ...RECEIVED_OUTCOMES.awaiting], word: 'Unpaid or Awaiting', people: ['unpaid', 'awaiting'] };
+  }
+  return { codes: RECEIVED_OUTCOMES.paid, word: 'Paid', people: ['paid'] };
+}
 
 /**
  * @param {object} args the model's arguments, with `said` and `saidRecent` injected
@@ -132,7 +173,19 @@ function guardFilters(args = {}) {
 
   // ---- words with one meaning the model left out
   const now = String(args.said);
-  if ((out.paid === undefined || out.paid === null) && /\bunpaid\b|\bnot (?:been )?paid\b|\bhaven'?t been paid\b|\bstill owed\b/i.test(now) && !METHOD_PAID.test(now)) {
+  // "WHO HASN'T CONFIRMED PAYMENT" IS PAYMENT RECEIVED, never the Paid
+  // switch. His call 2026-10-08: the switch is the admin's, the answer theirs.
+  const receivedWords = ASKS_RECEIVED.test(now);
+  if (receivedWords) {
+    if (out.paid !== undefined && out.paid !== null && !/\b(?:marked|switch)\b/i.test(now)) {
+      delete out.paid; dropped.push('paid status (that is the Paid switch, not what they answered)');
+    }
+    if (out.paymentOutcome === undefined || out.paymentOutcome === null) {
+      const asked = receivedAsked(now);
+      out.paymentOutcome = asked.codes; added.push(`payment received ${asked.word}`);
+    }
+  }
+  if (!receivedWords && (out.paid === undefined || out.paid === null) && /\bunpaid\b|\bnot (?:been )?paid\b|\bhaven'?t been paid\b|\bstill owed\b/i.test(now) && !METHOD_PAID.test(now)) {
     out.paid = false; added.push('unpaid');
   }
   if (out.paymentMethod === undefined || out.paymentMethod === null) {
@@ -145,7 +198,13 @@ function guardFilters(args = {}) {
   if (out.currency === undefined || out.currency === null) {
     // "paid in AED" / "in euros", never "is on GBP right?", which is a
     // question about everyone, not a filter (denominator.test.js)
-    const codes = ['GBP', 'AED', 'EURO', 'USD'].filter((c) => new RegExp(`\\b(?:paid |earn\\w* |gets? paid )?in\\s+(?:${VALUE_WORDS.currency[c].source})`, 'i').test(now));
+    // AND NEVER "OWED ... IN USD": with an amount asked, a bare "in USD" is
+    // the currency to SHOW it in. "whats the whole sheet owed in usd" was
+    // filtered to deals paid in USD and answered "owed nothing". Suite
+    // 2026-10-08. Only "paid in" / "earn in" narrows an amount question.
+    const asksAmount = /\b(?:owed?|owing|total|how much|worth|comes? to|sum)\b/i.test(now);
+    const lead = asksAmount ? '(?:paid |earn\\w* |gets? paid )' : '(?:paid |earn\\w* |gets? paid )?';
+    const codes = ['GBP', 'AED', 'EURO', 'USD'].filter((c) => new RegExp(`\\b${lead}in\\s+(?:${VALUE_WORDS.currency[c].source})`, 'i').test(now));
     if (codes.length) { out.currency = codes; added.push(codes.join(' or ')); }
   }
   // NOTHING LEFT TO NARROW: their words asked for something, the model's
@@ -166,6 +225,8 @@ function guarded(tool) {
     ...tool,
     async handler(rawArgs = {}, ...rest) {
       const { args, dropped, added, emptied } = guardFilters(rawArgs);
+      // "Paid", "Unpaid", "Portion", "Awaiting" as the column's own codes.
+      if (args.paymentOutcome !== undefined && args.paymentOutcome !== null) args.paymentOutcome = outcomeCodes(args.paymentOutcome);
       if (dropped.length || added.length) {
         logger.info({ tool: tool.name, said: rawArgs.said, dropped, added, emptied }, 'diane: read guard corrected the filters');
       }
@@ -195,4 +256,6 @@ function guarded(tool) {
   };
 }
 
-module.exports = { guardFilters, guarded, GUARDED_TOOLS, numbersIn };
+module.exports = {
+  guardFilters, guarded, GUARDED_TOOLS, numbersIn, outcomeCodes, RECEIVED_OUTCOMES, ASKS_RECEIVED, receivedAsked,
+};

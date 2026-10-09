@@ -19,6 +19,21 @@ const { Resvg } = require('@resvg/resvg-js');
 // chalkboard's Patrick Hand. Bundled so the PC draws what this Mac draws.
 const FONT_DIR = path.join(__dirname, '../../assets/fonts');
 const FONT_FILES = require('fs').readdirSync(FONT_DIR).filter((f) => f.endsWith('.ttf')).map((f) => path.join(FONT_DIR, f));
+
+/**
+ * NEVER EVERY FONT ON THE MACHINE. `loadSystemFonts: true` read every font
+ * installed, on every page: 2.4s on the Windows PC, the API standing still
+ * the whole time (resvg is synchronous), while whatbot waited on it for an
+ * expense preview. Same fix as whatbot's own pictures, 2026-10-09: every
+ * face we draw with is bundled, plus a few system fonts BY PATH for what
+ * those lack (emoji, Arabic and other scripts in a name). ~40ms a page.
+ */
+const FALLBACK_FONTS = [
+  'C:\\Windows\\Fonts\\arial.ttf', 'C:\\Windows\\Fonts\\segoeui.ttf', 'C:\\Windows\\Fonts\\seguiemj.ttf',
+  '/System/Library/Fonts/Supplemental/Arial Unicode.ttf', '/System/Library/Fonts/Supplemental/Arial.ttf',
+  '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+].filter((f) => require('fs').existsSync(f));
+const FONTS = { loadSystemFonts: false, fontFiles: [...FONT_FILES, ...FALLBACK_FONTS], defaultFontFamily: 'Inter' };
 const STYLES = ['sheet', 'notebook', 'receipt', 'ledger', 'chalkboard'];
 const WIDTH = 1000;
 const { measure, wrapTo, fitColumns } = require('./measure');
@@ -455,9 +470,7 @@ function renderTable(spec) {
     const svg = style === 'notebook' ? notebook(spec, page, at)
       : style === 'receipt' ? receipt(spec, page, at)
         : sheet(spec, page, at, THEMES[style]);
-    return new Resvg(svg, {
-      font: { loadSystemFonts: true, fontFiles: FONT_FILES, defaultFontFamily: 'Helvetica' },
-    }).render().asPng();
+    return new Resvg(svg, { font: FONTS }).render().asPng();
   });
 }
 

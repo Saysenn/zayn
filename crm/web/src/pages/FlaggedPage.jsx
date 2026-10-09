@@ -43,6 +43,7 @@ const CATEGORY_LABELS = {
   'wants-human': 'Wants a person',
   anger: 'Anger',
   'data-request': 'Data request',
+  'expense-refund': 'Expense refund',
 };
 
 function categoryLabel(c) {
@@ -459,7 +460,7 @@ export default function FlaggedPage() {
 
       {viewing && <PersonModal row={viewing} onClose={() => setViewing(null)} />}
 
-      <BulkBar count={sel.count} noun="person" onClear={sel.clear}>
+      <BulkBar count={sel.count} onClear={sel.clear}>
         <BulkAction icon={HourglassIcon} onClick={() => bulkStatus('in_progress', 'marked in progress')}>
           Mark in progress
         </BulkAction>

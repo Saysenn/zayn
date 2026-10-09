@@ -3,6 +3,7 @@ const { paymentPeriodSql, payStatusSql } = require('../shared/paymentPeriod.help
 const { personRatesSql } = require('../shared/personRates.helper');
 const { ratedMonthlyTotals } = require('../shared/rates.helper');
 const { PROFILE_RATE_FIELD, PROFILE_COLUMN_FOR_LOG } = require('../shared/profileRateLog.helper');
+const { personPayStateSql } = require('../shared/personPayState.helper');
 // A profile write changes the dead list's names and contacts, held in the rows cache.
 const { invalidatingRows } = require('./invalidatingRows');
 
@@ -140,9 +141,16 @@ const ownerSql = (t) => `COALESCE((
   LIMIT 1), ${t}.person_id)`;
 
 async function findAll(filters = {}) {
-  const { page = 1, pageSize = 25, cryptoPercent = 0 } = filters;
+  const { page = 1, pageSize = 25, cryptoPercent = 0, shouldBePaid, paid, paymentReceived } = filters;
   const params = [];
   const whereSql = dealFilters(filters, params);
+
+  // PERSON filters, unlike dealFilters: they test the person's state across
+  // every live deal, so they go on the joined row rather than the deals.
+  const personWhere = [];
+  if (shouldBePaid) { params.push(shouldBePaid); personWhere.push(`should_be_paid_state = $${params.length}`); }
+  if (paid) { params.push(paid); personWhere.push(`paid_state = $${params.length}`); }
+  if (paymentReceived) { params.push(paymentReceived); personWhere.push(`payment_received = $${params.length}`); }
 
   const limitParam = params.length + 1;
   const offsetParam = params.length + 2;
@@ -203,12 +211,26 @@ async function findAll(filters = {}) {
            FILTER (WHERE d.needs_review AND d.review_reason <> ''), NULL) AS review_reasons
        FROM deals d GROUP BY d.owner_id
      ),
+     -- EVERY LIVE DEAL THE PERSON HOLDS, not just the ones the filters
+     -- matched: a switch on this row writes to all of them, so it has to
+     -- show all of them. See shared/personPayState.helper.
+     pay AS (
+       SELECT ${ownerSql('m')} AS person_id,
+              ARRAY_AGG(m.id ORDER BY m.id) AS live_deal_ids,
+              ${personPayStateSql('m')}
+       FROM tb_mastersheet m
+       WHERE m.person_id IS NOT NULL AND m.person_id <> '' AND m.stopped_on IS NULL
+       GROUP BY 1
+     ),
      joined AS (
-       SELECT a.*, COALESCE(t.monthly_parts, '{}'::jsonb) AS monthly_parts, ${PERSON_COLUMNS}
+       SELECT a.*, COALESCE(t.monthly_parts, '{}'::jsonb) AS monthly_parts, ${PERSON_COLUMNS},
+              COALESCE(pay.live_deal_ids, '{}') AS live_deal_ids,
+              pay.should_be_paid_state, pay.paid_state, pay.payment_received
        FROM agg a
        LEFT JOIN totals_json t ON t.person_id = a.person_id
        LEFT JOIN tb_people p   ON p.person_id = a.person_id
-       WHERE true
+       LEFT JOIN pay           ON pay.person_id = a.person_id
+       WHERE ${personWhere.length ? personWhere.join(' AND ') : 'true'}
      )
      SELECT
        (SELECT COUNT(*)::int FROM joined) AS total,
@@ -282,9 +304,12 @@ async function findById(personId) {
        (SELECT COUNT(DISTINCT ${companyKeySql('')})::int FROM deals)                           AS company_count,
        (SELECT COUNT(DISTINCT ${companyKeySql('')}) FILTER (WHERE payment_period = 'active')::int FROM deals) AS active_company_count,
        (SELECT jsonb_object_agg(currency, subtotal) FROM totals)                               AS monthly_totals,
+       -- The header's switches and tag, over live deals. See personPayState.helper.
+       pay.should_be_paid_state, pay.paid_state, pay.payment_received,
        COALESCE((SELECT json_agg(d ORDER BY d.group_name, d.company, d.role_label) FROM deals d), '[]') AS deals
      FROM (SELECT 1) _
-     LEFT JOIN tb_people p ON p.person_id = $1`,
+     LEFT JOIN tb_people p ON p.person_id = $1
+     LEFT JOIN (SELECT ${personPayStateSql('d')} FROM deals d WHERE d.stopped_on IS NULL HAVING COUNT(*) > 0) pay ON true`,
     [personId],
   );
 

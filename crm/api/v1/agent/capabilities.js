@@ -84,8 +84,9 @@ const AREAS = Object.freeze([
     ],
   },
   {
-    label: "people: correct a person's details and their add on or fee",
-    tools: ['update_person'],
+    label: "people: who is paid, should be paid or has confirmed payment, one person's pay state, and "
+      + "correct a person's details and their add on or fee",
+    tools: ['list_people', 'show_person', 'update_person'],
   },
   {
     label: 'concerns anybody has raised',

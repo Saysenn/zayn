@@ -16,8 +16,9 @@ import ExpensesDiffModal from '../components/import/ExpensesDiffModal';
 import ExpensesExportModal from '../components/export/ExpensesExportModal';
 import NumberRangeFilter from '../components/filters/NumberRangeFilter';
 import { TableSkeleton } from '../components/display/Skeleton';
+import StatusBadge from '../components/badges/StatusBadge';
 import {
-  ReceiptIcon, SearchIcon, PlusIcon, TrashIcon, EditIcon, ImportIcon, DownloadIcon,
+  ReceiptIcon, SearchIcon, PlusIcon, TrashIcon, EditIcon, ImportIcon, DownloadIcon, CheckIcon, FlagIcon, UndoIcon,
 } from '../components/icons';
 import {
   useExpenses, useExpenseOptions, useCreateExpense, useExpenseCellEdit,
@@ -53,6 +54,30 @@ import {
 // Settings rates panel. See docs/expense.md.
 
 const STICKY = 'expenses';
+
+/**
+ * REFUNDED OR NOT (migration 078), one badge per row: refunded, needs
+ * review, or for one from an earlier month still owed, late / unpaid /
+ * overdue with the month it is from. This month's open ones read Not
+ * refunded, in grey. A settled row is locked: unsettle it to change it.
+ */
+const SETTLE_FILTERS = [
+  { value: '', label: 'Any refund status' },
+  { value: 'unsettled', label: 'Not refunded' },
+  { value: 'settled', label: 'Refunded' },
+  { value: 'review', label: 'Needs review' },
+  { value: 'late', label: 'Late, from before' },
+  { value: 'unpaid', label: 'Asked, still unpaid' },
+  { value: 'overdue', label: 'Overdue' },
+];
+const isSettled = (row) => row?.settle_status === 'settled';
+
+function RefundBadge({ row }) {
+  const tag = row.settle_tag;
+  if (!tag) return <StatusBadge status="settle_open" size="sm" />;
+  const from = ['late', 'unpaid', 'overdue'].includes(tag) && row.from_month ? ` · ${row.from_month}` : '';
+  return <StatusBadge status={`settle_${tag}`} label={from ? `${({ late: 'Late', unpaid: 'Unpaid', overdue: 'Overdue' })[tag]}${from}` : undefined} size="sm" />;
+}
 
 // One row of the table, so the column list is written once.
 const asList = (values) => values.map((v) => ({ value: v, label: v }));
@@ -121,6 +146,7 @@ export default function ExpensesPage() {
   const [amount, setAmount] = useStickyState(`${STICKY}.amount`, {});
   const [savedBy, setSavedBy] = useStickyState(`${STICKY}.savedBy`, []);
   const [linked, setLinked] = useStickyState(`${STICKY}.linked`, '');
+  const [settle, setSettle] = useStickyState(`${STICKY}.settle`, '');
   // '' is this month; not sticky, so a visit never opens on an old month
   const [viewMonth, setViewMonth] = useState('');
   const forget = useClearSticky(STICKY);
@@ -139,6 +165,7 @@ export default function ExpensesPage() {
     amountMax: amount.max || undefined,
     savedBy,
     linked: linked || undefined,
+    settle: settle || undefined,
     month: viewMonth || undefined,
     page,
     pageSize: PAGE_SIZE,
@@ -164,12 +191,12 @@ export default function ExpensesPage() {
   const when = month ? monthLabel(month) : null;
 
   const filterCount = [
-    groups.length, currencies.length, amount.field ? 1 : 0, savedBy.length, linked ? 1 : 0, viewMonth ? 1 : 0,
+    groups.length, currencies.length, amount.field ? 1 : 0, savedBy.length, linked ? 1 : 0, settle ? 1 : 0, viewMonth ? 1 : 0,
   ].reduce((a, b) => a + (b ? 1 : 0), 0);
 
   // Clear FORGETS as well as resets, or the old values come back next visit.
   function clearFilters() {
-    setGroups([]); setCurrencies([]); setSavedBy([]); setLinked(''); setViewMonth('');
+    setGroups([]); setCurrencies([]); setSavedBy([]); setLinked(''); setSettle(''); setViewMonth('');
     setAmount({}); setQ(''); setSearchField(SEARCH_ANY);
     setPage(1);
     forget();
@@ -251,6 +278,38 @@ export default function ExpensesPage() {
     sel.clear();
   }
 
+  // WHAT THE TICKED ROWS ARE, so the bar offers only what fits them
+  const picked = (rows ?? []).filter((r) => sel.has(r.id));
+  const anySettled = picked.some(isSettled);
+  const anyOpen = picked.some((r) => !isSettled(r));
+  const anyNotReview = picked.some((r) => r.settle_status !== 'review');
+  const anyReopenable = picked.some((r) => r.settle_status === 'settled' || r.settle_status === 'review');
+  const [settling, setSettling] = useState(false);
+
+  /**
+   * REFUNDED OR NOT, BY HAND (his call 2026-10-08): settle (locks them),
+   * reopen, or mark for review. Logged on the server with who did it.
+   */
+  const SETTLE_ACT = {
+    settle: { call: apiService.expenses.settle, status: 'settled', tag: 'settled', done: 'marked refunded' },
+    unsettle: { call: apiService.expenses.unsettle, status: 'unsettled', tag: null, done: 'reopened' },
+    review: { call: apiService.expenses.review, status: 'review', tag: 'review', done: 'marked for review' },
+  };
+  function bulkSettle(action) {
+    const ids = sel.ids;
+    const act = SETTLE_ACT[action];
+    run({
+      call: () => act.call(ids),
+      invalidates: EXPENSE_KEYS,
+      optimistic: patchExpenses(ids, (r) => ({ ...r, settle_status: act.status, settle_tag: act.tag })),
+      toast: bulkMessage(act.done, ids.length, 'expense'),
+      report: (data) => bulkMessage(act.done, data.moved.length, 'expense'),
+      failure: `Couldn't update ${countOf(ids.length, 'expense')}`,
+    });
+    setSettling(false);
+    sel.clear();
+  }
+
   function bulkDelete() {
     const ids = sel.ids;
     run({
@@ -270,7 +329,8 @@ export default function ExpensesPage() {
   // edit in place for a one word fix: they stop their own click. A row
   // still saving (`pending-`) has nothing on the server to edit yet.
   const openRow = (row) => {
-    if (!String(row.id).startsWith('pending-')) setEditingRow(row);
+    // a settled one is locked: nothing to edit until it is unsettled
+    if (!String(row.id).startsWith('pending-') && !isSettled(row)) setEditingRow(row);
   };
 
   return (
@@ -410,6 +470,14 @@ export default function ExpensesPage() {
               ]}
               placeholder="Linked or not"
             />
+            <Select
+              size="sm"
+              className="w-44"
+              value={settle}
+              onChange={(v) => { setSettle(v ?? ''); setPage(1); }}
+              options={SETTLE_FILTERS}
+              placeholder="Any refund status"
+            />
           </>
         )}
       />
@@ -429,6 +497,7 @@ export default function ExpensesPage() {
               <th className="th text-right tabular-nums">Raw amount</th>
               <th className="th text-right tabular-nums">Rate</th>
               <th className="th text-right tabular-nums">AED amount</th>
+              <th className="th">Refund</th>
               <th className="th">Group</th>
               <th className="th">Spent by</th>
               <th className="th">Saved by</th>
@@ -437,7 +506,7 @@ export default function ExpensesPage() {
           </thead>
           <tbody>
             {isLoading ? (
-              <TableSkeleton columns={13} />
+              <TableSkeleton columns={14} />
             ) : rows?.length ? rows.map((row) => (
               <tr
                 key={row.id}
@@ -450,7 +519,8 @@ export default function ExpensesPage() {
                   // inline edit, and must not throw the form over it.
                   if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); openRow(row); }
                 }}
-                className={`cursor-pointer hover:bg-surface-sunken ${sel.has(row.id) ? 'row-selected' : ''}`}
+                title={isSettled(row) ? 'Refunded, so locked. Unsettle it to change it.' : undefined}
+                className={`${isSettled(row) ? 'cursor-default' : 'cursor-pointer'} hover:bg-surface-sunken ${sel.has(row.id) ? 'row-selected' : ''}`}
               >
                 <td className="td sticky-col w-8" onClick={(e) => e.stopPropagation()}>
                   <input
@@ -464,6 +534,7 @@ export default function ExpensesPage() {
                 {/* EditableCell IS the <td>, so it takes the table's own
                     `.td` padding instead of sitting inside a second one. */}
                 <EditableCell
+                  editable={!isSettled(row)}
                   className="sticky-col"
                   type="date"
                   value={row.spent_on}
@@ -471,11 +542,13 @@ export default function ExpensesPage() {
                   onSave={(v) => saveCell(row, 'spentOn', v)}
                 />
                 <EditableCell
+                  editable={!isSettled(row)}
                   className="sticky-col sticky-edge font-medium text-text"
                   value={row.description}
                   onSave={(v) => saveCell(row, 'description', v)}
                 />
                 <EditableCell
+                  editable={!isSettled(row)}
                   type="suggest"
                   suggestions={options.payees}
                   value={row.payee}
@@ -490,12 +563,14 @@ export default function ExpensesPage() {
                   </span>
                 </td>
                 <EditableCell
+                  editable={!isSettled(row)}
                   type="suggest"
                   suggestions={currencyOptions}
                   value={row.currency}
                   onSave={(v) => saveCell(row, 'currency', v)}
                 />
                 <EditableCell
+                  editable={!isSettled(row)}
                   className="text-right tabular-nums"
                   type="number"
                   value={row.raw_amount}
@@ -507,6 +582,7 @@ export default function ExpensesPage() {
                     {/* A div inside the td here, for the info icon beside
                         it, so its own `.td` padding and rule are dropped. */}
                     <EditableCell
+                      editable={!isSettled(row)}
                       as="div"
                       className="!border-0 !p-0"
                       type="number"
@@ -535,7 +611,10 @@ export default function ExpensesPage() {
                     </CellInfo>
                   </span>
                 </td>
+                {/* REFUNDED OR NOT: the badge, worked out on the server */}
+                <td className="td whitespace-nowrap"><RefundBadge row={row} /></td>
                 <EditableCell
+                  editable={!isSettled(row)}
                   type="suggest"
                   suggestions={options.groups}
                   value={row.group_name}
@@ -546,6 +625,7 @@ export default function ExpensesPage() {
                 <td className="td">
                   <span className="inline-flex items-center gap-1">
                     <EditableCell
+                      editable={!isSettled(row)}
                       as="div"
                       className="!border-0 !p-0"
                       type="suggest"
@@ -567,7 +647,7 @@ export default function ExpensesPage() {
             )) : !error && (
               <EmptyState
                 asRow
-                colSpan={13}
+                colSpan={14}
                 icon={ReceiptIcon}
                 title={filterCount > 0 || q ? 'No expense matches these filters' : 'Nothing here yet'}
                 hint={filterCount > 0 || q ? undefined : `Nothing recorded for ${when ?? 'this month'} yet.`}
@@ -646,9 +726,42 @@ export default function ExpensesPage() {
         />
       )}
 
-      <BulkBar count={sel.count} noun="expense" onClear={sel.clear}>
-        <BulkAction icon={EditIcon} onClick={() => setBulkEditing(true)}>Edit</BulkAction>
-        <BulkAction icon={TrashIcon} variant="danger" onClick={() => setBulkDeleting(true)}>
+      {settling && (
+        <ConfirmDialog
+          title={`Mark ${sel.count} ${sel.count === 1 ? 'expense' : 'expenses'} refunded?`}
+          subject={`${sel.count} selected on this page.`}
+          detail={['Settled expenses are locked: nobody can change or delete them, on WhatsApp, with Diane or here, until they are unsettled.']}
+          confirmLabel={`Settle ${sel.count}`}
+          confirmVariant="primary"
+          busyLabel="Settling…"
+          icon={<CheckIcon width={15} height={15} />}
+          onCancel={() => setSettling(false)}
+          onConfirm={() => bulkSettle('settle')}
+        />
+      )}
+
+      {/* THE BOTTOM BAR, only what fits the ticked rows. Settle is the main
+          act (solid); review wants someone (yellow); reopen is quiet; a
+          settled row can't be edited or deleted, so those wait. */}
+      <BulkBar count={sel.count} onClear={sel.clear}>
+        {anyOpen && <BulkAction icon={CheckIcon} variant="primary" onClick={() => setSettling(true)}>Settle</BulkAction>}
+        {anyNotReview && <BulkAction icon={FlagIcon} variant="warning" onClick={() => bulkSettle('review')}>Needs review</BulkAction>}
+        {anyReopenable && <BulkAction icon={UndoIcon} onClick={() => bulkSettle('unsettle')}>Unsettle</BulkAction>}
+        <BulkAction
+          icon={EditIcon}
+          disabled={anySettled}
+          title={anySettled ? 'Refunded ones are locked: unsettle them first' : undefined}
+          onClick={() => setBulkEditing(true)}
+        >
+          Edit
+        </BulkAction>
+        <BulkAction
+          icon={TrashIcon}
+          variant="danger"
+          disabled={anySettled}
+          title={anySettled ? 'Refunded ones are locked: unsettle them first' : undefined}
+          onClick={() => setBulkDeleting(true)}
+        >
           Delete
         </BulkAction>
       </BulkBar>

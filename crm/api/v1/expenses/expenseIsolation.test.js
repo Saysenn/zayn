@@ -145,7 +145,7 @@ test('THIS MONTH IS THE SERVER\'S; an earlier one only when picked, never one ah
   // can be picked in the month filter, but only one already over.
   const route = codeOf(read(api, 'expenses.js'));
   assert.match(route, /const month = viewMonth\(req\.query\.month\)/);
-  assert.match(route, /res\.json\(\{ \.\.\.result, month/, 'and the page is told which one');
+  assert.match(route, /res\.json\(\{ \.\.\.result, (?:rows, )?month/, 'and the page is told which one');
   // eslint-disable-next-line global-require
   const { viewMonth } = require('../expenses');
   // eslint-disable-next-line global-require

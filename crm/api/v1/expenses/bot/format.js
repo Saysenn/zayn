@@ -227,6 +227,13 @@ const shown = (field, v, x) => (v == null || v === '' ? 'blank'
   : field === 'spentOn' ? dayFull(v) : field === 'rawAmount' ? money(x?.currency, v) : String(v));
 const headOf = (x, group) => `*${x.description || 'No description'}* · ${[group && x.groupName, day(x.spentOn), x.payee].filter(Boolean).join(' · ')}`;
 
+/**
+ * PICK SOME BY NUMBER (his report 2026-10-08: "only 1-3" on six changes was
+ * refused). A preview of more than one is numbered, and the hint says how,
+ * in numbers that fit it.
+ */
+const PICK_HINT = (n) => (n > 2 ? `_only 1-${n - 1}_ · _not ${n}_` : '_only 1_ · _not 2_');
+
 /** A change to one saved expense, before ➜ after. */
 function editPreview(expense, fields, { group = false } = {}) {
   const out = ['✏️ *CHANGE THIS EXPENSE?*', '_Not changed yet_', SEP, headOf(expense, group)];
@@ -236,51 +243,93 @@ function editPreview(expense, fields, { group = false } = {}) {
 }
 
 /**
- * SEVERAL CHANGES, ONE YES (his call 2026-10-07: "why doesn't it stack up
- * the things I want to change and ask once?"). One line per expense, each
- * field before ➜ after.
+ * WHAT A DRAFT DOES TO THE MONEY (his list 2026-10-08): per person when who
+ * spent it moves ("Gloria +AED 1,240 · Zayn −AED 1,240"), and the total
+ * when it changes. In AED at each expense's own rate.
  */
-function editsPreview(items, { group = false, removes = [] } = {}) {
-  // CHANGES AND REMOVALS TOGETHER, one yes (the planner's draft)
-  if (removes.length) {
-    const n = items.length;
-    const out = [`✏️ *${[n ? `CHANGE ${n}` : '', `REMOVE ${removes.length}`].filter(Boolean).join(' · ')}?*`, '_Not changed yet_', SEP];
-    for (const x of items) {
-      const b = x.before;
-      const what = Object.entries(x.fields).filter(([f]) => f !== 'currency')
-        .map(([f, v]) => `${FIELD[f] ?? f} ${shown(f, b[f], b)} ➜ *${shown(f, v, { ...b, ...x.fields })}*`).join(' · ');
-      out.push(`• *${b.description || 'No description'}* · ${[group && b.groupName, day(b.spentOn)].filter(Boolean).join(' · ')}: ${what}`);
-    }
-    for (const r of removes) out.push(`• 🗑️ *${r.before.description}* · ${day(r.before.spentOn)} · ${money(r.before.currency, r.before.rawAmount)}: remove`);
-    out.push(SEP, `Reply *yes* to do ${n + removes.length === 1 ? 'it' : 'them all'} · *cancel* · add another, or drop one (_not the ${String((items[0]?.before ?? removes[0].before).description ?? 'first').split(' ')[0].toLowerCase()}_)`);
-    return out.join('\n');
+function effectLines(items, removes = []) {
+  const rate = (b) => (b.currency === 'AED' ? 1 : Number(b.exchangeRate) || null);
+  const aed = (b, v) => (rate(b) ? Number(v) * rate(b) : null);
+  const who = new Map();
+  const add = (name, v) => { if (v == null) return; const k = String(name ?? '').trim() || 'nobody'; who.set(k, (who.get(k) ?? 0) + v); };
+  let before = 0;
+  let after = 0;
+  let people = false;
+  let unknown = false;
+  for (const x of items) {
+    const b = x.before;
+    const was = aed(b, b.rawAmount);
+    const now = aed(b, x.fields.rawAmount ?? b.rawAmount);
+    if (was == null || now == null) { unknown = true; continue; }
+    before += was;
+    after += now;
+    if ('spentBy' in x.fields || x.splits?.length) people = true;
+    add(b.spentBy, -was);
+    add('spentBy' in x.fields ? x.fields.spentBy : b.spentBy, now);
+    for (const p of x.splits ?? []) { const v = aed(b, p.rawAmount) ?? 0; after += v; add(p.spentBy, v); }
   }
-  if (items.length === 1) {
+  for (const r of removes) {
+    const v = aed(r.before, r.before.rawAmount);
+    if (v == null) { unknown = true; continue; }
+    before += v;
+    add(r.before.spentBy, -v);
+  }
+  const out = [];
+  const signed = (v) => `*${v > 0 ? '+' : '−'}${money('AED', Math.abs(Math.round(v * 100) / 100))}*`;
+  const moved = [...who].filter(([, v]) => Math.abs(v) >= 0.005);
+  if (people && moved.length) out.push(`📊 ${moved.slice(0, 6).map(([k, v]) => `${k} ${signed(v)}`).join(' · ')}`);
+  if (Math.abs(after - before) >= 0.005 && !unknown) out.push(`📊 Total *${money('AED', Math.round(before * 100) / 100)}* ➜ *${money('AED', Math.round(after * 100) / 100)}*`);
+  return out;
+}
+
+/** A long preview's lines: the first 10 and a count, unless they asked for all. */
+const PAGE_AT = 15;
+const PAGE = 10;
+function paged(lines, all) {
+  if (all || lines.length <= PAGE_AT) return lines;
+  return [...lines.slice(0, PAGE), `_…and ${lines.length - PAGE} more · reply *show all* to see every line_`];
+}
+
+/**
+ * SEVERAL CHANGES, ONE YES (his call 2026-10-07: "why doesn't it stack up
+ * the things I want to change and ask once?"). One numbered line per
+ * expense, each field before ➜ after; removals after the changes; a split's
+ * new expenses under the one they come from.
+ */
+function editsPreview(items, { group = false, removes = [], all = false } = {}) {
+  const n = items.length;
+  const many = n + removes.length > 1;
+  if (!many && !removes.length && !items[0]?.splits?.length) {
     const [x] = items;
     return editPreview({ ...x.before, n: null }, x.fields, { group }).replace('Reply *yes* · *modify* · *cancel*', 'Reply *yes* · *cancel* · or add another change');
   }
-  const out = [`✏️ *CHANGE ${items.length} EXPENSES?*`, '_Not changed yet_', SEP];
-  for (const x of items) {
+  const head = removes.length ? `✏️ *${[n ? `CHANGE ${n}` : '', `REMOVE ${removes.length}`].filter(Boolean).join(' · ')}?*` : `✏️ *CHANGE ${n} ${n === 1 ? 'EXPENSE' : 'EXPENSES'}?*`;
+  const lines = [];
+  items.forEach((x, i) => {
     const b = x.before;
     const what = Object.entries(x.fields).filter(([f]) => f !== 'currency')
       .map(([f, v]) => `${FIELD[f] ?? f} ${shown(f, b[f], b)} ➜ *${shown(f, v, { ...b, ...x.fields })}*`).join(' · ');
-    out.push(`• *${b.description || 'No description'}* · ${[group && b.groupName, day(b.spentOn)].filter(Boolean).join(' · ')}: ${what}`);
-  }
-  out.push(SEP, `Reply *yes* to change them all · *cancel* · add another, or drop one (_not the ${String(items[0].before.description ?? 'first').split(' ')[0].toLowerCase()}_)`);
-  return out.join('\n');
+    lines.push(`• ${many ? `*${i + 1}.* ` : ''}*${b.description || 'No description'}* · ${[group && b.groupName, day(b.spentOn)].filter(Boolean).join(' · ')}: ${what}`);
+    for (const p of x.splits ?? []) lines.push(`   ↳ ➕ new: *${money(b.currency, p.rawAmount)}* · by ${p.spentBy || 'nobody'} _(split)_`);
+  });
+  removes.forEach((r, i) => lines.push(`• ${many ? `*${n + i + 1}.* ` : ''}🗑️ *${r.before.description}* · ${day(r.before.spentOn)} · ${money(r.before.currency, r.before.rawAmount)}: remove`));
+  const effect = effectLines(items, removes);
+  const reply = !many ? 'Reply *yes* to do it · *cancel* · or add another'
+    : `Reply *yes* to ${removes.length ? 'do' : 'change'} them all · *cancel* · add another, or pick some (${PICK_HINT(n + removes.length)})`;
+  return [head, '_Not changed yet_', SEP, ...paged(lines, all), SEP, ...(effect.length ? [...effect, ''] : []), reply].join('\n');
 }
 
-/** Several changed at once: one line each. */
+/** Several changed at once: one numbered line each, so "undo only 2" is clear. */
 function changedMany(rows, { group = false } = {}) {
-  return [`✅ *CHANGED · ${rows.length} expenses*`, SEP, ...rows.map((x) => line({ ...x, n: null }, { number: false, group })), SEP, 'Reply *undo* to put them all back.'].join('\n');
+  return [`✅ *CHANGED · ${rows.length} expenses*`, SEP, ...paged(rows.map((x, i) => line({ ...x, n: i + 1 }, { number: true, group })), false), SEP, 'Reply *undo* to put them all back, or *undo only 2*.'].join('\n');
 }
 
-function removePreview(list, { group = false } = {}) {
+function removePreview(list, { group = false, all = false } = {}) {
   const out = [`🗑️ *REMOVE ${list.length === 1 ? 'THIS EXPENSE' : `${list.length} EXPENSES`}?*`, '_Not removed yet_', SEP];
-  for (const x of list) out.push(line({ ...x, n: null }, { number: false, group }));
+  out.push(...paged(list.map((x, i) => line({ ...x, n: list.length > 1 ? i + 1 : null }, { number: list.length > 1, group })), all));
   out.push(SEP, totalLine(list), '', list.length === 1
     ? 'Reply *yes* · *cancel* · or add another to remove'
-    : `Reply *yes* to remove them all · *cancel* · add another, or drop one (_not the ${String(list[0].description ?? 'first').split(' ')[0].toLowerCase()}_)`);
+    : `Reply *yes* to remove them all · *cancel* · add another, or pick some (${PICK_HINT(list.length)})`);
   return out.join('\n');
 }
 
@@ -300,24 +349,25 @@ function undoPreview(action) {
 const saved = (items, group) => [
   `✅ *SAVED · ${items.length} ${items.length === 1 ? 'expense' : 'expenses'} · ${group === '*' ? [...new Set(items.map((x) => x.groupName))].join(', ') : group}*`,
   SEP,
-  ...items.slice(0, SHOWN).map((x) => `• ${x.description} · ${money(x.currency, x.rawAmount)}`),
+  ...items.slice(0, SHOWN).map((x, i) => `• ${items.length > 1 ? `*${i + 1}.* ` : ''}${x.description} · ${money(x.currency, x.rawAmount)}`),
   ...(items.length > SHOWN ? [`• _…and ${items.length - SHOWN} more_`] : []),
   SEP,
   totalLine(items),
   '',
-  `Reply *undo* to take ${items.length === 1 ? 'it' : 'them'} back.`,
+  `Reply *undo* to take ${items.length === 1 ? 'it' : 'them'} back${items.length > 1 ? ', or *undo only 2*' : ''}.`,
 ].join('\n');
 
 const changed = (x, { group = false } = {}) => [
   '✅ *CHANGED*', SEP, block({ ...x, n: null }, { group }), SEP, 'Reply *undo* to put it back.',
 ].join('\n');
 
-const removed = (list) => [
+const removed = (list, { start = 0 } = {}) => [
   `✅ *REMOVED · ${list.length} ${list.length === 1 ? 'expense' : 'expenses'}*`,
   SEP,
-  ...list.slice(0, SHOWN).map((x) => `• ${x.description} · ${money(x.currency, x.rawAmount)}`),
+  ...list.slice(0, SHOWN).map((x, i) => `• ${list.length + start > 1 ? `*${start + i + 1}.* ` : ''}${x.description} · ${money(x.currency, x.rawAmount)}`),
+  ...(list.length > SHOWN ? [`• _…and ${list.length - SHOWN} more_`] : []),
   SEP,
-  `Reply *undo* to bring ${list.length === 1 ? 'it' : 'them'} back.`,
+  `Reply *undo* to bring ${list.length === 1 ? 'it' : 'them'} back${list.length > 1 ? ', or *undo only 2*' : ''}.`,
 ].join('\n');
 
 

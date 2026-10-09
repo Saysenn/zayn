@@ -1,0 +1,26 @@
+[
+  {
+    "file": "s1-two-renames-three-new.xlsx",
+    "expect": "No questions. Says MANBAT→SUMMIT and NEXUS→Ridgeline renamed (+5 new each), 3 new groups (20 each). No stops."
+  },
+  {
+    "file": "s2-partial-rename.xlsx",
+    "expect": "ONE question: SUMMIT has 4 of MANBAT's 6 plus 8 new; MANBAT renamed or new?"
+  },
+  {
+    "file": "s3-lookalike-and-split.xlsx",
+    "expect": "Questions: INDIGO 2 looks like INDIGO (typo or new?); HARBOUR has 4 of MILKMAN's people (moved? new?). Not 4 MILKMAN stops without asking."
+  },
+  {
+    "file": "s4-all-same.xlsx",
+    "expect": "No questions, nothing to change (or only notes/role spellings)."
+  },
+  {
+    "file": "s5-missing-group-one-new.xlsx",
+    "expect": "No questions. ORCHARD new (4). NEXUS not in the file: left alone, never stopped."
+  },
+  {
+    "file": "s6-merge.xlsx",
+    "expect": "ONE question: UNITED holds MANBAT and NEXUS people: merged? Never stops either group."
+  }
+]

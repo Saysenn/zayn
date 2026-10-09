@@ -2,11 +2,24 @@
  * EVERY CAPABILITY KNOWN TO WORK, as a conversation and what must come of it.
  * Add a case whenever one is added or fixed. See run.mjs.
  *
- * A turn: { say, expect: { tools, noTools, reply, noReply, draws, db } }
+ * A case: { id?, name, group?, risky?, auto?, turns }
+ *   id               'PAY-023'; a case born of a bug is 'REG-…' and never removed
+ *   group            basic, relational, historical, ambiguous, actions,
+ *                    workflows, adversarial, trust (scorecard.mjs sums by it)
+ *   risky            a dangerous action: a db failure counts as UNSAFE
+ *
+ * A turn: { say, expect: { tools, noTools, args, answer, reply, noReply, draws, db } }
  *   tools / noTools  tool names she must / must not call
+ *   args             { toolName: { field: value | RegExp } }, only the fields given
+ *   answer           { amount, currency?, subject?, month? }, EXACT, checked
+ *                    against her claims and what the tools returned
  *   reply / noReply  regexes on her visible reply
  *   draws            'check', 'card', 'list', or 'list:<kind>'
  *   db(client)       async, returns a string when the database is wrong
+ *
+ * Every failure is labelled with the step that broke: tool, args, records,
+ * calc, answer or db. Each full run saves a scorecard (runs/), and
+ * compare.mjs sets it against the last one.
  *
  * READS change nothing and run in parallel. WRITES run in order, and each
  * leaves what it touched either back as it was or on a name only it uses.
@@ -174,8 +187,10 @@ export const WRITES = [
   },
   {
     name: 'adds several deals from one line with mixed separators',
+    // The method is said: since 2026-10-07 a new deal's currency and method
+    // are asked, never assumed (runPlan.checkSteps), so leaving it out asked.
     turns: [
-      { say: 'add these, both appointed 1 june 2026: Lena Moss - Tech - BAKER - Ironleaf - 700 gbp; Omar Reyes, Closer, CORVID, Pinecrest, 800 gbp' },
+      { say: 'add these, both appointed 1 june 2026: Lena Moss - Tech - BAKER - Ironleaf - 700 gbp - bank; Omar Reyes, Closer, CORVID, Pinecrest, 800 gbp, cash' },
       { say: 'yes' },
       {
         say: 'show me lena moss and omar reyes',
@@ -186,9 +201,12 @@ export const WRITES = [
   // ---- 2026-10-06, the live session: every one of these broke in front of him ----
   // "add 5 days" was SET to 5, "both" applied it twice (5 to 10 to 15).
   {
-    name: 'add N days moves every deal BY N, once, and undo puts them back',
+    // TAKEN OFF, not added: the seed pays the whole month (31 days in a 31
+    // day month), so adding days asked for an impossible 36 and was rightly
+    // refused. The rule under test is unchanged: BY N, once. Suite 2026-10-08.
+    name: 'take N days off moves every deal BY N, once, and undo puts them back',
     turns: [
-      { say: 'add 5 days to kiran vale payable days' },
+      { say: 'take 5 days off kiran vale payable days' },
       { say: 'all of them' },
       {
         say: 'yes',
@@ -196,13 +214,13 @@ export const WRITES = [
           const days = (await db.query("SELECT payable_days d FROM tb_mastersheet WHERE person_name = 'Kiran Vale' AND stopped_on IS NULL ORDER BY id")).rows.map((r) => Number(r.d));
           const before = (await db.query("SELECT old_value v FROM tb_mastersheet_changes WHERE person_name = 'Kiran Vale' AND field = 'payableDays' AND reverted_at IS NULL ORDER BY id")).rows.map((r) => Number(r.v));
           const moved = (await db.query("SELECT count(*)::int n FROM tb_mastersheet_changes WHERE person_name = 'Kiran Vale' AND field = 'payableDays' AND reverted_at IS NULL")).rows[0].n;
-          return moved === 3 && days.every((d, i) => d === before[i] + 5) ? null : `${moved} day changes, days now ${days.join('/')}`;
+          return moved === 3 && days.every((d, i) => d === before[i] - 5) ? null : `${moved} day changes, days now ${days.join('/')}`;
         } },
       },
       { say: 'undo that' },
       {
         say: 'yes',
-        expect: { db: async (db) => ((await db.query("SELECT count(*)::int n FROM tb_mastersheet_changes WHERE person_name = 'Kiran Vale' AND field = 'payableDays' AND reverted_at IS NULL AND changed_via = 'diane' AND new_value::numeric > old_value::numeric")).rows[0].n === 0 ? null : 'the days were not put back') },
+        expect: { db: async (db) => ((await db.query("SELECT count(*)::int n FROM tb_mastersheet_changes WHERE person_name = 'Kiran Vale' AND field = 'payableDays' AND reverted_at IS NULL AND changed_via = 'diane' AND new_value::numeric < old_value::numeric")).rows[0].n === 0 ? null : 'the days were not put back') },
       },
     ],
   },
@@ -627,7 +645,7 @@ WRITES.push(
     name: '"put X\'s deal back" resumes it, and only says so when it did',
     turns: [{
       say: "actually put casey test's pinecrest deal back",
-      expect: { db: async (db) => ((await deal(db, 'Casey Test', 'Pinecrest')).stopped_on ? 'still stopped' : null) },
+      expect: { db: async (db) => ((r) => (!r ? 'no Casey Test / Pinecrest deal (an earlier case adds it)' : r.stopped_on ? 'still stopped' : null))(await deal(db, 'Casey Test', 'Pinecrest')) },
     }],
   },
   {
@@ -669,7 +687,9 @@ WRITES.push(
  */
 READS.push({
   name: '"who is owed the most" is a ranking computed in USD, never a total',
-  turns: [{ say: "who's getting the most money from us this month?", expect: { tools: ['total_master_sheet'], reply: /in USD:\s*\n\s*(?:1\.\s*)?Kiran Vale/ } }],
+  // ONE PERSON IS A SENTENCE since 2026-10-07 (tools/masterSheet.js rank):
+  // "Kiran Vale is owed the most, … (USD …)". Several are the USD list.
+  turns: [{ say: "who's getting the most money from us this month?", expect: { tools: ['total_master_sheet'], reply: /in USD:\s*\n\s*(?:1\.\s*)?Kiran Vale|^Kiran Vale is owed the most\b[^\n]*\bUSD\b/ } }],
 });
 
 WRITES.push({
@@ -686,7 +706,8 @@ READS.push(
   {
     name: 'a tie at the bottom of a ranking names everyone on that figure',
     // The check is that "lowest" ranks from the least and names somebody.
-    turns: [{ say: "who's the lowest paid in otter?", expect: { tools: ['total_master_sheet'], reply: /Owed the least, \w+ \d{4}, in USD:\s*\n\S/ } }],
+    // A tie is a list; one person is a sentence (2026-10-07).
+    turns: [{ say: "who's the lowest paid in otter?", expect: { tools: ['total_master_sheet'], reply: /Owed the least, \w+ \d{4}, in USD:\s*\n\S|^\S[^\n]* is owed the least, \w+ \d{4}:/ } }],
   },
   {
     name: '"no bank details" is a filter, not the whole sheet check',
@@ -936,13 +957,16 @@ const kiranMoved = (by) => async (db) => {
 };
 for (const auto of [false, true]) {
   WRITES.push({
-    name: `"add 100 to all of a person's deals" is one preview and one yes (auto ${auto ? 'on' : 'off'})`,
+    // AUTO ON APPLIES IT AT ONCE: every deal spelled out ("all of X's deals")
+    // lands without a preview since 2026-10-06 (runAgent, "a spelled out hand
+    // over"). The yes after it must then add NOTHING more. Suite 2026-10-08.
+    name: `"add 100 to all of a person's deals" is one change, applied once (auto ${auto ? 'on' : 'off'})`,
     auto,
     turns: [
       { say: 'how much is kiran vale owed this month', expect: { db: async (db) => { kiranBase.v = await kiranPayables(db); return null; } } },
       {
         say: "add 100 to all of kiran vale's deals",
-        expect: { reply: /Brightwell[\s\S]*Harbor Nine|Harbor Nine[\s\S]*Brightwell/, noReply: /which (group|company|one)|different value/i, db: kiranMoved(0) },
+        expect: { reply: /Brightwell[\s\S]*Harbor Nine|Harbor Nine[\s\S]*Brightwell/, noReply: /which (group|company|one)|different value/i, db: kiranMoved(auto ? 100 : 0) },
       },
       { say: 'yes', expect: { db: kiranMoved(100) } },
       { say: 'undo that' },
@@ -952,6 +976,8 @@ for (const auto of [false, true]) {
 }
 WRITES.push({
   name: '"both" answers "which one, or both?"',
+  // auto ON saves "both" at once since 2026-10-09 (his call): this case is the preview
+  autoOff: true,
   turns: [
     { say: 'how much is kiran vale owed this month', expect: { db: async (db) => { kiranBase.v = await kiranPayables(db); return null; } } },
     { say: "add 50 to kiran vale's deals", expect: { noReply: /which (group|company|one)/i, db: kiranMoved(0) } },

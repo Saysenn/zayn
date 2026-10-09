@@ -1,0 +1,73 @@
+{
+  "set": "probe",
+  "at": "2026-10-09T22:15:54.948Z",
+  "seconds": 22,
+  "cases": 3,
+  "passed": 1,
+  "passRate": 33.3,
+  "groups": {
+    "main": {
+      "cases": 3,
+      "passed": 1,
+      "passRate": 33.3
+    }
+  },
+  "failuresByLabel": {
+    "tool": 1,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 0,
+    "db": 2
+  },
+  "calcAccuracy": null,
+  "inventedRate": 0,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0,
+  "recoveryRate": 0,
+  "perTurn": {
+    "turns": 11,
+    "modelRounds": 0.8,
+    "toolCalls": 0.8,
+    "retries": 0.09,
+    "inputTokens": 22708,
+    "cachedPct": 98,
+    "outputTokens": 22,
+    "medianMs": 71,
+    "slowestMs": 8533
+  },
+  "tokens": {
+    "input": 249790,
+    "cached": 245632,
+    "output": 245
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "a change shown with an owed question gives the new figure on the yes",
+      "name": "a change shown with an owed question gives the new figure on the yes",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "\"actually scrap that\" undoes the change just made",
+      "name": "\"actually scrap that\" undoes the change just made",
+      "group": "main",
+      "pass": false,
+      "labels": [
+        "tool",
+        "db"
+      ]
+    },
+    {
+      "id": "\"both\" answers \"which one, or both?\"",
+      "name": "\"both\" answers \"which one, or both?\"",
+      "group": "main",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    }
+  ]
+}

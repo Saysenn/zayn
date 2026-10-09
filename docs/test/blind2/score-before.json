@@ -1,0 +1,524 @@
+{
+  "card": {
+    "label": "before",
+    "files": 30,
+    "errors": 0,
+    "groupAccuracy": "50/86 (58%)",
+    "filesAllGroupsRight": "10/30",
+    "questionsAsked": 0,
+    "newDealsExact": "10/30",
+    "stopsExact": "5/30",
+    "changesExact": "5/30",
+    "wrongStops": 59,
+    "fileFullyRight": "2/30",
+    "medianSeconds": "4.2"
+  },
+  "results": [
+    {
+      "file": "blind-01.xlsx",
+      "ms": 4029,
+      "asked": 0,
+      "reply": 132,
+      "groupsRight": 0,
+      "groups": 0,
+      "wrong": [],
+      "adds": 0,
+      "wantAdds": 0,
+      "stops": 0,
+      "wantStops": 0,
+      "updates": 2,
+      "wantUpdates": 2
+    },
+    {
+      "file": "blind-02.xlsx",
+      "ms": 1376,
+      "asked": 0,
+      "reply": 160,
+      "groupsRight": 0,
+      "groups": 0,
+      "wrong": [],
+      "adds": 0,
+      "wantAdds": 0,
+      "stops": 1,
+      "wantStops": 1,
+      "updates": 1,
+      "wantUpdates": 1
+    },
+    {
+      "file": "blind-03.xlsx",
+      "ms": 4668,
+      "asked": 0,
+      "reply": 519,
+      "groupsRight": 1,
+      "groups": 4,
+      "wrong": [
+        "Kestrel Services East:renamed",
+        "Atlas:split",
+        "MANBAT 2:new"
+      ],
+      "adds": 40,
+      "wantAdds": 40,
+      "stops": 4,
+      "wantStops": 2,
+      "updates": 51,
+      "wantUpdates": 2
+    },
+    {
+      "file": "blind-04.xlsx",
+      "ms": 3802,
+      "asked": 0,
+      "reply": 498,
+      "groupsRight": 2,
+      "groups": 5,
+      "wrong": [
+        "INDIGO 2:renamed",
+        "MILKMAN 4:new",
+        "INDIGO 4:new"
+      ],
+      "adds": 33,
+      "wantAdds": 34,
+      "stops": 2,
+      "wantStops": 22,
+      "updates": 24,
+      "wantUpdates": 3
+    },
+    {
+      "file": "blind-05.xlsx",
+      "ms": 3351,
+      "asked": 0,
+      "reply": 163,
+      "groupsRight": 0,
+      "groups": 0,
+      "wrong": [],
+      "adds": 0,
+      "wantAdds": 0,
+      "stops": 4,
+      "wantStops": 2,
+      "updates": 43,
+      "wantUpdates": 3
+    },
+    {
+      "file": "blind-06.xlsx",
+      "ms": 5713,
+      "asked": 0,
+      "reply": 215,
+      "groupsRight": 1,
+      "groups": 2,
+      "wrong": [
+        "Team INDIGO:ours"
+      ],
+      "adds": 0,
+      "wantAdds": 0,
+      "stops": 5,
+      "wantStops": 0,
+      "updates": 53,
+      "wantUpdates": 3
+    },
+    {
+      "file": "blind-07.xlsx",
+      "ms": 3357,
+      "asked": 0,
+      "reply": 364,
+      "groupsRight": 1,
+      "groups": 2,
+      "wrong": [
+        "bluepeak partners:split"
+      ],
+      "adds": 3,
+      "wantAdds": 3,
+      "stops": 5,
+      "wantStops": 2,
+      "updates": 52,
+      "wantUpdates": 2
+    },
+    {
+      "file": "blind-08.xlsx",
+      "ms": 3944,
+      "asked": 0,
+      "reply": 501,
+      "groupsRight": 5,
+      "groups": 6,
+      "wrong": [
+        "ridgeline staffing east care:split"
+      ],
+      "adds": 37,
+      "wantAdds": 39,
+      "stops": 11,
+      "wantStops": 8,
+      "updates": 25,
+      "wantUpdates": 1
+    },
+    {
+      "file": "blind-09.xlsx",
+      "ms": 3759,
+      "asked": 0,
+      "reply": 497,
+      "groupsRight": 2,
+      "groups": 2,
+      "wrong": [],
+      "adds": 8,
+      "wantAdds": 9,
+      "stops": 1,
+      "wantStops": 0,
+      "updates": 26,
+      "wantUpdates": 2
+    },
+    {
+      "file": "blind-10.xlsx",
+      "ms": 5244,
+      "asked": 0,
+      "reply": 437,
+      "groupsRight": 1,
+      "groups": 6,
+      "wrong": [
+        "Saffron Staffing Partners Staffing:merged",
+        "BLUEPEAK NORTH EAST:renamed",
+        "Atlas Holdings Services:split",
+        "falcon:new",
+        "Harbour Partners Partners Holdings:new"
+      ],
+      "adds": 109,
+      "wantAdds": 34,
+      "stops": 0,
+      "wantStops": 0,
+      "updates": 0,
+      "wantUpdates": 0
+    },
+    {
+      "file": "blind-11.xlsx",
+      "ms": 5805,
+      "asked": 0,
+      "reply": 504,
+      "groupsRight": 2,
+      "groups": 3,
+      "wrong": [
+        "ridgeline group east:renamed"
+      ],
+      "adds": 18,
+      "wantAdds": 21,
+      "stops": 5,
+      "wantStops": 21,
+      "updates": 45,
+      "wantUpdates": 2
+    },
+    {
+      "file": "blind-12.xlsx",
+      "ms": 2940,
+      "asked": 0,
+      "reply": 195,
+      "groupsRight": 1,
+      "groups": 1,
+      "wrong": [],
+      "adds": 2,
+      "wantAdds": 2,
+      "stops": 4,
+      "wantStops": 2,
+      "updates": 22,
+      "wantUpdates": 4
+    },
+    {
+      "file": "blind-13.xlsx",
+      "ms": 4321,
+      "asked": 0,
+      "reply": 522,
+      "groupsRight": 2,
+      "groups": 3,
+      "wrong": [
+        "Beacon East:renamed"
+      ],
+      "adds": 40,
+      "wantAdds": 41,
+      "stops": 2,
+      "wantStops": 21,
+      "updates": 26,
+      "wantUpdates": 2
+    },
+    {
+      "file": "blind-14.xlsx",
+      "ms": 5195,
+      "asked": 0,
+      "reply": 461,
+      "groupsRight": 1,
+      "groups": 2,
+      "wrong": [
+        "northgate staffing services partners:merged"
+      ],
+      "adds": 76,
+      "wantAdds": 0,
+      "stops": 0,
+      "wantStops": 0,
+      "updates": 2,
+      "wantUpdates": 5
+    },
+    {
+      "file": "blind-15.xlsx",
+      "ms": 4887,
+      "asked": 0,
+      "reply": 508,
+      "groupsRight": 4,
+      "groups": 5,
+      "wrong": [
+        "INDIGO 2:renamed"
+      ],
+      "adds": 26,
+      "wantAdds": 27,
+      "stops": 4,
+      "wantStops": 0,
+      "updates": 49,
+      "wantUpdates": 3
+    },
+    {
+      "file": "blind-16.xlsx",
+      "ms": 3318,
+      "asked": 0,
+      "reply": 412,
+      "groupsRight": 2,
+      "groups": 2,
+      "wrong": [],
+      "adds": 4,
+      "wantAdds": 2,
+      "stops": 3,
+      "wantStops": 2,
+      "updates": 30,
+      "wantUpdates": 2
+    },
+    {
+      "file": "blind-17.xlsx",
+      "ms": 4203,
+      "asked": 0,
+      "reply": 480,
+      "groupsRight": 2,
+      "groups": 5,
+      "wrong": [
+        "HALCYON RECRUITMENT CARE:renamed",
+        "MANBAT 2:renamed",
+        "ATLAS:new"
+      ],
+      "adds": 92,
+      "wantAdds": 37,
+      "stops": 3,
+      "wantStops": 25,
+      "updates": 0,
+      "wantUpdates": 0
+    },
+    {
+      "file": "blind-18.xlsx",
+      "ms": 4848,
+      "asked": 0,
+      "reply": 536,
+      "groupsRight": 2,
+      "groups": 4,
+      "wrong": [
+        "Manbat Ltd:ours",
+        "ALL GROUPS 4:new"
+      ],
+      "adds": 18,
+      "wantAdds": 19,
+      "stops": 1,
+      "wantStops": 0,
+      "updates": 53,
+      "wantUpdates": 5
+    },
+    {
+      "file": "blind-19.xlsx",
+      "ms": 7200,
+      "asked": 0,
+      "reply": 536,
+      "groupsRight": 3,
+      "groups": 3,
+      "wrong": [],
+      "adds": 33,
+      "wantAdds": 36,
+      "stops": 9,
+      "wantStops": 3,
+      "updates": 51,
+      "wantUpdates": 2
+    },
+    {
+      "file": "blind-20.xlsx",
+      "ms": 3550,
+      "asked": 0,
+      "reply": 540,
+      "groupsRight": 1,
+      "groups": 3,
+      "wrong": [
+        "willow care services north:split",
+        "MILKMAN 3:new"
+      ],
+      "adds": 23,
+      "wantAdds": 23,
+      "stops": 2,
+      "wantStops": 0,
+      "updates": 20,
+      "wantUpdates": 5
+    },
+    {
+      "file": "blind-21.xlsx",
+      "ms": 5286,
+      "asked": 0,
+      "reply": 343,
+      "groupsRight": 0,
+      "groups": 1,
+      "wrong": [
+        "NORTHGATE NORTH CARE NORTH:split"
+      ],
+      "adds": 3,
+      "wantAdds": 4,
+      "stops": 9,
+      "wantStops": 3,
+      "updates": 47,
+      "wantUpdates": 8
+    },
+    {
+      "file": "blind-22.xlsx",
+      "ms": 4575,
+      "asked": 0,
+      "reply": 230,
+      "groupsRight": 2,
+      "groups": 4,
+      "wrong": [
+        "Northgate North North Recruitment:renamed",
+        "ORCHARD EAST HOLDINGS HOLDINGS:new"
+      ],
+      "adds": 50,
+      "wantAdds": 49,
+      "stops": 3,
+      "wantStops": 12,
+      "updates": 4,
+      "wantUpdates": 4
+    },
+    {
+      "file": "blind-23.xlsx",
+      "ms": 3143,
+      "asked": 0,
+      "reply": 506,
+      "groupsRight": 3,
+      "groups": 3,
+      "wrong": [],
+      "adds": 8,
+      "wantAdds": 8,
+      "stops": 6,
+      "wantStops": 4,
+      "updates": 46,
+      "wantUpdates": 3
+    },
+    {
+      "file": "blind-24.xlsx",
+      "ms": 2700,
+      "asked": 0,
+      "reply": 511,
+      "groupsRight": 2,
+      "groups": 2,
+      "wrong": [],
+      "adds": 13,
+      "wantAdds": 1,
+      "stops": 3,
+      "wantStops": 0,
+      "updates": 0,
+      "wantUpdates": 1
+    },
+    {
+      "file": "blind-25.xlsx",
+      "ms": 2647,
+      "asked": 0,
+      "reply": 262,
+      "groupsRight": 1,
+      "groups": 2,
+      "wrong": [
+        "bluepeak:split"
+      ],
+      "adds": 2,
+      "wantAdds": 1,
+      "stops": 2,
+      "wantStops": 0,
+      "updates": 17,
+      "wantUpdates": 3
+    },
+    {
+      "file": "blind-26.xlsx",
+      "ms": 4896,
+      "asked": 0,
+      "reply": 176,
+      "groupsRight": 1,
+      "groups": 1,
+      "wrong": [],
+      "adds": 1,
+      "wantAdds": 1,
+      "stops": 7,
+      "wantStops": 2,
+      "updates": 62,
+      "wantUpdates": 6
+    },
+    {
+      "file": "blind-27.xlsx",
+      "ms": 3522,
+      "asked": 0,
+      "reply": 540,
+      "groupsRight": 2,
+      "groups": 3,
+      "wrong": [
+        "Granite Services:split"
+      ],
+      "adds": 27,
+      "wantAdds": 29,
+      "stops": 3,
+      "wantStops": 2,
+      "updates": 8,
+      "wantUpdates": 4
+    },
+    {
+      "file": "blind-28.xlsx",
+      "ms": 4944,
+      "asked": 0,
+      "reply": 562,
+      "groupsRight": 1,
+      "groups": 3,
+      "wrong": [
+        "ALL GROUPS 2:renamed",
+        "HARBOUR EAST RECRUITMENT HOLDINGS:split"
+      ],
+      "adds": 8,
+      "wantAdds": 7,
+      "stops": 4,
+      "wantStops": 4,
+      "updates": 47,
+      "wantUpdates": 2
+    },
+    {
+      "file": "blind-29.xlsx",
+      "ms": 6644,
+      "asked": 0,
+      "reply": 543,
+      "groupsRight": 4,
+      "groups": 5,
+      "wrong": [
+        "MABNAT:ours"
+      ],
+      "adds": 81,
+      "wantAdds": 52,
+      "stops": 9,
+      "wantStops": 1,
+      "updates": 35,
+      "wantUpdates": 0
+    },
+    {
+      "file": "blind-30.xlsx",
+      "ms": 3460,
+      "asked": 0,
+      "reply": 416,
+      "groupsRight": 1,
+      "groups": 4,
+      "wrong": [
+        "FALCON HOLDINGS:renamed",
+        "Ridgeline North Staffing Partners:split",
+        "Ember:new"
+      ],
+      "adds": 76,
+      "wantAdds": 39,
+      "stops": 0,
+      "wantStops": 3,
+      "updates": 2,
+      "wantUpdates": 9
+    }
+  ]
+}

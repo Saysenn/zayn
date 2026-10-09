@@ -311,6 +311,18 @@ function valueNamed(cell, said) {
   return words.every((w) => heard.some((h) => sameWord(h, w)));
 }
 
+/**
+ * A MONEY CELL SAID AS MONEY: "GBP 1,450", never a bare "1450". Library
+ * 2026-10-08: "what's felix orr's monthly" came back "1450", no currency.
+ * The currency is the card's own cell, so the figure and the code agree.
+ */
+function asMoney(cells, value) {
+  const n = Number(String(value).replace(/,/g, ''));
+  if (!Number.isFinite(n) || String(value).trim() === '') return String(value);
+  const cur = cells.find((c) => fold(c?.label) === 'currency')?.value || 'GBP';
+  return `${cur} ${n.toLocaleString('en-GB', { maximumFractionDigits: 2 })}`;
+}
+
 function fieldsAsked(card, said) {
   const cells = cellsOf(card);
   const wanted = labelsIn(cells, said);
@@ -333,7 +345,7 @@ function fieldsAsked(card, said) {
     return plainest.length === 1
       ? plainest.map((c) => ({
         label: String(c.label),
-        value: String(c.value),
+        value: isMoneyLabel(c.label) ? asMoney(cells, c.value) : String(c.value),
         money: isMoneyLabel(c.label),
       }))
       : [];
@@ -347,7 +359,9 @@ function fieldsAsked(card, said) {
       label: String(c.label),
       // A null cell is a field nobody has filled in, and saying "not set" is
       // the answer. Saying nothing reads as though the lookup failed.
-      value: c.value === null || c.value === undefined || c.value === '' ? 'not set' : String(c.value),
+      value: c.value === null || c.value === undefined || c.value === ''
+        ? 'not set'
+        : isMoneyLabel(c.label) ? asMoney(cells, c.value) : String(c.value),
       money: isMoneyLabel(c.label),
     }));
 }

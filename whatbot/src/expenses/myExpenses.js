@@ -71,6 +71,16 @@ async function fetchMine(ctx, phone) {
 const day = (v) => new Date(`${String(v).slice(0, 10)}T00:00:00Z`).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
 const title = (s) => (s ? `${s.charAt(0).toUpperCase()}${s.slice(1)}` : "");
 
+/** " · ✅ refunded", " · from Sep, not refunded yet": after each line, when the CRM says. */
+function statusOf(r) {
+  switch (r.settle_tag) {
+    case "settled": return " · ✅ refunded";
+    case "review": return " · being checked";
+    case "late": case "unpaid": case "overdue": return ` · from ${r.from_month}, not refunded yet`;
+    default: return "";
+  }
+}
+
 /** What they spent, in words and as a paper note. */
 function reply(rows, ctx, month) {
   const when = new Date(`${month}-01T00:00:00Z`).toLocaleString("en-GB", { month: "long", timeZone: "UTC" });
@@ -83,16 +93,23 @@ function reply(rows, ctx, month) {
   const mixed = new Set(items.map((r) => r.currency)).size > 1;
   const aed = items.every((r) => r.aed_amount != null) ? items.reduce((n, r) => n + Number(r.aed_amount), 0) : null;
   const totalLine = `${total}${mixed && aed != null ? ` (about ${money(Math.round(aed * 100) / 100, "AED")})` : ""}`;
-  const lines = items.map((r, i) => `${i + 1}. ${day(r.spent_on)} · ${r.description}${r.payee ? ` · ${r.payee}` : ""} · *${money(r.amount, r.currency)}*`);
-  const text = [`🧾 *Your ${when} expenses · ${group}*`, ...lines, "", `*Total:* ${totalLine}`].join("\n");
+  const lines = items.map((r, i) => `${i + 1}. ${day(r.spent_on)} · ${r.description}${r.payee ? ` · ${r.payee}` : ""} · *${money(r.amount, r.currency)}*${statusOf(r)}`);
+  // REFUNDED OR NOT (the CRM's Expenses check): "3 refunded · 2 in the next check"
+  const refunded = items.filter((r) => r.settle_tag === "settled").length;
+  const review = items.filter((r) => r.settle_tag === "review").length;
+  const waiting = items.length - refunded - review;
+  const refundLine = items.some((r) => "settle_tag" in r)
+    ? [refunded ? `${refunded} refunded` : "", waiting ? `${waiting} in the next check` : "", review ? `${review} being checked by the team` : ""].filter(Boolean).join(" · ")
+    : "";
+  const text = [`🧾 *Your ${when} expenses · ${group}*`, ...lines, "", `*Total:* ${totalLine}`, ...(refundLine ? [refundLine] : [])].join("\n");
   let image = null;
   try {
     const pngs = renderTable({
       style: payPictureStyle(),
       title: `${ctx.person.personName.split(" ")[0]}'s expenses · ${group}`,
       subtitle: `${when} · ${items.length} ${items.length === 1 ? "expense" : "expenses"}`,
-      columns: [{ label: "Date" }, { label: "What" }, { label: "Paid to" }, { label: "Category" }, { label: "Amount", align: "right" }],
-      sections: [{ rows: items.map((r) => ({ cells: [day(r.spent_on), r.description ?? "", r.payee ?? "", title(r.category), money(r.amount, r.currency)] })) }],
+      columns: [{ label: "Date" }, { label: "What" }, { label: "Paid to" }, { label: "Category" }, ...(refundLine ? [{ label: "Refunded" }] : []), { label: "Amount", align: "right" }],
+      sections: [{ rows: items.map((r) => ({ cells: [day(r.spent_on), r.description ?? "", r.payee ?? "", title(r.category), ...(refundLine ? [r.settle_tag === "settled" ? "Yes" : r.settle_tag === "review" ? "Checking" : "Not yet"] : []), money(r.amount, r.currency)] })) }],
       total: { label: "Total", value: totalLine },
       marks: false,
     });

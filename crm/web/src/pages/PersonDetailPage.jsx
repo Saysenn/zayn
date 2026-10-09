@@ -29,7 +29,10 @@ import PercentField from '../components/forms/PercentField';
 import FloatingField from '../components/forms/FloatingField';
 import StatusBadge from '../components/badges/StatusBadge';
 import PaymentPeriod from '../components/badges/PaymentPeriod';
-import PaydayIndicator from '../components/badges/PaydayIndicator';
+import PaymentReceived, { dealReceived } from '../components/badges/PaymentReceived';
+import DealReceivedCell from '../components/forms/DealReceivedCell';
+import PaySwitch from '../components/forms/PaySwitch';
+import usePersonPay, { PAY_SWITCHES } from '../hooks/usePersonPay';
 import ManagePersonModal from '../components/modals/ManagePersonModal';
 import ConfirmDialog from '../components/modals/ConfirmDialog';
 import { confirm } from '../configs/confirms.config';
@@ -213,6 +216,8 @@ export default function PersonDetailPage() {
   const { run } = useBulkActions();
   const [confirmStop, setConfirmStop] = useState(false);
   const [editField, setEditField] = useState(null);
+  // Should be paid / Paid for the whole person, onto every live deal.
+  const setPay = usePersonPay();
 
   // Neither waits for the server: the deals change on screen, the bar is
   // cleared and the toast (with Undo) is up on the click. See useBulkActions.
@@ -411,6 +416,26 @@ export default function PersonDetailPage() {
                     change by changing a row, not by typing over a summary. */}
                 <Read label="Roles" value={(person.roles || []).join(', ')} />
                 <Read label="Groups" value={(person.groups || []).join(', ')} />
+                {/* THE PERSON'S PAY, his call 2026-10-08: the same switches
+                    and tag as their row on People, over every live deal. */}
+                <div className="sm:col-span-2 flex flex-wrap items-start gap-x-8 gap-y-3">
+                  {Object.entries(PAY_SWITCHES).map(([field, sw]) => (
+                    <div key={field}>
+                      <dt className="text-xs font-semibold uppercase tracking-wide text-text-faint">{sw.label}</dt>
+                      <dd className="mt-1">
+                        <PaySwitch state={person[sw.state]} label={sw.label}
+                          onChange={(on) => setPay([{
+                            person_id: person.person_id,
+                            live_deal_ids: deals.filter((d) => !d.stopped_on).map((d) => d.id),
+                          }], field, on)} />
+                      </dd>
+                    </div>
+                  ))}
+                  <div>
+                    <dt className="text-xs font-semibold uppercase tracking-wide text-text-faint">Payment received</dt>
+                    <dd className="mt-1 text-sm"><PaymentReceived value={person.payment_received} /></dd>
+                  </div>
+                </div>
                 <div className="sm:col-span-2">
                   <dt className="text-xs font-semibold uppercase tracking-wide text-text-faint">Identifier</dt>
                   <dd className="mt-0.5 font-mono text-xs text-text-faint">{person.person_id}</dd>
@@ -549,7 +574,7 @@ export default function PersonDetailPage() {
         />
       )}
 
-      <BulkBar count={sel.count} noun="deal" onClear={sel.clear}>
+      <BulkBar count={sel.count} onClear={sel.clear}>
         <BulkMenu
           icon={EditIcon}
           label="Edit"
@@ -602,7 +627,7 @@ function PersonDeals({ deals, options, cellEdit, sel }) {
               badges={
                 <>
                   <PaymentPeriod period={d.payment_period} />
-                  {d.payment_outcome && <PaydayIndicator outcome={d.payment_outcome} />}
+                  {dealReceived(d.payment_outcome) && <PaymentReceived value={dealReceived(d.payment_outcome)} />}
                 </>
               }
               facts={[
@@ -631,7 +656,7 @@ function PersonDeals({ deals, options, cellEdit, sel }) {
                 <th className="th">Method</th>
                 <th className="th">Preset</th>
                 <th className="th">Payment period</th>
-                <th className="th">Payday</th>
+                <th className="th">Payment received</th>
               </tr>
             </thead>
             <tbody>
@@ -706,11 +731,9 @@ function PersonDeals({ deals, options, cellEdit, sel }) {
                       paymentStartOn={d.payment_start_on}
                     />
                   </td>
-                  <td className="td">
-                    {d.payment_outcome
-                      ? <PaydayIndicator outcome={d.payment_outcome} />
-                      : <span className="text-xs text-text-faint">Not checked</span>}
-                  </td>
+                  {/* Its own <td>: EditableCell is one. */}
+                  <DealReceivedCell deal={d}
+                    onSave={(v) => cellEdit({ id: d.id, fields: { paymentOutcome: v }, subject: d.person_name, label: 'payment received' })} />
                 </tr>
                 );
               })}

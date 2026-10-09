@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { LINK_FILTER } from '../configs/linkFilters';
 // Filters survive leaving the page. See useStickyState.
 import { useStickyState, useClearSticky } from '../hooks/useStickyState';
 import { useStickyColumns } from '../hooks/useStickyColumns';
@@ -19,7 +20,10 @@ import MoneyTotals from '../components/display/MoneyTotals';
 import { formatTotalsWhole } from '../helpers/formatMoney';
 import CellInfo from '../components/display/CellInfo';
 import { popup } from '../configs/popups.config';
-import { BuildingIcon, SearchIcon, DownloadIcon, UsersIcon, StopHandIcon, EditIcon } from '../components/icons';
+import { BuildingIcon, SearchIcon, DownloadIcon, UsersIcon, StopHandIcon, EditIcon, PaidIcon, ShouldBePaidIcon } from '../components/icons';
+import PaymentReceived from '../components/badges/PaymentReceived';
+import PaySwitch from '../components/forms/PaySwitch';
+import usePersonPay, { PAY_SWITCHES, payHint } from '../hooks/usePersonPay';
 import { countFilters } from '../helpers/filters';
 import { EmptyState, ErrorState } from '../components/display/StateBlocks';
 import SelectAll from '../components/forms/SelectAll';
@@ -115,7 +119,7 @@ function summarizeList(items, max = 2) {
  * Still a real keyboard target: tabbable, and Enter opens it, so this
  * doesn't become a mouse-only page.
  */
-function PersonRow({ person, onOpen, selected, onSelect }) {
+function PersonRow({ person, onOpen, selected, onSelect, onPay }) {
   return (
     <tr
       className={`border-b border-border last:border-0 hover:bg-surface-sunken cursor-pointer ${selected ? 'row-selected' : ''}`}
@@ -161,7 +165,7 @@ function PersonRow({ person, onOpen, selected, onSelect }) {
               reason={
                 person.review_reasons?.length
                   ? person.review_reasons.join('; ')
-                  : 'One of this person’s rows came in messy. Open them to see which.'
+                  : 'One of this person’s deals needs a check. Open them to see which.'
               }
             />
           </span>
@@ -187,6 +191,15 @@ function PersonRow({ person, onOpen, selected, onSelect }) {
       {/* The column has room, so the table prints every currency. Only the
           card hides them behind an icon. */}
       <td className="td text-right tabular-nums">{formatTotalsWhole(person.monthly_totals)}</td>
+      {/* THE PERSON'S SWITCHES, his call 2026-10-08. Each writes to every
+          live deal they hold. The cell swallows clicks and keys, or a
+          Space on the switch would also open the person. */}
+      {Object.entries(PAY_SWITCHES).map(([field, sw]) => (
+        <td key={field} className="td" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+          <PaySwitch state={person[sw.state]} label={`${sw.label}: ${person.display_name}`} onChange={(on) => onPay(person, field, on)} />
+        </td>
+      ))}
+      <td className="td"><PaymentReceived value={person.payment_received} /></td>
     </tr>
   );
 }
@@ -220,6 +233,7 @@ function PersonCard({ person, onOpen, selected, onSelect }) {
             <span className="badge badge-in_progress">Company removed</span>
           )}
           {person.needs_review && <span className="badge badge-in_progress">Needs a check</span>}
+          {person.payment_received && <PaymentReceived value={person.payment_received} />}
         </>
       }
       facts={[
@@ -244,6 +258,21 @@ export default function PeoplePage() {
   const forgetFilters = useClearSticky('people.');
   const [search, setSearch] = useStickyState('people.search', '');
   const [filters, setFilters] = useStickyState('people.filters', {});
+  // A LINK SEEDS THE FILTERS (the briefing's "not marked paid" lands here
+  // with Paid: no). The filters are one sticky object, so they are read off
+  // the address here rather than through useStickyState's single param.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const seeded = {};
+    for (const key of [LINK_FILTER.paid, LINK_FILTER.needsReview]) {
+      const value = url.searchParams.get(key);
+      if (value) seeded[key] = value;
+      url.searchParams.delete(key);
+    }
+    if (!Object.keys(seeded).length) return;
+    setFilters(seeded);
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [setFilters]);
   const [showExport, setShowExport] = useState(false);
 
   const navigate = useNavigate();
@@ -275,6 +304,13 @@ export default function PeoplePage() {
   const [confirmStop, setConfirmStop] = useState(false);
   // The deal field the Edit menu picked, while its value modal is open.
   const [editField, setEditField] = useState(null);
+  // Should be paid / Paid, per person, from the row's switch or the bar.
+  const setPay = usePersonPay();
+  const selectedPeople = (people ?? []).filter((p) => sel.has(p.person_id));
+  function payAll(field, on) {
+    setPay(selectedPeople, field, on);
+    sel.clear();
+  }
 
   // Neither waits. The bar is cleared and the rows change on the click;
   // the deal ids are fetched and written behind it. See patchPeople.
@@ -356,7 +392,7 @@ export default function PeoplePage() {
   // Only the dropdown filters decide whether the panel springs open. A
   // ticked checkbox is already visible, so opening the panel for it would
   // reveal controls nobody asked about.
-  const panelActive = ['role', 'group', 'company', 'method', 'currency', 'status', 'needsReview'].some((k) => filters[k]);
+  const panelActive = ['role', 'group', 'company', 'method', 'currency', 'status', 'needsReview', 'shouldBePaid', 'paid', 'paymentReceived'].some((k) => filters[k]);
 
   return (
     <div className="space-y-4">
@@ -443,6 +479,29 @@ export default function PeoplePage() {
             <Select size="sm" className="w-44"
               value={filters.currency ?? ''} onChange={(v) => setFilter('currency', v)}
               options={filterOptions?.currencies ?? []} placeholder="All currencies" />
+            {/* THE PERSON'S SWITCHES, across their live deals. Moved here
+                from the master sheet, his call 2026-10-08. Mixed is its
+                own answer: "who still has a deal left to pay". */}
+            {Object.entries(PAY_SWITCHES).map(([field, sw]) => {
+              const key = field === 'overridePaid' ? 'paid' : 'shouldBePaid';
+              return (
+                <Select key={field} size="sm" className="w-48"
+                  value={filters[key] ?? ''} onChange={(v) => setFilter(key, v)}
+                  options={['yes', 'no', 'mixed'].map((v) => ({ value: v, label: `${sw.label}: ${v}` }))}
+                  placeholder={`${sw.label}: any`} />
+              );
+            })}
+            {/* WHAT THEY SAID on payday, not the Paid switch. Same four
+                words as the column. */}
+            <Select size="sm" className="w-56"
+              value={filters.paymentReceived ?? ''} onChange={(v) => setFilter('paymentReceived', v)}
+              options={[
+                { value: 'paid', label: 'Payment received: paid' },
+                { value: 'unpaid', label: 'Payment received: unpaid' },
+                { value: 'portion', label: 'Payment received: portion' },
+                { value: 'awaiting', label: 'Payment received: awaiting' },
+              ]}
+              placeholder="Payment received: any" />
           </>
         }
       />
@@ -466,7 +525,7 @@ export default function PeoplePage() {
 
       {view === 'rows' && (
       <div className="table-wrap">
-        <table ref={tableRef} className="w-full min-w-[760px] text-sm">
+        <table ref={tableRef} className="w-full min-w-[900px] text-sm">
           <thead>
             <tr>
               <th className="th sticky-col w-8">
@@ -475,19 +534,24 @@ export default function PeoplePage() {
               <th className="th sticky-col sticky-edge">Name</th>
               <th className="th">Roles</th>
               <th className="th">Groups</th>
-              <th className="th text-right">Active deals</th>
+              <th className="th w-[5rem] whitespace-normal text-right leading-tight">Active deals</th>
               <th className="th text-right">Monthly</th>
+              {/* Two lines, so the three pay columns fit a laptop with no side scroll */}
+              <th className="th w-[5.5rem] whitespace-normal leading-tight">Should be paid</th>
+              <th className="th">Paid</th>
+              <th className="th w-[5.5rem] whitespace-normal leading-tight">Payment received</th>
             </tr>
           </thead>
           <tbody>
-            {isLoading && <TableSkeleton rows={8} columns={6} />}
+            {isLoading && <TableSkeleton rows={8} columns={9} />}
             {!isLoading && people?.length === 0 && (
-              <EmptyState asRow colSpan={6} icon={UsersIcon} {...empty} />
+              <EmptyState asRow colSpan={9} icon={UsersIcon} {...empty} />
             )}
             {!isLoading && people?.map((p) => (
               <PersonRow
                 key={p.person_id} person={p} onOpen={openPerson}
                 selected={sel.has(p.person_id)} onSelect={() => sel.toggle(p.person_id)}
+                onPay={(person, field, on) => setPay([person], field, on)}
               />
             ))}
           </tbody>
@@ -534,7 +598,21 @@ export default function PeoplePage() {
 
       {/* No Export here: the page's own export is switched off
           (SHOW_EXPORT), and it exports by filter, not by tick. */}
-      <BulkBar count={sel.count} noun="person" onClear={sel.clear}>
+      <BulkBar count={sel.count} onClear={sel.clear}>
+        {/* Moved here from the master sheet, his call 2026-10-08. Writes to
+            every live deal the ticked people hold. */}
+        {Object.entries(PAY_SWITCHES).map(([field, sw]) => (
+          <BulkMenu
+            key={field}
+            icon={field === 'overridePaid' ? PaidIcon : ShouldBePaidIcon}
+            label={sw.label}
+            hint={payHint(selectedPeople, sw.state)}
+            options={[
+              { label: 'Yes', onSelect: () => payAll(field, true) },
+              { label: 'No', onSelect: () => payAll(field, false) },
+            ]}
+          />
+        ))}
         <BulkAction icon={StopHandIcon} variant="danger" onClick={() => setConfirmStop(true)}>
           Stop all deals
         </BulkAction>

@@ -1,0 +1,56 @@
+{
+  "set": "probe",
+  "at": "2026-10-09T20:27:41.012Z",
+  "seconds": 6,
+  "cases": 1,
+  "passed": 0,
+  "passRate": 0,
+  "groups": {
+    "main": {
+      "cases": 1,
+      "passed": 0,
+      "passRate": 0
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 1,
+    "db": 0
+  },
+  "calcAccuracy": null,
+  "inventedRate": null,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0,
+  "recoveryRate": null,
+  "perTurn": {
+    "turns": 0,
+    "modelRounds": null,
+    "toolCalls": null,
+    "retries": null,
+    "inputTokens": null,
+    "cachedPct": null,
+    "outputTokens": null,
+    "medianMs": 0,
+    "slowestMs": 0
+  },
+  "tokens": {
+    "input": 0,
+    "cached": 0,
+    "output": 0
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "\"put X's deal back\" resumes it, and only says so when it did",
+      "name": "\"put X's deal back\" resumes it, and only says so when it did",
+      "group": "main",
+      "pass": false,
+      "labels": [
+        "answer"
+      ]
+    }
+  ]
+}

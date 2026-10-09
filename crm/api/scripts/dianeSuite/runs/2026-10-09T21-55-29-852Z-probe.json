@@ -1,0 +1,54 @@
+{
+  "set": "probe",
+  "at": "2026-10-09T21:55:29.852Z",
+  "seconds": 8,
+  "cases": 1,
+  "passed": 1,
+  "passRate": 100,
+  "groups": {
+    "main": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 0,
+    "db": 0
+  },
+  "calcAccuracy": null,
+  "inventedRate": 0,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0.5,
+  "recoveryRate": null,
+  "perTurn": {
+    "turns": 2,
+    "modelRounds": 1,
+    "toolCalls": 1.5,
+    "retries": 0,
+    "inputTokens": 26177,
+    "cachedPct": 100,
+    "outputTokens": 55,
+    "medianMs": 6599,
+    "slowestMs": 6599
+  },
+  "tokens": {
+    "input": 52353,
+    "cached": 52096,
+    "output": 109
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "a change finds the deal by one word of its company",
+      "name": "a change finds the deal by one word of its company",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}

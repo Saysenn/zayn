@@ -165,8 +165,10 @@ message mean something:
 
 `NOTHING_ARRIVED` is tested **before** `AMOUNT_WRONG`, and that ordering is load-bearing:
 "I received nothing, the amount never came" matches both, and reading it as a short payment
-would mark somebody who got zero as part paid, which switches their Paid toggle **on** in
-the CRM. The expensive mistake only runs one way, so the cautious branch goes first.
+would mark somebody who got zero as a Portion in the CRM. The cautious branch goes first.
+
+Upgrading a "no" to `partial` here is the answer getting more precise, not a changed mind:
+the CRM flags it as a portion, not as a changed answer.
 
 Anything that matches neither is a real question: it is answered normally and the follow-up
 stays outstanding, because they may still come back to it.
@@ -193,7 +195,7 @@ report. Chasing people about their wages by bot reads badly.
 ## Changing an answer
 
 Somebody confirms on payday, then finds the money never cleared, or was short. Their record
-said `confirmed` and the CRM had their Paid toggle switched **on**, and there was no way
+said `confirmed` and the CRM showed them as Paid, and there was no way
 back: the check was closed, so anything they said reached the model, which cannot record an
 outcome.
 
@@ -213,9 +215,11 @@ Now, with no check open, a message like any of these brings the options back:
 >
 > Whichever you pick replaces your earlier answer.
 
-The new answer overwrites the record and is sent to the CRM, which upserts per assignment
-per period — so reverting a `confirmed` to `not_received` also switches the Paid toggle back
-**off** on both CRM pages.
+The new answer overwrites the record and is sent to the CRM, which writes it onto every deal
+the person holds in that group — so reverting a `confirmed` to `not_received` also switches
+the Paid toggle back **off**. A real answer replaced by a different one (Paid → Unpaid, say)
+is **flagged for admin review** on those deals: an accidental yes taken back is exactly the
+case somebody should look at.
 
 Notes on the design:
 
@@ -254,20 +258,28 @@ Every outcome is forwarded to the CRM (`PATCH /api/v1/agent/payment-status`, one
 assignment the person holds in that group). Redis is still the source of truth: these calls
 are best-effort and never awaited into a reply.
 
-| Outcome        | When                          | Paid toggle in the CRM | Indicator |
-|----------------|-------------------------------|------------------------|-----------|
-| `sent`         | the message goes out          | untouched              | none      |
-| `confirmed`    | they answer yes               | ON                     | check     |
-| `partial`      | they say the amount was short | ON, it did arrive      | warning   |
-| `not_received` | they answer no                | OFF                    | warning   |
-| `no_response`  | the 3-day sweep gives up      | untouched              | none      |
+| Outcome        | When                          | Paid toggle in the CRM | Payment received (deal / person) | Review flag |
+|----------------|-------------------------------|------------------------|----------------------------------|-------------|
+| `sent`         | the message goes out          | untouched              | Awaiting / Awaiting              | no          |
+| `confirmed`    | they answer yes               | ON                     | Paid / Paid                      | no          |
+| `partial`      | they say the amount was short | untouched              | Unpaid / Portion                 | yes         |
+| `not_received` | they answer no                | OFF                    | Unpaid / Unpaid                  | no          |
+| `no_response`  | the 3-day sweep gives up      | untouched              | Awaiting / Awaiting              | no          |
 
-`sent` is what makes the CRM's Confirmed column start at "awaiting reply" instead of blank,
-so an admin can tell *we asked and they have not answered* from *nobody has asked them*.
+**Payment received** (it was the Confirmed column) is the CRM's column for what they said.
+A deal shows Paid or Unpaid; the person on the People pages shows Paid, Unpaid or
+**Portion** when their deals disagree or any was part paid. `sent` makes it read
+**Awaiting** rather than blank, so an admin can tell *we asked and they have not answered*
+from *nobody has asked them*.
 
-The Paid rule is **"did any money arrive"**, not "was it right" — which is why `partial`
-counts as paid. `sent` and `no_response` touch nothing: nobody has told us anything, and
-defaulting a silent person to unpaid would erase an admin's own record on no evidence.
+**A portion waits for an admin** (his call 2026-10-08). Which of the person's deals were
+paid is not something the bot can know, so `partial` leaves the Paid toggle alone, shows
+every deal Unpaid and flags each one. The admin sets each deal's Payment received to Paid
+or Unpaid, and that clears the flag. Nothing else does: not a sheet upload, and not "Save
+and mark it sorted".
+
+`sent` and `no_response` touch nothing on the Paid toggle: nobody has told us anything,
+and defaulting a silent person to unpaid would erase an admin's own record on no evidence.
 
 ---
 
@@ -392,5 +404,5 @@ do not yet check the number is on WhatsApp at all.
    CRM; nobody is paged.
 6. **A reopened check is not distinguishable in the record.** The new answer overwrites the
    old one and nothing keeps "they said yes on the 3rd, then no on the 9th". The CRM's
-   `master_sheet_field_changes` log catches the outcome changing, but the Redis record does
-   not.
+   change log catches the outcome changing and flags the deal ("payday answer changed from
+   Paid to Unpaid"), but the Redis record does not.

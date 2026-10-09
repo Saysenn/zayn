@@ -66,7 +66,7 @@ const {
 const { exportSheet } = require('./exportSheet');
 const { showSheetPreset } = require('./sheetPreset');
 // eslint-disable-next-line import/order
-const { guarded } = require('../readGuard');
+const { guarded, outcomeCodes } = require('../readGuard');
 const { confirmFirst } = require('./confirmFirst');
 const { applyCompanyStatus, wouldStop } = require('../../shared/companyStatus.helper');
 // "Add 3%" written as "set to 3" took 160 AED out of a month in silence.
@@ -236,8 +236,9 @@ const DETAIL_FIELDS = [
   ['addon_percent', 'add on % (this deal, ADDED)'], ['fee_percent', 'fee % (this deal, DEDUCTED)'],
   ['person_addon_percent', 'add on % (the PERSON, ADDED, stacks with the deal one above)'],
   ['person_fee_percent', 'fee % (the PERSON, DEDUCTED, stacks with the deal one above)'],
-  ['payment_outcome', 'payment outcome (whatsapp confirmation)'], ['payment_replied_at', 'confirmed at'],
-  ['override_should_be_paid', 'should be paid (admin override)'], ['override_paid', 'paid (admin override)'],
+  ['payment_outcome', 'payment received (what they answered on payday)'], ['payment_replied_at', 'answered on payday at'],
+  // Set per PERSON on the People page, stored on each deal. 2026-10-08.
+  ['override_should_be_paid', 'should be paid (switch, set per person)'], ['override_paid', 'paid (switch, set per person)'],
   ['override_paid_at', 'admin marked paid at'],
   ['source', 'source'],
 ];
@@ -312,7 +313,29 @@ const SENTINEL_SAYS = {
 // repeating the same sentence three times.
 const QUIET_WHEN_NEVER_BANK = new Set(['account_number', 'sort_code']);
 
+/**
+ * ===============================
+ * * PAYMENT RECEIVED, SAID AS THE TAG ON SCREEN
+ * ===============================
+ * His call 2026-10-08, "Confirmed" renamed. The column holds whatbot's code;
+ * the deal says Paid, Unpaid or Awaiting. A portion is Unpaid on the deal
+ * until an admin marks it, and is flagged for review meanwhile.
+ */
+const RECEIVED_TAG = Object.freeze({
+  confirmed: 'Paid',
+  not_received: 'Unpaid',
+  partial: 'Unpaid (portion, flagged for review)',
+  sent: 'Awaiting',
+  no_response: 'Awaiting',
+});
+const receivedTag = (code) => (code ? RECEIVED_TAG[code] ?? String(code) : null);
+// The filter heading: a portion said as Portion, so "Unpaid or Portion" reads right.
+const RECEIVED_FILTER_WORD = Object.freeze({
+  confirmed: 'Paid', not_received: 'Unpaid', partial: 'Portion', sent: 'Awaiting', no_response: 'Awaiting',
+});
+
 function readable(col, value) {
+  if (col === 'payment_outcome') return receivedTag(value);
   if (value === NEVER_BANK && QUIET_WHEN_NEVER_BANK.has(col)) return null;
   return SENTINEL_SAYS[value] ?? formatValue(value);
 }
@@ -591,7 +614,8 @@ function narrowCard(card, only) {
   return {
     ...card,
     groups,
-    switches: wanted.has('overrideShouldBePaid') || wanted.has('shouldBePaid') ? card.switches : [],
+    // EITHER SWITCH keeps the pills: asking about "paid" lost the Paid pill.
+    switches: ['overrideShouldBePaid', 'shouldBePaid', 'overridePaid', 'paid'].some((k) => wanted.has(k)) ? card.switches : [],
   };
 }
 
@@ -756,17 +780,18 @@ function dealCard(r) {
     },
     /**
      * ===============================
-     * * WHATBOT'S OWN COLUMNS, and they are read only here
+     * * PAYMENT RECEIVED, what they answered on payday
      * ===============================
-     * The outcome is what the person said on WhatsApp, and the switches
-     * above are the admin's decision. Two different facts, so they are not
-     * merged, and nothing in the CRM writes these.
+     * The switches above are the admin's decision; this is the person's
+     * answer. Two different facts, so they are not merged. Whatbot writes it,
+     * and an admin sets it by hand to answer a portion (it clears the payday
+     * flag). Said as the tag, never the raw code. His call 2026-10-08.
      */
     {
       title: 'Payment',
       cells: [
-        cell('Outcome', r.payment_outcome, null),
-        cell('Confirmed at', r.payment_replied_at, null, 'date'),
+        cell('Payment received', receivedTag(r.payment_outcome), 'paymentOutcome'),
+        cell('Answered at', r.payment_replied_at, null, 'date'),
       ],
     },
     {
@@ -1466,11 +1491,12 @@ const findAndShow = {
       const person = displayPersonName(rows[0]?.person_name);
       const groups = [...new Set(rows.map((row) => row.group_name).filter(Boolean))];
       const scope = groups.length === 1 ? ` in ${groups[0]}` : '';
+      const dealsWord = rows.length === 1 ? 'deal' : 'deals';
       return {
-        summary: `${person} has ${rows.length} deals${scope}. They are already listed on screen.`,
-        list: dealList(rows, `${person}'s ${rows.length} deals`),
+        summary: `${person} has ${rows.length} ${dealsWord}${scope}. They are already listed on screen.`,
+        list: dealList(rows, `${person}'s ${rows.length} ${dealsWord}`),
         rows: rows.map(summarizeRow),
-        reply: `${person} has ${rows.length} deals${scope}. Choose a company to open one.`,
+        reply: `${person} has ${rows.length} ${dealsWord}${scope}. ${rows.length === 1 ? 'Open it for the full details.' : 'Choose a company to open one.'}`,
         computedReply: true,
       };
     }
@@ -1809,14 +1835,31 @@ const ROW_FIELDS = {
     type: ['boolean', 'null'],
     description: 'The should-be-paid SWITCH, a STANDING answer with no month in it. '
       + 'true = yes, false = no and the row leaves every payout total, null = nobody has decided. '
-      + `This is what the People page shows. NOT FOR "${SPECIAL_CASE_SWITCH}" or any wording `
+      + 'SET PER PERSON on the People page: with no company named it goes to ALL their live deals. '
+      + `NOT FOR "${SPECIAL_CASE_SWITCH}" or any wording `
       + `about one month: a row owed nothing because its payment start has not arrived is `
       + `specialCaseDeal. Takes a confirmed call.`,
   },
   overridePaid: {
     type: ['boolean', 'null'],
     description: 'The paid SWITCH: whether the money ARRIVED, never whether it is owed. '
-      + 'true = it arrived, false = it did not, null = nobody has decided. Takes a confirmed call.',
+      + 'true = it arrived, false = it did not, null = nobody has decided. SET PER PERSON: with no '
+      + 'company named it goes to ALL their live deals. Not Payment received. Takes a confirmed call.',
+  },
+  /**
+   * ===============================
+   * * PAYMENT RECEIVED, BY HAND. His call 2026-10-08.
+   * ===============================
+   * What came back on payday, which whatbot writes. An admin sets it to
+   * answer a portion deal by deal, and that is the review: the payday flag
+   * clears with it. Paid or Unpaid only; a portion is the person's answer.
+   */
+  paymentOutcome: {
+    type: 'string',
+    enum: ['Paid', 'Unpaid'],
+    description: 'PAYMENT RECEIVED on this deal, what they answered on payday, set by hand: Paid or '
+      + 'Unpaid. NOT the Paid switch (overridePaid): only when they say "payment received", '
+      + '"they confirmed", or are marking a portion\'s deals. Clears the payday flag. Takes a confirmed call.',
   },
   // `status` IS GONE FROM HERE, 2026-09-09. It used to be settable, and a
   // stored value won over the formula on every read, so a row could show
@@ -2253,6 +2296,23 @@ function confirmPaymentSwitch(args, before, fields) {
 }
 
 /**
+ * PAYMENT RECEIVED BY HAND asks first, like the switches beside it: it
+ * answers for the person and clears a payday flag. His call 2026-10-08.
+ */
+function confirmPaymentReceived(args, before, fields) {
+  if (fields.paymentOutcome === undefined || before?.payment_outcome === fields.paymentOutcome) return null;
+  const flagged = /payday/i.test(String(before?.review_reason ?? ''));
+  return confirmFirst(args.confirmed, {
+    act: 'set Payment received on this deal',
+    count: 1,
+    keeps: 'The Paid switch, the figures and the dates are not touched.',
+    lines: [`${displayPersonName(before?.person_name)} at ${before?.company || 'no company'}: payment received `
+      + `${receivedTag(before?.payment_outcome) ?? 'never asked'} to ${receivedTag(fields.paymentOutcome)}`
+      + `${flagged ? ', which clears the payday flag' : ''}`],
+  });
+}
+
+/**
  * ===============================
  * * THE QUESTION SHE ASKS INSTEAD OF LEAVING A ROW AT ZERO
  * ===============================
@@ -2303,12 +2363,25 @@ function derivedFieldAsked(args) {
   return hit ? `NOTHING HAS BEEN CHANGED. ${NOT_SETTABLE[hit]}` : null;
 }
 
+/**
+ * "Paid" / "Unpaid" as the code whatbot writes. Anything else throws, as a
+ * switch does: guessing which way a payment answer was meant is the one
+ * thing not to do.
+ */
+function coerceOutcome(v) {
+  const s = String(v ?? '').trim().toLowerCase();
+  if (['paid', 'confirmed', 'received', 'yes'].includes(s)) return 'confirmed';
+  if (['unpaid', 'not_received', 'not received', 'no'].includes(s)) return 'not_received';
+  throw new Error(`bad payment received "${v}", expected Paid or Unpaid`);
+}
+
 function normalizeFields(args) {
   const out = {};
   for (const key of Object.keys(ROW_FIELDS)) {
     if (args[key] === undefined) continue;
     if (DATE_FIELDS.includes(key)) out[key] = coerceDate(args[key]);
     else if (TRISTATE_FIELDS.includes(key)) out[key] = coerceTristate(args[key], key);
+    else if (key === 'paymentOutcome') out[key] = coerceOutcome(args[key]);
     else out[key] = args[key];
   }
   if (args.groupName) out.groupName = String(args.groupName).toUpperCase();
@@ -2444,6 +2517,13 @@ function describeFilter(a) {
   if (has(a.endWhen, 'none')) bits.push('with no end date, so ongoing');
   if (a.status) bits.push(`payment period ${words(a.status).replace(/_/g, ' ')}`);
   if (a.needsReview) bits.push('needs a check');
+  if (a.paydayFlagged === true) bits.push('flagged by the payday answer');
+  if (a.paydayFlagged === false) bits.push('not flagged by the payday answer');
+  // PAYMENT RECEIVED, in the words on screen, so the heading says it. 2026-10-08.
+  if (a.paymentOutcome) {
+    const said = [...new Set(outcomeCodes(a.paymentOutcome).map((c) => RECEIVED_FILTER_WORD[c]))];
+    if (said.length) bits.push(`payment received ${said.join(' or ')}`);
+  }
   if (a.paid === false) bits.push('not paid');
   if (a.paid === true) bits.push('paid');
   if (a.shouldBePaid === false) bits.push('should not be paid');
@@ -2562,8 +2642,18 @@ const FILTER_PARAMS = {
       + 'when the end date setting is on. The last two are NOT the same thing.',
   }),
   needsReview: { type: 'boolean' },
-  shouldBePaid: { type: 'boolean', description: 'The admin switch, not the sheet\'s text column' },
-  paid: { type: 'boolean', description: 'The admin switch' },
+  /**
+   * FLAGGED BY THE PAYDAY ANSWER, apart from the import's check. His call
+   * 2026-10-08: a portion, or an answer changed, waits for an admin to set
+   * Payment received. needsReview reaches these AND every messy import row.
+   */
+  paydayFlagged: {
+    type: 'boolean',
+    description: 'true: flagged by the payday answer (a portion, or an answer changed after the fact), waiting '
+      + 'for Payment received to be set. Not the same as needsReview, which is every flag including the import\'s.',
+  },
+  shouldBePaid: { type: 'boolean', description: 'The admin switch, not the sheet\'s text column. Set per person, held on each deal.' },
+  paid: { type: 'boolean', description: 'The admin switch, set per person. NOT Payment received: "confirmed payment" is paymentOutcome.' },
   missingPerson: { type: 'boolean', description: 'Orphaned by a deleted person' },
   missingCompany: { type: 'boolean', description: 'Orphaned by a deleted company' },
   missingPhone: { type: 'boolean', description: 'true: no phone number on the deal' },
@@ -2693,8 +2783,11 @@ const FILTER_PARAMS = {
   label: pluralFilter({ type: 'string', description: "The row's label column, as the sheet writes it." }),
   paymentOutcome: pluralFilter({
     type: 'string',
-    enum: ['confirmed', 'partial', 'not_received', 'sent', 'no_response'],
-    description: "What the person said on WhatsApp. Whatbot's own column: confirmed and partial switch Paid on, not_received off, sent and no_response touch nothing.",
+    enum: ['paid', 'unpaid', 'portion', 'awaiting', 'confirmed', 'partial', 'not_received', 'sent', 'no_response'],
+    description: 'PAYMENT RECEIVED, what the person answered on payday, never the Paid switch. Use the words: '
+      + 'paid (confirmed), unpaid (not_received or partial), portion (partial, part of it arrived, flagged for '
+      + 'review), awaiting (sent or no_response). "Who hasn\'t confirmed payment" is unpaid and awaiting. '
+      + 'Payday sets the Paid switch on for confirmed and off for not_received; a portion leaves it alone.',
   }),
   oldGroup: {
     type: 'string',
@@ -4928,11 +5021,10 @@ const DEAL_CHECKLIST = [
   { field: 'label', label: 'Label' },
   { field: 'shouldBePaid', label: 'Should be paid or not (the sheet\'s own text column)' },
   { field: 'paid', label: 'Paid (the sheet\'s own text column)' },
-  // The SWITCHES, right under the two text columns they are constantly
-  // mistaken for. These are what the People page shows and what a payout
-  // total counts; the two above are the boss's own words, kept verbatim.
-  { field: 'overrideShouldBePaid', label: 'Should be paid', note: 'the switch, not the sheet\'s text' },
-  { field: 'overridePaid', label: 'Paid', note: 'the money arrived, not that it was sent' },
+  // THE TWO SWITCHES LEFT THE FORM, 2026-10-08, as they left the web one:
+  // they are set per PERSON on the People page now and written to every
+  // live deal. Still writable through update_master_sheet_row and the bulk
+  // tool, which go to the person's live deals unless a deal is named.
   { field: 'notes', label: 'Notes' },
   { field: 'bankDetails', label: 'Bank details of individual' },
   { field: 'accountNumber', label: 'Account number' },
@@ -4947,17 +5039,8 @@ const DEAL_CHECKLIST = [
 const DATE_FIELD_SET = new Set(['assignedOn', 'paymentStartOn', 'presetOn', 'endOn']);
 const NUMBER_FIELD_SET = new Set(['monthlyAmount', 'payableAmount', 'payableDays']);
 
-/**
- * A TOGGLE, not a text box, and TRI-STATE rather than on/off.
- *
- * These are the switches the People and Master Sheet pages already show.
- * Untouched is NULL and means nobody has decided, which the queries
- * resolve to "should be paid yes, paid no" — genuinely different from
- * somebody deciding NO. A two-state toggle would make opening a form and
- * saving it record a payment decision nobody made, which is the exact bug
- * the UI's faded-switch rule exists to prevent.
- */
-const TOGGLE_FIELD_SET = new Set(['overrideShouldBePaid', 'overridePaid']);
+// The tri-state TOGGLE went with the two switches: nothing on the form is
+// one now. Should be paid and Paid are set per person. His call 2026-10-08.
 
 // Closed sets that are not worth a database round trip. Everything else
 // with options gets them from the live sheet, below.
@@ -4967,7 +5050,6 @@ const FIXED_CHOICES = {
 };
 
 function inputFor(field, options) {
-  if (TOGGLE_FIELD_SET.has(field)) return 'toggle';
   if (DATE_FIELD_SET.has(field)) return 'date';
   if (NUMBER_FIELD_SET.has(field)) return 'number';
   if (options?.length) return 'select';
@@ -5081,6 +5163,134 @@ async function createDeal(fields) {
 // The deal being added, between messages. See "THE DEAL BEING BUILT IS KEPT".
 let addDraft = null;
 
+/**
+ * ===============================
+ * * "PUT X ON COMPANY A AND B" IS ONE PREVIEW
+ * ===============================
+ * His call 2026-10-08. Two companies were two adds, two previews and two
+ * yeses. Now one deal per company and one confirm. The role and the group
+ * come from X's live deal when not given, and are asked only when there is
+ * none to take them from, or their deals disagree.
+ */
+async function addOnCompanies(args) {
+  const companies = [...new Map(args.companies.map((c) => String(c ?? '').trim()).filter(Boolean)
+    .map((c) => [fold(c), c])).values()];
+  const name = String(args.personName ?? '').trim();
+  if (!name) {
+    const ask = `Who are the new deals on ${listOf(companies)} for?`;
+    return { summary: `NOTHING WAS ADDED YET. ${ask} Ask exactly that.`, reply: ask, computedReply: true };
+  }
+  const held = ((await repo.searchFuzzy({ q: name }).catch(() => [])) ?? [])
+    .filter((r) => !r.stopped_on && fold(r.person_name) === fold(name));
+  const theirs = (col) => [...new Set(held.map((r) => r[col]).filter(Boolean))];
+  const roles = theirs('role_label');
+  const groups = theirs('group_name');
+  const roleLabel = args.roleLabel || (roles.length === 1 ? roles[0] : null);
+  const groupName = args.groupName || (groups.length === 1 ? groups[0] : null);
+  const saidSoFar = `${args.said ?? ''}\n${args.saidRecent ?? ''}`;
+  // A yes replays what was shown, which already settled the dates.
+  const datesSettled = args.confirmed === true || args.assignedOn || args.paymentStartOn || args.payableDays != null
+    || args.specialCaseDeal || /\b(?:pay(?:s|ing)? (?:from|in full|this month|now)|ongoing|standing|full month|no dates?)\b/i.test(saidSoFar);
+  const who = displayPersonName(held[0]?.person_name ?? name);
+  const missing = [
+    !roleLabel && (roles.length > 1 ? `the role (they hold ${listOf(roles)})` : 'the role'),
+    !groupName && (groups.length > 1 ? `the group (they are in ${listOf(groups)})` : 'the group'),
+    (args.monthlyAmount == null || args.monthlyAmount === '') && 'the monthly amount (and currency, if not GBP)',
+    !datesSettled && 'the appointment date (or say "pay from this month" for an ongoing deal)',
+  ].filter(Boolean);
+  if (missing.length > 0) {
+    const ask = `To add ${who} on ${listOf(companies)} I still need ${listOf(missing)}.`;
+    return {
+      summary: `NOTHING WAS ADDED YET. ${ask} Ask exactly that. When they answer, call add_deal again with `
+        + 'companies and EVERY field given since they asked, theirs only.',
+      reply: ask,
+      computedReply: true,
+    };
+  }
+  const known = await Promise.resolve(repo.knownSpellings?.()).catch(() => null);
+  const group = (known?.groups ?? []).find((g) => fold(g) === fold(groupName)) ?? groupName;
+  if ((known?.groups ?? []).length && !known.groups.some((g) => fold(g) === fold(group))) {
+    const ask = `${groupName} is not a group on the sheet. Which group is it: ${known.groups.join(', ')}?`;
+    return { summary: `NOTHING WAS ADDED YET. ${ask} Ask exactly that.`, reply: ask, computedReply: true };
+  }
+  const titled = (v) => (v === v.toLowerCase() ? v.replace(/(^|[\s'-])([a-z])/g, (m, pre, ch) => pre + ch.toUpperCase()) : v);
+  const personName = held[0]?.person_name ?? titled(name);
+  // ALREADY ON IT in that group is said, never added twice.
+  const already = [];
+  const deals = [];
+  for (const raw of companies) {
+    const company = (known?.companies ?? []).find((c) => fold(c) === fold(raw)) ?? titled(raw);
+    if (held.some((r) => fold(r.company) === fold(company) && fold(r.group_name) === fold(group))) {
+      already.push(company);
+      continue;
+    }
+    const fields = normalizeFields({
+      ...args, personName, company, groupName: group, roleLabel: (known?.roles ?? []).find((r) => fold(r) === fold(roleLabel)) ?? roleLabel,
+    });
+    if (!fields.presetOn) fields.presetOn = `${currentMonth()}-01`;
+    const noYear = settleYears(fields, saidSoFar);
+    if (noYear) return { summary: noYear };
+    const offMonth = farOffPreset(fields, saidSoFar);
+    if (offMonth) return { summary: offMonth };
+    recomputePayable({}, fields, { onCreate: true });
+    deals.push(fields);
+  }
+  const onAlready = already.length ? ` ${who} is already on ${listOf(already)} in ${group}, so ${already.length === 1 ? 'that one is' : 'those are'} left out.` : '';
+  if (deals.length === 0) {
+    const reply = `Nothing to add.${onAlready}`;
+    return { summary: `${reply} Say exactly that.`, reply, computedReply: true };
+  }
+  const shown = (f) => [
+    displayPersonName(f.personName), f.roleLabel, f.groupName, f.company,
+    `${f.currency || 'GBP'} ${Number(f.monthlyAmount ?? 0).toLocaleString('en-GB')} a month`,
+    f.assignedOn ? `appointed ${isoDay(f.assignedOn)}` : null,
+    f.paymentStartOn ? `payment starts ${isoDay(f.paymentStartOn)}` : null,
+    f.endOn ? `ends ${isoDay(f.endOn)}` : null,
+    `paid by ${f.paymentMethod || 'cash'}`,
+  ].filter(Boolean).join(' · ');
+  const pending = confirmFirst(args.confirmed, {
+    act: `add ${who} as a new deal on each of ${listOf(deals.map((f) => f.company))}`,
+    count: deals.length,
+    keeps: onAlready.trim(),
+    lines: deals.map(shown),
+  });
+  if (pending) {
+    // HELD AS THE WHOLE ASK, so the yes adds exactly what was shown.
+    const DERIVED = new Set(['payableAmount', 'payableDays', 'status', 'company']);
+    const whole = Object.fromEntries(Object.entries(deals[0])
+      .filter(([k, v]) => !DERIVED.has(k) && v != null && v !== '' && ROW_FIELDS[k]));
+    return { ...pending, redirect: { name: 'add_deal', args: { ...whole, companies: deals.map((f) => f.company) } } };
+  }
+  const added = [];
+  const taken = [];
+  for (const fields of deals) {
+    const { role, seat } = parseRole(fields.roleLabel);
+    // eslint-disable-next-line no-await-in-loop
+    const row = await createDeal({
+      ...fields,
+      role,
+      seat,
+      personId: personIdOf(fields.personName),
+      syncKey: dealKey({
+        groupName: fields.groupName, company: fields.company, role, seat, personId: personIdOf(fields.personName),
+      }),
+    });
+    if (row?.taken) taken.push(fields.company); else if (row) added.push(row);
+  }
+  if (added.length) broadcast(null, 'master-sheet:changed', { action: 'created', ids: added.map((r) => r.id), via: 'agent' });
+  const lines = added.map((r) => `Added ${displayPersonName(r.person_name)} as ${r.role_label} in ${r.group_name} at ${r.company}, `
+    + `${money({ ...r, payable_amount: r.monthly_amount })} a month, so ${money(r)} for this month.`);
+  const reply = [...lines, taken.length ? `Already on ${listOf(taken)}, so not added again.` : '', onAlready.trim()]
+    .filter(Boolean).join('\n');
+  return {
+    summary: `${reply}\n\nSay it as written. These are the saved rows; do not look them up again.`,
+    cards: added.map(dealCard),
+    rows: added.map(summarizeRow),
+    reply,
+    computedReply: true,
+  };
+}
+
 const createRow = {
   name: 'add_deal',
   // IT CHANGES DATA. Read by runAgent: a turn that only LOOKED
@@ -5099,15 +5309,30 @@ const createRow = {
     // Audit 2026-09-30: "add a handler to Acqua" found no tool, because a
     // handler on a company is not stored anywhere but in a deal.
     + 'A HANDLER ON A COMPANY IS A DEAL ON THAT COMPANY: "add a handler to Northstar Care" or "put Casey on '
-    + 'Northstar Care" is this tool, with company set to that company.',
+    + 'Northstar Care" is this tool, with company set to that company. "Put X on A and B" is ONE call with '
+    + 'companies [A, B]: one deal each, one preview, the role and group taken from X\'s live deal when not given.',
   parameters: {
     type: 'object',
     properties: {
       ...ROW_FIELDS,
+      companies: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'TWO OR MORE companies, one new deal on each, in one preview. Use it instead of company '
+          + 'for "put X on A and B". Never call this once per company.',
+      },
       confirmed: { type: 'boolean', description: 'Only on the SECOND call, after they said yes to the deal as shown.' },
     },
   },
   async handler(rawNewArgsIn) {
+    // SEVERAL COMPANIES ARE ONE ACT, with its own path. See addOnCompanies.
+    const severalCompanies = (Array.isArray(rawNewArgsIn?.companies) ? rawNewArgsIn.companies : [])
+      .filter((c) => String(c ?? '').trim());
+    if (severalCompanies.length > 1) return addOnCompanies(rawNewArgsIn);
+    if (severalCompanies.length === 1 && !rawNewArgsIn.company) {
+      // eslint-disable-next-line no-param-reassign
+      rawNewArgsIn = { ...rawNewArgsIn, company: severalCompanies[0] };
+    }
     /**
      * ===============================
      * * THE DEAL BEING BUILT IS KEPT, NOT RE-REMEMBERED
@@ -5250,7 +5475,12 @@ const createRow = {
      * called TECH. A role that IS a group, beside a group that is not, is
      * the two swapped; any other unknown group is asked about. 2026-10-04.
      */
-    if (typeof rawNewArgs.groupName === 'string' && rawNewArgs.groupName.trim()) {
+    // A NEW GROUP THEY APPROVED in a file check is kept exactly: "INDIGO 2"
+    // was "corrected" to INDIGO below and six deals landed in the wrong
+    // group (browser test 2026-10-08). Only a plan run can send this.
+    const approvedNew = rawNewArgsIn?.confirmed === true && typeof rawNewArgsIn?.approvedNewGroup === 'string'
+      && fold(rawNewArgsIn.approvedNewGroup) === fold(rawNewArgs.groupName ?? '');
+    if (!approvedNew && typeof rawNewArgs.groupName === 'string' && rawNewArgs.groupName.trim()) {
       const spellings = await Promise.resolve(repo.knownSpellings?.()).catch(() => null);
       const groups = spellings?.groups ?? [];
       if (groups.length && !groups.some((g) => fold(g) === fold(rawNewArgs.groupName))) {
@@ -5886,6 +6116,28 @@ const updateRow = {
         delete fields.role;
         delete fields.seat;
       }
+      /**
+       * ===============================
+       * * "MARK ZAYN PAID" IS ZAYN, NOT ONE OF HIS DEALS
+       * ===============================
+       * His call 2026-10-08. Should be paid and Paid are set per PERSON on the
+       * People page and written to every live deal they hold. So a switch with
+       * no deal named goes to all of them in one preview, never "which deal?".
+       * A company, group or role THEY said keeps it to that deal.
+       */
+      const heardDeal = fold(`${args.said ?? ''} ${args.saidRecent ?? ''}`);
+      const dealSaid = [args.targetCompany, args.targetGroup, args.targetRole]
+        .some((w) => fold(w).length > 1 && heardDeal.includes(fold(w)))
+        || person.rows.some((r) => fold(r.company).length > 2 && heardDeal.includes(fold(r.company)));
+      const switchesOnly = Object.keys(fields).length > 0 && Object.keys(fields).every((k) => SWITCH_WORDS[k])
+        && Object.keys(args.add ?? {}).length === 0;
+      if (switchesOnly && person.rows.length > 1 && !dealSaid && !args.confirmed) {
+        // JOINING anyone named before it this turn, never replacing them:
+        // "mark suki and ines paid" is one act. See handOver.
+        const entry = { person: person.rows[0].person_name, allDeals: true, set: fields };
+        const earlier = args.turn?.wrote?.get('__person');
+        return handOverCall(earlier?.entry && earlier.who !== personKey(person.rows[0]) ? handOver(earlier, entry) : [entry], args);
+      }
       const movesMoney = Object.keys(args.add ?? {}).length > 0 || Object.keys(fields).some((k) => NAMED_DEALS_ONLY[k]);
       if (movesMoney && !args.confirmed && !namedBy(args.saidRecent, person.rows[0].person_name)) {
         return notNamedAsk(displayPersonName(person.rows[0].person_name));
@@ -6003,6 +6255,20 @@ const updateRow = {
     }
     if (!before) {
       return { summary: args.id == null ? 'Name the person and company for the deal to update.' : `No row with id ${args.id}.` };
+    }
+    // THE SAME BY ID: a card on screen is one of their deals, and the switch
+    // is still the person's unless they named the deal. See above, 2026-10-08.
+    if (args.id != null && !args.confirmed && Object.keys(fields).length > 0
+      && Object.keys(fields).every((k) => SWITCH_WORDS[k]) && Object.keys(args.add ?? {}).length === 0) {
+      const heard = fold(`${args.said ?? ''} ${args.saidRecent ?? ''}`);
+      const named = [before.company, before.group_name].some((w) => fold(w).length > 2 && heard.includes(fold(w)));
+      const theirs = ((await repo.searchFuzzy({ q: before.person_name }).catch(() => [])) ?? [])
+        .filter((r) => !r.stopped_on && fold(r.person_name) === fold(before.person_name));
+      if (!named && theirs.length > 1) {
+        const entry = { person: before.person_name, allDeals: true, set: fields };
+        const earlier = args.turn?.wrote?.get('__person');
+        return handOverCall(earlier?.entry && earlier.who !== personKey(before) ? handOver(earlier, entry) : [entry], args);
+      }
     }
     /**
      * ===============================
@@ -6167,6 +6433,7 @@ const updateRow = {
     const ratedBefore = switching ? (await ratedRows([before]))[0] : before;
     const payPending = confirmSpecialCaseDeal(args, before, fields)
       ?? confirmPaymentSwitch(args, ratedBefore, fields)
+      ?? confirmPaymentReceived(args, before, fields)
       ?? confirmAmounts(args, before, fields, added)
       ?? confirmEndingOrCurrency(args, before, fields);
     if (payPending) return payPending;
@@ -6175,6 +6442,10 @@ const updateRow = {
 
     const saved = await repo.update(before.id, fields, 'diane', { derived });
     if (!saved) return { summary: `No row with id ${before.id}.` };
+    // SETTING PAYMENT RECEIVED IS THE REVIEW: the payday flag goes with it,
+    // as the page's own route does. Straight to the repo here, so said here.
+    const flagCleared = 'paymentOutcome' in fields ? await repo.clearPaydayFlag(before.id).catch(() => null) : null;
+    if ('paymentOutcome' in fields) broadcast(null, 'people:changed', { action: 'updated', personId: before.person_id });
     // WRITTEN, so a hand over later this turn leaves them out and says so.
     const handed = args.turn?.wrote?.get('__person');
     if (handed && handed.who === personKey(before)) handed.written = true;
@@ -6192,7 +6463,9 @@ const updateRow = {
       return old === undefined || old === null || old === '' || same
         ? '' : ` (was ${formatValue(old)})`;
     };
-    const changed = Object.keys(fields).map((key) => `${(FIELD_LABELS[key] ?? key).replace(/^./, (c) => c.toUpperCase())} ${formatValue(fields[key])}${wasOf(key)}`).join(', ');
+    const changed = Object.keys(fields).map((key) => (key === 'paymentOutcome'
+      ? `Payment received ${receivedTag(fields[key])}${before?.payment_outcome ? ` (was ${receivedTag(before.payment_outcome)})` : ''}${flagCleared ? ', payday flag cleared' : ''}`
+      : `${(FIELD_LABELS[key] ?? key).replace(/^./, (c) => c.toUpperCase())} ${formatValue(fields[key])}${wasOf(key)}`)).join(', ');
     // THE ROW IS ON THE SHEET AND OWES NOTHING, so she asks rather than
     // leaving it at zero for somebody to find at the end of the month.
     // See specialCaseDealAsk: the trigger is the state, never a phrase.
@@ -6611,7 +6884,7 @@ const FIELD_LABELS = {
   notes: 'notes', bankDetails: 'bank details', accountNumber: 'account number',
   sortCode: 'sort code', shouldBePaid: 'should be paid',
   addonPercent: 'add on %', feePercent: 'fee %',
-  paid: 'paid', status: 'status', paymentOutcome: 'payment outcome (whatsapp)',
+  paid: 'paid', status: 'status', paymentOutcome: 'payment received',
   overrideShouldBePaid: 'should be paid (admin override)', overridePaid: 'paid (admin override)',
   // ===============================
   // * THE SIX THAT HAD NO WORDING, 2026-09-24
@@ -7021,6 +7294,8 @@ const PER_PERSON = {
 const NAMED_DEALS_ONLY = {
   payableAmount: 'this month\'s payable amount is set per named deal',
   specialCaseDeal: 'paying a deal for a month its dates exclude is decided per named deal',
+  // Not money, but a portion is answered deal by deal. 2026-10-08.
+  paymentOutcome: 'payment received is set per named deal',
 };
 
 /** "a, b and c". A comma run made three fields read as one long value. */
@@ -7586,6 +7861,7 @@ function dealLine(row, patch) {
         : `special case OFF, taking ${figure} back out of ${month}`;
     }
     if (SWITCH_WORDS[key]) return switchLine(key, value, row);
+    if (key === 'paymentOutcome') return `payment received ${receivedTag(row.payment_outcome) ?? 'never asked'} to ${receivedTag(value)}`;
     const label = FIELD_LABELS[key] ?? key;
     if (ADDABLE[key]) {
       const unit = MONEY_FIELDS.has(key) ? `${currency} ` : '';
@@ -7810,6 +8086,9 @@ async function perPersonUpdate(args) {
     ? `\nALREADY SAVED THIS TURN, not part of this: ${already.name}. Say so.\n`
     : '';
 
+  // THE SWITCHES ARE THE PERSON'S, and the preview says so. 2026-10-08.
+  const switchesOnly = plan.every((p) => Object.keys(p.add).length === 0
+    && Object.keys(p.fields).length > 0 && Object.keys(p.fields).every((k) => SWITCH_WORDS[k]));
   // THE LINES GO AS A LIST, so the relay guard holds her to every one: given
   // as prose she answered with a total and "yes" matched nothing. 2026-09-25.
   const pending = confirmFirst(args.confirmed, {
@@ -7818,7 +8097,8 @@ async function perPersonUpdate(args) {
     act: `${plan.length === 1 ? `change ${displayPersonName(plan[0].person)}'s deals` : 'set a DIFFERENT value on each of them'}${done ? ` (${done.trim()})` : ''}`,
     count: rowCount,
     noun: 'row',
-    keeps: 'Read every line back. A count on its own hides which deal moved, so nobody could '
+    keeps: `${switchesOnly ? 'Set per PERSON, as the People page does: every live deal they hold, '
+      + 'stopped deals left alone. ' : ''}Read every line back. A count on its own hides which deal moved, so nobody could `
       + 'tell one wrong value from the rest.',
     lines: lines.map((l) => l.trim()),
   });
@@ -7836,8 +8116,12 @@ async function perPersonUpdate(args) {
       // eslint-disable-next-line no-await-in-loop
       const saved = await repo.update(row.id, patch, 'diane', { derived, batchId }).catch(() => null);
       if (saved) updated.push(saved.id); else failed.push(row.id);
+      // Payment received set is the payday review done. See updateRow.
+      // eslint-disable-next-line no-await-in-loop
+      if (saved && 'paymentOutcome' in patch) await repo.clearPaydayFlag(row.id).catch(() => null);
     }
   }
+  if (plan.some((p) => 'paymentOutcome' in p.fields)) broadcast(null, 'people:changed', { action: 'bulk-updated' });
 
   // A ROW THAT DID NOT TAKE IS NAMED, never averaged into a success count.
   if (failed.length > 0) {
@@ -8105,6 +8389,8 @@ const bulkUpdate = {
     const {
       set, confirmed, except, people, onProgress, said, open, ...filter
     } = args;
+    // Payment received by its words, as the reads take it. See readGuard.
+    if (filter.paymentOutcome != null) filter.paymentOutcome = outcomeCodes(filter.paymentOutcome);
     /**
      * ===============================
      * * REFUSED BY NAME, never dropped in silence
@@ -10803,7 +11089,21 @@ const recentChanges = {
     const hours = Number.isInteger(args.hours) && args.hours > 0 ? args.hours : 24;
     const person = typeof args.person === 'string' && args.person.trim() ? args.person.trim() : null;
     const people = listAsked(args.people);
-    const names = people.length > 0 ? people : person ? [person] : [];
+    let names = people.length > 0 ? people : person ? [person] : [];
+    /**
+     * A FIRST NAME IS THE ONE PERSON WHO HAS IT. Library 2026-10-08: "has
+     * felix's pay changed" looked for "Felix", found no change and said none,
+     * with Felix Orr's 1,300 to 1,450 in the log. Only a first name exactly
+     * one person on the sheet has; anything else stays as said.
+     */
+    if (names.some((n) => !/\s/.test(n))) {
+      const roster = ((await peopleRepo.filterOptions().catch(() => null))?.people ?? []).map((p) => p.name).filter(Boolean);
+      names = names.map((n) => {
+        if (/\s/.test(n) || roster.some((r) => fold(r) === fold(n))) return n;
+        const hits = roster.filter((r) => fold(String(r).trim().split(/\s+/)[0]) === fold(n));
+        return hits.length === 1 ? hits[0] : n;
+      });
+    }
     const scopeText = names.length > 0 ? ` for ${listOf(names)}` : '';
     // Was 25 rows and 200 changes, both silent. A busy day ran past both:
     // the admin was read back twenty-five of forty with nothing saying so.

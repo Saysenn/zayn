@@ -1,0 +1,75 @@
+{
+  "set": "probe",
+  "at": "2026-10-09T21:52:14.759Z",
+  "seconds": 45,
+  "cases": 4,
+  "passed": 4,
+  "passRate": 100,
+  "groups": {
+    "main": {
+      "cases": 4,
+      "passed": 4,
+      "passRate": 100
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 0,
+    "db": 0
+  },
+  "calcAccuracy": null,
+  "inventedRate": 0,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0,
+  "recoveryRate": 100,
+  "perTurn": {
+    "turns": 20,
+    "modelRounds": 0.9,
+    "toolCalls": 1.1,
+    "retries": 0.1,
+    "inputTokens": 26829,
+    "cachedPct": 98,
+    "outputTokens": 32,
+    "medianMs": 2125,
+    "slowestMs": 8407
+  },
+  "tokens": {
+    "input": 536581,
+    "cached": 525184,
+    "output": 634
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "take N days off moves every deal BY N, once, and undo puts them back",
+      "name": "take N days off moves every deal BY N, once, and undo puts them back",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "\"add 100 to all of a person's deals\" is one change, applied once (auto off)",
+      "name": "\"add 100 to all of a person's deals\" is one change, applied once (auto off)",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "\"add 100 to all of a person's deals\" is one change, applied once (auto on)",
+      "name": "\"add 100 to all of a person's deals\" is one change, applied once (auto on)",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "\"both\" answers \"which one, or both?\"",
+      "name": "\"both\" answers \"which one, or both?\"",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}

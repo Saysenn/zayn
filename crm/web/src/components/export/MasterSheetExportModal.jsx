@@ -1109,6 +1109,7 @@ export default function MasterSheetExportModal({ group: initialGroup, onClose })
             ids: w.ids,
             fields: { [w.fix.field]: w.fix.value },
             label: w.fix.label,
+            wholePerson: w.fix.wholePerson,
           })}
           // Two shapes: a one field fix, and a dates suggestion that
           // carries its whole patch.

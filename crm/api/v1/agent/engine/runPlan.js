@@ -69,7 +69,8 @@ function planPrompt(groups) {
     'rate (a person\'s own add on % or fee %, on all their deals), rename_company (company -> newName).',
     'changes: mode "add" when they move a figure BY an amount (add, deduct = negative, plus, minus, raise by),',
     'mode "set" when they give the new value (to N, make it N). "add/deduct N" with no field named is monthlyAmount.',
-    '"N days" is payableDays. Paid/unpaid is overridePaid "true"/"false". Dates as YYYY-MM-DD. Money as plain numbers.',
+    '"N days" is payableDays. Paid/unpaid is overridePaid "true"/"false". Should be paid / not to be paid is overrideShouldBePaid "true"/"false".',
+    'Both switches are set PER PERSON: allDeals true unless they named a group or company. Dates as YYYY-MM-DD. Money as plain numbers.',
     'THIS MONTH ONLY ("only for this month", "just this month", "one-off", "he already got some cash", "not his monthly")',
     'is payableAmount (this month\'s payable), NEVER monthlyAmount. When they correct a step that way, move it to payableAmount.',
     'group: only if they named one. Known groups: ' + groups.join(', ') + '.',
@@ -111,6 +112,8 @@ async function readSteps(text, { groups, previous = null }) {
 }
 
 const NOT_GIVEN = (v) => v == null || String(v).trim() === '';
+// Should be paid and Paid: set per person, on every live deal. 2026-10-08.
+const PERSON_SWITCHES = new Set(['overridePaid', 'overrideShouldBePaid']);
 
 /** One slip on a group name, as everywhere else. */
 function groupFrom(name, groups) {
@@ -233,6 +236,11 @@ async function checkSteps(steps, { groups, said }) {
       const byCompany = rows.filter((r) => fold(r.company).includes(fold(step.company)));
       if (byCompany.length) rows = byCompany;
     }
+    // THE PAY SWITCHES ARE THE PERSON'S. His call 2026-10-08: set on the People
+    // page, written to every live deal. No "which one?" unless they named one.
+    const switchesOnly = step.action === 'update' && step.changes.length > 0
+      && step.changes.every((c) => PERSON_SWITCHES.has(c.field));
+    if (switchesOnly && !group && !step.company) step.allDeals = true;
     if (rows.length === 0) {
       ask(`${step.person} has no deal in ${group ?? step.company}.`);
     } else if (rows.length > 1 && !step.allDeals && step.action !== 'rate') {
@@ -384,6 +392,9 @@ async function fillAnswers(said, asking, client = null) {
 }
 
 /** One step with the answers given for it, and what it still lacks. */
+// What a new deal still needs, said in their words, never a field name.
+const NEED_WORDS = { group: 'group', company: 'company', roleLabel: 'role', monthlyAmount: 'monthly amount', assignedOn: 'appointment date (or "from this month")' };
+
 function applyAnswers(step, answers) {
   if (!answers.length) return step;
   const next = { ...step, changes: [...(step.changes ?? [])] };
@@ -397,7 +408,8 @@ function applyAnswers(step, answers) {
   }
   const has = (f) => (f === 'group' ? next.group : f === 'company' ? next.company : next.changes.some((c) => c.field === f && String(c.value).trim()));
   next.need = ['group', 'company', 'roleLabel', 'monthlyAmount'].filter((f) => !has(f));
-  next.question = next.need.length ? `New deal for ${next.person}${next.line ? ` (line ${next.line})` : ''} still needs: ${next.need.join(', ')}.` : null;
+  if (!has('assignedOn') && !has('paymentStartOn')) next.need.push('assignedOn');
+  next.question = next.need.length ? `New deal for ${next.person}${next.line ? ` (line ${next.line})` : ''} still needs: ${next.need.map((x) => NEED_WORDS[x] ?? x).join(', ')}.` : null;
   next.lines = [{
     name: next.person,
     where: [next.group, next.company].filter(Boolean).join(' · '),
@@ -576,7 +588,123 @@ function doneReply(plan) {
  *
  * @returns {Promise<null|{ reply: string, card: object }>} null to hand back to her
  */
+/**
+ * THEIR ANSWERS TO THE GROUP QUESTIONS, read in code: "yes" takes every
+ * guess; "1 new", "2 no", "summit is new", "don't add halcyon" answer one.
+ * A bare "no" answers a single question; with several it answers none.
+ * @returns {{ decided: object|null, left: object[], heard: boolean }}
+ */
+function readGroupAnswers(said, qs, base = null) {
+  const text = String(said ?? '').toLowerCase().trim();
+  const pick = {};
+  const named = (seg) => qs.find((q) => [q.name, q.from].filter(Boolean).some((n) => seg.includes(String(n).toLowerCase())));
+  const verdict = (seg, q) => {
+    // HER QUESTION: "leave it out" drops the group; "no" is her other reading.
+    if (q.kind === 'ai') {
+      /**
+       * OR WHAT IT REALLY IS, in their words, when her guess was wrong:
+       * "it's MANBAT renamed", "merged manbat and nexus", "same as INDIGO",
+       * "split from MILKMAN". Any of our group names they say is used.
+       */
+      const named = (q.groups ?? []).filter((g) => new RegExp(`(?:^|[^a-z0-9])${String(g).toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[^a-z0-9])`).test(seg)
+        && String(g).toLowerCase() !== String(q.name).toLowerCase());
+      if (named.length && /\bmerg/.test(seg)) return { judged: true, renames: { [q.name]: named } };
+      if (named.length && /\brenam/.test(seg)) return { judged: true, renames: { [q.name]: [named[0]] } };
+      if (named.length && /\bsplit\b|\bmoved? from\b|\bcame from\b/.test(seg)) return { judged: true, notRenamed: [q.name] };
+      if (named.length && /\b(?:same|typo|is|its|it's|=)\b/.test(seg)) return { judged: true, aliases: { [q.name]: named[0] } };
+      if (/\b(?:leave|drop|skip|ignore|don'?t add|dont add|exclude)\b/.test(seg)) return 'drop';
+      /**
+       * THE OTHER KIND, SAID BARE: "1 renamed" to "I'd add it as a new group.
+       * Right, or MANBAT renamed?" is her OTHER reading, not a yes to her
+       * guess (upload test 2026-10-10, blind-19: it was added as new).
+       */
+      const saidKind = /\brenam/.test(seg) ? 'renamed' : /\bmerg/.test(seg) ? 'merged' : null;
+      /**
+       * HER "NEW" GUESS, ANSWERED "RENAMED" OR "NO": the group of ours her
+       * own question named ("…, or MANBAT renamed?"). Her other reading had
+       * no group to rename when the model listed none, and dropped the whole
+       * group from the file instead (upload test 2026-10-10, blind-12).
+       */
+      const asked = q.judged === 'new' && !q.like
+        ? (q.groups ?? []).find((g) => String(g).toLowerCase() !== String(q.name).toLowerCase()
+          && new RegExp(`(?:^|[^a-z0-9])${String(g).toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[^a-z0-9])`).test(String(q.text ?? '').toLowerCase()))
+        : null;
+      if (asked && !/\bnew\b/.test(seg) && (saidKind === 'renamed' || /\b(?:no|nope|nah|wrong)\b/.test(seg))) return { judged: true, renames: { [q.name]: [asked] } };
+      if (saidKind && q.judged && q.judged !== saidKind && !/\bnew\b/.test(seg)) return 'no';
+      if (/\bnew\b/.test(seg)) return 'new';
+      if (/\b(?:no|nope|nah|not|wrong)\b/.test(seg)) return 'no';
+      if (/\b(?:y|ya|yes|yep|yeah|yup|right|correct|ok|okay|sure|same|renamed?|merged?|split|add)\b/.test(seg)) return 'guess';
+      return null;
+    }
+    // A SIBLING ("MILKMAN 2", next to MILKMAN): "no", "same", or our name
+    // said back means it IS ours.
+    if (q.guess === 'sibling' && !/\bnew\b/.test(seg)
+      && (/\b(?:no|nope|nah|same|typo|wrong|mistake)\b/.test(seg) || (q.like && new RegExp(`\\b(?:its|it's|is|=)\\s+${String(q.like).toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(seg)))) return 'alias';
+    if (/\bnew\b/.test(seg)) return 'new';
+    if (/\b(?:no|nope|not|nah|skip|don'?t|dont|leave|drop|ignore|wrong)\b/.test(seg)) return q.kind === 'rename' || q.guess === 'typo' ? 'new' : 'drop';
+    if (/\b(?:y|ya|yes|yep|yeah|yup|right|correct|rename\w*|typo|same|ok|okay|add|sure)\b/.test(seg)) return 'guess';
+    return null;
+  };
+  if (/^(?:y|ya|yes|yep|yeah|yup|ok|okay|sure|correct|right|go ahead|do it|all good|looks good|sounds good|go with (?:it|that|them|your guess(?:es)?))\b[\s!.]*(?:(?:to )?(?:all|both|everything))?[\s!.]*$/.test(text)) {
+    for (const q of qs) pick[q.name] = 'guess';
+  } else if (qs.length === 1 && /^(?:no|nope|nah|wrong)\b/.test(text) && !named(text)) {
+    pick[qs[0].name] = verdict(text, qs[0]);
+  } else {
+    // "and" splits only before another number: "merged manbat and nexus" is one answer.
+    for (const seg of text.split(/[,;\n]|\.\s|\band\s+(?=(?:no\.?\s*|#)?\d+\b)/)) {
+      const num = /^\s*(?:no\.?\s*|#)?(\d+)\b/.exec(seg);
+      // A number that is not one of her questions answers nothing.
+      const q = num ? qs[Number(num[1]) - 1] : (named(seg) || (qs.length === 1 ? qs[0] : null));
+      const v = q && verdict(num ? seg.slice(num[0].length) : seg, q);
+      if (q && v) pick[q.name] = v;
+    }
+  }
+  const left = qs.filter((q) => !pick[q.name]);
+  if (left.length) return { decided: null, left, heard: Object.keys(pick).length > 0, pick };
+  // HER OWN QUESTIONS (groupJudge.js) carry what yes and no mean.
+  if (qs.some((q) => q.kind === 'ai')) {
+    // eslint-disable-next-line global-require
+    const { mergeDecisions } = require('./groupJudge');
+    const parts = qs.map((q) => {
+      const v = pick[q.name];
+      if (q.kind !== 'ai') return null;
+      if (v && typeof v === 'object') return v;
+      if (v === 'drop') return { judged: true, dropGroups: [q.name] };
+      if (v === 'guess' || (v === 'new' && q.judged === 'new')) return q.yes;
+      return q.no;
+    });
+    return { decided: mergeDecisions(base, ...parts), left: [], heard: true, pick };
+  }
+  const decided = { notRenamed: [], dropGroups: [], aliases: {} };
+  for (const q of qs) {
+    const v = pick[q.name];
+    if (q.kind === 'rename' && v === 'new') decided.notRenamed.push(q.name);
+    if ((q.guess === 'typo' && v === 'guess') || v === 'alias') decided.aliases[q.name] = q.like;
+    if (v === 'drop') decided.dropGroups.push(q.name);
+  }
+  return { decided, left: [], heard: true, pick };
+}
+
 async function planTurn({ said, pending, groups, invoke }) {
+  /**
+   * GROUPS FIRST, ANSWERED. Before the plan's own "no" means cancel: here a
+   * "no" answers her question ("is SUMMIT MANBAT renamed?" "no"). Only
+   * "cancel" / "never mind" calls the file check off.
+   */
+  if (pending?.groupQs?.length && pending.sheetInput && !/^(?:cancel|never ?mind|forget (?:it|that)|scrap (?:it|that)|stop)\b/i.test(String(said).trim())) {
+    const got = readGroupAnswers(said, pending.groupQs, pending.preDecided);
+    if (!got.decided) {
+      const left = got.left.map((q) => `${pending.groupQs.indexOf(q) + 1}. ${q.text}`).join('\n');
+      return {
+        reply: `${got.heard ? 'Got it. Still need' : 'Before I plan the changes, I need'}:\n${left}\n\nReply "yes" to go with my ${got.left.length === 1 ? 'guess' : 'guesses'}, or answer by number (e.g. "1 new"). Nothing has changed.`,
+        card: planCard(got.heard ? { ...pending, groupQs: pending.groupQs } : pending),
+      };
+    }
+    logger.info({ plan: pending.id, decided: got.decided }, 'diane: group questions answered');
+    return sheetTurn({
+      said: pending.request, groups, readGiven: pending.sheetInput.read, readoutGiven: pending.sheetInput.readout, decided: got.decided,
+    });
+  }
   if (pending) {
     const answer = readReply(said, pending);
     logger.info({ plan: pending.id, answer: answer.kind }, 'diane: a reply to a plan');
@@ -656,6 +784,19 @@ async function planTurn({ said, pending, groups, invoke }) {
       }
       // THEIR ANSWERS TO HER QUESTIONS fill those gaps and nothing else: a
       // small call reads the values, code puts them on the steps that asked.
+      /**
+       * "FROM THIS MONTH" settles every new deal with no start date, in code:
+       * the payment starts on the 1st, as the add tool takes "pay from this
+       * month". The model's reading of it asked again and again (2026-10-08).
+       */
+      if (plan.steps.some((x) => x.need?.includes('assignedOn'))
+        && /\b(?:from|starting|start(?:s|ed)?|pay(?:ing)? from)\s+(?:this|the current)\s+month\b|\bthis month\b|\bongoing\b|\bstart(?:s|ing)? now\b/i.test(said)) {
+        const first = `${currentMonth()}-01`;
+        plan.steps = plan.steps.map((x) => (x.need?.includes('assignedOn') ? applyAnswers(x, [{ step: x.n, field: 'paymentStartOn', value: first }]) : x));
+        plan.status = plan.steps.some((x) => x.question) ? 'asking' : 'preview';
+        const left = plan.steps.filter((x) => x.question).map((x) => `${x.n}. ${x.question}`);
+        return { reply: left.length ? `Got it. Still to check:\n${fewOf(left)}` : previewReply(plan), card: planCard(plan) };
+      }
       if (plan.steps.some((x) => x.need?.length)) {
         const filled = await fillAnswers(said, plan.steps.filter((x) => x.need?.length)).catch(() => []);
         if (filled.length) {
@@ -688,12 +829,42 @@ async function planTurn({ said, pending, groups, invoke }) {
 }
 
 /**
+ * THE GROUPS IN ONE LINE EACH: renamed, new, and ours not in the file. The
+ * ones still in question are left to the question.
+ */
+function groupLines(found, doubts) {
+  const asked = new Set(doubts.map((q) => q.name));
+  const lines = found.renamed.filter((r) => !asked.has(r.to))
+    .map((r) => {
+      const shared = r.shared ?? r.deals.length;
+      const of = r.of ?? r.deals.length;
+      if (r.alsoFrom?.length) return `• ${[r.from, ...r.alsoFrom.map((x) => x.group)].join(' + ')} → ${r.to}: merged (${[shared, ...r.alsoFrom.map((x) => x.shared)].join(' + ')} people${r.extra ? `, +${r.extra} new` : ''})`;
+      return `• ${r.from} → ${r.to}: renamed (${shared === of ? `all ${of} people` : `${shared} of its ${of} people`}${r.extra ? `, +${r.extra} new` : ''})`;
+    });
+  const fresh = (found.newGroupInfo ?? found.newGroups.map((name) => ({ name, rows: null }))).filter((g) => !asked.has(g.name));
+  // A NEW GROUP THAT TAKES PEOPLE OF OURS says from where: "HARBOUR (7), 4 from MILKMAN".
+  const movedIn = (name) => {
+    const from = {};
+    for (const m of found.moved ?? []) if (m.to === name) from[m.from] = (from[m.from] ?? 0) + 1;
+    return Object.entries(from).map(([g, n]) => `${n} from ${g}`).join(', ');
+  };
+  if (fresh.length) lines.push(`• New: ${fresh.map((g) => { const m = movedIn(g.name); return `${g.name}${g.rows ? ` (${g.rows}${m ? `, ${m}` : ''})` : ''}`; }).join(', ')}`);
+  // A group she is asking about is not "left alone": it waits on the answer.
+  const waiting = new Set(doubts.flatMap((q) => [q.like, q.from]).filter(Boolean));
+  const alone = (found.notInTheirs ?? []).filter((g) => !waiting.has(g));
+  if (alone.length) lines.push(`• Not in your file, left alone: ${alone.join(', ')}`);
+  return lines;
+}
+
+/**
  * A SHEET THEY PASTED OR DROPPED IN: read, compared, and offered as a plan.
  * See sheetCheck.js. Nothing changes until they say yes to it.
  */
 async function sheetTurn({
   text = '', tables = null, said, groups, onEvent = null, client = null, deals: givenDeals = null,
   profiles: givenProfiles = null, companies: givenCompanies = null,
+  // GROUPS FIRST, ANSWERED: the file as read before, and their answers.
+  readGiven = null, readoutGiven = null, decided = null,
 }) {
   // eslint-disable-next-line global-require
   const sheet = require('./sheetCheck');
@@ -703,6 +874,9 @@ async function sheetTurn({
   const { understand } = require('./layout');
   // SAID AS IT GOES: a silent minute read as a dead server. Live 2026-10-06.
   const step = (label, done) => onEvent?.({ type: 'progress', label, done, total: 4 });
+  // THEIR WORDS, NOT THE FILE'S NAME: "📎 s5-missing-group.xlsx" read as
+  // "missing" and the plan was cut to stops only (trust test 2026-10-08).
+  said = String(said ?? '').split('\n').filter((l) => !/^\s*📎/u.test(l)).join('\n').trim();
 
   /**
    * ANY FILE, ANY LAYOUT. Their call 2026-10-06: not a reader built for one
@@ -711,11 +885,21 @@ async function sheetTurn({
    * every row by that. Text that is not a table is read by the model, with
    * every line accounted for.
    */
-  step('Reading your file', 0);
-  const got = tables ? { tables, text } : await intake({ text });
-  step('Working out what each column means', 1);
-  const layouts = await understand(got.tables, { groups, client });
-  const { byKind, readout, skipped } = sheet.fromLayout(got.tables, layouts);
+  let got = { text: '' };
+  let byKind;
+  let readout;
+  let skipped = [];
+  if (readGiven) {
+    // Their answers to the group questions: the same rows, read once already.
+    byKind = { deals: { ...readGiven, rows: [...readGiven.rows], unread: [...(readGiven.unread ?? [])] } };
+    readout = readoutGiven ?? [];
+  } else {
+    step('Reading your file', 0);
+    got = tables ? { tables, text } : await intake({ text });
+    step('Working out what each column means', 1);
+    const layouts = await understand(got.tables, { groups, client });
+    ({ byKind, readout, skipped } = sheet.fromLayout(got.tables, layouts));
+  }
   /**
    * A FILE ABOUT ANOTHER AREA is said to be one. An expenses sheet sent in
    * the master sheet area has no deals in it, and checking it as deals would
@@ -747,7 +931,7 @@ async function sheetTurn({
   ].filter((d, i, all) => all.findIndex((x) => x.id === d.id) === i);
   // The export's charges, so its own figures are not read as changes.
   const cryptoPercent = Number((await require('../../repos/settings.repo').get().catch(() => null))?.crypto_percent ?? 0);
-  const found = sheet.compare(read, deals, groups, { cryptoPercent });
+  let found = sheet.compare(read, deals, groups, { cryptoPercent, ...(decided ?? {}) });
   const how = sheet.readoutLines(readout);
 
   /**
@@ -778,6 +962,58 @@ async function sheetTurn({
         },
       };
     }
+  }
+
+  /**
+   * ===============================
+   * * GROUPS FIRST, ONLY WHEN IN DOUBT
+   * ===============================
+   * His call 2026-10-08, case by case: a clear rename or a clearly new group
+   * is planned and said in one line; a real doubt is asked first, short,
+   * with her guess, and nothing is planned on a guess. The rows read are
+   * kept on the card, so the answer is checked without reading the file
+   * again. See sheetCheck.groupDoubts.
+   */
+  /**
+   * SHE JUDGES THE GROUPS (groupJudge.js), from the facts code gathered:
+   * what she is sure of is applied, what she is not is asked. Only when she
+   * cannot be asked do the rules (groupDoubts) decide.
+   */
+  let doubts = [];
+  let preDecided = null;
+  if (!decided && (found.unfamiliar ?? []).length) {
+    step('Working out the groups', 2);
+    // eslint-disable-next-line global-require
+    const judge = require('./groupJudge');
+    const judged = await judge.judgeGroups(found, groups, { client });
+    if (judged) {
+      preDecided = judge.mergeDecisions(...judged.filter((j) => j.sure).map(judge.decisionOf));
+      doubts = judged.filter((j) => !j.sure).map((j) => ({
+        kind: 'ai', name: j.name, judged: j.kind, like: j.ours?.[0] ?? null, groups,
+        text: j.question || `${j.name}: I'd take it as ${j.kind === 'new' ? 'a new group' : `${j.kind} (${j.ours.join(' + ')})`}. Right?`,
+        yes: judge.decisionOf(j), no: judge.otherOf(j),
+      }));
+      // What she is sure of, applied; the ones she asks about stay as asked.
+      found = sheet.compare(read, deals, groups, { cryptoPercent, ...preDecided });
+    } else {
+      doubts = sheet.groupDoubts(found);
+    }
+  } else if (!decided) {
+    doubts = sheet.groupDoubts(found);
+  }
+  if (doubts.length) {
+    const asking = {
+      id: randomUUID(), request: said, source: 'sheet', status: 'asking', steps: [], notes: [], checked: found.read,
+      groupQs: doubts, preDecided, sheetInput: { read, readout }, readout: how,
+    };
+    const clear = groupLines(found, doubts);
+    const reply = [
+      `Checked ${found.read} rows. ${doubts.length === 1 ? 'One question' : `${doubts.length} questions`} before I plan the changes:`,
+      doubts.map((q, i) => `${i + 1}. ${q.text}`).join('\n'),
+      clear.length ? `Clear already:\n${clear.join('\n')}` : '',
+      `Reply "yes" to go with my ${doubts.length === 1 ? 'guess' : 'guesses'}, or answer by number (e.g. "1 new"). Nothing has changed.`,
+    ].filter(Boolean).join('\n\n');
+    return { reply, card: planCard(asking) };
   }
 
   step('Working out the fixes', 3);
@@ -833,7 +1069,8 @@ async function sheetTurn({
     found.renamed.length && plural(found.renamed.length, 'group renamed', 'groups renamed'),
     found.notOnSheet.length && plural(found.notOnSheet.length, 'new deal', 'new deals'),
     found.stoppedHere?.length && plural(found.stoppedHere.length, 'stopped here but still in your file', 'stopped here but still in your file'),
-    found.missing.length && plural(found.missing.length, 'of ours not in your file', 'of ours not in your file'),
+    // A STOP IS NAMED when there are few: it ends someone's pay.
+    found.missing.length && `${plural(found.missing.length, 'to stop', 'to stop')}, not in your file${found.missing.length <= 3 ? `: ${found.missing.map((d) => d.person_name).join(', ')}` : ''}`,
     found.others && plural(found.others, 'person or company to update', 'people or companies to update'),
     found.unmatched.length && plural(found.unmatched.length, 'row I could not match for sure', 'rows I could not match for sure'),
     found.unread.length && plural(found.unread.length, 'line I could not read', 'lines I could not read'),
@@ -849,7 +1086,15 @@ async function sheetTurn({
     const rest = found2.filter((l) => !(plan.steps[0].action === 'add_deal' && /new deal/.test(l)) && !(plan.steps[0].action === 'stop' && /not in your file/.test(l)));
     body = `${kind}:\n${bullets(plan.steps)}${rest.length ? `\n\nAlso in the file (not shown): ${rest.join(', ')}.` : ''}`;
   } else {
-    body = `Checked ${plural(found.read, 'row', 'rows')}.${found2.length ? `\n${found2.map((l) => `• ${l}`).join('\n')}` : ''}`;
+    // EASY TO READ AND CONFIRM: the groups first, one line each, then the
+    // changes. His call 2026-10-08.
+    const groupsSaid = groupLines(found, []);
+    const changes = found2.filter((l) => !(groupsSaid.length && /groups? renamed/.test(l)));
+    body = [
+      `Checked ${plural(found.read, 'row', 'rows')}.`,
+      groupsSaid.length ? `Groups\n${groupsSaid.join('\n')}` : '',
+      changes.length ? `Changes\n${changes.map((l) => `• ${l}`).join('\n')}` : '',
+    ].filter(Boolean).join('\n\n');
   }
   body += monthNote;
   const ask = narrowed ? 'Do these?' : 'Make ours match?';
@@ -871,5 +1116,5 @@ async function sheetTurn({
 
 
 module.exports = {
-  planTurn, sheetTurn, makePlan, checkSteps, runSteps, doneReply, previewReply, applyAnswers,
+  planTurn, sheetTurn, makePlan, checkSteps, runSteps, doneReply, previewReply, applyAnswers, readGroupAnswers,
 };

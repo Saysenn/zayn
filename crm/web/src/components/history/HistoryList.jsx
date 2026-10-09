@@ -64,9 +64,9 @@ export const FIELD_LABELS = {
   postcode: 'postcode', acceptingPostals: 'accepting postals', bankDetails: 'bank',
   accountNumber: 'account number', sortCode: 'sort code', label: 'label',
   shouldBePaid: 'should be paid', paid: 'paid', notes: 'notes', status: 'status',
-  needsReview: 'needs review', paymentOutcome: 'payday outcome', specialCaseDeal: 'special case',
+  needsReview: 'needs review', paymentOutcome: 'payment received', specialCaseDeal: 'special case',
   stoppedOn: 'stopped on',
-  overrideShouldBePaid: 'should be paid (override)', overridePaid: 'paid (override)',
+  overrideShouldBePaid: 'should be paid', overridePaid: 'paid',
   // Set on the PERSON and logged on every deal it reaches, so the label
   // has to say which level. Undo puts the PROFILE back, on every deal.
   personAddonPercent: 'add on % (profile)', personFeePercent: 'fee % (profile)',
@@ -77,7 +77,11 @@ export const FIELD_LABELS = {
 };
 
 // A logged value that is a code on the wire, shown as its label. Empty stays empty.
-const VALUE_LABELS = { [REVIEW_ANSWER_LOG_FIELD]: REVIEW_ANSWER_LABEL };
+const VALUE_LABELS = {
+  [REVIEW_ANSWER_LOG_FIELD]: REVIEW_ANSWER_LABEL,
+  // The payday outcome, in the words Payment received shows. See PaymentReceived.
+  paymentOutcome: { confirmed: 'Paid', not_received: 'Unpaid', partial: 'Portion', sent: 'Awaiting', no_response: 'Awaiting' },
+};
 const shown = (field, value) => VALUE_LABELS[field]?.[value] ?? value;
 
 // A week, not a day: an edit made last Friday is exactly the one somebody
@@ -302,7 +306,7 @@ export default function HistoryList({
           no furniture. The sentence above still carries the count. */}
       <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
 
-      <BulkBar count={sel.count} noun="change" onClear={sel.clear}>
+      <BulkBar count={sel.count} onClear={sel.clear}>
         <BulkAction icon={UndoIcon} onClick={undoSelected}>Undo</BulkAction>
       </BulkBar>
     </div>

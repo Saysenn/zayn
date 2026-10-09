@@ -86,8 +86,8 @@ describe("nothing arrived, or the wrong amount", () => {
 
   it("puts nothing-arrived first when a sentence could read as either", () => {
     // The expensive mistake only runs one way: reading "I got nothing, the
-    // amount never came" as a SHORT payment would mark them part paid and
-    // switch their Paid toggle on in the CRM. handleMessage tests
+    // amount never came" as a SHORT payment would mark them part paid, a
+    // Portion in the CRM rather than Unpaid. handleMessage tests
     // NOTHING_ARRIVED first for exactly this sentence.
     const both = "I received nothing, the amount never came";
     expect(NOTHING_ARRIVED.test(both)).toBe(true);

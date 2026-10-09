@@ -319,10 +319,12 @@ function correctionFor(said) {
       + 'to pay this month and then stop. It comes back pending: show it and wait for them to agree.';
   }
   if (MARKS_PAID.test(String(said ?? ''))) {
-    return 'THEY TOLD YOU TO DO SOMETHING AND YOU LOOKED IT UP INSTEAD. "Paid" is the PAID SWITCH '
-      + 'on their deals, nothing to do with the monthly review. Call bulk_update_master_sheet with '
-      + '`people` and set: { overridePaid: true } (false for unpaid), or update_master_sheet_row for '
-      + 'one deal. It comes back pending: show it and wait for them to agree.';
+    // SET PER PERSON since 2026-10-08: every live deal, no "which deal?".
+    return 'THEY TOLD YOU TO DO SOMETHING AND YOU LOOKED IT UP INSTEAD. "Paid" is the PAID SWITCH, '
+      + 'nothing to do with the monthly review, and it is set PER PERSON: every live deal they hold. '
+      + 'Call bulk_update_master_sheet with `people` and set: { overridePaid: true } (false for '
+      + 'unpaid). Do not ask which deal. Only when they named ONE company is it update_master_sheet_row '
+      + 'for that deal. It comes back pending: show it and wait for them to agree.';
   }
   if (isSpecialCaseInstruction(said)) {
     return 'THEY TOLD YOU TO DO SOMETHING AND YOU LOOKED IT UP INSTEAD. "Make them a special '

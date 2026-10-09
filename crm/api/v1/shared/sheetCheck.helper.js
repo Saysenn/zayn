@@ -290,7 +290,8 @@ const RULES = [
       .filter(([, v]) => !text(v)).map(([label]) => label);
     return gone.length ? `no ${gone.join(', ')}` : null;
   }],
-  ['worthALook', (r) => (r.needs_review === true ? 'flagged messy by the import' : null)],
+  // THE REASON ITSELF: payday flags rows too now, so "the import" was a guess.
+  ['worthALook', (r) => (r.needs_review === true ? (text(r.review_reason) || 'flagged for a check') : null)],
 ];
 
 /**

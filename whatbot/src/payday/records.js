@@ -190,7 +190,7 @@ export async function recordReply(
   // has actually taken it (payday/crmOutbox.js). The CRM push is
   // fire-and-forget by design — it must never delay a reply to somebody
   // waiting — which used to mean a push lost to an outage was lost for good,
-  // silently, with the CRM's Confirmed column and Paid toggle simply never
+  // silently, with the CRM's Payment received and Paid toggle simply never
   // learning. This flag is the memory that lets a later run catch up.
   const next = {
     ...prev,
@@ -255,7 +255,7 @@ export async function allRecords(period) {
  * Run this before the report so the numbers are final.
  *
  * Returns the records it closed, not just how many. The CRM has to be told
- * about each one (its Confirmed column still says "awaiting reply" until
+ * about each one (its Payment received still says "Awaiting" until
  * somebody says otherwise), and only this function knows which they were —
  * a second pass over allRecords afterwards couldn't tell the ones closed
  * just now from the ones closed last month.

@@ -61,8 +61,10 @@ test('an ordinary instruction that names no field is NOT refused', () => {
 test('the guarded set is the payment decisions, and nothing else', () => {
   // Widening this list is a decision about money, so it is stated here
   // rather than discovered from behaviour.
+  // paymentOutcome since 2026-10-08: Payment received is their answer, and
+  // "mark him paid" must never write it.
   assert.deepEqual([...MUST_BE_NAMED].sort(), [
-    'overridePaid', 'overrideShouldBePaid', 'paid', 'shouldBePaid', 'specialCaseDeal',
+    'overridePaid', 'overrideShouldBePaid', 'paid', 'paymentOutcome', 'shouldBePaid', 'specialCaseDeal',
   ]);
 });
 

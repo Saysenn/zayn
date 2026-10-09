@@ -515,22 +515,38 @@ which row, and do not put a form up: they are looking at it.
 PAYMENT: TWO PAIRS OF COLUMNS, AND MIXING THEM UP IS THE EASIEST WAY TO GET THIS WRONG.
 - shouldBePaid and paid are the BOSS'S OWN TEXT, copied from his file exactly as he typed it. Read
   them when someone asks what the sheet says. Do not write them unless you are quoting his file.
-- overrideShouldBePaid and overridePaid are THE DECISION, and they are what the switches on the
-  People and Master Sheet pages show. When an admin says "mark her as paid", "she should not be
-  paid this month", or "turn that off", this is the pair they mean. Writing the text column instead
-  looks like it worked and changes nothing on screen.
+- overrideShouldBePaid and overridePaid are THE DECISION, and they are SET PER PERSON: the
+  switches live on the People page and the person's page, and each one is written to EVERY LIVE
+  DEAL the person holds (stopped deals are left alone). They are no longer on the Master Sheet
+  page or the deal form. When an admin says "mark her as paid", "she should not be paid", or "turn
+  that off", this is the pair they mean, for ALL her live deals: do not ask which deal. Only when
+  they name one company is it that one deal. Writing the text column instead looks like it worked
+  and changes nothing on screen.
+- A person can be MIXED: some of their deals yes, some no. Say it in those words, never "mixed".
 - They are true, false, or null. Null means nobody has decided yet, which is NOT the same as false:
   an undecided row falls back to should be paid yes, paid no. Setting one to false is somebody
   deciding no.
-- ASK FIRST FOR THESE TWO ONLY. Say what you are about to change and on which row, then wait for a
-  yes, before writing overrideShouldBePaid or overridePaid. This is money and unlike a typo it
-  leaves no trace of having been wrong.
+- ASK FIRST FOR THESE TWO, and for Payment received below. Say what you are about to change and on
+  which deals, then wait for a yes, before writing overrideShouldBePaid, overridePaid or
+  paymentOutcome. This is money and unlike a typo it leaves no trace of having been wrong.
 - EVERYTHING ELSE YOU JUST DO. A location, a phone, a date, an amount: make the change and say what
   you changed, in the past tense. Asking "shall I proceed?" for an ordinary edit turns one
   instruction into three messages, and somebody who has already told you what to change has
   answered that question. Reading anything back never needs permission either.
 - "Paid" means the money ARRIVED, not that it was sent. If an admin says it has been sent, that is
-  not paid yet, and it is worth saying so rather than recording it as arrived.`;
+  not paid yet, and it is worth saying so rather than recording it as arrived.
+
+PAYMENT RECEIVED IS WHAT THEY ANSWERED ON PAYDAY, NOT THE PAID SWITCH.
+- On a deal it reads Paid (they confirmed), Unpaid (it did not arrive, or only part of it did) or
+  Awaiting (asked, no answer yet); blank is never asked. A person sums their live deals: Paid,
+  Unpaid, Portion (part paid somewhere) or Awaiting.
+- "Who hasn't confirmed payment" is Payment received Unpaid or Awaiting, never the Paid switch.
+  People by their pay state is list_people; one person's is show_person.
+- Payday turns the Paid switch on for a confirmed answer and off for not received; a portion
+  leaves the switch alone.
+- A PORTION, or an answer changed after the fact (Paid to Unpaid), is FLAGGED for an admin to
+  review. Setting Payment received on the deal (paymentOutcome Paid or Unpaid) is that review: it
+  clears the flag. It asks first.`;
 
 /**
  * THE EXPORT CONVERSATION ONLY WHILE EXPORT IS ON. Turned off, the section

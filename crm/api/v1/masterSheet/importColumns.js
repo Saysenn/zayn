@@ -110,6 +110,9 @@ const COLUMN_SOURCES = {
  * These are the parser's own verdict on the rows it just read, not values
  * copied out of the sheet. Leaving them stale would mean a row still
  * flagged for a problem the new file fixed.
+ *
+ * EXCEPT A PAYDAY FLAG, which no file answers: the upsert carries it over
+ * (shared/paydayFlag.helper keepingPayday), 2026-10-08.
  */
 const ALWAYS_WRITTEN = ['needs_review', 'review_reason'];
 

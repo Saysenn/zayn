@@ -70,3 +70,7 @@ came from are in this file's git history (before 2026-10-06).
     days. Each part is safe to run twice, logs what it cleared, and writes
     nothing when there is nothing to clear. Receipts already have their own
     6-hourly keeper (`startReceiptsKeeper`); it moves into this runner.
+15. **Voice notes on the expense bot.** A WhatsApp voice note is turned into
+    text, then read exactly like a typed message (same previews, same yes).
+    On hold (his call 2026-10-08): speech to text is still too slow and too
+    costly per message to be worth it. Revisit when that improves.

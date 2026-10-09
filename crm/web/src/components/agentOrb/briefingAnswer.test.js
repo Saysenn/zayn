@@ -22,9 +22,9 @@ import { LINK_FILTER } from '../../configs/linkFilters.js';
  * then does nothing when you click it.
  */
 
-test('THE EIGHT KEYS, and a new one is a deliberate change on BOTH sides', () => {
+test('THE NINE KEYS, and a new one is a deliberate change on BOTH sides', () => {
   assert.deepEqual(Object.keys(BRIEFING_GOES_TO).sort(), [
-    'concerns', 'liquidating', 'needsReview', 'pastYear', 'payableOver', 'reviewMonthly', 'specialCase', 'unpaid',
+    'concerns', 'liquidating', 'needsReview', 'pastYear', 'payableOver', 'payday', 'reviewMonthly', 'specialCase', 'unpaid',
   ]);
 });
 
@@ -65,13 +65,11 @@ test('THE THREE REVIEW LINES ALL LAND ON /review, with no param', () => {
 });
 
 /**
- * AND THE UNPAID LINE DOES NOT PRETEND THERE IS AN UNPAID FILTER. The Paid
- * checkbox narrows to PAID by explicit design, so seeding it false would
- * be a filter active with its own control reading off.
+ * PAID IS THE PERSON'S NOW, his call 2026-10-08, so the unpaid line lands on
+ * People with its own Paid filter, which offers "no" as a real choice.
  */
-test('UNPAID LANDS ON THE DEALS IN PERIOD, not on a filter that does not exist', () => {
-  assert.equal(BRIEFING_GOES_TO.unpaid, `/master-sheet?${LINK_FILTER.period}=active`);
-  assert.doesNotMatch(BRIEFING_GOES_TO.unpaid, /paid=false/);
+test('UNPAID LANDS ON PEOPLE, filtered to Paid: no', () => {
+  assert.equal(BRIEFING_GOES_TO.unpaid, `/people?${LINK_FILTER.paid}=no`);
 });
 
 // ===============================
@@ -305,7 +303,7 @@ test('THE DATA CHECKS READ EVERY DEAL WITH ITS AMOUNTS', () => {
   const parts = sectionSegments({ key: 'payableOver', sentence: 'x', rows });
   assert.equal(parts[1].text, 'Drew at Monument, £2,000 against £1,250 a month and Smurf at Workforce, £1,000 against £500 a month.');
   assert.equal(parts.length, 2, 'no money line: each amount was already said');
-  assert.deepEqual(DETAIL_KEYS, ['specialCase', 'payableOver', 'unpaid']);
+  assert.deepEqual(DETAIL_KEYS, ['specialCase', 'payableOver', 'unpaid', 'payday']);
   // UNPAID IS PEOPLE (his call 2026-10-07): names read, amounts on screen
   const unpaid = sectionSegments({ key: 'unpaid', sentence: 'x', rows: [
     { id: 'person:abe', person: 'Abe', company: 'KP', deals: 1, totals: [{ amount: 300, currency: 'GBP' }] },
@@ -339,7 +337,7 @@ test('A TOPIC IS PICKED BY VOICE, only among the ones on screen', () => {
   for (const key of Object.keys(TOPIC_WORDS)) assert.ok(BRIEFING_GOES_TO[key], `${key} has a page`);
 });
 
-test('THE STACK: one card per topic, the newest in front, no scroll', () => {
+test('THE STACK: one card per topic, the newest in front, never past the screen', () => {
   const src = readFileSync(new URL('./DianeBriefing.jsx', import.meta.url), 'utf8');
   assert.match(src, /const front = focus \?\? cards\.length - 1;/);
   assert.match(src, /const depth = front - position;/);
@@ -352,7 +350,12 @@ test('THE STACK: one card per topic, the newest in front, no scroll', () => {
   assert.match(src, /if \(segment\.kind === 'read' && all\.length > 0\) all\.at\(-1\)\.parts\.push/, 'a topic is one card');
   // The read along: each entry lights while she says it, and nothing moves.
   assert.match(src, /const now = i === spoken \? READ_STATE\.ACTIVE : i < spoken \? READ_STATE\.DONE : READ_STATE\.WAITING;/);
-  assert.doesNotMatch(src, /overflow-y-auto/, 'the height is fixed, never a scrollbar');
+  // CAPPED, his call 2026-10-07: 62 people not paid ran the card off the
+  // screen. The panel stops at the viewport, the rows scroll with no bar,
+  // and the row she is reading is followed into view.
+  assert.match(src, /maxHeight: CARD_MAX_H/, 'the card never runs past the screen');
+  assert.match(src, /className="agent-scroll min-h-0 overflow-y-auto/, 'the rows scroll, with no bar');
+  assert.match(src, /querySelectorAll\(`\[data-read="\$\{READ_STATE\.ACTIVE\}"\]`\)/, 'her voice is followed');
 });
 
 test('THE SHEET MOVED WHILE SHE TALKED: nothing removed, sorted ticked, new added', () => {

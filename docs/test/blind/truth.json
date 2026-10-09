@@ -1,0 +1,819 @@
+[
+  {
+    "file": "blind-01.xlsx",
+    "groups": {
+      "Kestrel": {
+        "kind": "renamed",
+        "ours": [
+          "MANBAT"
+        ],
+        "ambiguous": false
+      },
+      "WILLOW EAST": {
+        "kind": "renamed",
+        "ours": [
+          "MILKMAN"
+        ],
+        "ambiguous": false
+      },
+      "tidewater": {
+        "kind": "new",
+        "ours": []
+      },
+      "Ridgeline Group East North": {
+        "kind": "new",
+        "ours": []
+      },
+      "Bluepeak": {
+        "kind": "new",
+        "ours": []
+      }
+    },
+    "newDeals": 13,
+    "moves": 0,
+    "stops": 2,
+    "changes": 3,
+    "notInFile": [],
+    "story": [
+      "ALL GROUPS: kept, 0 pay edits, 0 removed",
+      "INDIGO: kept, 3 pay edits, 0 removed",
+      "MANBAT: renamed Kestrel, +1 new",
+      "MILKMAN: renamed WILLOW EAST, +3 new",
+      "NEXUS: kept, 0 pay edits, 2 removed",
+      "tidewater: brand new group of 3",
+      "Ridgeline Group East North: brand new group of 1",
+      "Bluepeak: brand new group of 5"
+    ]
+  },
+  {
+    "file": "blind-02.xlsx",
+    "groups": {
+      "Ember Recruitment Recruitment Partners": {
+        "kind": "merged",
+        "ours": [
+          "MANBAT",
+          "MILKMAN"
+        ]
+      }
+    },
+    "newDeals": 0,
+    "moves": 0,
+    "stops": 0,
+    "changes": 1,
+    "notInFile": [],
+    "story": [
+      "ALL GROUPS: kept, 0 pay edits, 0 removed",
+      "INDIGO: kept, 1 pay edits, 0 removed",
+      "MANBAT + MILKMAN: merged as Ember Recruitment Recruitment Partners, +0 new",
+      "NEXUS: kept, 0 pay edits, 0 removed"
+    ]
+  },
+  {
+    "file": "blind-03.xlsx",
+    "groups": {
+      "tidewater services": {
+        "kind": "renamed",
+        "ours": [
+          "ALL GROUPS"
+        ],
+        "ambiguous": false
+      },
+      "COBALT STAFFING": {
+        "kind": "merged",
+        "ours": [
+          "INDIGO",
+          "MANBAT"
+        ]
+      },
+      "Tidewater Recruitment Services Group": {
+        "kind": "split",
+        "ours": [
+          "NEXUS"
+        ]
+      },
+      "northgate partners east north": {
+        "kind": "new",
+        "ours": []
+      },
+      "northgate": {
+        "kind": "new",
+        "ours": []
+      },
+      "harbour partners staffing": {
+        "kind": "new",
+        "ours": []
+      }
+    },
+    "newDeals": 36,
+    "moves": 2,
+    "stops": 0,
+    "changes": 0,
+    "notInFile": [
+      "MILKMAN"
+    ],
+    "story": [
+      "ALL GROUPS: renamed tidewater services, +4 new",
+      "INDIGO + MANBAT: merged as COBALT STAFFING, +0 new",
+      "MILKMAN: not in the file (left alone)",
+      "NEXUS: 2 split off into Tidewater Recruitment Services Group (+4 new), 0 pay edits, 0 removed",
+      "northgate partners east north: brand new group of 3",
+      "northgate: brand new group of 18",
+      "harbour partners staffing: brand new group of 7"
+    ]
+  },
+  {
+    "file": "blind-04.xlsx",
+    "groups": {
+      "HALCYON STAFFING": {
+        "kind": "renamed",
+        "ours": [
+          "MANBAT"
+        ],
+        "ambiguous": false
+      }
+    },
+    "newDeals": 0,
+    "moves": 0,
+    "stops": 3,
+    "changes": 2,
+    "notInFile": [
+      "MILKMAN"
+    ],
+    "story": [
+      "ALL GROUPS: kept, 0 pay edits, 2 removed",
+      "INDIGO: kept, 2 pay edits, 1 removed",
+      "MANBAT: renamed HALCYON STAFFING, +0 new",
+      "MILKMAN: not in the file (left alone)",
+      "NEXUS: kept, 0 pay edits, 0 removed"
+    ]
+  },
+  {
+    "file": "blind-05.xlsx",
+    "groups": {
+      "GRANITE RECRUITMENT HOLDINGS": {
+        "kind": "renamed",
+        "ours": [
+          "ALL GROUPS"
+        ],
+        "ambiguous": true
+      },
+      "SAFFRON STAFFING SERVICES": {
+        "kind": "renamed",
+        "ours": [
+          "MANBAT"
+        ],
+        "ambiguous": false
+      },
+      "Nexus Ltd": {
+        "kind": "ours",
+        "ours": [
+          "NEXUS"
+        ]
+      }
+    },
+    "newDeals": 11,
+    "moves": 0,
+    "stops": 4,
+    "changes": 0,
+    "notInFile": [
+      "MILKMAN"
+    ],
+    "story": [
+      "ALL GROUPS: renamed GRANITE RECRUITMENT HOLDINGS (only 6 of 10 people), +6 new",
+      "INDIGO: kept, 0 pay edits, 0 removed",
+      "MANBAT: renamed SAFFRON STAFFING SERVICES, +5 new",
+      "MILKMAN: not in the file (left alone)",
+      "NEXUS: written as \"Nexus Ltd\" (same group)"
+    ]
+  },
+  {
+    "file": "blind-06.xlsx",
+    "groups": {
+      "SAFFRON SERVICES": {
+        "kind": "renamed",
+        "ours": [
+          "NEXUS"
+        ],
+        "ambiguous": true
+      },
+      "MILKMAN 4": {
+        "kind": "new",
+        "ours": []
+      },
+      "ALL GROUPS 2": {
+        "kind": "new",
+        "ours": []
+      },
+      "GRANITE": {
+        "kind": "new",
+        "ours": []
+      }
+    },
+    "newDeals": 52,
+    "moves": 0,
+    "stops": 4,
+    "changes": 2,
+    "notInFile": [],
+    "story": [
+      "ALL GROUPS: kept, 0 pay edits, 0 removed",
+      "INDIGO: kept, 0 pay edits, 1 removed",
+      "MANBAT: kept, 2 pay edits, 1 removed",
+      "MILKMAN: kept, 0 pay edits, 0 removed",
+      "NEXUS: renamed SAFFRON SERVICES (only 4 of 6 people), +4 new",
+      "MILKMAN 4: brand new group of 5",
+      "ALL GROUPS 2: brand new group of 21",
+      "GRANITE: brand new group of 22"
+    ]
+  },
+  {
+    "file": "blind-07.xlsx",
+    "groups": {
+      "MILKMAN 3": {
+        "kind": "renamed",
+        "ours": [
+          "MILKMAN"
+        ],
+        "ambiguous": false
+      }
+    },
+    "newDeals": 2,
+    "moves": 0,
+    "stops": 0,
+    "changes": 5,
+    "notInFile": [
+      "MANBAT"
+    ],
+    "story": [
+      "ALL GROUPS: kept, 0 pay edits, 0 removed",
+      "INDIGO: kept, 3 pay edits, 0 removed",
+      "MANBAT: not in the file (left alone)",
+      "MILKMAN: renamed MILKMAN 3, +2 new",
+      "NEXUS: kept, 2 pay edits, 0 removed"
+    ]
+  },
+  {
+    "file": "blind-08.xlsx",
+    "groups": {
+      "MILKMAN 3": {
+        "kind": "renamed",
+        "ours": [
+          "MILKMAN"
+        ],
+        "ambiguous": true
+      }
+    },
+    "newDeals": 6,
+    "moves": 0,
+    "stops": 13,
+    "changes": 5,
+    "notInFile": [],
+    "story": [
+      "ALL GROUPS: kept, 0 pay edits, 1 removed",
+      "INDIGO: kept, 0 pay edits, 0 removed",
+      "MANBAT: kept, 3 pay edits, 0 removed",
+      "MILKMAN: renamed MILKMAN 3 (only 15 of 25 people), +6 new",
+      "NEXUS: kept, 2 pay edits, 0 removed"
+    ]
+  },
+  {
+    "file": "blind-09.xlsx",
+    "groups": {
+      "WILLOW CARE EAST": {
+        "kind": "renamed",
+        "ours": [
+          "MANBAT"
+        ],
+        "ambiguous": false
+      }
+    },
+    "newDeals": 0,
+    "moves": 0,
+    "stops": 4,
+    "changes": 5,
+    "notInFile": [
+      "NEXUS"
+    ],
+    "story": [
+      "ALL GROUPS: kept, 2 pay edits, 2 removed",
+      "INDIGO: kept, 2 pay edits, 2 removed",
+      "MANBAT: renamed WILLOW CARE EAST, +0 new",
+      "MILKMAN: kept, 1 pay edits, 0 removed",
+      "NEXUS: not in the file (left alone)"
+    ]
+  },
+  {
+    "file": "blind-10.xlsx",
+    "groups": {
+      "MABNAT": {
+        "kind": "ours",
+        "ours": [
+          "MANBAT"
+        ]
+      },
+      "summit recruitment group services": {
+        "kind": "renamed",
+        "ours": [
+          "MILKMAN"
+        ],
+        "ambiguous": false
+      },
+      "summit recruitment north": {
+        "kind": "split",
+        "ours": [
+          "NEXUS"
+        ]
+      }
+    },
+    "newDeals": 5,
+    "moves": 2,
+    "stops": 1,
+    "changes": 4,
+    "notInFile": [],
+    "story": [
+      "ALL GROUPS: kept, 0 pay edits, 0 removed",
+      "INDIGO: kept, 3 pay edits, 1 removed",
+      "MANBAT: written as \"MABNAT\" (same group)",
+      "MILKMAN: renamed summit recruitment group services, +5 new",
+      "NEXUS: 2 split off into summit recruitment north (+0 new), 1 pay edits, 0 removed"
+    ]
+  },
+  {
+    "file": "blind-11.xlsx",
+    "groups": {
+      "ALL GROUPS 3": {
+        "kind": "renamed",
+        "ours": [
+          "ALL GROUPS"
+        ],
+        "ambiguous": false
+      },
+      "Beacon Services": {
+        "kind": "split",
+        "ours": [
+          "INDIGO"
+        ]
+      },
+      "ember group": {
+        "kind": "renamed",
+        "ours": [
+          "MILKMAN"
+        ],
+        "ambiguous": false
+      },
+      "Ember East Holdings Recruitment": {
+        "kind": "new",
+        "ours": []
+      },
+      "GRANITE SERVICES NORTH": {
+        "kind": "new",
+        "ours": []
+      }
+    },
+    "newDeals": 9,
+    "moves": 7,
+    "stops": 4,
+    "changes": 4,
+    "notInFile": [],
+    "story": [
+      "ALL GROUPS: renamed ALL GROUPS 3, +3 new",
+      "INDIGO: 7 split off into Beacon Services (+1 new), 2 pay edits, 2 removed",
+      "MANBAT: kept, 2 pay edits, 0 removed",
+      "MILKMAN: renamed ember group, +3 new",
+      "NEXUS: kept, 0 pay edits, 2 removed",
+      "Ember East Holdings Recruitment: brand new group of 1",
+      "GRANITE SERVICES NORTH: brand new group of 1"
+    ]
+  },
+  {
+    "file": "blind-12.xlsx",
+    "groups": {
+      "Saffron Partners Group": {
+        "kind": "renamed",
+        "ours": [
+          "ALL GROUPS"
+        ],
+        "ambiguous": false
+      },
+      "NEXUS 3": {
+        "kind": "renamed",
+        "ours": [
+          "NEXUS"
+        ],
+        "ambiguous": true
+      },
+      "saffron recruitment care": {
+        "kind": "new",
+        "ours": []
+      },
+      "Halcyon East Care": {
+        "kind": "new",
+        "ours": []
+      }
+    },
+    "newDeals": 31,
+    "moves": 0,
+    "stops": 2,
+    "changes": 6,
+    "notInFile": [],
+    "story": [
+      "ALL GROUPS: renamed Saffron Partners Group, +4 new",
+      "INDIGO: kept, 0 pay edits, 0 removed",
+      "MANBAT: kept, 3 pay edits, 0 removed",
+      "MILKMAN: kept, 3 pay edits, 0 removed",
+      "NEXUS: renamed NEXUS 3 (only 4 of 6 people), +8 new",
+      "saffron recruitment care: brand new group of 11",
+      "Halcyon East Care: brand new group of 8"
+    ]
+  },
+  {
+    "file": "blind-13.xlsx",
+    "groups": {
+      "WILLOW GROUP NORTH NORTH": {
+        "kind": "renamed",
+        "ours": [
+          "INDIGO"
+        ],
+        "ambiguous": false
+      },
+      "willow": {
+        "kind": "renamed",
+        "ours": [
+          "MILKMAN"
+        ],
+        "ambiguous": true
+      },
+      "MERIDIAN CARE EAST RECRUITMENT": {
+        "kind": "new",
+        "ours": []
+      }
+    },
+    "newDeals": 20,
+    "moves": 0,
+    "stops": 15,
+    "changes": 3,
+    "notInFile": [
+      "ALL GROUPS"
+    ],
+    "story": [
+      "ALL GROUPS: not in the file (left alone)",
+      "INDIGO: renamed WILLOW GROUP NORTH NORTH, +5 new",
+      "MANBAT: kept, 0 pay edits, 1 removed",
+      "MILKMAN: renamed willow (only 15 of 25 people), +3 new",
+      "NEXUS: kept, 3 pay edits, 2 removed",
+      "MERIDIAN CARE EAST RECRUITMENT: brand new group of 12"
+    ]
+  },
+  {
+    "file": "blind-14.xlsx",
+    "groups": {
+      "ember group": {
+        "kind": "new",
+        "ours": []
+      }
+    },
+    "newDeals": 15,
+    "moves": 0,
+    "stops": 0,
+    "changes": 1,
+    "notInFile": [
+      "ALL GROUPS"
+    ],
+    "story": [
+      "ALL GROUPS: not in the file (left alone)",
+      "INDIGO: kept, 0 pay edits, 0 removed",
+      "MANBAT: kept, 0 pay edits, 0 removed",
+      "MILKMAN: kept, 0 pay edits, 0 removed",
+      "NEXUS: kept, 1 pay edits, 0 removed",
+      "ember group: brand new group of 15"
+    ]
+  },
+  {
+    "file": "blind-15.xlsx",
+    "groups": {
+      "Team NEXUS": {
+        "kind": "ours",
+        "ours": [
+          "NEXUS"
+        ]
+      }
+    },
+    "newDeals": 0,
+    "moves": 0,
+    "stops": 1,
+    "changes": 10,
+    "notInFile": [],
+    "story": [
+      "ALL GROUPS: kept, 3 pay edits, 0 removed",
+      "INDIGO: kept, 3 pay edits, 1 removed",
+      "MANBAT: kept, 1 pay edits, 0 removed",
+      "MILKMAN: kept, 3 pay edits, 0 removed",
+      "NEXUS: written as \"Team NEXUS\" (same group)"
+    ]
+  },
+  {
+    "file": "blind-16.xlsx",
+    "groups": {
+      "Ember North": {
+        "kind": "renamed",
+        "ours": [
+          "MANBAT"
+        ],
+        "ambiguous": true
+      },
+      "ember recruitment services": {
+        "kind": "renamed",
+        "ours": [
+          "NEXUS"
+        ],
+        "ambiguous": true
+      },
+      "MERIDIAN CARE": {
+        "kind": "new",
+        "ours": []
+      },
+      "MILKMAN 2": {
+        "kind": "new",
+        "ours": []
+      },
+      "Saffron Holdings": {
+        "kind": "new",
+        "ours": []
+      }
+    },
+    "newDeals": 51,
+    "moves": 0,
+    "stops": 5,
+    "changes": 1,
+    "notInFile": [],
+    "story": [
+      "ALL GROUPS: kept, 0 pay edits, 0 removed",
+      "INDIGO: kept, 1 pay edits, 1 removed",
+      "MANBAT: renamed Ember North (only 3 of 5 people), +3 new",
+      "MILKMAN: kept, 0 pay edits, 0 removed",
+      "NEXUS: renamed ember recruitment services (only 4 of 6 people), +6 new",
+      "MERIDIAN CARE: brand new group of 13",
+      "MILKMAN 2: brand new group of 19",
+      "Saffron Holdings: brand new group of 10"
+    ]
+  },
+  {
+    "file": "blind-17.xlsx",
+    "groups": {
+      "willow partners": {
+        "kind": "split",
+        "ours": [
+          "ALL GROUPS"
+        ]
+      },
+      "SAFFRON": {
+        "kind": "split",
+        "ours": [
+          "MILKMAN"
+        ]
+      },
+      "Bluepeak Group": {
+        "kind": "new",
+        "ours": []
+      }
+    },
+    "newDeals": 25,
+    "moves": 11,
+    "stops": 4,
+    "changes": 4,
+    "notInFile": [
+      "MANBAT"
+    ],
+    "story": [
+      "ALL GROUPS: 3 split off into willow partners (+0 new), 0 pay edits, 2 removed",
+      "INDIGO: kept, 2 pay edits, 0 removed",
+      "MANBAT: not in the file (left alone)",
+      "MILKMAN: 8 split off into SAFFRON (+2 new), 2 pay edits, 2 removed",
+      "NEXUS: kept, 0 pay edits, 0 removed",
+      "Bluepeak Group: brand new group of 23"
+    ]
+  },
+  {
+    "file": "blind-18.xlsx",
+    "groups": {
+      "MERIDIAN GROUP EAST": {
+        "kind": "renamed",
+        "ours": [
+          "MANBAT"
+        ],
+        "ambiguous": false
+      }
+    },
+    "newDeals": 2,
+    "moves": 0,
+    "stops": 1,
+    "changes": 0,
+    "notInFile": [
+      "INDIGO"
+    ],
+    "story": [
+      "ALL GROUPS: kept, 0 pay edits, 1 removed",
+      "INDIGO: not in the file (left alone)",
+      "MANBAT: renamed MERIDIAN GROUP EAST, +2 new",
+      "MILKMAN: kept, 0 pay edits, 0 removed",
+      "NEXUS: kept, 0 pay edits, 0 removed"
+    ]
+  },
+  {
+    "file": "blind-19.xlsx",
+    "groups": {
+      "AL LGROUPS": {
+        "kind": "ours",
+        "ours": [
+          "ALL GROUPS"
+        ]
+      },
+      "MANBAT 2": {
+        "kind": "renamed",
+        "ours": [
+          "MANBAT"
+        ],
+        "ambiguous": true
+      }
+    },
+    "newDeals": 8,
+    "moves": 0,
+    "stops": 2,
+    "changes": 1,
+    "notInFile": [],
+    "story": [
+      "ALL GROUPS: written as \"AL LGROUPS\" (same group)",
+      "INDIGO: kept, 1 pay edits, 0 removed",
+      "MANBAT: renamed MANBAT 2 (only 3 of 5 people), +8 new",
+      "MILKMAN: kept, 0 pay edits, 0 removed",
+      "NEXUS: kept, 0 pay edits, 0 removed"
+    ]
+  },
+  {
+    "file": "blind-20.xlsx",
+    "groups": {
+      "Beacon Group Group North": {
+        "kind": "new",
+        "ours": []
+      }
+    },
+    "newDeals": 11,
+    "moves": 0,
+    "stops": 1,
+    "changes": 2,
+    "notInFile": [
+      "ALL GROUPS",
+      "INDIGO",
+      "MILKMAN"
+    ],
+    "story": [
+      "ALL GROUPS: not in the file (left alone)",
+      "INDIGO: not in the file (left alone)",
+      "MANBAT: kept, 0 pay edits, 0 removed",
+      "MILKMAN: not in the file (left alone)",
+      "NEXUS: kept, 2 pay edits, 1 removed",
+      "Beacon Group Group North: brand new group of 11"
+    ]
+  },
+  {
+    "file": "blind-21.xlsx",
+    "groups": {
+      "WILLOW GROUP": {
+        "kind": "split",
+        "ours": [
+          "MILKMAN"
+        ]
+      },
+      "NEXUS 3": {
+        "kind": "renamed",
+        "ours": [
+          "NEXUS"
+        ],
+        "ambiguous": false
+      },
+      "Granite Services Partners Holdings": {
+        "kind": "new",
+        "ours": []
+      }
+    },
+    "newDeals": 26,
+    "moves": 8,
+    "stops": 2,
+    "changes": 4,
+    "notInFile": [
+      "ALL GROUPS"
+    ],
+    "story": [
+      "ALL GROUPS: not in the file (left alone)",
+      "INDIGO: kept, 2 pay edits, 0 removed",
+      "MANBAT: kept, 0 pay edits, 2 removed",
+      "MILKMAN: 8 split off into WILLOW GROUP (+3 new), 2 pay edits, 0 removed",
+      "NEXUS: renamed NEXUS 3, +1 new",
+      "Granite Services Partners Holdings: brand new group of 22"
+    ]
+  },
+  {
+    "file": "blind-22.xlsx",
+    "groups": {
+      "MILKMAN 2": {
+        "kind": "renamed",
+        "ours": [
+          "MILKMAN"
+        ],
+        "ambiguous": false
+      },
+      "BEACON": {
+        "kind": "new",
+        "ours": []
+      }
+    },
+    "newDeals": 16,
+    "moves": 0,
+    "stops": 1,
+    "changes": 5,
+    "notInFile": [],
+    "story": [
+      "ALL GROUPS: kept, 1 pay edits, 0 removed",
+      "INDIGO: kept, 2 pay edits, 1 removed",
+      "MANBAT: kept, 2 pay edits, 0 removed",
+      "MILKMAN: renamed MILKMAN 2, +5 new",
+      "NEXUS: kept, 0 pay edits, 0 removed",
+      "BEACON: brand new group of 11"
+    ]
+  },
+  {
+    "file": "blind-23.xlsx",
+    "groups": {
+      "Granite Partners": {
+        "kind": "new",
+        "ours": []
+      },
+      "Atlas Group East North": {
+        "kind": "new",
+        "ours": []
+      },
+      "MANBAT 2": {
+        "kind": "new",
+        "ours": []
+      }
+    },
+    "newDeals": 30,
+    "moves": 0,
+    "stops": 1,
+    "changes": 3,
+    "notInFile": [
+      "NEXUS"
+    ],
+    "story": [
+      "ALL GROUPS: kept, 0 pay edits, 0 removed",
+      "INDIGO: kept, 0 pay edits, 1 removed",
+      "MANBAT: kept, 1 pay edits, 0 removed",
+      "MILKMAN: kept, 2 pay edits, 0 removed",
+      "NEXUS: not in the file (left alone)",
+      "Granite Partners: brand new group of 9",
+      "Atlas Group East North: brand new group of 17",
+      "MANBAT 2: brand new group of 4"
+    ]
+  },
+  {
+    "file": "blind-24.xlsx",
+    "groups": {
+      "saffron recruitment north": {
+        "kind": "renamed",
+        "ours": [
+          "ALL GROUPS"
+        ],
+        "ambiguous": false
+      },
+      "Kestrel Staffing Partners": {
+        "kind": "renamed",
+        "ours": [
+          "MANBAT"
+        ],
+        "ambiguous": true
+      },
+      "Ember Holdings Group Partners": {
+        "kind": "split",
+        "ours": [
+          "NEXUS"
+        ]
+      },
+      "GRANITE GROUP": {
+        "kind": "new",
+        "ours": []
+      }
+    },
+    "newDeals": 11,
+    "moves": 2,
+    "stops": 2,
+    "changes": 1,
+    "notInFile": [],
+    "story": [
+      "ALL GROUPS: renamed saffron recruitment north, +0 new",
+      "INDIGO: kept, 0 pay edits, 0 removed",
+      "MANBAT: renamed Kestrel Staffing Partners (only 3 of 5 people), +6 new",
+      "MILKMAN: kept, 1 pay edits, 0 removed",
+      "NEXUS: 2 split off into Ember Holdings Group Partners (+3 new), 0 pay edits, 0 removed",
+      "GRANITE GROUP: brand new group of 2"
+    ]
+  }
+]

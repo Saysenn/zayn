@@ -16,4 +16,11 @@ export const openaiConfig = {
   requestTimeoutMs: 30_000,
 
   temperature: 0.2,
+
+  /** the payments agent v2, see agent/v2/askModel.js */
+  v2: {
+    on: env.PAYMENTS_V2 === "1",
+    model: env.PAYMENTS_V2_MODEL,
+    effort: env.PAYMENTS_V2_EFFORT,
+  },
 };

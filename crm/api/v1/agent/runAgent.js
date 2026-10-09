@@ -1,5 +1,9 @@
 const env = require('../../configs/env');
-const logger = require('../../configs/logger');
+// Watched for the suite's per turn numbers (agent/turnStats.js); off, it is pino as before.
+const turnStats = require('./turnStats');
+// The deals behind a figure, for "where did that come from?" (agent/evidence.js).
+const evidence = require('./evidence');
+const logger = turnStats.watch(require('../../configs/logger'));
 const { resolveContext, openingTools, HELD_UNTIL_NEEDED } = require('./contexts');
 // The admin agreed, so the pending call is re-issued as confirmed. Only
 // ever for a change the previous answer already described.
@@ -14,7 +18,7 @@ const rowsRepo = require('../repos/masterSheetRows.repo');
 const { writeTarget, namedSomeoneElse, refusalFor } = require('./namedOther');
 // Auto mode: the closed ALLOW list of confirmations that may be skipped,
 // and the one time the admin is asked whether to turn it on.
-const { couldSkip, spelledOut, autoConfirmOffer } = require('./autoConfirm');
+const { couldSkip, spelledOut, answeredAll, autoConfirmOffer } = require('./autoConfirm');
 const { stripMarkdown } = require('./stripMarkdown');
 const { noDashes } = require('./noDashes');
 const { dealWords } = require('./dealWords');
@@ -141,7 +145,7 @@ const OWN_TOOL = /%|\bpercent|\bfees?\b|\badd[\s-]?ons?\b|\brates?\b|post\s*code
  * the one deal call, as a value or an add.
  */
 const NAMED_FIELDS = [
-  [['paid', 'overridePaid'], /\bmark(?:ed)?\s+(?:\w+\s+){0,2}(?:as\s+)?(?:un)?paid\b|\b(?:unpaid|not\s+paid)\b/i],
+  [['paid', 'overridePaid', 'paymentOutcome'], /\bmark(?:ed)?\s+(?:\w+\s+){0,2}(?:as\s+)?(?:un)?paid\b|\b(?:unpaid|not\s+paid)\b/i],
   [['notes'], /\bnotes?\b/i],
   [['label'], /\blabel\b/i],
   [['payableDays'], /\bpayable\s+days\b|\b\d+\s+days\b|\bdays\s+(?:to\s+)?\d/i],
@@ -215,6 +219,23 @@ const EVERY_DEAL_EDIT = {
   },
 };
 
+/**
+ * "MARK ALL OF THEM SHOULD BE PAID", said of the people she just listed.
+ * Library 2026-10-08: the plan read the sentence alone, so "them" was
+ * nobody, it asked who, and the yes changed nothing. The names come from
+ * her last answer (its lines or its list), held to the sheet's own people.
+ */
+const THEM = /\b(?:them|those|these|all of them|each of them|that lot)\b/i;
+function theyAre(said, history, roster, pending) {
+  if (pending || !THEM.test(String(said))) return said;
+  const people = (roster?.people ?? []).map((p) => p.name).filter(Boolean);
+  const last = [...(history ?? [])].slice(0, -1).reverse().find((m) => m.role === 'assistant' && (m.list || /\n/.test(String(m.content ?? ''))));
+  if (!last) return said;
+  const text = [String(last.content ?? ''), ...(last.list?.rows ?? []).map((r) => r.name ?? r.person ?? '')].join('\n');
+  const named = people.filter((n) => new RegExp(`(^|\\n|\\d\\.\\s)${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(text));
+  return named.length ? `${said} (them = ${named.join(', ')})` : said;
+}
+
 const FORCED_ROUTES = [
   [RESUME_ASK, 'resume_deal'],
   // "JUNO PARK IS DONE WITH US, STOP HER DEAL" is a stop, said in so many
@@ -267,6 +288,16 @@ const FORCED_ROUTES = [
   [/^\s*(?:(?:can you|please|pls|ok|okay)\s+)?(?:add|create|put in|set up)\s+(?:a\s+|an\s+)?(?:new\s+)?(?:deal|handler|row|person)\b|\bnew deal for\b/i, 'add_deal'],
   // "DID JASON'S RAISE GO THROUGH?" is answered from what the runner did. 2026-10-04.
   [/\b(?:did|has|have)\b[^.?!]*\b(?:go(?:ne)? through|run|ran|appl(?:y|ied)|happen(?:ed)?|kick(?:ed)? in)\b/i, 'list_parked_work'],
+  // "HAS FELIX'S PAY CHANGED" is the change log, never today's total, which
+  // cannot say what it was before. Library 2026-10-08.
+  // Not a comparison of months, which is compare_months' question.
+  [{
+    test: (said) => /\b(?:has|have|did|was|were)\b[^.?!]*\b(?:pay|monthly|money|payable|rate|fee|amount|salary)\b[^.?!]*\bchang\w*\b|\bwhat changed\b|\bany changes?\b[^.?!]*\b(?:to|on|for)\b/i.test(said)
+      && !/\b(?:between|compar\w*|versus|vs\.?|against)\b/i.test(said),
+  }, 'recent_master_sheet_changes'],
+  // "WHAT HAVE WE GOT SCHEDULED?" is the parked list. Suite 2026-10-08: it
+  // drew "could you clarify what type of schedule?". Not a cancel, below.
+  [/^(?![^.?!]*\b(?:cancel|scrap|call off|drop)\b)[^.?!]*\b(?:what(?:'s| is| have| has| do)?|anything|show|list)\b[^.?!]*\b(?:scheduled|parked|queued|lined up|coming up next month|planned for next month)\b/i, 'list_parked_work'],
   // "WHO'S PAID IN EUROS" names them: it came back as a total with no
   // names. The filter lists who; a total can follow. 2026-10-04.
   [/^\s*who(?:'s|s| is| are| gets?)\s+paid\s+(?:in|by|with|via)\b/i, 'filter_master_sheet'],
@@ -315,6 +346,14 @@ const FORCED_ROUTES = [
   // "Who is owed the most" is a ranking: see rankAskedIn. 2026-10-03.
   [{ test: (said) => Boolean(rankAskedIn(said)) }, 'total_master_sheet'],
   [EVERY_DEAL_EDIT, 'bulk_update_master_sheet'],
+  // "OTTER MONTHLY +10% PLS" moves the monthly BY a percentage: the bulk
+  // tool's. Library 2026-10-08: it was read as a 10% add on rate for a
+  // person called Otter. Never an add on, a fee or a later month.
+  [{
+    test: (said) => /\b(?:monthly|monthlies|payable|pay|salar(?:y|ies))\b/i.test(said)
+      && /(?:[+-]\s*\d+(?:\.\d+)?\s*(?:%|percent)|\b(?:raise|bump|increase|up|cut|reduce|lower|drop)\b[^.?!]*\b\d+(?:\.\d+)?\s*(?:%|percent))/i.test(said)
+      && !/\b(?:add[\s-]?on|fee|rate|crypto)\b/i.test(said) && !LATER_MONTH.test(said),
+  }, 'bulk_update_master_sheet'],
 ];
 
 // The read-only narrowing below. Off: see where it is used.
@@ -331,7 +370,7 @@ const READ_TOOLS = new Set([
   'check_rates', 'exchange_rate', 'recent_master_sheet_changes', 'list_stopped_deals',
   'list_dead_people', 'dead_person_details', 'list_monthly_review', 'list_companies',
   'active_companies', 'list_parked_work', 'recall_past_conversations', 'show_past_conversation',
-  'say', 'state_claims',
+  'say', 'state_claims', 'list_people', 'show_person',
 ]);
 const MORE_TOOLS = Object.freeze({
   type: 'function',
@@ -395,8 +434,29 @@ FORCED_ROUTES.unshift([UNDO_ASKED, 'undo_master_sheet_change']);
 // made to abe". A pattern object, so it sits in the same list. See undoIntent.js.
 // NOT RIGHT AFTER A QUESTION: "cancel it" under "shall I set it?" is a no
 // to the proposal, never an undo of an earlier change.
+/**
+ * A CHANGE SHE REPORTED, then a closing "anything else?": still a change
+ * just made. With auto mode on, "actually scrap that" after "Felix's
+ * monthly is now 1,450. Anything else?" went to a lookup and nothing was
+ * undone (suite, auto on, 2026-10-10). Only the LAST sentence may be the
+ * question, and the rest must say something changed.
+ */
+function reportedChange(answer) {
+  const text = String(answer ?? '').trim();
+  const body = text.replace(/[^.!?\n]*\?\s*$/, '');
+  return /\b(?:updated|changed|is now|are now|now (?:is|at)|set to|was \S+ (?:now|before)|done|all set|sorted|added|stopped|moved|renamed)\b/i.test(body);
+}
+/** Her last real answer: a bare "nothing is waiting on a yes" looks past to the one before. */
+function lastRealAnswer(history = []) {
+  const answers = history.filter((m) => m?.role === 'assistant' && !m.card && !m.list && !m.form && !m.exportSession && typeof m.content === 'string');
+  for (let i = answers.length - 1; i >= 0; i -= 1) {
+    if (!/^Nothing is waiting on a yes\b/i.test(answers[i].content.trim())) return answers[i].content;
+  }
+  return '';
+}
 FORCED_ROUTES.unshift([{
-  test: (said, history = []) => asksUndoPlainly(said) && !/\?\s*$/.test(lastAssistantAnswer(history).trim()),
+  test: (said, history = []) => asksUndoPlainly(said)
+    && (!/\?\s*$/.test(lastAssistantAnswer(history).trim()) || reportedChange(lastRealAnswer(history))),
 }, 'undo_master_sheet_change']);
 /**
  * ===============================
@@ -455,6 +515,7 @@ const { parseEdit, callFor, followUp, sameFor } = require('./directEdit');
 const { looksMultiStep, pendingPlan, isQuestion } = require('./engine/planSteps');
 const { route: routeMessage, asEdit } = require('./engine/router');
 const { readRoute, toolCall: readToolCall } = require('./engine/readRouter');
+const { personPayLine } = require('./tools/people');
 const { planTurn, sheetTurn } = require('./engine/runPlan');
 const { looksLikeSheet } = require('./engine/sheetCheck');
 const { PROMPT_PLACEHOLDERS } = require('./promptPlaceholders');
@@ -1146,6 +1207,8 @@ async function invokeTool(tools, name, rawArgs, history = [], onEvent = null, tu
     result = await invokeToolInner(tools, name, rawArgs, history, onEvent, turn);
     return result;
   } finally {
+    turnStats.tool({ name, rawArgs, ms: Date.now() - started, result });
+    evidence.note(result);
     logger.info({
       tool: name,
       args: String(rawArgs ?? '').slice(0, 500),
@@ -1194,6 +1257,10 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
         + 'Split the change into smaller calls, or ask the admin for the remaining fields separately.',
     };
   }
+  // A NEW GROUP IS APPROVED ONLY BY A PLAN THEY SAID YES TO (a file check
+  // that asked about it). From anywhere else the mark is dropped, so the
+  // model can never create a group by sending it.
+  if (!turn?.planRun) delete args.approvedNewGroup;
 
   /**
    * WHEN IT APPLIES IS DECIDED HERE, in code. A later `when` goes to
@@ -1558,7 +1625,9 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
   }
   // A PAYMENT METHOD NOBODY SAID: "who's paid in aed?" came with method
   // "bank" and answered "no deals are paid in AED by bank". 2026-10-04.
-  if (props.paymentMethod && args.paymentMethod != null
+  // Never on a plan they said yes to: there the method is from their file,
+  // and "yes" names none (six new deals saved as cash, 2026-10-08).
+  if (props.paymentMethod && args.paymentMethod != null && !turn?.planRun
     && !/\b(?:cash|bank|banks|banked|crypto|transfer|wire|usdt|btc)\b/i.test(recentSaid(history, 2))) {
     const { paymentMethod: _pm, ...rest } = args;
     args = rest;
@@ -1800,6 +1869,32 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
     if (turn?.planRun) {
       args.said = '';
       args.saidRecent = '';
+    }
+    /**
+     * "SET PAYMENT RECEIVED TO PAID" IS THEIR ANSWER, NOT THE SWITCH. Library
+     * 2026-10-08: it came as overridePaid, the preview said "HAS been paid",
+     * and the yes wrote the Paid switch while Payment received stayed Unpaid.
+     * Moved here, in code, when they said payment received and she sent the
+     * switch instead. See readGuard.ASKS_RECEIVED.
+     */
+    // THIS message only: "mark him paid" after a question about his payment
+    // received is the switch.
+    const receivedSaid = /\bpayment\s+received\b|\breceived\s+(?:the\s+)?payment\b/i.test(args.said ?? '')
+      && !/\b(?:paid|should be paid)\s+switch\b/i.test(args.said ?? '');
+    if (receivedSaid && ['update_master_sheet_row', 'bulk_update_master_sheet'].includes(name)) {
+      const moveTo = (o) => {
+        if (!o || typeof o.overridePaid !== 'boolean' || o.paymentOutcome != null) return;
+        o.paymentOutcome = o.overridePaid ? 'confirmed' : 'not_received';
+        delete o.overridePaid;
+        logger.info({ tool: name }, 'diane: payment received was sent as the Paid switch, moved');
+      };
+      // AND THE COPY THAT IS REMEMBERED for the yes, which replays it with no
+      // words to read: left alone, the yes wrote the switch after all.
+      for (const o of [args, modelArgs]) {
+        moveTo(o);
+        moveTo(o.set);
+        for (const p of o.perPerson ?? []) moveTo(p.set);
+      }
     }
     if (['exchange_rate', 'undo_master_sheet_change', 'show_past_conversation', 'delete_past_conversations', 'add_deal'].includes(name)) args.priorAnswer = lastAssistantAnswer(history);
     // DEALS WHOSE "pay this month anyway?" was already answered on screen, so
@@ -2153,8 +2248,9 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
     // `spelledOut`. An answer to her own question
     // ("which group, or both?") counts the message it answers too.
     const answering = /\?\s*$/.test(String(lastAssistantAnswer(history) ?? '').trim());
+    const allAnswered = answering && answeredAll(lastAssistantAnswer(history), lastSaid(history));
     const mayStillSkip = !couldSkip(name, tool)
-      && spelledOut(name, tool, modelArgs, answering ? recentSaid(history) : lastSaid(history));
+      && spelledOut(name, tool, modelArgs, answering ? recentSaid(history) : lastSaid(history), { allAnswered });
     if (!guessed && !reachesMany && (couldSkip(name, tool) || mayStillSkip) && await autoConfirmOn(turn)) {
       logger.info({ tool: name }, 'diane: auto mode, no confirmation asked');
       args.confirmed = true;
@@ -3030,12 +3126,43 @@ async function runAgentTurn(history, contextName, onEvent) {
    * preview. "james heath has left, stop him" was answered with his deal
    * listed and nothing else (re-test 2026-10-07).
    */
+  // A STOP ON A LATER DAY IS PARKED, by the stop tool: "stop otto fenn end of
+  // this month" went to the engine, which stopped him today (suite 2026-10-08).
   const endsADeal = /\b(?:stop|stopped|has left|have left|left us|quit|quits|leaving|let go|finished with us|end (?:his|her|their|the) deals?)\b/i.test(asked)
-    && !/\b(?:from|in|next|november|december|january)\b.*\bmonth\b|\bnext month\b/i.test(asked);
+    && !/\b(?:from|in|next|november|december|january)\b.*\bmonth\b|\bnext month\b|\b(?:at the |by the )?end of (?:this|the) month\b|\bon (?:the )?\d{1,2}(?:st|nd|rd|th)?\b|\b\d{4}-\d{2}-\d{2}\b/i.test(asked);
+  /**
+   * THE ENGINE IS FOR SEVERAL DIFFERENT CHANGES, read in code too. Suite
+   * 2026-10-08: the router's "bulk_edit" sent "raise corvid by 10%", "fee 2%
+   * on every deal in otter" and "add 100 to otto and mara" to the engine,
+   * which has no percentage and wrote nothing; the bulk tool does all three,
+   * every deal listed. And "make it 1400 and whats he owed?" is one change
+   * and a question, never a plan: the router's multi_step has to be one in
+   * the words as well (two change verbs, or a list).
+   */
+  // A LIST of deals ("Lena …; Omar …") is several, whatever the router called
+  // it: the fast way added Lena alone (suite 2026-10-08).
+  const listed = /[;\n]/.test(String(asked));
+  const severalInWords = looksMultiStep(asked) || listed;
+  /**
+   * "ADD THESE: Lena …; Omar …" is a LIST OF NEW DEALS, whatever the router
+   * called it ("other", unsure): the plan engine adds every line in one
+   * preview. The fast way first tried a bulk CHANGE on the names, then
+   * recovered, or not (suite 2026-10-10, 2 runs in 4).
+   */
+  const addsAList = listed && /^\s*(?:pls\s+|please\s+)?add\b/i.test(String(asked)) && String(asked).split(/[;\n]/).filter((x) => x.trim()).length >= 2;
   const toEngine = (routed
-    // A whole group goes to the engine too: one preview, every deal listed.
-    ? routed.sure && (routed.kind === 'multi_step' || routed.kind === 'bulk_edit')
-    : looksMultiStep(asked)) || (endsADeal && !pending);
+    ? (routed.sure && ((routed.kind === 'multi_step' && severalInWords) || (routed.kind === 'bulk_edit' && listed))) || addsAList
+    : looksMultiStep(asked) || addsAList) || (endsADeal && !pending);
+  /**
+   * EVERY ROUTE IS LOGGED, with why (the box plan, 2026-10-08): a request
+   * that went the fast way and needed correcting becomes a suite case, and
+   * this line is where it is found.
+   */
+  logger.info({
+    route: (pending && !sheetGiven) ? 'plan:answer' : sheetGiven ? 'plan:file' : toEngine && editsHere ? 'plan:new' : 'fast',
+    why: routed ? `router ${routed.kind}${routed.sure ? '' : ' (unsure)'}` : endsADeal ? 'ends a deal' : looksMultiStep(asked) ? 'several changes' : 'one ask',
+    said: String(asked).slice(0, 160),
+  }, 'diane: routed');
   if (((pending && !sheetGiven) || sheetGiven || toEngine) && editsHere) {
     try {
       const roster = await require('../repos/people.repo').filterOptions().catch(() => null);
@@ -3049,7 +3176,7 @@ async function runAgentTurn(history, contextName, onEvent) {
           onEvent,
         })
         : await planTurn({
-        said: asked,
+        said: theyAre(asked, history, roster, pending),
         pending,
         groups: roster?.groups ?? [],
         invoke: async (name, args) => {
@@ -3103,11 +3230,29 @@ async function runAgentTurn(history, contextName, onEvent) {
       for (const card of result?.cards ?? []) onEvent?.({ type: 'card', card });
       if (result?.list) onEvent?.({ type: 'list', list: result.list });
       const reply = result?.reply ?? (result?.cards?.length ? `${person}: ${result.cards.length} ${result.cards.length === 1 ? 'deal' : 'deals'}, on screen.` : '');
-      if (reply) return { reply, changedRowIds: [], context: context.key, claims: [] };
+      // AND THE PERSON'S OWN PAY STATE: set per person since 2026-10-08, so
+      // the deal cards alone no longer say it. See tools/people.js.
+      const pay = reply ? await personPayLine(person).catch(() => null) : null;
+      if (reply) return { reply: pay ? `${reply}\n${pay}` : reply, changedRowIds: [], context: context.key, claims: [] };
     }
   }
+  // A QUESTION A FORCED ROUTE OWNS is not the read router's: "what have we got
+  // scheduled?" was read as a sheet filter and answered "which schedule?",
+  // before the parked list's route was ever looked at. Suite 2026-10-08.
+  const READ_ROUTER_TOOLS = new Set(['filter_master_sheet', 'total_master_sheet', 'find_and_show_details', 'show_person', 'list_people', 'show_sheet_preset']);
+  const ownedElsewhere = FORCED_ROUTES.some(([test, tool]) => !READ_ROUTER_TOOLS.has(tool) && test.test(asked, history));
   const codeRouted = STOPPED_ASK.test(asked) || COMPANIES_IN_ASK.test(asked) || BREAKDOWN_ASK.test(asked)
-    || COMPANIES_LIST_ASK.test(asked) || STATUS_ASK.test(asked) || SECOND_ASK.test(asked) || RESUME_ASK.test(asked);
+    || COMPANIES_LIST_ASK.test(asked) || STATUS_ASK.test(asked) || SECOND_ASK.test(asked) || RESUME_ASK.test(asked)
+    || ownedElsewhere;
+  // "WHO IS ON ABC" with ABC Ltd and ABC Limited: asked back in code, naming
+  // both, before anything reads it as some other thing. See companyFragment.
+  if (!pending && !sheetGiven && !fileNow && context.tools.some((t) => t.name === 'filter_master_sheet')) {
+    const roster = await require('../repos/people.repo').filterOptions().catch(() => null);
+    const half = roster && require('./engine/readRouter').companyFragment(asked, {
+      companies: roster.companies ?? [], groups: roster.groups ?? [], people: (roster.people ?? []).map((p) => p.name),
+    });
+    if (half) return { reply: half, changedRowIds: [], context: context.key, claims: [] };
+  }
   if (routed?.sure && routed.kind === 'question' && !pending && !sheetGiven && !fileNow && !codeRouted
     && context.tools.some((t) => t.name === 'filter_master_sheet') && LIGHT_MODEL && LIGHT_MODEL !== 'off' && env.aiProvider === 'openai') {
     try {
@@ -3126,6 +3271,11 @@ async function runAgentTurn(history, contextName, onEvent) {
         let reply = result?.reply ?? '';
         const sub = result?.list?.subtitle && !/^everything$/i.test(result.list.subtitle) ? `, ${result.list.subtitle}` : '';
         if (!reply && result?.list?.title) reply = `${result.list.title}${sub}.`;
+        // "SHOW ME ZAYN" carries his pay state too, as the bare name does.
+        if (reply && call.name === 'find_and_show_details' && call.args?.name && !result?.ambiguous) {
+          const pay = await personPayLine(call.args.name).catch(() => null);
+          if (pay) reply = `${reply}\n${pay}`;
+        }
         if (!reply && result?.summary) {
           // one short sentence from the result, by the light model, no tools
           const said = await getClient().chat.completions.create({
@@ -3556,7 +3706,14 @@ async function runAgentTurn(history, contextName, onEvent) {
    * the tool ends the turn with no model round at all; anything else is
    * handed to her to word.
    */
-  if (!forcedTool && heldCalls.length === 0 && !turnState.otherDeals && !bothAfterOne
+  /**
+   * HER OWN "WHICH GROUP, OR ALL OF THEM?" ANSWERED: read in code, even though
+   * the forced route for "all of them" also points at the one-deal tool. It
+   * handed the turn to the model, which kept the name and lost the change
+   * ("take 5 days off" became nothing, suite 2026-10-10).
+   */
+  const answersWhich = forcedTool === 'update_master_sheet_row' && /\bhas \d+ deals\. Which \w+ should get\b/.test(String(lastAnswer ?? ''));
+  if ((!forcedTool || answersWhich) && heldCalls.length === 0 && !turnState.otherDeals && !bothAfterOne
     && context.tools.some((t) => t.name === 'update_master_sheet_row')) {
     const roster = await require('../repos/people.repo').filterOptions().catch(() => null);
     const names = { people: (roster?.people ?? []).map((p) => p.name), groups: roster?.groups ?? [] };
@@ -3567,6 +3724,15 @@ async function runAgentTurn(history, contextName, onEvent) {
       // THE ROUTER'S single edit, sure and on a real person, takes the same road.
       ?? routerEdit;
     if (edit) {
+      /**
+       * "ON HARBOR" THAT IS NO GROUP OF OURS is a word of their company
+       * (Harbor Nine): sent as the company, not as a group that matches
+       * nothing (the router's edit, suite 2026-10-10: two failed calls).
+       */
+      if (edit.group && !names.groups.some((g) => fold(g) === fold(edit.group))) {
+        edit.company = edit.group;
+        edit.group = null;
+      }
       const call = callFor(edit);
       turnState.model = 'code';
       logger.info({ edit, tool: call.name }, 'diane: an everyday edit, read in code');
@@ -5316,8 +5482,19 @@ async function runAgentTurn(history, contextName, onEvent) {
  * that same data: she reads what is shown, all of it. See screenReading.js.
  */
 async function runAgent(history, contextName, onEvent) {
+  // "WHERE DID THAT COME FROM?" is answered in code from the deals behind
+  // her last figure, with no search and no model. See agent/evidence.js.
+  if (evidence.asked(history)) {
+    const shown = await evidence.explain(history).catch(() => null);
+    if (shown) return { reply: shown, changedRowIds: [], context: contextName, claims: [] };
+  }
   const waiting = isQuestion(lastSaid(history)) ? pendingPlan(history) : null;
-  const done = await runAgentScreen(history, contextName, onEvent);
+  const [done, usedIds] = await evidence.collect(() => runAgentScreen(history, contextName, onEvent));
+  // KEPT WITH AN ANSWER THAT STATES MONEY, beside its claims; the browser
+  // stores it in history, and the next "where did that come from" reads it.
+  if (done && (done.claims?.length || /(?:GBP|AED|EUR|USD|£|€)\s?\d/.test(String(done.reply ?? '')))) {
+    done.evidence = usedIds;
+  }
   // THE PLAN IS STILL THERE: said after the answer, so a yes still finds it.
   if (waiting && done?.reply && !/\bplan\b/i.test(done.reply)) {
     const n = waiting.steps.filter((s) => !s.skipped).length;

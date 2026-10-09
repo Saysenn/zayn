@@ -113,7 +113,7 @@ function numberOrNull(value) {
  */
 function buildWhere({
   month, q, searchField, groups, currencies,
-  amountField, amountMin, amountMax, savedBy, linked,
+  amountField, amountMin, amountMax, savedBy, linked, carry = false, settle,
 } = {}) {
   const params = [];
   const where = [];
@@ -122,7 +122,30 @@ function buildWhere({
   // the table holds and look exactly like one month's figure.
   const bounds = monthBounds(month);
   params.push(bounds.from, bounds.to);
-  where.push(`spent_on >= $${params.length - 1} AND spent_on < $${params.length}`);
+  // THIS MONTH, AND ANY FROM BEFORE STILL NOT REFUNDED (his call 2026-10-08):
+  // a late September taxi waits in October until it is settled
+  where.push(carry
+    ? "((spent_on >= $1 AND spent_on < $2) OR (spent_on < $1 AND settle_status <> 'settled'))"
+    : 'spent_on >= $1 AND spent_on < $2');
+
+  // REFUNDED OR NOT (migration 078): a status, or a badge worked out from
+  // one. "Overdue" is from before LAST month, its bound a parameter too.
+  const settleList = asList(settle).filter((v) => ['unsettled', 'settled', 'review', 'late', 'unpaid', 'overdue'].includes(v));
+  let prevAt = null;
+  if (settleList.includes('overdue')) {
+    const first = bounds.from;
+    params.push(new Date(Date.UTC(Number(first.slice(0, 4)), Number(first.slice(5, 7)) - 2, 1)).toISOString().slice(0, 10));
+    prevAt = params.length;
+  }
+  const SETTLE = {
+    unsettled: "settle_status = 'unsettled'",
+    settled: "settle_status = 'settled'",
+    review: "settle_status = 'review'",
+    late: "settle_status = 'unsettled' AND settle_check_id IS NULL AND spent_on < $1",
+    unpaid: "settle_status = 'unsettled' AND settle_check_id IS NOT NULL AND spent_on < $1",
+    overdue: `settle_status <> 'settled' AND spent_on < $${prevAt}`,
+  };
+  if (settleList.length) where.push(`(${settleList.map((v) => `(${SETTLE[v]})`).join(' OR ')})`);
 
   const groupList = asList(groups);
   if (groupList.length) {
@@ -421,11 +444,12 @@ async function spentByPerson({ personId = null, phone = null, group, month }) {
   if (!group || (!personId && !phone)) return [];
   const bounds = monthBounds(month);
   const { rows } = await pool.query(
-    `SELECT id, spent_on, description, payee, currency, raw_amount, exchange_rate, aed_amount, category, group_name, spent_by
+    `SELECT id, spent_on, description, payee, currency, raw_amount, exchange_rate, aed_amount, category, group_name, spent_by, settle_status, settle_check_id
        FROM tb_expenses
       WHERE archived_at IS NULL
         AND upper(group_name) = upper($1)
-        AND spent_on >= $2 AND spent_on < $3
+        -- this month's, and any from before still not refunded (migration 078)
+        AND ((spent_on >= $2 AND spent_on < $3) OR (spent_on < $2 AND settle_status <> 'settled'))
         AND ((spent_by_person_id IS NOT NULL AND spent_by_person_id = $4)
           OR (spent_by_phone IS NOT NULL AND spent_by_phone = $5))
       ORDER BY spent_on, id`,

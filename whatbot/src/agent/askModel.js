@@ -43,6 +43,12 @@ export async function runAgent(ctx, question, history) {
     return runMockAgent(ctx, question);
   }
 
+  // v2, beside this one and off unless PAYMENTS_V2=1 (see v2/askModel.js)
+  if (openaiConfig.v2.on) {
+    const { runAgentV2 } = await import("./v2/askModel.js");
+    return runAgentV2(ctx, question, history);
+  }
+
   // what we send the LLM: the rules, the last few turns, then the new question
   const messages = [
     { role: "system", content: systemPrompt(ctx) },

@@ -11,6 +11,7 @@ import PaymentStartRules from '../components/settings/PaymentStartRules';
 import ConversionRates from '../components/settings/ConversionRates';
 import ThemePicker from '../components/settings/ThemePicker';
 import ExpenseAdmins from '../components/settings/ExpenseAdmins';
+import HmrcKnowledge from '../components/settings/HmrcKnowledge';
 import ExpenseStyle from '../components/settings/ExpenseStyle';
 import Button, { FileButton, LinkButton } from '../components/buttons/Button';
 import Toggle from '../components/forms/Toggle';
@@ -249,6 +250,8 @@ export default function SettingsPage() {
   const loginBriefing = data?.loginBriefing ?? true;
   // off unless the server said on: revealing expenses is never the default
   const employeeExpenses = data?.employeeExpenses === true;
+  // off unless the server said on: asking people about refunds is never the default
+  const expenseCheck = data?.expenseCheck === true;
   // Defaults OFF, unlike the two above, and that is the point: a write that
   // skips its preview is one nobody read before it happened, so an
   // unreadable or missing value must never read as permission.
@@ -496,6 +499,26 @@ export default function SettingsPage() {
 
           {section === 'whatbot' && (
             <Card
+              title="Expenses check"
+              description="On payday, right after someone answers their payday check, WhatBot asks about their expenses on their own: how many, how much, and were they refunded. A yes settles exactly the ones it listed, and settled expenses are locked. A no, a partial, or a sorry-that-was-a-mistake goes to the Flagged page as Expense refund. Anyone still not refunded by the 1st is flagged too, every week until it is sorted. Nothing is ever settled on its own."
+            >
+              {isLoading ? (
+                <Skeleton className="h-9 w-32" />
+              ) : (
+                <SettingSwitch
+                  label="Expenses check"
+                  checked={expenseCheck}
+                  disabled={isPending}
+                  onChange={(v) => update({ expenseCheck: v })}
+                  on="WhatBot asks about expense refunds on payday"
+                  off="Expenses are settled by hand only"
+                />
+              )}
+            </Card>
+          )}
+
+          {section === 'whatbot' && (
+            <Card
               title="Picture style"
               description="How long results look as a picture: expense previews and reports on WhatsApp and in Diane's chat, and her sheet checks, plans and deal lists. Only results of 4 or more rows get one. Anything that needs checking is tinted on its own cell, and the caption still says what needs an answer."
             >
@@ -545,6 +568,15 @@ export default function SettingsPage() {
                   off="She asks first, every time"
                 />
               )}
+            </Card>
+          )}
+
+          {section === 'diane' && (
+            <Card
+              title="HMRC & CIS knowledge"
+              description="What Diane answers from in HMRC & CIS mode: GOV.UK guidance and HMRC's own manuals (CIS, PAYE, National Insurance, employment status, the construction VAT reverse charge, penalties), and our own notes, which she reads first. Every answer names its sources."
+            >
+              <HmrcKnowledge />
             </Card>
           )}
 

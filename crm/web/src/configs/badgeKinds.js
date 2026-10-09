@@ -57,14 +57,25 @@ export const BADGE_LABELS = Object.freeze({
   // same kind of thing a badge is for: one small fact, read at a glance.
   review_monthly: 'Reviewed monthly',
   end_note_unknown: 'Not a date',
-  confirmed: 'Confirmed',
-  not_received: 'Not received',
+  // THE PAYDAY OUTCOMES, in Payment received's words (his call 2026-10-08).
+  // PaymentReceived passes its own label; these are the fallback.
+  confirmed: 'Paid',
+  not_received: 'Unpaid',
   no_response: 'No response',
-  sent: 'Awaiting reply',
-  // The money came, but short. Distinct from not_received (nothing
-  // arrived) and from confirmed (arrived in full). It counts as paid, and
-  // still needs a human to find out why it was short.
-  partial: 'Partial',
+  sent: 'Awaiting',
+  // The money came, but short. The person reads Portion and each deal is
+  // flagged until an admin marks it Paid or Unpaid.
+  partial: 'Portion',
+  // AN EXPENSE REFUNDED OR NOT (migration 078). Refunded is done and green;
+  // not refunded is waiting and grey; late is carried over from an earlier
+  // month (information, the accent); unpaid and needs review want someone
+  // to act (warning); overdue is 2 paydays gone (red).
+  settle_settled: 'Refunded',
+  settle_open: 'Not refunded',
+  settle_late: 'Late',
+  settle_unpaid: 'Unpaid',
+  settle_review: 'Needs review',
+  settle_overdue: 'Overdue',
 });
 
 /** What the build has to keep, whether or not any file spells it out. */

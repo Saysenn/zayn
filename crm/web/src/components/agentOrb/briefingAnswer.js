@@ -35,22 +35,19 @@ export const BRIEFING_GOES_TO = Object.freeze({
   liquidating: '/review',
   pastYear: '/review',
   reviewMonthly: '/review',
-  // Rows the last import could not settle: the master sheet's own filter.
+  // Rows waiting on a check: the master sheet's own filter.
   // NOT "flagged", which is the page the concerns line goes to. One word
   // for two things is how somebody clicks the wrong line.
   needsReview: `/master-sheet?${LINK_FILTER.needsReview}=true`,
   /**
-   * NOT A "NOT PAID" FILTER, because there is no such filter. The Paid
-   * checkbox narrows to PAID by explicit design ("ticked means narrow to
-   * this, never show the opposite"), so seeding it with false would be a
-   * filter active with its own control reading off: exactly the invisible
-   * state this codebase refuses.
-   *
-   * So this lands on the deals in period, which is where the Paid switches
-   * are and where somebody marking people off would go anyway. An unpaid
-   * filter of its own is a separate piece of UI with its own decisions.
+   * PAID IS THE PERSON'S, his call 2026-10-08, and set on People. Its Paid
+   * filter offers "no" as a real choice (yes / no / mixed), so the line
+   * lands on the people nobody has marked paid at all.
    */
-  unpaid: `/master-sheet?${LINK_FILTER.period}=active`,
+  unpaid: `/people?${LINK_FILTER.paid}=no`,
+  // A portion or a changed payday answer: the people with a check waiting,
+  // where each person's Payment received is on their row.
+  payday: `/people?${LINK_FILTER.needsReview}=true`,
   // Whatbot's, and they have a page of their own. It is grouped by PERSON,
   // which is what the count is: people with something open, not concerns.
   concerns: '/flagged',
@@ -166,8 +163,11 @@ export function heardYes(said) {
 // sentences, and no totals. The card and her voice come from cardEntries().
 
 // The two checks on the data itself: the card lists every row with its amounts.
-// 'unpaid' is one row per PERSON (his call 2026-10-07), shown in full
-export const DETAIL_KEYS = Object.freeze(['specialCase', 'payableOver', 'unpaid']);
+// 'unpaid' and 'payday' are one row per PERSON (his calls 2026-10-07 and
+// 2026-10-08), shown in full
+export const DETAIL_KEYS = Object.freeze(['specialCase', 'payableOver', 'unpaid', 'payday']);
+// The person lines: names read, what they are owed on screen.
+const PERSON_KEYS = ['unpaid', 'payday'];
 
 /** What a person is owed, each currency on its own: "AED 4,100 and £500". */
 export const owedText = (r, money) => (r.totals?.length ? r.totals : [{ amount: r.amount, currency: r.currency }])
@@ -210,7 +210,7 @@ export function cardEntries(item) {
       const at = r.company ? ` at ${r.company}` : r.deals > 1 ? `, ${r.deals} deals` : '';
       // the NAMES are read, the amounts stay on screen: at a month's start
       // nearly everyone is on this card, and every amount aloud is minutes
-      if (item.key === 'unpaid') return { id: r.id, row: r, said: r.person };
+      if (PERSON_KEYS.includes(item.key)) return { id: r.id, row: r, said: r.person };
       const said = item.key === 'payableOver'
         ? `${r.person}${at}, ${whole(r.amount, r.currency)} against ${whole(r.monthly, r.currency)} a month`
         : `${r.person}${at}, ${whole(r.amount, r.currency)}`;
@@ -261,7 +261,8 @@ export const TOPIC_LABEL = Object.freeze({
   reviewMonthly: 'Review this month',
   unpaid: 'Not marked paid',
   concerns: 'Whatbot flagged',
-  needsReview: 'Import checks',
+  payday: 'Payday answers',
+  needsReview: 'Needs a check',
   specialCase: 'Special case on',
   payableOver: 'Payable over monthly',
 });
@@ -278,6 +279,7 @@ export const TOPIC_WORDS = Object.freeze({
   reviewMonthly: ['review', 'reviews', 'marked'],
   unpaid: ['unpaid', 'paid', 'payment', 'payments', 'money'],
   concerns: ['whatbot', 'flagged', 'flag', 'flags', 'concerns', 'concern'],
+  payday: ['payday', 'portion', 'part', 'answer', 'answers', 'changed'],
   needsReview: ['import', 'check', 'checks'],
   specialCase: ['special'],
   payableOver: ['payable', 'over', 'more', 'exceed'],

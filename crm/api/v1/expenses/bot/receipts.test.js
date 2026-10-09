@@ -60,7 +60,8 @@ test('THE 3 MONTH CLEAR keeps the current month and the two before, and nothing 
     assert.deepEqual(out.kept, ['2026-10', '2026-09', '2026-08']);
     assert.deepEqual(out.cleared.sort(), ['2026-06', '2026-07']);
     assert.deepEqual(fs.readdirSync(DIR).filter((d) => /^\d/.test(d)).sort(), ['2026-08', '2026-09', '2026-10']);
-    assert.deepEqual(marked.sort(), ['2026-06/%', '2026-07/%'], 'their expenses are marked cleared, never deleted');
+    // each month is read (what is still owed) and then marked: the same two months
+    assert.deepEqual([...new Set(marked)].sort(), ['2026-06/%', '2026-07/%'], 'their expenses are marked cleared, never deleted');
   } finally {
     pool.query = real;
     fs.rmSync(DIR, { recursive: true, force: true });

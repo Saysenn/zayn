@@ -115,8 +115,8 @@ const STEPS = [
       // sheet's own free-text should_be_paid / paid columns.
       //
       // That is what a switch already means everywhere else in the CRM:
-      // the same two columns the Master Sheet table and the People page
-      // toggle. The free-text pair holds whatever the boss typed into the
+      // the same two columns the People pages toggle (per person since
+      // 2026-10-08). The free-text pair holds whatever the boss typed into the
       // xlsx ("yes", "n/a", a sentence), and a row added here has no sheet
       // behind it, so there are no words of the boss's to record. Wiring
       // these switches to the text columns instead would give the same

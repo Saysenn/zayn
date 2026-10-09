@@ -60,7 +60,8 @@ test('THE PLAN: each fix a step, missing deals a stop, a new deal asks what it l
   const plan = toPlan(compare(read, DEALS, GROUPS), 'check');
   assert.deepEqual(plan.steps.map((s) => s.action), ['update', 'add_deal', 'stop']);
   assert.equal(plan.status, 'asking', 'the new deal has no company or role');
-  assert.match(plan.steps[1].question, /company, roleLabel/);
+  // In words, and the start date too: the add is refused without one (2026-10-08).
+  assert.match(plan.steps[1].question, /still needs: company, role, appointment date/);
 });
 
 test('NUMBERS, DATES AND PASTES are read the way they are written', () => {
@@ -176,4 +177,117 @@ test('NICKNAMES: "Jim" in their file is our "James" in the same company, never a
   assert.ok(s.nickname('Bob Hale', 'Robert Hale'));
   assert.ok(!s.nickname('Jim Brown', 'James Smith'), 'the surname still has to match');
   assert.ok(!s.nickname('James', 'James'), 'the same name is not a nickname');
+});
+
+// ---- GROUPS FIRST, ONLY WHEN IN DOUBT (his calls 2026-10-08) ----
+const { groupDoubts } = require('./sheetCheck');
+const { readGroupAnswers } = require('./runPlan');
+const { tablesIn } = require('./intake');
+
+const BIG = [
+  ...['Ana', 'Ben', 'Cal', 'Dee', 'Eli'].map((p, i) => deal(10 + i, p, 'NEXUS', 'Acme', 1000)),
+  ...['Fay', 'Gus', 'Hal', 'Ivy'].map((p, i) => deal(20 + i, p, 'MILKMAN', 'Brine', 900)),
+];
+const BIG_GROUPS = ['NEXUS', 'MILKMAN'];
+const sheetOf = (rows) => readTable(`Name,Group,Company,Monthly\n${rows.map((r) => r.join(',')).join('\n')}`);
+const nexusAs = (name, people) => people.map((p) => [p, name, 'Acme', 1000]);
+const milkman = ['Fay', 'Gus', 'Hal', 'Ivy'].map((p) => [p, 'MILKMAN', 'Brine', 900]);
+
+test('A CLEAR RENAME AND A CLEARLY NEW GROUP are said, never asked', () => {
+  const read = sheetOf([...nexusAs('RIDGE', ['Ana', 'Ben', 'Cal', 'Dee', 'Eli', 'New One']), ...milkman, ['Zed Q', 'HALCYON', 'Northgate', 700]]);
+  const found = compare(read, BIG, BIG_GROUPS);
+  assert.deepEqual(found.renamed.map((r) => `${r.from}>${r.to}:${r.shared}/${r.of}+${r.extra}`), ['NEXUS>RIDGE:5/5+1']);
+  assert.deepEqual(found.newGroups, ['HALCYON']);
+  assert.deepEqual(groupDoubts(found), [], 'nothing in doubt');
+  assert.equal(found.missing.length, 0, 'a renamed group stops nobody');
+});
+
+test('A PARTIAL RENAME is asked, naming who is not there', () => {
+  const read = sheetOf([...nexusAs('RIDGE', ['Ana', 'Ben', 'Cal', 'N1', 'N2', 'N3', 'N4']), ...milkman]);
+  const [q] = groupDoubts(compare(read, BIG, BIG_GROUPS));
+  assert.equal(q.kind, 'rename');
+  assert.match(q.text, /^RIDGE: 3 of NEXUS's 5 people are in it \(not there: Dee, Eli\), plus 4 new\. I'd take it as NEXUS renamed/);
+});
+
+test('A NUMBERED NAME is asked as a sibling, and "MILKMAN 2" is never silently MILKMAN', () => {
+  const read = sheetOf([...nexusAs('NEXUS', ['Ana', 'Ben', 'Cal', 'Dee', 'Eli']), ...milkman, ['Zed Q', 'MILKMAN 2', 'Brine', 700]]);
+  const found = compare(read, BIG, BIG_GROUPS);
+  assert.deepEqual(found.newGroups, ['MILKMAN 2']);
+  const [q] = groupDoubts(found);
+  assert.equal(q.guess, 'sibling');
+  assert.match(q.text, /MILKMAN 2 \(1 deal\) is new, next to our MILKMAN/);
+  const typo = compare(read, BIG, BIG_GROUPS, { aliases: { 'MILKMAN 2': 'MILKMAN' } });
+  assert.deepEqual(typo.newGroups, [], 'answered "it is MILKMAN": read as MILKMAN');
+  assert.deepEqual(typo.notOnSheet.map((r) => `${r.person}@${r.group}`), ['Zed Q@MILKMAN']);
+});
+
+test('A SPLIT: a new group holding people of ours is asked, then those deals MOVE there', () => {
+  const read = sheetOf([...nexusAs('NEXUS', ['Ana', 'Ben', 'Cal', 'Dee', 'Eli']), ['Fay', 'MILKMAN', 'Brine', 900], ['Gus', 'MILKMAN', 'Brine', 900], ['Hal', 'HARBOUR', 'Brine', 900], ['Ivy', 'HARBOUR', 'Brine', 900], ['Kai New', 'HARBOUR', 'Brine', 800]]);
+  const found = compare(read, BIG, BIG_GROUPS);
+  const [q] = groupDoubts(found);
+  assert.match(q.text, /HARBOUR is new to us, but 2 of its 3 people are in MILKMAN \(still in your file too\)\. I'd add HARBOUR as a new group and move those 2 there/);
+  assert.deepEqual(found.moved.map((m) => `${m.deal.person_name}:${m.from}>${m.to}`), ['Hal:MILKMAN>HARBOUR', 'Ivy:MILKMAN>HARBOUR']);
+  assert.equal(found.missing.length, 0, 'moved, never stopped');
+  const left = compare(read, BIG, BIG_GROUPS, { dropGroups: ['HARBOUR'] });
+  assert.equal(left.missing.length, 0, 'HARBOUR left out: its people are not offered as stops either');
+});
+
+test('THEIR ANSWERS, read in code: yes takes every guess, numbers answer one, a stray number answers none', () => {
+  const qs = [{ kind: 'rename', name: 'RIDGE', from: 'NEXUS', guess: 'rename' }, { kind: 'new', name: 'MILKMAN 2', guess: 'typo', like: 'MILKMAN' }, { kind: 'new', name: 'HARBOUR', guess: 'new', like: 'MILKMAN' }];
+  assert.deepEqual(readGroupAnswers('yes', qs).decided, { notRenamed: [], dropGroups: [], aliases: { 'MILKMAN 2': 'MILKMAN' } });
+  assert.deepEqual(readGroupAnswers('1 new, 2 yes, 3 leave it out', qs).decided, { notRenamed: ['RIDGE'], dropGroups: ['HARBOUR'], aliases: { 'MILKMAN 2': 'MILKMAN' } });
+  assert.deepEqual(readGroupAnswers('ridge is a new group', qs).left.map((q) => q.name), ['MILKMAN 2', 'HARBOUR'], 'one answered, two still to ask');
+  assert.equal(readGroupAnswers('no', qs).decided, null, 'a bare no with three questions answers none');
+  assert.deepEqual(readGroupAnswers('1 yes, 2 leave it out', [qs[0]]).decided, { notRenamed: [], dropGroups: [], aliases: {} }, '"2" is not one of her questions');
+  assert.deepEqual(readGroupAnswers('no', [qs[0]]).decided.notRenamed, ['RIDGE'], 'one question: "no" is its answer');
+});
+
+test('A BLANK LINE IS NOT A NEW TABLE: the row after it is read, never eaten as a header', () => {
+  const grid = [
+    ['Group', 'Role', 'Name of individual', 'Company'],
+    ['INDIGO', 'Mid 1', 'Zayn', 'Workforce'],
+    [null, null, null, null],
+    ['INDIGO', 'Mid 1', 'BYG', 'DIVERSE REC PAYROLL'],
+    ['INDIGO', 'Mid 1', 'Donaldo', 'SG'],
+  ];
+  const tables = tablesIn(grid, 'Oct');
+  assert.equal(tables.length, 1);
+  assert.deepEqual(tables[0].rows.map((r) => r.cells[2]), ['Zayn', 'BYG', 'Donaldo']);
+});
+
+test('A MERGE: two of ours under one new name is asked as a merge, and the second group\'s deals move', () => {
+  const both = [...BIG, deal(30, 'Ana', 'MILKMAN', 'Brine', 900, { role_label: 'Closer' })];
+  const read = sheetOf([...nexusAs('UNITED', ['Ana', 'Ben', 'Cal', 'Dee', 'Eli']), ...['Fay', 'Gus', 'Hal', 'Ivy'].map((p) => [p, 'UNITED', 'Brine', 900]), ['Ana', 'UNITED', 'Brine', 900], ['Kai New', 'UNITED', 'Acme', 500]]);
+  const found = compare(read, both, BIG_GROUPS);
+  const [q] = groupDoubts(found);
+  assert.match(q.text, /^UNITED holds \d of (NEXUS|MILKMAN)'s people and \d of (NEXUS|MILKMAN)'s people\. I'd take it as \w+ and \w+ merged into UNITED/);
+  assert.equal(found.renamed[0].extra, 1, 'one newcomer: Ana in both groups is one person, not two');
+  assert.deepEqual(found.notInTheirs, [], 'a merged group is not "left alone"');
+  assert.equal(found.missing.length, 0, 'nobody stopped');
+  assert.ok(found.moved.every((m) => m.to === 'UNITED'), 'the other group\'s deals move to UNITED');
+});
+
+test('GROUP NAMES OF ANY LENGTH, judged by how they differ', () => {
+  const base = [...nexusAs('NEXUS', ['Ana', 'Ben', 'Cal', 'Dee', 'Eli']), ...milkman];
+  const oneNew = (group) => compare(sheetOf([...base, ['Zed Q', group, 'Brine', 700], ['Yan P', group, 'Brine', 700]]), BIG, BIG_GROUPS);
+  // a tag on our own name is our group, asked nothing
+  for (const same of ['Milkman Group', 'MILKMAN Ltd', 'Team Milkman']) {
+    const found = oneNew(same);
+    assert.deepEqual(found.newGroups, [], `${same} is MILKMAN`);
+    assert.deepEqual(groupDoubts(found), [], `${same}: nothing to ask`);
+  }
+  // another number or an extra word: a sibling, most likely new
+  for (const sib of ['MILKMAN 2', 'Milkman 1', 'Milkman North East', 'NEXUS Health Care Services']) {
+    const [q] = groupDoubts(oneNew(sib));
+    assert.equal(q?.guess, 'sibling', sib);
+    assert.match(q.text, /is new, next to our (MILKMAN|NEXUS)\. I'd add it as its own group/);
+  }
+  // a couple of letters off: a slip
+  const [typo] = groupDoubts(oneNew('MILKMNA'));
+  assert.equal(typo?.guess, 'typo');
+  // and the answers
+  const qs = [{ kind: 'new', name: 'MILKMAN 2', guess: 'sibling', like: 'MILKMAN' }];
+  assert.deepEqual(readGroupAnswers('yes', qs).decided.aliases, {}, 'yes: its own group');
+  assert.deepEqual(readGroupAnswers('no its milkman', qs).decided.aliases, { 'MILKMAN 2': 'MILKMAN' });
+  assert.deepEqual(readGroupAnswers('1 same', qs).decided.aliases, { 'MILKMAN 2': 'MILKMAN' });
 });

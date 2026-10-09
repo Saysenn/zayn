@@ -17,6 +17,8 @@
     "test": "node scripts/test.js",
     "test:drift": "node scripts/testDrift.js",
     "test:diane": "node scripts/dianeSuite/run.mjs",
+    "test:diane:compare": "node scripts/dianeSuite/compare.mjs",
+    "refresh:dev": "node scripts/refreshDev.js",
     "test:diane:tz": "for z in Asia/Dubai Europe/London America/Los_Angeles; do echo \"== $z\"; TZ=$z node scripts/dianeSuite/run.mjs; done"
   },
   "keywords": [],

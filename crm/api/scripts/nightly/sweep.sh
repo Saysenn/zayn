@@ -3,21 +3,22 @@
 # * THE CLONE SWEEP: real conversations on a copy of live
 # ***************************************************
 # Every scenario in sweep/ runs twice, auto mode off and on, through the real
-# agent on the LOCAL clone (crm_clone, 127.0.0.1:54329). Each one ends by
-# undoing what it did, so the clone has to come back exactly as it was. A
-# scenario that leaves it changed is a fault: either the undo missed something
-# or a write landed that nobody saw.
+# agent on the TEST copy of live: DEV since 2026-10-08 (scripts/testDb.js),
+# there is no local clone. Each one ends by undoing what it did, so the copy
+# has to come back exactly as it was. A scenario that leaves it changed is a
+# fault: either the undo missed something or a write landed that nobody saw.
 #
 #   bash scripts/nightly/sweep.sh <out dir>
 #
 # Never live. dianeChat only skips its write guard when DATABASE_URL is the
-# clone's own address.
+# test database's own address, and testDb refuses LIVE.
 set -u
 API_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="${1:-/tmp/diane-sweep}"
 mkdir -p "$OUT"
-CLONE='postgresql://postgres:localtest@127.0.0.1:54329/crm_clone'
-psql_clone() { docker exec crm-clone psql -U postgres -d crm_clone -tAc "$1"; }
+cd "$API_DIR" || exit 2
+CLONE="$(node -e "process.stdout.write(require('./scripts/testDb').testDbUrl())")" || exit 2
+psql_clone() { node scripts/testDbSql.js "$1"; }
 snap() {
   psql_clone "select md5(string_agg(id||':'||monthly_amount||':'||payable_amount||':'||coalesce(payable_days,0)||':'||coalesce(addon_percent,0)||':'||coalesce(fee_percent,0)||':'||coalesce(stopped_on::text,''), ',' order by id)) from tb_mastersheet"
   psql_clone "select md5(string_agg(person_id||':'||addon_percent||':'||fee_percent, ',' order by person_id)) from tb_people"

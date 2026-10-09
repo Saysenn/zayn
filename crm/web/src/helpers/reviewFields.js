@@ -109,6 +109,18 @@ const RULES = [
     column: 'currency',
     detail: 'The sheet had no currency on this row, so it defaulted to GBP.',
   },
+  // THE PAYDAY ANSWER, written by the API's paydayFlag. Setting Payment
+  // received on the deal is the review, and clears it.
+  {
+    match: /payday says only part of the pay arrived/i,
+    column: 'payment_outcome',
+    detail: 'They said only part of their pay arrived. Set this deal to Paid or Unpaid once you know which deals were paid.',
+  },
+  {
+    match: /payday answer changed from (\w+) to (\w+)/i,
+    column: 'payment_outcome',
+    detail: (m) => `They changed their payday answer from ${m[1]} to ${m[2]}. Check what really arrived, then set Paid or Unpaid here.`,
+  },
 ];
 
 /**

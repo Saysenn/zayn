@@ -41,8 +41,16 @@ const pool = new Pool({
   // Keeping connections alive is what stops it recurring: pg's default
   // idleTimeoutMillis is 10s, so a quiet minute closed every connection and
   // the next request paid the full cost all over again.
-  min: 2,                       // never drop to zero, so the handshake is already paid
-  idleTimeoutMillis: 0,         // 0 = never close an idle client
+  // never drop to zero, so the handshake is already paid
+  min: Math.min(Number(process.env.DB_POOL_MIN ?? 2), Number(process.env.DB_POOL_MAX) || 10),
+  // pg's own default of 10, unless a test process asks for fewer: DEV's
+  // pooler allows 15 clients in all, shared with the dev API. 2026-10-08.
+  max: Number(process.env.DB_POOL_MAX) || 10,
+  // EXTRAS GO, THE WARM ONES STAY: pg-pool closes an idle client only above
+  // `min`, so the two warm ones are never dropped. With 0 here (never close)
+  // the dev API kept every client a burst had opened: 9 of DEV's 15, and
+  // the suite stopped on "max clients reached" (2026-10-08).
+  idleTimeoutMillis: 30000,
   keepAlive: true,              // TCP keepalive, so a NAT/idle timeout can't silently drop it
   connectionTimeoutMillis: 20000, // a genuine cold connect can take ~15s; failing at 10 would be wrong
 });

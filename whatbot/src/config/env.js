@@ -78,6 +78,14 @@ const EnvSchema = z
      * runs out. Never use it in production.
      */
     LLM_MODE: z.enum(["live", "mock"]).default("live"),
+    /**
+     * The payments agent v2 (2026-10-09), beside v1 and off by default:
+     * the same tools on a current model through OpenAI's Responses API.
+     * See src/agent/v2/askModel.js. OpenAI only, not Groq or Gemini.
+     */
+    PAYMENTS_V2: z.enum(["0", "1"]).default("0"),
+    PAYMENTS_V2_MODEL: z.string().default("gpt-5.4-mini"),
+    PAYMENTS_V2_EFFORT: z.enum(["none", "low", "medium", "high"]).default("low"),
 
     /**
      * Where the roster comes from.

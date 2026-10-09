@@ -26,7 +26,8 @@ import { DetailGrid, DetailCard, Stat } from '../components/layout/DetailLayout'
 import EditableCell from '../components/forms/EditableCell';
 import StatusBadge from '../components/badges/StatusBadge';
 import PaymentPeriod from '../components/badges/PaymentPeriod';
-import PaydayIndicator from '../components/badges/PaydayIndicator';
+import PaymentReceived, { dealReceived } from '../components/badges/PaymentReceived';
+import DealReceivedCell from '../components/forms/DealReceivedCell';
 import ConfirmDialog from '../components/modals/ConfirmDialog';
 import HistoryModal from '../components/modals/HistoryModal';
 import ManageCompanyModal from '../components/modals/ManageCompanyModal';
@@ -512,7 +513,7 @@ export default function CompanyDetailPage() {
         />
       )}
 
-      <BulkBar count={sel.count} noun="deal" onClear={sel.clear}>
+      <BulkBar count={sel.count} onClear={sel.clear}>
         <BulkAction icon={EditIcon} onClick={() => setBulkEditing(true)}>Edit</BulkAction>
         <BulkAction icon={StopHandIcon} variant="danger" onClick={() => setBulkStopping(true)}>Stop</BulkAction>
       </BulkBar>
@@ -601,7 +602,7 @@ function CompanyHandlers({ deals, options, cellEdit, sel }) {
               badges={
                 <>
                   <PaymentPeriod period={d.payment_period} />
-                  {d.payment_outcome && <PaydayIndicator outcome={d.payment_outcome} />}
+                  {dealReceived(d.payment_outcome) && <PaymentReceived value={dealReceived(d.payment_outcome)} />}
                 </>
               }
               facts={[
@@ -635,7 +636,7 @@ function CompanyHandlers({ deals, options, cellEdit, sel }) {
                 <th className="th">Method</th>
                 <th className="th">Preset</th>
                 <th className="th">Payment period</th>
-                <th className="th">Payday</th>
+                <th className="th">Payment received</th>
               </tr>
             </thead>
             <tbody>
@@ -703,11 +704,8 @@ function CompanyHandlers({ deals, options, cellEdit, sel }) {
                       paymentStartOn={d.payment_start_on}
                     />
                   </td>
-                  <td className="td">
-                    {d.payment_outcome
-                      ? <PaydayIndicator outcome={d.payment_outcome} />
-                      : <span className="text-xs text-text-faint">Not checked</span>}
-                  </td>
+                  <DealReceivedCell deal={d}
+                    onSave={(v) => cellEdit({ id: d.id, fields: { paymentOutcome: v }, subject: d.person_name, label: 'payment received' })} />
                 </tr>
               ))}
             </tbody>

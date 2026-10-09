@@ -5,6 +5,9 @@ const { dueThisMonth, reviewReason, REVIEW_REASON } = require('./reviewQueue.hel
 const { countsTowardTotal } = require('./owedThisMonth.helper');
 const { currentMonth } = require('./presetMonth.helper');
 const { ratedRows } = require('./ratedRows.helper');
+const { PAYDAY_REASON } = require('./paydayFlag.helper');
+
+const PAYDAY_ALL = new RegExp(PAYDAY_REASON.source, 'gi');
 
 /**
  * ***************************************************
@@ -61,8 +64,12 @@ const SAY = {
   // DISTINCT people: a row is a (person, group) pair, so one name in two
   // groups is two rows but one person. The flags are said beside it.
   concerns: (n, flags = n) => `${n} ${plural(n, 'person has', 'people have')} ${flags} ${plural(flags, 'flag', 'flags')} from whatbot, waiting on you.`,
-  // NOT "flagged", which is the Flagged PAGE: these are rows the import could not settle.
-  needsReview: (n) => `${n} ${plural(n, 'row', 'rows')} came off the last import needing a check.`,
+  // PAYDAY ANSWERS WAITING ON YOU, his call 2026-10-08: a portion, or an
+  // answer changed after the fact. People, like unpaid.
+  payday: (n) => `${n} ${plural(n, 'person', 'people')} said only part of their pay arrived, or changed their payday answer.`,
+  // NOT "flagged", which is the Flagged PAGE: rows with a check waiting.
+  // Not "the import" either: payday flags rows too, and has its own line.
+  needsReview: (n) => `${n} ${plural(n, 'row needs', 'rows need')} a check.`,
   // CHECKS ON THE DATA ITSELF, his call 2026-09-28.
   specialCase: (n) => `${n} ${plural(n, 'deal still has', 'deals still have')} special case switched on.`,
   payableOver: (n) => `${n} ${plural(n, 'deal is', 'deals are')} payable more than ${plural(n, 'its', 'their')} monthly amount this month.`,
@@ -163,7 +170,12 @@ async function briefing(period = currentMonth()) {
   // default for paid is NO. So "not marked paid" is null or false alike.
   const unpaid = await ratedRows(owedThisMonth(rows, period, useEndDate)
     .filter((row) => row.override_paid !== true));
-  const flagged = await ratedRows(rows.filter((row) => row.needs_review && !row.stopped_on));
+  // A row flagged by payday goes on the payday line; it is on the check
+  // line too only when the import flagged it for something else as well.
+  const flaggedRows = rows.filter((row) => row.needs_review && !row.stopped_on);
+  const payday = await ratedRows(flaggedRows.filter((row) => PAYDAY_REASON.test(row.review_reason ?? '')));
+  const flagged = await ratedRows(flaggedRows.filter((row) => !PAYDAY_REASON.test(row.review_reason ?? '')
+    || String(row.review_reason).replace(PAYDAY_ALL, '').replace(/[,\s]/g, '') !== ''));
   const special = await ratedRows(rows.filter((row) => row.special_case_deal === true && !row.stopped_on));
   // RATED BOTH SIDES, so the comparison is the same as raw and the figures match the screen.
   const payableOver = (await ratedRows(owedThisMonth(rows, period, useEndDate)))
@@ -187,6 +199,7 @@ async function briefing(period = currentMonth()) {
   const people = new Set(concernRows.map((r) => String(r.person).trim().toLowerCase())).size;
   const flags = concernRows.reduce((sum, r) => sum + r.flags, 0);
   add('concerns', concernRows, people, flags);
+  add('payday', unpaidPeople(payday));
   add('needsReview', flagged.map((r) => dealRow(r, 'payable_amount')));
   add('specialCase', special.map((r) => dealRow(r, 'payable_amount')));
   add('payableOver', payableOver.map((r) => dealRow(r, 'payable_amount')));

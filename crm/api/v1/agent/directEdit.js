@@ -166,9 +166,13 @@ function parseEdit(said, roster) {
  * Every deal of the person is the bulk door; one deal or "which?" is the
  * one deal door, which asks for the group itself.
  */
+// THE TWO PAY SWITCHES ARE THE PERSON'S. His call 2026-10-08: set on the
+// People page, written to every live deal, so no group named is all of them.
+const PERSON_SWITCHES = new Set(['overridePaid', 'overrideShouldBePaid']);
+
 function callFor(edit) {
   const change = edit.op === 'add' ? { add: { [edit.field]: edit.value } } : { [edit.field]: edit.value };
-  if (edit.allDeals && !edit.group) {
+  if ((edit.allDeals || (edit.op === 'set' && PERSON_SWITCHES.has(edit.field))) && !edit.group && !edit.company) {
     const entry = edit.op === 'add'
       ? { person: edit.person, allDeals: true, add: change.add }
       : { person: edit.person, allDeals: true, set: change };
@@ -176,7 +180,7 @@ function callFor(edit) {
   }
   return {
     name: 'update_master_sheet_row',
-    args: { targetPerson: edit.person, ...(edit.group ? { targetGroup: edit.group } : {}), ...change },
+    args: { targetPerson: edit.person, ...(edit.group ? { targetGroup: edit.group } : {}), ...(edit.company ? { targetCompany: edit.company } : {}), ...change },
   };
 }
 

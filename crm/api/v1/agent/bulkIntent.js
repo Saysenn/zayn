@@ -66,9 +66,13 @@ const MUST_BE_NAMED = Object.freeze([
   'specialCaseDeal',
   'shouldBePaid',
   'paid',
+  // PAYMENT RECEIVED is their answer, and "mark him paid" is the switch, not
+  // this. It is only written when they say it. His call 2026-10-08.
+  'paymentOutcome',
 ]);
 
 const SPOKEN = Object.freeze({
+  paymentOutcome: /\bpayment\s+received\b|\breceived\b|\bconfirm\w*\b|\bportion\b|\boutcome\b/,
   specialCaseDeal: /\bspecial\b/,
   overridePaid: /\b(?:un)?paid\b/,
   paid: /\b(?:un)?paid\b/,

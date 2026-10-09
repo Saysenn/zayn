@@ -29,6 +29,7 @@ import { recordMessage } from "./system/crmClient.js";
 import { sendText } from "./whatsapp/sendMessage.js";
 import { sendDocument } from "./whatsapp/sendDocument.js";
 import { sendImage } from "./whatsapp/sendImage.js";
+import { sendOnce } from "./whatsapp/sendOnce.js";
 import { keepTyping, typingOnce } from "./whatsapp/typing.js";
 
 /** The numbered menu at the end of a reply ("What next? 1. ... 2. ..."), if it has one. */
@@ -83,11 +84,34 @@ const PAYDAY_RETRY_EVERY_MS = 5 * 60_000;
  * of the burst, and "typing…" while they are read (his call 2026-10-07).
  * Throws are retried 3 times by BullMQ, so nothing is lost quietly.
  */
+/**
+ * ===============================
+ * * QUIET WHILE IDLE: every Redis command is billed
+ * ===============================
+ * BullMQ's defaults ask Redis every 5s per worker for new work and check for
+ * stalled jobs every 30s, five workers over. Measured 2026-10-09: ~5
+ * commands a second with nothing happening, ~430k a day, and Upstash's
+ * 500k cap ran out ("max requests limit exceeded"); then rate checks, locks
+ * and replies failed together.
+ *
+ *   drainDelay       how long an idle worker waits on Redis per ask. A new
+ *                    job wakes it at once (BullMQ's marker), so replies are
+ *                    no slower; only the empty polling is fewer.
+ *   stalledInterval  how often it looks for a job a dead worker left. The
+ *                    inbound queue keeps the shortest; nothing else is urgent.
+ *   lockDuration     a message job holds its lock for 60s, renewed every 30s
+ *                    (not 15s), and a slow reply no longer counts as stalled.
+ */
+const IDLE = { drainDelay: 30, stalledInterval: 300_000 };
+const INBOUND = { drainDelay: 30, stalledInterval: 120_000, lockDuration: 60_000 };
+
 const messageWorker = new Worker(
   INBOUND_QUEUE,
   async (job) => {
     const { from, to, text, voice, groupId, messageId, attachments, batchSeq, unreadable } = job.data;
     logger.info({ messageId, groupId }, "processing message");
+    // a retried job never sends a part twice (see sendOnce.js)
+    const once = sendOnce(messageId);
 
     // A voice note becomes a question HERE, not earlier: transcription is
     // billed, and BullMQ has already dropped this job if it is a redelivery.
@@ -96,7 +120,7 @@ const messageWorker = new Worker(
     if (voice) {
       const heard = await heardFromVoice(voice);
       if (!heard.ok) {
-        await sendText(from, to, heard.reply);
+        await once(() => sendText(from, to, heard.reply));
         return;
       }
       question = heard.text;
@@ -112,7 +136,7 @@ const messageWorker = new Worker(
       batchSeq,
       unreadable,
       // the expense bot's "Got it, reading…" and "typing…" while it reads
-      notify: (t) => sendText(from, to, t).catch((err) => logger.warn({ err }, "could not send the reading note")),
+      notify: (t) => once(() => sendText(from, to, t)).catch((err) => logger.warn({ err }, "could not send the reading note")),
       typing: () => keepTyping(from, to),
       typingOnce: () => typingOnce(from, to),
     });
@@ -126,28 +150,28 @@ const messageWorker = new Worker(
       // a pay breakdown: its one line caption, then whatever menu followed it
       const caption = reply.imageCaption
         ?? (reply.caption ? [reply.caption, menuOf(reply.text)].filter(Boolean).join("\n\n") : reply.text);
-      await sendImage(from, to, { content: Buffer.from(reply.image.base64, "base64"), caption, mimetype: reply.image.mime });
+      await once(() => sendImage(from, to, { content: Buffer.from(reply.image.base64, "base64"), caption, mimetype: reply.image.mime }));
       // a long report's further pages, in order
       for (const page of reply.moreImages ?? []) {
-        await sendImage(from, to, { content: Buffer.from(page.base64, "base64"), caption: "", mimetype: page.mime });
+        await once(() => sendImage(from, to, { content: Buffer.from(page.base64, "base64"), caption: "", mimetype: page.mime }));
       }
       // AN EXPENSE PREVIEW: the pictures first, THEN the notes, "Please
       // check" and what to reply, as their own message
-      if (reply.imageCaption && reply.body?.trim()) await sendText(from, to, reply.body);
+      if (reply.imageCaption && reply.body?.trim()) await once(() => sendText(from, to, reply.body));
     } else {
-      await sendText(from, to, reply.text);
+      await once(() => sendText(from, to, reply.text));
     }
     // a second or third bubble (the expense bot's rates), in order
-    for (const t of reply.more ?? []) await sendText(from, to, t);
+    for (const t of reply.more ?? []) await once(() => sendText(from, to, t));
 
     // THE RECEIPT THEY ASKED FOR, after the line that names it: a photo as a
     // picture, a PDF or a sheet as a file. Only ever on their request.
     if (reply.receipt) {
       const content = Buffer.from(reply.receipt.base64, "base64");
       if (/^image\//.test(reply.receipt.mime)) {
-        await sendImage(from, to, { content, caption: "", mimetype: reply.receipt.mime });
+        await once(() => sendImage(from, to, { content, caption: "", mimetype: reply.receipt.mime }));
       } else {
-        await sendDocument(from, to, { content, fileName: reply.receipt.filename ?? "receipt", mimetype: reply.receipt.mime, caption: "" });
+        await once(() => sendDocument(from, to, { content, fileName: reply.receipt.filename ?? "receipt", mimetype: reply.receipt.mime, caption: "" }));
       }
     }
 
@@ -163,7 +187,7 @@ const messageWorker = new Worker(
           "attachment dropped — documents are off",
         );
       } else {
-        await sendDocument(from, to, reply.attachment);
+        await once(() => sendDocument(from, to, reply.attachment));
       }
     }
 
@@ -171,12 +195,18 @@ const messageWorker = new Worker(
     // above — this never gets a chance to delay or risk it. identify() is a
     // second lookup rather than a change to handleMessage's return shape,
     // which every existing caller and test already depends on.
-    const ctx = await identify(from, groupId);
-    if (ctx) await recordMessage(ctx.person.personId, groupId, question);
+    // AND IT CAN NEVER FAIL THE JOB: a throw here re-ran the whole job, and
+    // with it the whole reply (duplicate sends, 2026-10-09).
+    try {
+      const ctx = await identify(from, groupId);
+      if (ctx) await recordMessage(ctx.person.personId, groupId, question);
+    } catch (err) {
+      logger.warn({ err: err?.message, messageId }, "could not record the message for the CRM chatbox");
+    }
   },
   // `connection` looks optional but defaults to localhost: works in dev,
   // fails silently in production
-  { connection: redis, concurrency: workerConcurrency },
+  { connection: redis, concurrency: workerConcurrency, ...INBOUND },
 );
 
 // ---------------------------------------------------------------------------
@@ -193,7 +223,7 @@ const messageWorker = new Worker(
 const masterSheetPullWorker = new Worker(
   MASTER_SHEET_PULL_QUEUE,
   () => pullMasterSheet(),
-  { connection: redis, concurrency: 1 },
+  { connection: redis, concurrency: 1, ...IDLE },
 );
 
 // ---------------------------------------------------------------------------
@@ -209,6 +239,7 @@ const paydayWorker = new Worker(
   {
     connection: redis,
     concurrency: 1,
+    ...IDLE,
   },
 );
 
@@ -232,6 +263,7 @@ const paydaySendWorker = new Worker(
     connection: redis,
     concurrency: 1,
     limiter: { max: 1, duration: paydayConfig.sendGapMinutes * 60_000 },
+    ...IDLE,
   },
 );
 
@@ -248,7 +280,7 @@ const paydaySendWorker = new Worker(
 const paydayRetryWorker = new Worker(
   PAYDAY_RETRY_QUEUE,
   () => retryUnsynced(currentPeriod()),
-  { connection: redis, concurrency: 1 },
+  { connection: redis, concurrency: 1, ...IDLE },
 );
 
 // ---------------------------------------------------------------------------

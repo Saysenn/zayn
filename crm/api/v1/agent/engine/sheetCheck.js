@@ -83,6 +83,14 @@ function dateIn(v, monthFirst = false) {
   const s = String(v ?? '').trim();
   let m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
   if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  // "1-Oct-26", "1 Oct 2026", "01 October 2026": a month in words is never
+  // day or month first. Messy file 2026-10-08: these were read as no date.
+  const word = /^(\d{1,2})[\s/.-]+([a-z]{3,9})\.?[\s/.-]+(\d{2,4})$/i.exec(s);
+  const MON = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  if (word && MON.includes(word[2].slice(0, 3).toLowerCase())) {
+    const year = word[3].length === 2 ? `20${word[3]}` : word[3];
+    return `${year}-${String(MON.indexOf(word[2].slice(0, 3).toLowerCase()) + 1).padStart(2, '0')}-${word[1].padStart(2, '0')}`;
+  }
   m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/.exec(s);
   if (!m) return null;
   const [day, month] = monthFirst ? [m[2], m[1]] : [m[1], m[2]];
@@ -382,7 +390,15 @@ function sameAsDeal(field, theirs, deal, rated) {
   return same(field, theirs, rated(ours, deal));
 }
 
-function compare(read, deals, knownGroups, { cryptoPercent = 0 } = {}) {
+/** A group name without the words that only tag it: group, grp, ltd, limited, team, the. */
+function bare(name) {
+  return String(name ?? '').toLowerCase().split(/[^a-z0-9]+/)
+    .filter((w) => w && !['group', 'grp', 'groups', 'ltd', 'limited', 'team', 'the', 'co'].includes(w)).join('');
+}
+
+function compare(read, deals, knownGroups, {
+  cryptoPercent = 0, notRenamed = [], dropGroups = [], aliases = {}, renames = null,
+} = {}) {
   // eslint-disable-next-line global-require
   const { ratedAmount } = require('../../shared/rates.helper');
   const rated = (amount, deal) => ratedAmount(amount, deal, { cryptoPercent });
@@ -390,8 +406,30 @@ function compare(read, deals, knownGroups, { cryptoPercent = 0 } = {}) {
   const groupOf = (g) => {
     if (!g) return null;
     const want = fold(g);
-    return knownGroups.find((k) => fold(k) === want) ?? knownGroups.find((k) => want.length >= 4 && within(want, fold(k), 1)) ?? null;
+    // A SLIP IS NEVER ANOTHER NUMBER: "INDIGO 2" is not INDIGO (messy file 2026-10-08).
+    const digits = (x) => (String(x).match(/\d+/g) ?? []).join(',');
+    return knownGroups.find((k) => fold(k) === want)
+      // THE SAME NAME WITH A TAG: "Milkman Group", "MILKMAN Ltd", "Team Indigo".
+      ?? knownGroups.find((k) => bare(k) && bare(k) === bare(g))
+      ?? knownGroups.find((k) => want.length >= 4 && within(want, fold(k), 1) && digits(want) === digits(fold(k))) ?? null;
   };
+  /**
+   * THE ADMIN'S ANSWERS, when they gave them (groups first, 2026-10-08): a
+   * group they said is a typo for one of ours is read as ours, a group they
+   * said not to add is left out of the check, and a name they said is NOT a
+   * rename is a new group (below).
+   */
+  const theirName = (r) => (r.group ? (groupOf(r.group) ?? String(r.group).trim()) : null);
+  // People in a group they left out are never offered as stops elsewhere.
+  const droppedPeople = new Set(read.rows.filter((r) => dropGroups.includes(theirName(r))).map((r) => fold(r.person)));
+  if (Object.keys(aliases).length || dropGroups.length) {
+    read = {
+      ...read,
+      rows: read.rows
+        .map((r) => (r.group && aliases[String(r.group).trim()] ? { ...r, group: aliases[String(r.group).trim()] } : r))
+        .filter((r) => !dropGroups.includes(theirName(r))),
+    };
+  }
   // ---- groups: renamed, new, not in their sheet ----
   const theirGroups = new Map();
   for (const r of read.rows) {
@@ -405,28 +443,112 @@ function compare(read, deals, knownGroups, { cryptoPercent = 0 } = {}) {
     if (!ourGroups.has(d.group_name)) ourGroups.set(d.group_name, new Set());
     ourGroups.get(d.group_name).add(fold(d.person_name));
   }
+  const notRenamedSet = new Set(notRenamed.map(fold));
   const renamed = [];
   const newGroups = [];
+  // HOW MUCH EACH NEW NAME SHARES WITH OURS, so the question can say why.
+  const newGroupInfo = [];
   for (const [g, people] of theirGroups) {
-    if (ourGroups.has(g)) continue;
+    // One of OUR group names (even one with no live deal today) is never new.
+    if (ourGroups.has(g) || knownGroups.includes(g)) continue;
     let best = null;
+    let near = null;
+    const shares = [];
     for (const [ours, theirsPeople] of ourGroups) {
+      const shared = [...theirsPeople].filter((p) => people.has(p)).length;
+      if (shared >= 2) shares.push({ group: ours, shared, of: theirsPeople.size });
+      if (shared && (!near || shared > near.shared)) near = { group: ours, shared, of: theirsPeople.size };
       if (theirGroups.has(ours)) continue;
-      const overlap = [...theirsPeople].filter((p) => people.has(p)).length / Math.max(theirsPeople.size, 1);
-      if (overlap >= 0.6 && (!best || overlap > best.overlap)) best = { from: ours, overlap };
+      const overlap = shared / Math.max(theirsPeople.size, 1);
+      if (overlap >= 0.6 && (!best || overlap > best.overlap)) best = { from: ours, overlap, shared, of: theirsPeople.size };
     }
-    if (best) renamed.push({ from: best.from, to: g, deals: live.filter((d) => d.group_name === best.from) });
-    else newGroups.push(g);
+    const rows = read.rows.filter((r) => r.group && (groupOf(r.group) ?? r.group.trim()) === g).length;
+    // A NAME LIKE ONE OF OURS ("MILKMEN", "Nexus 2"): a slip or a rename, not obviously new.
+    /**
+     * A NAME LIKE ONE OF OURS, judged by HOW it differs, any length of name:
+     * another number or an extra word ("MILKMAN 2", "Milkman North Team") is
+     * a sibling, most likely new; a couple of letters off is a slip.
+     */
+    const fg = bare(g);
+    let lookalike = null;
+    let lookKind = null;
+    for (const o of ourGroups.keys()) {
+      const fo = bare(o);
+      if (fg.length < 3 || !fo) continue;
+      const digitsDiffer = (fg.match(/\d+/g) ?? []).join() !== (fo.match(/\d+/g) ?? []).join();
+      const letters = (x) => x.replace(/\d+/g, '');
+      if (letters(fg) === letters(fo) && digitsDiffer) { lookalike = o; lookKind = 'sibling'; break; }
+      if (fg.includes(fo) || fo.includes(fg)) { lookalike = o; lookKind = 'sibling'; break; }
+      if (!digitsDiffer && within(fg, fo, 2)) { lookalike = o; lookKind = 'typo'; break; }
+    }
+    // HER JUDGEMENT, when she gave one (groupJudge.js): a rename or merge she
+    // named is one, whatever the overlap; with her judgement in hand, no
+    // other group is renamed by the 60% rule.
+    if (renames) {
+      const ours = (renames[g] ?? []).filter((o) => ourGroups.has(o));
+      best = ours.length ? { from: ours[0], shared: shares.find((x) => x.group === ours[0])?.shared ?? 0, of: ourGroups.get(ours[0]).size } : null;
+      if (best) shares.splice(0, shares.length, ...shares.filter((x) => ours.includes(x.group)), ...ours.filter((o) => !shares.some((x) => x.group === o)).map((o) => ({ group: o, shared: 0, of: ourGroups.get(o).size })));
+    }
+    if (best && !notRenamedSet.has(fold(g))) {
+      // Newcomers in PEOPLE, as the old faces are: one person with two deals is one.
+      const gone = [...ourGroups.get(best.from)].filter((p) => !people.has(p));
+      const goneNames = [...new Set(live.filter((d) => d.group_name === best.from && gone.includes(fold(d.person_name))).map((d) => d.person_name))];
+      renamed.push({ from: best.from, to: g, deals: live.filter((d) => d.group_name === best.from), shared: best.shared, of: best.of, rows, extra: [...people].filter((p) => ![best.from, ...shares.filter((x) => x.group !== best.from && !theirGroups.has(x.group)).map((x) => x.group)].some((o) => ourGroups.get(o).has(p))).length, gone: goneNames, lookalike,
+        // TWO OF OURS UNDER ONE NEW NAME is a merge, not a rename.
+        alsoFrom: shares.filter((x) => x.group !== best.from && !theirGroups.has(x.group)) });
+    } else {
+      newGroups.push(g);
+      newGroupInfo.push({ name: g, rows, people: people.size, near, lookalike, lookKind, oldStillHere: Boolean(near && theirGroups.has(near.group)) });
+    }
   }
   const renamedTo = new Map(renamed.map((r) => [r.to, r.from]));
+  // THE FACTS FOR HER JUDGEMENT (groupJudge.js): every group of theirs that
+  // is not ours by name, with who it shares, and our groups' sizes.
+  const ourSizes = Object.fromEntries([...ourGroups].map(([g, p]) => [g, p.size]));
+  const inFile = [...ourGroups.keys()].filter((g) => theirGroups.has(g));
+  const unfamiliar = [...theirGroups].filter(([g]) => !ourGroups.has(g) && !knownGroups.includes(g)).map(([g, people]) => ({
+    name: g,
+    people: people.size,
+    newcomers: [...people].filter((p) => ![...ourGroups.values()].some((ourPeople) => ourPeople.has(p))).length,
+    // HOW ITS NAME RELATES TO OURS, as a fact for her: a slip, or a sibling.
+    looksLike: (() => {
+      const fg = bare(g);
+      for (const o of ourGroups.keys()) {
+        const fo = bare(o);
+        if (fg.length < 3 || !fo) continue;
+        const digitsDiffer = (fg.match(/[0-9]+/g) ?? []).join() !== (fo.match(/[0-9]+/g) ?? []).join();
+        if (!digitsDiffer && (within(fg, fo, 2) || [...fg].sort().join('') === [...fo].sort().join(''))) return { group: o, kind: 'a slip of the same name' };
+        if (fg.includes(fo) || fo.includes(fg)) return { group: o, kind: 'a different name built on it' };
+      }
+      return null;
+    })(),
+    rows: read.rows.filter((r) => r.group && (groupOf(r.group) ?? String(r.group).trim()) === g).length,
+    // A PERSON IN TWO OF OUR GROUPS is counted once, for the group this name
+    // takes most of: Gloria in MANBAT and NEXUS made "all of NEXUS" read as
+    // a NEXUS + MANBAT merge (2026-10-08).
+    shares: (() => {
+      const raw = [...ourGroups].map(([o, ourPeople]) => ({ group: o, of: ourPeople.size, who: [...ourPeople].filter((p) => people.has(p)) }));
+      const part = (x) => x.who.length / Math.max(x.of, 1);
+      const home = (p) => raw.filter((x) => x.who.includes(p)).sort((a, b) => part(b) - part(a))[0]?.group;
+      return raw.map((x) => ({ group: x.group, of: x.of, shared: x.who.filter((p) => home(p) === x.group).length }))
+        .filter((x) => x.shared > 0).sort((a, b) => b.shared - a.shared);
+    })(),
+  }));
 
   // ---- rows: matched, mismatched, new, unclear ----
   const mismatched = [];
+  const movedToNew = [];
   const notOnSheet = [];
   const unmatched = [];
   const matchedIds = new Set();
   const companies = new Set(live.map((d) => fold(d.company)));
-  for (const r of read.rows) {
+  // OUR GROUPS' ROWS FIRST, then the new names: a person in both is their own
+  // deal where it was, and a second deal in the new group, whatever the row
+  // order. Read first, the new group's row took the deal as "moved".
+  // Our groups the file does not hold at all, and that were not renamed.
+  const absentOurs = [...ourGroups.keys()].filter((g) => !theirGroups.has(g) && !renamed.some((x) => x.from === g));
+  const ourName = (r) => !r.group || Boolean(groupOf(r.group) ?? renamedTo.get(String(r.group).trim()));
+  for (const r of [...read.rows.filter(ourName), ...read.rows.filter((x) => !ourName(x))]) {
     // "gary manbat kp 6300": KP is a company here, read as his role. Live 2026-10-06.
     if (!r.company && r.roleLabel && companies.has(fold(r.roleLabel))) {
       r.company = r.roleLabel;
@@ -442,7 +564,17 @@ function compare(read, deals, knownGroups, { cryptoPercent = 0 } = {}) {
       notOnSheet.push({ ...r, group: r.group ? (groupOf(r.group) ?? r.group.trim()) : null });
       continue;
     }
-    if (group) cands = cands.filter((d) => d.group_name === group);
+    // A MERGED NAME holds the deals of every group merged into it: Gloria in
+    // MANBAT and in NEXUS, both under UNITED, are told apart by role below.
+    const mergedFrom = renamed.find((x) => x.from === group && x.alsoFrom?.length);
+    // A RENAMED NAME may also hold people from our groups that are not in
+    // the file at all (a merge she called a rename): their deals are
+    // candidates too, told apart by role and pay, and they MOVE. Blind
+    // battery 2026-10-08: Pino on 1,250 and 1,750 paired crossed.
+    const viaRename = Boolean(group && r.group && !groupOf(r.group) && renamedTo.get(String(r.group).trim()));
+    const inGroups = viaRename ? [group, ...(mergedFrom?.alsoFrom ?? []).map((x) => x.group), ...absentOurs]
+      : group ? [group] : null;
+    if (inGroups) cands = cands.filter((d) => inGroups.includes(d.group_name));
     /**
      * THE COMPANY ON THE ROW COUNTS even for someone with one deal. Live
      * 2026-10-06: Nathan's row at "Social work partners PR" took our Nathan at
@@ -468,12 +600,28 @@ function compare(read, deals, knownGroups, { cryptoPercent = 0 } = {}) {
       const byRole = cands.filter((d) => fold(d.role_label) === fold(r.roleLabel));
       if (byRole.length) cands = byRole;
     }
+    // THE SAME DEAL TWICE (Gloria at Workforce as Closer in INDIGO, MANBAT
+    // and MILKMAN): identical in person, company and role, so either one is
+    // the row, and two rows take two of them. Blind battery 2026-10-08.
+    // Only within the row's own group(s): a row with NO group stays unclear.
+    if (inGroups && cands.length > 1 && cands.every((d) => fold(d.company) === fold(cands[0].company) && fold(d.role_label) === fold(cands[0].role_label))) {
+      // the one with the row's own pay first (Pino on 1,250 and on 1,750 were
+      // paired crossed and read as two changes), then the row's own group
+      const sameMoney = r.monthlyAmount != null ? cands.filter((d) => Math.abs(Number(d.monthly_amount) - Number(r.monthlyAmount)) < 0.005) : [];
+      const pool = sameMoney.length ? sameMoney : cands;
+      cands = [pool.find((d) => d.group_name === group) ?? pool[0]];
+    }
     if (cands.length > 1) {
       unmatched.push({ ...r, why: `${cands[0].person_name} has ${cands.length} deals (${cands.map((d) => d.group_name).join(', ')}) and the row does not say which` });
       continue;
     }
     const deal = cands[0];
     matchedIds.add(deal.id);
+    // UNDER A NEW GROUP'S NAME, a deal of ours moved there (a split, 2026-10-08):
+    // HARBOUR holding four of MILKMAN's people is those four moving.
+    if (r.group && (!group || (viaRename && deal.group_name !== group)) && fold(String(r.group).trim()) !== fold(deal.group_name)) {
+      movedToNew.push({ row: r, deal, from: deal.group_name, to: String(r.group).trim() });
+    }
     const diffs = COMPARED.filter((f) => r[f] !== undefined && !sameAsDeal(f, r[f], deal, rated))
       .map((f) => ({ field: f, theirs: r[f], ours: deal[FIELDS[f].column] }));
     if (diffs.length) mismatched.push({ row: r, deal, diffs });
@@ -516,11 +664,18 @@ function compare(read, deals, knownGroups, { cryptoPercent = 0 } = {}) {
    */
   const matchedIn = (g) => live.filter((d) => d.group_name === g && matchedIds.has(d.id)).length;
   const named = [...new Set([...theirGroups.keys()].map((g) => renamedTo.get(g) ?? g).filter((g) => ourGroups.has(g)))];
-  const covered = new Set(named.filter((g) => matchedIn(g) / Math.max(live.filter((d) => d.group_name === g).length, 1) >= 0.6));
+  // A RENAME THEY (or she, sure) DECIDED covers its group, however few came
+  // across: who did not is a leaver, offered as a stop by name.
+  const decidedRenames = new Set(Object.values(renames ?? {}).flat());
+  const covered = new Set(named.filter((g) => decidedRenames.has(g) || matchedIn(g) / Math.max(live.filter((d) => d.group_name === g).length, 1) >= 0.6));
   const partial = named.filter((g) => !covered.has(g))
     .map((g) => ({ group: g, matched: matchedIn(g), total: live.filter((d) => d.group_name === g).length }));
-  const missing = live.filter((d) => covered.has(d.group_name) && !matchedIds.has(d.id));
-  const notInTheirs = [...ourGroups.keys()].filter((g) => !named.includes(g) && !renamed.some((r) => r.from === g));
+  // NEVER A STOP FOR SOMEONE THE FILE STILL LISTS: a row of theirs that
+  // could not be matched for sure keeps their deals off the stop list.
+  const unsure = new Set(unmatched.map((u) => fold(u.person)));
+  const missing = live.filter((d) => covered.has(d.group_name) && !matchedIds.has(d.id) && !droppedPeople.has(fold(d.person_name)) && !unsure.has(fold(d.person_name)));
+  // A group merged into a new name is not "left alone": its people moved.
+  const notInTheirs = [...ourGroups.keys()].filter((g) => !named.includes(g) && !renamed.some((r) => r.from === g || (r.alsoFrom ?? []).some((x) => x.group === g)));
 
   /**
    * A DEAL THAT CHANGED GROUP IS A MOVE, not a new deal and a stop. Live
@@ -528,7 +683,7 @@ function compare(read, deals, knownGroups, { cryptoPercent = 0 } = {}) {
    * MILKMAN and came back as two adds and two stops. Same person, same
    * company, one deal of ours not in their sheet: that deal moved.
    */
-  const moved = [];
+  const moved = [...movedToNew];
   for (const r of [...notOnSheet]) {
     if (!r.company || !r.group) continue;
     const was = live.filter((d) => !matchedIds.has(d.id) && fold(d.person_name) === fold(r.person)
@@ -587,7 +742,8 @@ function compare(read, deals, knownGroups, { cryptoPercent = 0 } = {}) {
   }
 
   return {
-    read: read.rows.length, mismatched, notOnSheet, unmatched, missing, renamed, newGroups, notInTheirs, partial, moved, respelled, stoppedHere,
+    read: read.rows.length, mismatched, notOnSheet, unmatched, missing, renamed, newGroups, newGroupInfo, notInTheirs, partial, moved, respelled, stoppedHere,
+    unfamiliar, ourSizes, inFile,
     month: otherMonth ? { file: fileMonth, crm: crmMonth } : null,
     unread: read.unread,
   };
@@ -630,14 +786,20 @@ function toPlan(found, request) {
   }
   for (const r of found.notOnSheet) {
     const need = ['group', 'company', 'roleLabel', 'monthlyAmount'].filter((f) => r[f] === undefined || r[f] === null || r[f] === '');
+    // THE ADD NEEDS A START: the deal tool refuses a new deal with no
+    // appointment or payment start date, so it is asked BEFORE the yes,
+    // never found missing after it (browser test 2026-10-08: 9 of 9 failed).
+    if (!r.assignedOn && !r.paymentStartOn) need.push('assignedOn');
     // From another month's sheet, the month's own figures are left for the
     // CRM to work out for this one.
-    const changes = ['roleLabel', 'monthlyAmount', 'payableDays', 'currency', 'paymentMethod', 'presetOn', 'endOn', 'notes', 'label']
+    const changes = ['roleLabel', 'monthlyAmount', 'payableDays', 'currency', 'paymentMethod', 'presetOn', 'endOn', 'assignedOn', 'paymentStartOn', 'phone', 'location', 'notes', 'label']
       .filter((f) => r[f] !== undefined && !(found.month && ['presetOn', 'payableDays'].includes(f)))
       .map((f) => ({ field: f, mode: 'set', value: String(r[f]) }));
     steps.push({
       n: n(), action: 'add_deal', person: r.person, group: r.group ?? null, company: r.company ?? null, changes, need, line: r.line,
-      question: need.length ? `New deal for ${r.person} (line ${r.line}) still needs: ${need.join(', ')}.` : null,
+      // A group the file check found new, and they approved: kept as written.
+      newGroup: Boolean(r.group && found.newGroups.includes(r.group)),
+      question: need.length ? `New deal for ${r.person} (line ${r.line}) still needs: ${need.map((x) => ({ roleLabel: 'role', monthlyAmount: 'monthly amount', assignedOn: 'appointment date (or "from this month")' }[x] ?? x)).join(', ')}.` : null,
       lines: [{ name: r.person, where: [r.group, r.company].filter(Boolean).join(' · '), detail: changes.map((c) => `${FIELDS[c.field].label} ${c.value}`).join(' · ') || 'new deal' }],
     });
   }
@@ -846,8 +1008,64 @@ function readoutLines(readout) {
   });
 }
 
+/**
+ * ===============================
+ * * WHICH GROUPS ARE WORTH A QUESTION
+ * ===============================
+ * His call 2026-10-08: case by case, by the data, never always. A clear
+ * rename (nearly all of the old group's people, the old name gone) or a
+ * clearly new group (none of our people, a name like none of ours) is said
+ * in one line and planned. Only a real doubt is asked, with her guess:
+ *  - a rename of only part of a group, or more newcomers than old faces;
+ *  - a "new" name that looks like one of ours (a slip, or a rename);
+ *  - a "new" group holding people of one of ours (moved, split or merged).
+ * Each question carries the answer she would pick, so "yes" takes them all.
+ */
+function groupDoubts(found) {
+  const qs = [];
+  for (const r of found.renamed) {
+    if (r.alsoFrom?.length) {
+      const all = [{ group: r.from, shared: r.shared }, ...r.alsoFrom];
+      qs.push({
+        kind: 'rename', name: r.to, from: r.from, guess: 'rename',
+        text: `${r.to} holds ${all.map((x) => `${x.shared} of ${x.group}'s people`).join(' and ')}. I'd take it as ${all.map((x) => x.group).join(' and ')} merged into ${r.to}. Right, or is ${r.to} a new group?`,
+      });
+      continue;
+    }
+    const part = r.shared / Math.max(r.of, 1);
+    // Clear: nearly everyone came along, or nobody new joined (the group only
+    // shrank, and who left is a stop on the plan, by name).
+    if ((part >= 0.75 && r.extra <= r.shared) || r.extra === 0) continue;
+    const gone = r.gone?.length ? ` (not there: ${r.gone.length <= 3 ? r.gone.join(', ') : `${r.gone.length} people`})` : '';
+    qs.push({
+      kind: 'rename', name: r.to, from: r.from, guess: 'rename',
+      text: `${r.to}: ${r.shared} of ${r.from}'s ${r.of} people are in it${gone}${r.extra ? `, plus ${r.extra} new` : ''}. I'd take it as ${r.from} renamed. Right, or is ${r.to} a new group?`,
+    });
+  }
+  for (const g of found.newGroupInfo ?? []) {
+    if (g.lookalike && g.lookKind === 'sibling') {
+      qs.push({
+        kind: 'new', name: g.name, guess: 'sibling', like: g.lookalike,
+        text: `${g.name} (${g.rows} ${g.rows === 1 ? 'deal' : 'deals'}) is new, next to our ${g.lookalike}. I'd add it as its own group. Right, or is it ${g.lookalike}?`,
+      });
+    } else if (g.lookalike) {
+      qs.push({
+        kind: 'new', name: g.name, guess: 'typo', like: g.lookalike,
+        text: `${g.name} (${g.rows} ${g.rows === 1 ? 'deal' : 'deals'}) looks like a typo for our ${g.lookalike}. Right, or is it a new group?`,
+      });
+    } else if (g.near && g.near.shared >= 2) {
+      qs.push({
+        kind: 'new', name: g.name, guess: 'new', like: g.near.group,
+        text: `${g.name} is new to us, but ${g.near.shared} of its ${g.people ?? g.rows} people are in ${g.near.group}${g.oldStillHere ? ` (still in your file too)` : ''}. I'd add ${g.name} as a new group and move those ${g.near.shared} there. Right, or leave ${g.name} out?`,
+      });
+    }
+  }
+  return qs;
+}
+
 module.exports = {
   nickname,
+  groupDoubts,
   fromLayout, readoutLines, monthName,
   fileToText, fromImportRows, readTable, readMessy, looksLikeSheet, compare, toPlan, summary, numberIn, dateIn,
 };

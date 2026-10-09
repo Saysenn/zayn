@@ -41,11 +41,16 @@ WhatBot feeding it, and the month end payday check.
 - Outcomes are `confirmed`, `partial`, `not_received`, and `no_response`
   after `PAYDAY_RESPONSE_DAYS`. They go through `crmOutbox.js`, which retries.
 - CRM side, `agent.js:79-120`: writes `payment_outcome`, `payment_note` and
-  `payment_replied_at` (migration 016). **`confirmed` and `partial` set
-  `override_paid = true`, which is the paid tick on the master sheet;
-  `not_received` sets it false** (`agent.js:35`,
-  `masterSheetRows.repo.js:1015-1037`). `sent` and `no_response` leave paid
-  alone.
+  `payment_replied_at` (migration 016), shown as the **Payment received**
+  column (Paid / Unpaid / Awaiting per deal; Paid / Unpaid / Portion /
+  Awaiting per person on the People pages). **`confirmed` sets
+  `override_paid = true` and `not_received` sets it false** (`agent.js`
+  `PAID_BY_OUTCOME`). `partial`, `sent` and `no_response` leave paid alone.
+- **Flagged for admin review** (2026-10-08): `partial`, and a real answer
+  changed to a different one, set `needs_review` with a reason starting
+  "payday" (`shared/paydayFlag.helper.js`). Only setting the deal's Payment
+  received to Paid or Unpaid clears it; a sheet upload and "Save and mark it
+  sorted" keep it.
 - The CRM can block every one of these writes with the Settings flag
   `whatbot_writes_enabled` (migration 028).
 
@@ -74,7 +79,7 @@ The order to prove it:
 | Option | What | Messages sent |
 |---|---|---|
 | A | `npm install` in `whatbot/`, run the payday tests, then a dry run against the clone | none |
-| B | A, then one real send with `--only <the admin's own number>`; reply 1, 2 or 3 on the phone and check the paid tick (`override_paid`) and `payment_outcome` on that deal in the clone | one, to the admin |
+| B | A, then one real send with `--only <the admin's own number>`; reply 1, 2 or 3 on the phone and check Paid (`override_paid`), Payment received (`payment_outcome`) and, for 3, the review flag on that person's deals in the clone | one, to the admin |
 | C | Leave it for later | none |
 
 Not yet chosen. B needs the admin's own number.
@@ -112,8 +117,10 @@ Not yet chosen. B needs the admin's own number.
 
 ## What we want
 
-1. **Payday check**: at month end, WhatBot asks and the paid tick on each
-   deal follows the answer. (Exists; needs proving.)
+1. **Payday check**: at month end, WhatBot asks and each deal's Payment
+   received (and, for a clear yes or no, its Paid tick) follows the answer;
+   a portion or a changed answer is flagged for an admin. (Exists; needs
+   proving.)
 2. **Expenses through WhatBot**: a registered admin sends plain text, a photo
    of a receipt, an Excel or any document. It is read accurately, cleaned,
    and sent back as a numbered list for confirmation, with extra bubbles for

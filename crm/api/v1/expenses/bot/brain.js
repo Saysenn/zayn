@@ -8,10 +8,16 @@ const { extract } = require('./extract');
 const {
   normalise, duplicates, ready, currencyOf, num, exactCopy, ME,
 } = require('./check');
-const { readReply } = require('./reply');
+const { readReply, numberSet } = require('./reply');
 const { route, revise } = require('./understand');
-const { quickRoute, canonicalVerbs } = require('./quick');
+const { quickRoute, canonicalVerbs, numberRun } = require('./quick');
 const planner = require('./planner');
+/**
+ * THE EXPENSE AGENT (his call 2026-10-09: "expenses is very critical, this
+ * one should be super smart"): Diane's way, see agent.js. Off = the reader
+ * below, exactly as before; it is never deleted (his rule).
+ */
+const AGENT_ON = String(process.env.EXPENSE_AGENT ?? 'off').toLowerCase() === 'on';
 const PLANNER_ON = String(process.env.EXPENSE_PLANNER ?? 'on').toLowerCase() !== 'off';
 const find = require('./find');
 const { liveRates } = require('./rates');
@@ -93,6 +99,15 @@ const SAVE_THEN = /^(?:(?:ok(?:ay)?|yes|yep|yeah|sure)[,!.\s]+)?(?:save(?: it| t
 const FOLLOW_UP_CONTEXT = /^(?:📊|No expenses found|\*?SPENDING)/;
 const CHANGE_WHICH = /^(?:(?:ok(?:ay)?|so|hi|hey|sorry|actually|wait|oh|hmm+|right|now|um+|ah)[,!.\s]+)*(?:let'?s|lets|i (?:want|need) to|i'?d like to|can (?:you|i|we)|please|pls)?\s*(?:update|modify|change|edit|fix|correct|amend)\s+(?:some\s+|an?\s+|my\s+|the\s+|few\s+)?(?:([\p{L}][\p{L} .'-]{1,30}?)(?:'s)?\s+)?(?:expenses?|ones?|entries|items?)(?:\s+(?:please|pls|now))?[.!?]*$/iu;
 const UNDO = /^(?:undo(?: (?:that|it|this|last|the last one))?|take (?:it|that|them) back|put (?:it|that) back|revert(?: that| it)?)[!. ]*$/i;
+// "HOW MUCH IS GLORIA'S TOTAL AFTER THIS?": the draft counted as saved
+const AS_IF = /\b(?:after (?:this|that|these|those|the changes?|saving|it'?s saved|they'?re saved)|once (?:it'?s |they'?re )?(?:saved|changed|done)|if i save(?: it| them)?|with (?:the|these|those) changes?)\b/i;
+// "UNDO ONLY 2", "undo 2 and 3", "undo the last 2 things", "undo the gloria change"
+const UNDO_SOME = /^(?:(?:pls|please)\s+)?(?:undo|revert|put back|take back)\s+(?:only\s+|just\s+)?(?:no\.?\s*|#|numbers?\s+)?\d|^(?:only|just)\s+undo\s+\d|^(?:undo|revert)\s+(?:the\s+)?last\s+(?:\d+|two|three|four|five)\s+(?:things|changes|actions|ones|saves|edits)\b|^undo\s+(?:the\s+)?[a-z][\w\s'.-]{1,40}\s+(?:change|edit|update|removal|save|split)s?\b/i;
+// "WHAT DID YOU JUST CHANGE?", "who changed 4?"
+// and "show me my last changes (for …)" / "my recent edits": the same history,
+// never an expense search (two agent test 2026-10-09)
+const WHAT_DONE = /^(?:so\s+)?(?:what|which)\s+(?:did|have)\s+(?:you|i|we)\s+(?:just\s+)?(?:change|changed|do|done|save|saved|remove|removed|update|updated)(?:\s+(?:just\s+now|last))?\??$|^what\s+(?:was|were)\s+(?:just\s+)?(?:changed|saved|removed|updated)\??$|^(?:(?:can you\s+|pls\s+|please\s+)?(?:show|list|give|tell)\s+(?:me\s+)?|what\s+(?:are|were)\s+)?(?:my|the|our)\s+(?:last|recent|latest)\s+(?:\d+\s+)?(?:changes|edits|actions|updates)\b[^?]*\??$/i;
+const WHO_DID = /^who\s+(?:changed|edited|updated|added|saved|made|entered|put in)\s+(?:no\.?\s*|#|number\s*)?(\d{1,3}|(?:the\s+)?[a-z][\w\s'&.-]{1,40}?)\??$/i;
 
 /**
  * @param {{ phone: string, group: string, text?: string, attachments?: object[] }} msg
@@ -106,6 +121,7 @@ function showAgain(ctx) {
   const again = p.kind === 'add' ? format.addPreview(p.items, ctx.group)
     : p.kind === 'edit' ? format.editsPreview(editItems(p), { group: ctx.group === find.ALL, removes: p.removes ?? [] })
       : p.kind === 'remove' ? format.removePreview(p.before)
+        : p.kind === 'settle' ? settlePreview(p, ctx)
         : p.kind === 'undo' ? 'Undo the last thing you did?\nReply *yes* to undo it, or *cancel*.'
           : p.kind === 'either' ? 'Do you mean *change* the saved ones, or add them as *new*?' : null;
   return again ? `Just to be sure, this is still waiting:\n\n${again}` : 'Okay.';
@@ -146,7 +162,7 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
     state.awaiting = null;
     // a queue only lives while its first part is still waiting
     if (!state.pending) state.queue = [];
-    reply = await answerTurn(said, files, ctx);
+    reply = AGENT_ON ? await agentFirst(said, files, ctx) : await answerTurn(said, files, ctx);
     /**
      * THE NEXT THING THEY ASKED FOR IN THE SAME MESSAGE ("save it and
      * remove the lunch", two changes in one), once nothing is waiting: its
@@ -200,6 +216,14 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
       reply = 'Sorry, something went wrong on my side. Nothing was saved. Please try again in a minute.';
     }
   }
+  // A SECOND LOOK under a change preview: a big jump, a new payee, a name off
+  if (typeof reply === 'string') reply = await withWarnings(reply, ctx);
+  // SETTLED ONES LEFT OUT of a bigger change or removal: said under it
+  if (typeof reply === 'string' && ctx.locked?.length && !reply.startsWith('🔒')) {
+    reply = `${reply}
+
+🔒 Settled (refunded), so left out: ${ctx.locked.slice(0, 5).map((d) => `*${d}*`).join(', ')}${ctx.locked.length > 5 ? ` and ${ctx.locked.length - 5} more` : ''}. The CRM admin can reopen them.`;
+  }
   // THE RATES BUBBLE after a preview with other currencies in it: a second
   // message, so the rates read on their own (his call 2026-10-07).
   const more = [...(ctx.then ?? [])];
@@ -230,7 +254,7 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
   // Was the open preview the last thing they saw? A "yes" counts only then.
   if (state.pending) state.pending.at = state.pending.at ?? Date.now();
   // looking at a receipt is not looking away: a yes after it still counts
-  if (state.pending) state.pending.shownLast = Boolean(ctx.keepShown && state.pending.shownLast !== false) || PREVIEWS.test(String(reply ?? '')) || (ctx.then ?? []).some((t) => PREVIEWS.test(String(t))) || (/^(?:🧾 Receipt for|Sure, take your time|Okay, kept them|Drop all \d+ without saving|Sure\. Add one, like|Reply \*yes\* to undo it|No problem\. (?:Right now I'm about to|\d+ changes are waiting)|Which ones? should I (?:change|remove)|Left that one out|Swapped it|The \*[^*]+\* isn't in this list|Sure, I'll (?:remove .*|do that change) right after)/.test(String(reply ?? '')) && Boolean(state.pending.shownLast));
+  if (state.pending) state.pending.shownLast = Boolean(ctx.keepShown && state.pending.shownLast !== false) || PREVIEWS.test(String(reply ?? '')) || (ctx.then ?? []).some((t) => PREVIEWS.test(String(t))) || (/^(?:🧾 Receipt for|Sure, take your time|Okay, kept them|Drop all \d+ without saving|Sure\. Add one, like|Reply \*yes\* to undo it|No problem\. (?:Right now I'm about to|\d+ changes are waiting)|Which ones? should I (?:change|remove)|Left that one out|Swapped it|The \*[^*]+\* isn't in this list|Sure, I'll (?:remove .*|do that change) right after|That's \*\d+ expenses?\*)/.test(String(reply ?? '')) && Boolean(state.pending.shownLast));
   state.history = [...(state.history ?? []), { said: said || (files.length ? `[${files.length} file(s)]` : ''), reply }].slice(-HISTORY);
   if (msg.messageId) state.seen = [...(state.seen ?? []), { id: msg.messageId, reply }].slice(-30);
   // The saved batch is drawn once (below), never kept in the conversation.
@@ -312,6 +336,420 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
   };
 }
 
+// ---- warnings under a change preview ----
+
+/**
+ * WORTH A SECOND LOOK BEFORE THE YES (his list 2026-10-08): an amount 10×
+ * off, a date in the future, a payee never used (and the one they may have
+ * meant), a name not on the master sheet (and who they may have meant), a
+ * change that makes it the same as one already saved. Said, never blocked.
+ */
+async function warningsFor(p, ctx) {
+  const items = editItems(p);
+  const many = items.length + (p.removes ?? []).length > 1;
+  const low = (v) => String(v ?? '').trim().toLowerCase();
+  const known = await knownNames();
+  const people = items.some((x) => x.fields.spentBy) ? await spender.people().catch(() => null) : null;
+  const names = new Map();
+  const found = [];
+  for (const [i, x] of items.entries()) {
+    const b = x.before;
+    const f = x.fields;
+    if (f.rawAmount != null && Number(b.rawAmount) > 0 && Number(f.rawAmount) > 0) {
+      const ratio = Number(f.rawAmount) / Number(b.rawAmount);
+      if (ratio >= 10 || ratio <= 0.1) found.push({ i, msg: `${format.money(b.currency, b.rawAmount)} ➜ ${format.money(b.currency, f.rawAmount)} is ${ratio >= 10 ? `${Math.round(ratio)}× more` : `${Math.round(1 / ratio)}× less`}. Is that right?` });
+    }
+    if (f.spentOn && f.spentOn > ctx.today) found.push({ i, msg: `${format.dayFull(f.spentOn)} is in the future.` });
+    if (f.payee && !known.payees.some((k) => low(k) === low(f.payee))) {
+      const near = known.payees.find((k) => (low(k).length >= 4 && oneTypo(low(k), low(f.payee))) || (low(f.payee).length >= 3 && low(k).startsWith(low(f.payee))));
+      found.push({ i, msg: near ? `*${f.payee}* is a new payee. Did you mean *${near}*?` : `*${f.payee}* is a new payee.` });
+    }
+    if (f.spentBy && people && !x.me) {
+      const key = `${low(f.spentBy)}|${b.groupName ?? ctx.group}`;
+      if (!names.has(key)) names.set(key, await spender.linkSpender({ name: f.spentBy, group: b.groupName ?? ctx.group, list: people }).catch(() => null));
+      const l = names.get(key);
+      if (l?.status === 'near') found.push({ i, msg: `*${f.spentBy}* isn't on the master sheet. Did you mean *${l.choices[0]}*?` });
+      if (l?.status === 'ambiguous') found.push({ i, msg: `which *${f.spentBy}*? ${l.choices.slice(0, 3).join(' or ')}` });
+      if (l?.status === 'none') found.push({ i, msg: `*${f.spentBy}* isn't on the master sheet, so they won't see it on WhatsApp.` });
+    }
+    if (['spentOn', 'rawAmount', 'payee', 'description', 'currency'].some((k) => k in f)) {
+      const a = { ...b, ...f };
+      const twin = (await find.between(ctx.group, a.spentOn, a.spentOn)).find((r) => r.id !== x.id && Math.abs(Number(r.raw_amount) - Number(a.rawAmount)) < 0.005
+        && r.currency === a.currency && low(r.payee) === low(a.payee) && low(r.description) === low(a.description));
+      if (twin) found.push({ i, msg: `this would be the same as the *${twin.description}* already saved on ${format.day(a.spentOn)}.` });
+    }
+  }
+  // the same note on several lines is said once: "No. 1–6: Glroria isn't…"
+  const byMsg = new Map();
+  for (const w of found) byMsg.set(w.msg, [...(byMsg.get(w.msg) ?? []), w.i + 1]);
+  return [...byMsg].slice(0, 6).map(([msg, ns]) => `⚠️ ${many ? `No. ${format.ranges(ns)}: ` : ''}${msg}`);
+}
+
+/** The warnings, put just above "Reply yes…" of a change preview. */
+async function withWarnings(reply, ctx) {
+  const p = ctx.state.pending;
+  if (p?.kind !== 'edit' || !/_Not changed yet_/.test(String(reply ?? ''))) return reply;
+  const lines = await warningsFor(p, ctx).catch((err) => { logger.warn({ err: err.message }, 'expense bot: warnings skipped'); return []; });
+  if (!lines.length) return reply;
+  const at = reply.lastIndexOf('\nReply *yes*');
+  return at > 0 ? `${reply.slice(0, at)}\n${lines.join('\n')}\n${reply.slice(at)}` : `${reply}\n\n${lines.join('\n')}`;
+}
+
+// ---- the list on screen, searches, undo by number, "who changed it" ----
+
+const SHOW_ALL = /^(?:(?:pls|please|can you|could you)\s+)?(?:show|send|list|see|give)(?: me)?\s+(?:them\s+)?(?:all|all of them|every (?:one|line)|everything|the (?:full|whole|entire) (?:list|preview))(?:\s+(?:lines?|please|pls))*[.!?]*$/i;
+const SORT = /^(?:(?:pls|please|can you|could you)\s+)?(?:sort|order|arrange)(?:\s+(?:it|them|the list|these|those|this))?\s+by\s+(amount|price|cost|value|date|day|name|description|what|payee|paid to|shop|vendor|person|spender|who|spent by|category|type)(?:\s+(asc|desc|ascending|descending|biggest first|largest first|highest first|smallest first|lowest first|newest first|latest first|oldest first|high(?:est)? to low(?:est)?|low(?:est)? to high(?:est)?|a to z|z to a))?[.!?]*$/i;
+const SORT_SHORT = /^(?:(?:sort|order)\s+(?:it|them)?\s*)?(biggest|largest|highest|smallest|lowest|cheapest|newest|latest|oldest) first[.!?]*$/i;
+const LIST_ONLY = /^(?:(?:pls|please)\s+)?(?:only|just|show only|show me only|filter(?: to| by)?|keep only)\s+(?:the\s+)?(.+?)(?:\s+ones?)?[.!?]*$/i;
+const LIST_HIDE = /^(?:(?:pls|please)\s+)?(?:hide|without|exclude|leave out)\s+(?:the\s+)?(.+?)(?:\s+ones?)?[.!?]*$/i;
+const FIND_ASK = /^(?:(?:pls|please|can you|could you)\s+)?(?:find|search(?: for)?|look(?:ing)? for|look up|anything (?:with|from|for|about)|any (?:expenses? )?(?:with|from|for|about))\s+["“'‘]?(.+?)["”'’]?[?.!]*$/i;
+const MISSING_ASK = /\b(?:no|without|missing(?:\s+(?:an?|the|their))?|with(?:out)? (?:an? )?(?:empty|blank))\s+(payee|paid to|shop|vendor|category|spender|spent by|receipts?)\b/i;
+const MISSING_FIELD = { payee: 'payee', 'paid to': 'payee', shop: 'payee', vendor: 'payee', category: 'category', spender: 'spentBy', 'spent by': 'spentBy', receipt: 'receipt', receipts: 'receipt' };
+const SORT_KEY = { amount: 'amount', price: 'amount', cost: 'amount', value: 'amount', date: 'date', day: 'date', name: 'description', description: 'description', what: 'description', payee: 'payee', 'paid to': 'payee', shop: 'payee', vendor: 'payee', person: 'spentBy', spender: 'spentBy', who: 'spentBy', 'spent by': 'spentBy', category: 'category', type: 'category' };
+const CATEGORY_SAID = { fuel: 'fuel', petrol: 'fuel', travel: 'travel', transport: 'travel', taxi: 'travel', taxis: 'travel', food: 'food', meals: 'food', meal: 'food', office: 'office', bills: 'bills', bill: 'bills', utilities: 'bills', other: 'other' };
+
+/** One list row against "food", "over 500", "gloria's", "the taxis". */
+function rowFits(r, phrase) {
+  const t = String(phrase).toLowerCase().replace(/['’]s\b/g, '').trim();
+  const cat = CATEGORY_SAID[t.replace(/\s+(?:ones?|expenses?|category)$/, '')];
+  if (cat) return r.category === cat;
+  const aed = r.aed ?? r.rawAmount;
+  const over = /^(?:over|above|more than|bigger than|>)\s*(?:aed\s*)?(\d[\d,]*(?:\.\d+)?)/.exec(t);
+  if (over) return aed > Number(over[1].replace(/,/g, ''));
+  const under = /^(?:under|below|less than|smaller than|<)\s*(?:aed\s*)?(\d[\d,]*(?:\.\d+)?)/.exec(t);
+  if (under) return aed < Number(under[1].replace(/,/g, ''));
+  const words = find.wordsOf(t.replace(/^(?:by|spent by|paid to|from)\s+/, ''));
+  if (!words.length) return null;
+  const have = find.wordsOf(`${r.description} ${r.payee} ${r.spentBy}`);
+  return words.every((w) => have.some((h) => h === w || h.startsWith(w)));
+}
+
+/** A list, numbered from 1, and made the list on screen. */
+function listReply(rows, title, ctx, { all = false } = {}) {
+  showList(ctx, rows.map((r) => r.id));
+  const aed = rows.reduce((n, r) => n + (r.aed ?? 0), 0);
+  const lines = rows.map((r, i) => format.line({ ...r, n: i + 1 }, { number: true, group: ctx.group === find.ALL }));
+  const shown = all || lines.length <= 20 ? lines : [...lines.slice(0, 15), `_…and ${lines.length - 15} more · reply *show all* to list every one_`];
+  return [`📋 *${title}*`, format.SEP, ...shown, format.SEP, `*TOTAL:* *${format.money('AED', Math.round(aed * 100) / 100)}* (${rows.length} ${rows.length === 1 ? 'expense' : 'expenses'})`].join('\n');
+}
+
+/**
+ * WHAT CODE ANSWERS FIRST, free and the same every time (his list
+ * 2026-10-08): the list on screen sorted, narrowed or shown whole; a search;
+ * the ones missing something, then filled by number; an undo by number;
+ * what was just done; who changed one. Null for everything else.
+ */
+/**
+ * ===============================
+ * * "HOW DO I…?" / "CAN I…?" IS ANSWERED, never the hello again
+ * ===============================
+ * Two agent test 2026-10-09: "can I send the receipt photo first?" was read
+ * as a receipt request, and "can I add the cost later?" got the hello three
+ * times. A question about how the bot works is answered in one line, the
+ * same every time, with anything waiting still said.
+ */
+const HOW_TO = [
+  [/\b(?:receipt|photo|picture|pic)\b[^?]*\b(?:first|before|only|just|without)\b|\bcan i (?:just )?(?:send|upload|share) (?:a |the |just the )?(?:receipt|photo|picture|pic)\b/i,
+    'Yes. Send the receipt photo on its own: I read it, show the expense before saving, and ask for anything it doesn\'t show.'],
+  [/\b(?:later|after(?:wards)?|another time)\b[^?]*\b(?:add|change|update|edit|fix|put)\b|\b(?:add|change|update|edit|fix|put)\b[^?]*\b(?:later|after(?:wards)?|another time)\b/i,
+    'Yes. Save it now and change it any time this month, like _change the office lunch to 100_. Refunded ones are locked.'],
+  [/\b(?:first step|where do i (?:start|begin)|how (?:do|can|should) i (?:log|add|send|record|enter|submit|start)|how to (?:log|add|send|record|enter|submit)|what do i (?:send|do first))\b/i,
+    'Send it in one line, like _taxi 45 aed careem today_, or a receipt photo. I show it before saving, and *yes* saves it.'],
+  [/\bhow (?:do|can) i (?:delete|remove|cancel) (?:an? |the |one )?(?:saved |old )?(?:expense|one|entry)\b/i,
+    'Say _remove the taxi on 5 Oct_, or _show all expenses_ then _remove 2_. I ask before removing.'],
+  [/\bhow (?:do|can) i (?:change|edit|update|fix|correct)\b/i,
+    'Say what to change, like _change the taxi on 5 Oct to 50_ or _2 spent by Gloria_. I show the change before saving.'],
+  [/\b(?:how (?:do|can) i|can i) undo\b/i,
+    'Say *undo* to take back your last change, or _undo only 2_ for one line of it.'],
+];
+function howToAnswer(t, pending) {
+  if (!/\?|^(?:how|can|could|is it possible|do i|where|what do i)\b/i.test(t)) return null;
+  const hit = HOW_TO.find(([re]) => re.test(t));
+  if (!hit) return null;
+  return pending ? `${hit[1]}\n\n${waitingLine(pending)}` : hit[1];
+}
+
+async function codeFirst(said, ctx, pending) {
+  const t = String(said ?? '').trim();
+  if (!t) return null;
+  const how = howToAnswer(t, pending);
+  if (how) return how;
+  // "SHOW ALL": the whole waiting draft, or the whole list on screen
+  if (SHOW_ALL.test(t)) {
+    if (pending?.kind === 'edit') return format.editsPreview(editItems(pending), { group: ctx.group === find.ALL, removes: pending.removes ?? [], all: true });
+    if (pending?.kind === 'remove') return format.removePreview(pending.before, { group: ctx.group === find.ALL, all: true });
+    if (pending?.kind === 'settle') return settlePreview(pending, ctx, { all: true });
+    if (!pending && listOnScreen(ctx.state)) {
+      const rows = (await Promise.all(ctx.state.listIds.map((id) => expensesRepo.findById(id)))).filter(Boolean).map(find.asItem);
+      return listReply(rows, `ALL ${rows.length}`, ctx, { all: true });
+    }
+  }
+  // SETTLE / REOPEN / FOR REVIEW, BY HAND (Diane only)
+  const settleAsk = SETTLE_ASK.exec(t);
+  if (settleAsk) return startSettle(settleAsk, ctx);
+  // WHAT WAS JUST DONE
+  if (WHAT_DONE.test(t)) {
+    const a = await store.lastAction(ctx.phone, ctx.group);
+    if (pending) ctx.keepShown = true;
+    if (!a) return 'Nothing yet: you haven\'t saved, changed or removed anything here.';
+    const verb = { add: 'Saved', edit: 'Changed', remove: 'Removed' }[a.kind] ?? 'Did';
+    const when = new Date(a.created_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: process.env.TIMEZONE || 'Asia/Dubai' });
+    return `↩️ *Last thing you did* (${when}): ${verb}, ${actionText(a)}.\n\nReply *undo* to take it back.`;
+  }
+  // WHO CHANGED IT
+  const who = WHO_DID.exec(t);
+  if (who) return whoDid(who[1], ctx);
+  // UNDO BY NUMBER, THE LAST FEW, OR BY WHAT IT CHANGED
+  if (UNDO_SOME.test(t)) return startUndo(ctx, t);
+  // A SEARCH: "find dewa", "anything with careem" (the 3 months kept)
+  const look = FIND_ASK.exec(t);
+  if (look && !/\b(?:receipts?|preview)\b/i.test(look[1])) {
+    const words = look[1].replace(/\b(?:expenses?|ones?|in it|in them)\b/gi, ' ').trim();
+    const rows = (await find.between(ctx.group, minus(ctx.today, 92), ctx.today)).map(find.asItem)
+      .filter((r) => find.wordsOf(words).every((w) => find.wordsOf(`${r.description} ${r.payee} ${r.spentBy}`).some((h) => h === w || h.startsWith(w))));
+    if (pending) ctx.keepShown = true;
+    if (!rows.length) return `Nothing with _${words}_ in the last 3 months.`;
+    return listReply(rows, `${rows.length} WITH "${words.toUpperCase()}" · last 3 months`, ctx);
+  }
+  // THE ONES MISSING SOMETHING, to fill in by number
+  const gap = /^(?:which|what|show|list|any|are there|expenses?|ones?|find)\b/i.test(t) && MISSING_ASK.exec(t);
+  if (gap) {
+    const field = MISSING_FIELD[gap[1].toLowerCase()];
+    const rows = (await find.between(ctx.group, `${ctx.today.slice(0, 8)}01`, ctx.today)).filter((r) => (field === 'receipt' ? !r.receipt_path : !String(r[{ payee: 'payee', category: 'category', spentBy: 'spent_by' }[field]] ?? '').trim())).map(find.asItem);
+    const label = { payee: 'a payee', category: 'a category', spentBy: 'a spender', receipt: 'a receipt' }[field];
+    if (pending) ctx.keepShown = true;
+    if (!rows.length) return `Every expense this month has ${label}. 👍`;
+    const list = listReply(rows, `${rows.length} WITHOUT ${label.replace(/^an? /, '').toUpperCase()} · this month`, ctx);
+    if (field === 'receipt' || pending) return list;
+    ctx.state.awaiting = `fill:${field}`;
+    const ex = { payee: '1 careem, 2 zuma', category: '1 travel, 2 food', spentBy: '1 gloria, 2 zayn' }[field];
+    return `${list}\n\nFill them in by number, like _${ex}_, or _all ${ex.split(', ')[0].split(' ')[1]}_.`;
+  }
+  // "1 CAREEM, 2 ZUMA" after that list: each one filled, one preview
+  if (!pending && String(ctx.awaiting ?? '').startsWith('fill:') && ctx.state.listIds?.length) {
+    const field = ctx.awaiting.slice(5);
+    const ids = ctx.state.listIds;
+    const allOf = /^(?:all|all of them|every one|them all)\s+(?:to\s+|are\s+|is\s+)?(.+)$/i.exec(t);
+    const parts = allOf ? ids.map((_, i) => [i + 1, allOf[1]]) : t.split(/\n+|\s*[;,]\s*|\s+and\s+(?=\d)/i).map((p) => /^(?:no\.?\s*|#)?(\d{1,3})\s*[.):-]?\s+(.+)$/.exec(p.trim())).map((m) => (m ? [Number(m[1]), m[2]] : null));
+    if (parts.length && parts.every((p) => p && p[0] >= 1 && p[0] <= ids.length)) {
+      let reply = null;
+      for (const [n, v] of parts) {
+        const value = field === 'category' ? CATEGORY_SAID[v.toLowerCase().trim()] : v.trim().replace(/[.!]+$/, '');
+        if (!value) return `_${v}_ isn't a category. Use fuel, travel, food, office, bills or other.`;
+        // eslint-disable-next-line no-await-in-loop
+        const row = await expensesRepo.findById(ids[n - 1]);
+        if (row) reply = editPreviewFor(row, { [field]: value }, ctx);
+      }
+      if (ctx.state.pending?.kind === 'edit') return format.editsPreview(editItems(ctx.state.pending), { group: ctx.group === find.ALL });
+      return reply;
+    }
+  }
+  // THE LIST ON SCREEN, SORTED, NARROWED OR WITH SOME HIDDEN (nothing waiting)
+  if (!pending && listOnScreen(ctx.state)) {
+    const sort = SORT.exec(t);
+    const short = !sort && SORT_SHORT.exec(t);
+    const only = !sort && !short && LIST_ONLY.exec(t);
+    const hide = !sort && !short && !only && LIST_HIDE.exec(t);
+    if (sort || short || only || hide) {
+      const rows = (await Promise.all(ctx.state.listIds.map((id) => expensesRepo.findById(id)))).filter(Boolean).map(find.asItem);
+      if (sort || short) {
+        let by = sort ? SORT_KEY[sort[1].toLowerCase()] : /newest|latest|oldest/i.test(short[1]) ? 'date' : 'amount';
+        const word = String(sort?.[2] ?? short?.[1] ?? '').toLowerCase();
+        const asc = /asc|smallest|lowest|cheapest|oldest|low(?:est)? to|a to z/.test(word) || (!word && ['description', 'payee', 'spentBy', 'category'].includes(by));
+        if (!by) by = 'amount';
+        const sorted = find.sortRows(rows, `${by}:${asc ? 'asc' : 'desc'}`);
+        return listReply(sorted, `SORTED BY ${by === 'spentBy' ? 'PERSON' : by.toUpperCase()}${asc ? '' : ' · ' + (by === 'date' ? 'newest' : 'biggest') + ' first'}`, ctx);
+      }
+      const phrase = (only ?? hide)[1];
+      // by number: "only 1-3", "hide 4"
+      const ns = numberSet(phrase);
+      const fits = ns ? rows.map((r, i) => ns.includes(i + 1)) : rows.map((r) => rowFits(r, phrase));
+      if (fits.some((f) => f === null)) return null;
+      // words nothing on the list has ("just a sec", "only joking") are not a filter
+      const byWords = !ns && !CATEGORY_SAID[String(phrase).toLowerCase().replace(/['’]s\b/g, '').replace(/\s+(?:ones?|expenses?|category)$/, '').trim()] && !/^(?:over|above|more than|bigger than|under|below|less than|smaller than|[<>])/i.test(phrase);
+      if (byWords && !fits.some(Boolean)) return null;
+      const kept = rows.filter((_, i) => (only ? fits[i] : !fits[i]));
+      if (!kept.length) return only ? `None of the ${rows.length} on the list ${ns ? 'have those numbers' : `fit _${phrase}_`}.` : 'That would hide every one on the list.';
+      if (kept.length === rows.length) return only ? `They all fit _${phrase}_ already.` : `None of them fit _${phrase}_, so nothing was hidden.`;
+      return listReply(kept, `${kept.length} OF ${rows.length} · ${only ? `only ${phrase}` : `without ${phrase}`}`, ctx);
+    }
+  }
+  return null;
+}
+
+// ---- settling by hand: the CRM admin, through Diane ----
+
+const SETTLE_ASK = /^(?:(?:pls|please|can you|could you)\s+)?(?:(settle|unsettle|reopen)\s+(.+?)|mark\s+(.+?)\s+(?:as\s+)?(refunded|settled|paid|unsettled|not refunded|unpaid|for review|to review|needing review|needs review))[.!]*$/i;
+const MONTH_NO = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
+const SETTLE_WORDS = { settled: ['SETTLE', 'mark them refunded', 'SETTLED'], unsettled: ['REOPEN', 'reopen them', 'REOPENED'], review: ['MARK FOR REVIEW', 'mark them for review', 'MARKED FOR REVIEW'] };
+
+/**
+ * "SETTLE 1-3", "mark gloria's sept expenses refunded", "reopen 2" (his
+ * call 2026-10-08): only the CRM admin, so only with Diane. Shown first;
+ * nothing moves before yes.
+ */
+async function startSettle(m, ctx) {
+  if (ctx.channel !== 'diane') return 'Only the CRM admin can settle expenses: on the Expenses page, or with Diane.';
+  // one thing waits at a time: what waits is answered first
+  if (ctx.state.pending && ctx.state.pending.kind !== 'settle') { ctx.keepShown = true; return `${waitingLine(ctx.state.pending)}\nThen ask me to settle.`; }
+  const verb = String(m[1] ?? m[4]).toLowerCase();
+  const to = /^(?:settle|refunded|settled|paid)$/.test(verb) ? 'settled' : /review/.test(verb) ? 'review' : 'unsettled';
+  const phrase = String(m[2] ?? m[3]).trim();
+  const list = listOnScreen(ctx.state) ? ctx.state.listIds : [];
+  let rows;
+  const ns = numberSet(phrase.replace(/^(?:no\.?\s*|#)/i, ''));
+  if (ns) {
+    if (!list.length) return 'Which ones? Show a list first, like _show me this month\'s expenses_, then _settle 1-3_.';
+    if (!ns.every((n) => n >= 1 && n <= list.length)) return `There ${list.length === 1 ? 'is' : 'are'} only ${list.length} on the list. Pick from 1–${list.length}.`;
+    rows = (await Promise.all(ns.map((n) => expensesRepo.findById(list[n - 1])))).filter(Boolean);
+  } else if (/^(?:all|them|these|those|all of them|every one|the list)$/i.test(phrase) && list.length) {
+    rows = (await Promise.all(list.map((id) => expensesRepo.findById(id)))).filter(Boolean);
+  } else {
+    // "gloria's sept expenses": a person or words, and a month when said
+    const mon = Object.keys(MONTH_NO).find((k) => new RegExp(`\\b${k}[a-z]*\\b`, 'i').test(phrase));
+    const words = phrase.replace(/['’]s\b/g, '').replace(/\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b/gi, ' ').replace(/\b(?:expenses?|ones?|all|the|of|for|from|in)\b/gi, ' ').trim();
+    let from = minus(ctx.today, 92);
+    let to2 = ctx.today;
+    if (mon) {
+      const y = Number(ctx.today.slice(0, 4)) - (MONTH_NO[mon] > Number(ctx.today.slice(5, 7)) ? 1 : 0);
+      from = `${y}-${String(MONTH_NO[mon]).padStart(2, '0')}-01`;
+      to2 = new Date(Date.UTC(y, MONTH_NO[mon], 0)).toISOString().slice(0, 10);
+    }
+    const all = (await find.between(ctx.group, from, to2)).map((r) => ({ r, item: find.asItem(r) }));
+    rows = all.filter(({ item }) => !find.wordsOf(words).length || rowFits(item, words)).map(({ r }) => r);
+    if (!rows.length) return `Nothing fits _${phrase}_${mon ? '' : ' in the last 3 months'}.`;
+  }
+  const moving = rows.filter((r) => (r.settle_status ?? 'unsettled') !== to);
+  if (!moving.length) return `${rows.length === 1 ? 'It is' : `All ${rows.length} are`} already ${to === 'settled' ? 'settled' : to === 'review' ? 'marked for review' : 'unsettled'}.`;
+  ctx.state.pending = { kind: 'settle', to, ids: moving.map((r) => r.id), before: moving.map((r) => ({ ...SNAP(r), id: r.id })) };
+  return settlePreview(ctx.state.pending, ctx);
+}
+
+function settlePreview(p, ctx, { all = false } = {}) {
+  const [head, act] = SETTLE_WORDS[p.to];
+  const items = p.before.map((b) => ({ ...b, n: null }));
+  const lines = items.map((x, i) => format.line({ ...x, n: items.length > 1 ? i + 1 : null }, { number: items.length > 1, group: ctx.group === find.ALL }));
+  const shown = all || lines.length <= 15 ? lines : [...lines.slice(0, 10), `_…and ${lines.length - 10} more · reply *show all*_`];
+  return [`✅ *${head} ${items.length} ${items.length === 1 ? 'EXPENSE' : 'EXPENSES'}?*`, '_Not changed yet_', format.SEP, ...shown, format.SEP,
+    `Reply *yes* to ${act} · *cancel*`].join('\n');
+}
+
+async function saveSettle(ctx) {
+  const p = ctx.state.pending;
+  ctx.state.pending = null;
+  // eslint-disable-next-line global-require
+  const checks = require('../../repos/expenseChecks.repo');
+  const moved = await checks.setStatus(p.ids, p.to, { by: ctx.admin?.name ?? 'the CRM admin', via: 'diane' });
+  broadcast(null, EVENT, { action: p.to, ids: moved.map((r) => r.id), via: 'diane' });
+  const [, , done] = SETTLE_WORDS[p.to];
+  return `✅ *${done} · ${moved.length} ${moved.length === 1 ? 'expense' : 'expenses'}*${moved.length < p.ids.length ? `\n_${p.ids.length - moved.length} had already moved, left as they are._` : ''}`;
+}
+
+/** One action in words: "Spent by Zayn ➜ Gloria on the Taxi, the Lunch…". */
+function actionText(a, only = null) {
+  const list = (a.changes ?? []).map((c, i) => ({ c, i })).filter(({ c, i }) => !c.undone && !c.undid && (!only || only.includes(i + 1)));
+  const one = ({ c }) => {
+    if (c.removed || a.kind === 'remove') return `removed the *${c.before?.description}*`;
+    if (c.created) return `split off *${c.after?.description}* (${format.money(c.after?.currency, c.after?.rawAmount)} by ${c.after?.spentBy ?? 'nobody'})`;
+    if (a.kind === 'add') return `saved the *${c.after?.description}*${c.replaced ? ' (replaced)' : ''}`;
+    const moved = Object.keys(c.after ?? {}).filter((f) => !['exchangeRate', 'spentByPersonId', 'spentByPhone', 'savedBy'].includes(f) && String(c.before?.[f] ?? '') !== String(c.after?.[f] ?? ''));
+    return `the *${c.before?.description}*: ${moved.map((f) => `${format.LABEL[f] ?? f} ${c.before?.[f] ?? 'blank'} ➜ ${c.after?.[f] ?? 'blank'}`).join(', ') || 'changed'}`;
+  };
+  const shown = list.slice(0, 5).map(one);
+  return `${shown.join('; ')}${list.length > 5 ? ` and ${list.length - 5} more` : ''}`;
+}
+
+/** "WHO CHANGED 4?": who saved it, and every change made on WhatsApp since. */
+async function whoDid(target, ctx) {
+  const pool = require('../../../configs/db');
+  let row = null;
+  if (/^\d+$/.test(target)) {
+    const id = listOnScreen(ctx.state) ? ctx.state.listIds[Number(target) - 1] : null;
+    if (!id) return `Which one is No. ${target}? Show a list first, like _show me this month's expenses_.`;
+    row = await expensesRepo.findById(id);
+  } else {
+    const hits = thisMonthOr(await find.findTarget(ctx.group, { words: target.replace(/^the\s+/i, '') }, { today: ctx.today }), ctx.today);
+    if (hits.length > 1) return `There are ${hits.length} of those. Say which by number from a list, like _who changed 3?_`;
+    if (hits.length === 1) row = await expensesRepo.findById(hits[0].id);
+  }
+  if (!row) return 'I couldn\'t find that expense.';
+  const { rows } = await pool.query(
+    `SELECT a.*, (SELECT name FROM tb_expense_admins m WHERE m.phone = a.phone AND lower(m.group_name) = lower(a.group_name) LIMIT 1) AS who
+       FROM tb_expense_actions a
+      WHERE a.kind IN ('add', 'edit') AND EXISTS (SELECT 1 FROM jsonb_array_elements(a.changes) c WHERE c->>'id' = $1::text)
+      ORDER BY a.created_at ASC LIMIT 10`,
+    [String(row.id)],
+  );
+  const day = (v) => new Date(v).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: process.env.TIMEZONE || 'Asia/Dubai' });
+  const lines = [`🔎 *${row.description}* · ${format.money(row.currency, Number(row.raw_amount))} · ${format.day(find.iso(row.spent_on))}`, format.SEP,
+    `• Saved by *${row.saved_by ?? 'someone in the CRM'}* on ${day(row.created_at)}`];
+  for (const a of rows) {
+    const c = a.changes.find((x) => String(x.id) === String(row.id));
+    if (a.kind === 'edit' && c && !c.created) lines.push(`• Changed by *${a.who ?? a.phone}* on ${day(a.created_at)}: ${actionText({ ...a, changes: [c] })}${a.undone_at ? ' _(undone)_' : ''}`);
+  }
+  if (row.updated_at && new Date(row.updated_at) - new Date(rows.at(-1)?.created_at ?? row.created_at) > 60000) lines.push(`• Last updated ${day(row.updated_at)} (in the CRM or by Diane)`);
+  if (ctx.state.pending) ctx.keepShown = true;
+  return lines.join('\n');
+}
+
+/**
+ * WITH THE AGENT ON: code answers only the instant replies (a short yes, no,
+ * number or pick to what waits; hi, thanks, help, show it, undo, rates,
+ * files), then the agent reads everything else with the whole conversation.
+ * If it cannot be reached, or passes, the reader below answers.
+ */
+async function agentFirst(said, files, ctx) {
+  const t = said.trim();
+  const pending = ctx.state.pending ?? null;
+  const short = t.split(/\s+/).length <= 4;
+  const lastReply = String((ctx.state.history ?? []).at(-1)?.reply ?? '');
+  const askedLast = ctx.state.agentAsked === true && /\?\s*(?:\n|$)/.test(lastReply.trim());
+  const instant = files.length || !t
+    || GREETING.test(t) || HELP_ASK.test(t) || THANKS.test(t) || ACK.test(t) || SHOW_PREVIEW.test(t) || UNDO.test(t) || RECEIPT_ASK.test(t)
+    || (/^(?:the\s+)?receipts?\b/i.test(t) && t.length < 40)
+    || (/\brates?\b/i.test(t) && t.length < 30)
+    // "update zayn expenses", "delete some": the numbered list to pick from;
+    // not when it answers the agent's own question ("change, or add new?")
+    || (!pending && !askedLast && (CHANGE_WHICH.test(canonicalVerbs(t)) || REMOVE_WHICH.test(canonicalVerbs(t))))
+    || (pending && short && readReply(t, pending, { year: year(ctx.today), groups: ctx.groups }))
+    // a yes or no with nothing waiting: said plainly in code
+    || (!pending && short && /^(?:y|ya|yes|yep|yeah|yup|ok|okay|sure|go ahead|do it|save(?: it)?|no|nope|cancel)\b[\s!.]*$/i.test(t))
+    // A TYPED NEW EXPENSE ("45 aed careem taxi", "taxi 45 / lunch 30 / parking 15"): the
+    // reader below, with its own "change or new?" check, did these right every time
+    || (!pending && !askedLast && pureNewExpense(t))
+  ctx.state.agentAsked = false;
+  if (instant && /^(?:the\s+)?receipts?\b/i.test(t) && !RECEIPT_ASK.test(t)) return receiptFor(t, ctx);
+  if (instant) return answerTurn(said, files, ctx);
+  /**
+   * EXACT COMMANDS STAY IN CODE (the harness, 2026-10-10: the agent did them
+   * worse): sort, only, hide, show all, find, what was just done, who changed
+   * it, undo by number, settle; a question the code reader reads whole; an
+   * answer to the bot's own "change or new?" / "which one?"; "remove 3"
+   * with no list (the list is shown).
+   */
+  // an order in it ("anything from 1st oct, delete it") is not a search
+  const orders = /\b(?:delete|remove|bin|scrap|change|update|make|set|add|move|knock|take|double|halve|put|fix)\b/i.test(t);
+  const coded = orders && !/^(?:sort|order|show|list|undo|revert|who|what|which|find|search)\b/i.test(t) ? null : await codeFirst(t, ctx, pending);
+  if (coded) return coded;
+  const q = quickRoute(t, { today: ctx.today, groups: ctx.groups, group: ctx.group });
+  if (q?.kind === 'question' && !/\b(?:and|also|then|plus)\b.*\b(?:delete|remove|change|update|make|set|add|move|knock|double|halve)\b/i.test(t)) return answerTurn(said, files, ctx);
+  if (pending && ['either', 'pick', 'settle'].includes(pending.kind) && t.split(/\s+/).length <= 8) return answerTurn(said, files, ctx);
+  if (!listOnScreen(ctx.state) && /^(?:remove|delete|change|edit)\s+(?:no\.?\s*|#)?\d+[.!]*$/i.test(t)) return answerTurn(said, files, ctx);
+  try {
+    // eslint-disable-next-line global-require
+    const out = await require('./agent').agentTurn(said, ctx, {
+      plannerContext, applyPlan, onReply, questionReply, reviseFrom, actionText, quickRoute, route, whichToChange, whichToRemove,
+    });
+    // a question of its own: the short answer comes back to it, not to a code path
+    ctx.state.agentAsked = Boolean(out) && !ctx.state.pending && /\?\s*$/.test(String(out).trim());
+    if (out) return out;
+  } catch (err) {
+    if (err.code === 'NO_AI') throw err;
+    logger.warn({ err: err.message }, 'expense agent failed, the reader answers');
+  }
+  return answerTurn(said, files, ctx);
+}
+
 async function answerTurn(said, files, ctx) {
   const { state, admin, group, today } = ctx;
   let pending = state.pending ?? null;
@@ -344,6 +782,19 @@ async function answerTurn(said, files, ctx) {
       said = drop[1].trim();
       ctx.said = said;
     }
+  }
+  /**
+   * SOME OF THE PREVIEW, BY NUMBER: "only 1-3", "not 5-6", "1-3 only" (his
+   * report 2026-10-08: refused, then read as a new expense). Read in code,
+   * before anything can take it for something else.
+   */
+  if (pending && !files.length) {
+    const r = readReply(said, pending, { year: year(today), groups: ctx.groups });
+    if (r?.byLines) return onReply(r, ctx);
+  }
+  if (!files.length) {
+    const first = await codeFirst(said, ctx, pending);
+    if (first) return first;
   }
   if (pending && !files.length && pending.kind !== 'either') {
     const canon = canonicalVerbs(said);
@@ -432,7 +883,7 @@ async function answerTurn(said, files, ctx) {
       const keep = items.filter((x) => !words.every((w) => find.wordsOf(`${x.before.description} ${x.before.payee}`).some((h) => h.startsWith(w))));
       if (words.length && keep.length < items.length) {
         if (!keep.length) { ctx.state.pending = null; return 'Okay, nothing will be changed.'; }
-        ctx.state.pending = { kind: 'edit', items: keep };
+        ctx.state.pending = draft(keep, pending.removes ?? [], pending);
         return `Left that one out.\n\n${format.editsPreview(keep, { group: group === find.ALL })}`;
       }
     }
@@ -443,7 +894,7 @@ async function answerTurn(said, files, ctx) {
       const last = items.at(-1);
       const hits = thisMonthOr(await find.findTarget(group, { words: swap[1] }, { today }), today);
       if (last && hits.length === 1 && hits[0].id !== last.id) {
-        ctx.state.pending = { kind: 'edit', items: items.slice(0, -1) };
+        ctx.state.pending = draft(items.slice(0, -1), pending.removes ?? [], pending);
         return editPreviewFor(await expensesRepo.findById(hits[0].id), last.fields, ctx);
       }
     }
@@ -471,7 +922,7 @@ async function answerTurn(said, files, ctx) {
       const keep = items.filter((x) => !words.every((w) => find.wordsOf(`${x.before.description} ${x.before.payee}`).some((h) => h.startsWith(w))));
       if (keep.length < items.length) {
         if (!keep.length) { ctx.state.pending = null; return 'Okay, nothing will be changed.'; }
-        ctx.state.pending = { kind: 'edit', items: keep };
+        ctx.state.pending = draft(keep, pending.removes ?? [], pending);
         return `Left that one out.\n\n${format.editsPreview(keep, { group: group === find.ALL })}`;
       }
     }
@@ -600,6 +1051,8 @@ async function answerTurn(said, files, ctx) {
   // "SHOW ME THE RECEIPT FOR 4" / "...for the careem taxi" (his call 2026-10-07)
   if (RECEIPT_ASK.test(said)) return receiptFor(said, ctx);
   if (SHOW_PREVIEW.test(said)) {
+    if (pending?.kind === 'edit') return format.editsPreview(editItems(pending), { group: group === find.ALL, removes: pending.removes ?? [], all: true });
+    if (pending?.kind === 'remove') return format.removePreview(pending.before, { group: group === find.ALL, all: true });
     return pending?.kind === 'add' ? format.addPreview(pending.items, group) : 'There is no preview open right now. Send an expense, a receipt photo or a file and I\'ll show you one.';
   }
   if (UNDO.test(said) || UNDO_WORDS.test(said.trim())) return startUndo(ctx);
@@ -608,6 +1061,30 @@ async function answerTurn(said, files, ctx) {
    * THE PLANNER, NOTHING WAITING: what they want, read with what they can
    * see. A plain new expense, a list request and bare numbers stay in code.
    */
+  const listIds = ctx.state.listIds ?? [];
+  // A list they can still see: the same window the planner is shown it for
+  const listShown = Boolean(ctx.awaiting) || listOnScreen(ctx.state);
+  const run = !pending && !files.length && listShown ? numberRun(said) : null;
+  /**
+   * BY NUMBER, FROM THE LIST JUST SHOWN: "2 and 3" / "delete 2 and 3" to
+   * remove, "2 to 50" / "change 2 to 50" to change (his sweep 2026-10-07).
+   */
+  /**
+   * ONE CHANGE, A RUN OF NUMBERS: "1-6 spent by zayn", "1 to 6 to fuel",
+   * "1, 3 and 5 paid to Careem" (his report 2026-10-08: only No. 1 moved).
+   * Every number is read first; one out of the list, or a change that can't
+   * be read, and it falls through untouched.
+   */
+  if (run && run.ns.every((x) => x <= listIds.length)) {
+    const rows = (await Promise.all(run.ns.map((x) => expensesRepo.findById(listIds[x - 1])))).filter(Boolean);
+    const plan = rows.map((row) => ({ row, changes: changeFromWords(run.words, row, today) }));
+    const bad = plan.find((p) => p.changes?.why);
+    if (bad) return `No. ${run.ns[plan.indexOf(bad)]}: ${bad.changes.why} Nothing was changed yet.`;
+    if (rows.length === run.ns.length && plan.every((p) => p.changes)) {
+      for (const { row, changes } of plan) editPreviewFor(row, changes, ctx);
+      if (ctx.state.pending?.kind === 'edit') return format.editsPreview(editItems(ctx.state.pending), { group: group === find.ALL });
+    }
+  }
   if (PLANNER_ON && !pending && !files.length && !cheapMessage(said, null, ctx) && !pureNewExpense(said)
     && !CHANGE_WHICH.test(canonicalVerbs(said)) && !REMOVE_WHICH.test(canonicalVerbs(said))
     && !(ctx.awaiting && /^[\d\s,&and-]+$/i.test(said.trim()))
@@ -615,11 +1092,6 @@ async function answerTurn(said, files, ctx) {
     const out = await runPlanner(said, ctx);
     if (out) return out;
   }
-  /**
-   * BY NUMBER, FROM THE LIST JUST SHOWN: "2 and 3" / "delete 2 and 3" to
-   * remove, "2 to 50" / "change 2 to 50" to change (his sweep 2026-10-07).
-   */
-  const listIds = ctx.state.listIds ?? [];
   if (!pending && !files.length && listIds.length && ctx.awaiting) {
     const t = canonicalVerbs(said);
     const byNum = /^(?:remove\s+)?(?:no\.?\s*|number\s*|#)?(\d+(?:\s*(?:,|&|and|-|to)\s*\d+)*)[.!]*$/i.exec(t);
@@ -854,6 +1326,20 @@ async function receiptFor(said, ctx) {
     return `🧾 Receipt for *${n}. ${x.description}* (not saved yet).`;
   }
   const pool = require('../../../configs/db');
+  // "RECEIPT FOR 3" from the list on screen (his list 2026-10-08)
+  const listed = n && pending?.kind !== 'add' && listOnScreen(ctx.state) ? ctx.state.listIds[n - 1] : null;
+  if (n && pending?.kind !== 'add' && listOnScreen(ctx.state) && !listed) return `There is no No. ${n} on the list. Pick from 1–${ctx.state.listIds.length}.`;
+  if (listed) {
+    const one = await expensesRepo.findById(listed);
+    if (!one) return `No. ${n} is no longer there.`;
+    const what = `*${n}. ${one.description}* · ${format.money(one.currency, Number(one.raw_amount))} · ${format.day(find.iso(one.spent_on))}`;
+    const file = await receipts.fileOf(one.id);
+    if (file.missing === 'cleared') return `${what}: its receipt was cleared (receipts are kept for 3 months).`;
+    if (file.missing) return `${what} has no receipt: it was typed, not sent as a photo or file.`;
+    ctx.receiptOut = file;
+    if (pending) ctx.keepShown = true;
+    return `🧾 Receipt for ${what}.`;
+  }
   const words = said.replace(RECEIPT_ASK, ' ').replace(/\b(?:me|the|a|for|of|my|please|pls|that|this|one|last|latest)\b/gi, ' ').trim().split(/\s+/).filter((w) => w.length >= 3);
   const scope = ctx.group === '*' ? [] : [ctx.group];
   const { rows } = await pool.query(
@@ -903,6 +1389,17 @@ async function knownNames() {
   return { payees: o.payees ?? [], spentBy: o.spentBy ?? [] };
 }
 
+/** Payee → the one category it has had every time, at least twice (never "other"). */
+async function payeeHabits() {
+  const pool = require('../../../configs/db');
+  const { rows } = await pool.query(
+    `SELECT lower(btrim(payee)) AS p, min(category) AS c, count(*) AS n
+       FROM tb_expenses WHERE payee IS NOT NULL AND btrim(payee) <> '' AND category IS NOT NULL
+      GROUP BY 1 HAVING count(DISTINCT category) = 1 AND count(*) >= 2 AND min(category) <> 'other'`,
+  );
+  return new Map(rows.map((r) => [r.p, r.c]));
+}
+
 /** Check every item again: fields, defaults, duplicates against what is saved. */
 async function recheck(items, ctx) {
   const r = await rates();
@@ -911,6 +1408,18 @@ async function recheck(items, ctx) {
   const known = await knownNames();
   const out = items.map((x) => normalise({ ...x, doubt: x.modelDoubt }, { admin: ctx.admin, group: ctx.group, groups: ctx.groups, rates: r, live, known, today: ctx.today }))
     .map((x, i) => ({ ...x, modelDoubt: items[i].modelDoubt ?? null }));
+  /**
+   * THEIR HABITS (his list 2026-10-08): a payee whose words say no category
+   * ("Al Noor", not "Careem") takes the one it always has here, and says so.
+   */
+  const habits = await payeeHabits().catch(() => new Map());
+  for (const [i, x] of out.entries()) {
+    const was = items[i];
+    if (was.habitCat && x.category === was.habitCat) { x.habitCat = was.habitCat; x.notes.push(`category ${x.category}, like your other ${x.payee} ones`); continue; }
+    if ((was.category && was.category !== 'other') || x.category !== 'other' || !x.payee) continue;
+    const h = habits.get(String(x.payee).toLowerCase());
+    if (h) { x.category = h; x.habitCat = h; x.notes.push(`category ${h}, like your other ${x.payee} ones`); }
+  }
   const dates = out.map((x) => x.spentOn).filter(Boolean).sort();
   const saved = dates.length ? await find.between(ctx.group, minus(dates[0], 1), dates.at(-1)) : [];
   const checked = duplicates(out, saved);
@@ -1177,7 +1686,9 @@ async function saveAdd(ctx, { readyOnly = false } = {}) {
   }
   // ONE ACTION for the batch: the new ones (undo removes them) and the
   // replaced ones (undo puts their old values back)
-  const all = [...made.map((m) => ({ id: m.id, after: SNAP(m) })), ...replaced];
+  // in the order the ✅ message numbers them, so "undo only 2" is No. 2
+  let k = 0;
+  const all = items.map((x) => (x.replaceId ? replaced.find((r) => r.id === x.replaceId) : made[k] && { id: made[k].id, after: SNAP(made[k++]) })).filter(Boolean);
   await store.recordAction(require('../../../configs/db'), {
     phone: ctx.phone, group: ctx.group, kind: 'add', changes: all,
     summary: `${all.map((c) => `${c.after.description} · ${format.money(c.after.currency, c.after.raw_amount ?? c.after.rawAmount)}${c.replaced ? ' (replaced)' : ''}`).slice(0, 4).join(', ')}${all.length > 4 ? ` and ${all.length - 4} more` : ''}`,
@@ -1203,13 +1714,14 @@ async function onReply(r, ctx) {
     if (pending.kind === 'add') return 'Sure, what should change? Just say it, like _the taxi was 50_, _the lunch was yesterday_ or _leave out the parking_.';
     // A REMOVAL is changed by what is in it, never by "what should it be"
     // (his report 2026-10-07: it asked that three times)
-    if (pending.kind === 'remove') return 'Sure. Add one, like _also the taxi on 5 Oct_, or drop one, like _not the cleaner_. Or reply *yes* to remove, or *cancel*.';
+    if (pending.kind === 'remove') return `Sure. Add one, like _also the taxi on 5 Oct_, or drop some, like _not the cleaner_${pending.ids.length > 1 ? ` or _only 1-${pending.ids.length - 1}_` : ''}. Or reply *yes* to remove, or *cancel*.`;
     if (pending.kind === 'undo') return 'Reply *yes* to undo it, or *cancel* to leave it as it is.';
+    if (pending.kind === 'settle') return 'Say which ones instead, like _settle 1-3_, or reply *yes*, or *cancel*.';
     if (pending.kind === 'edit') {
       const items = editItems(pending);
       const m = (pending.removes ?? []).length;
       return [`No problem. ${items.length === 1 && !m ? `Right now I'm about to ${changeText(items[0])}.` : `${items.length + m} changes are waiting.`}`,
-        'Add another (_change the taxi to 50_), change one (_make the groceries 250_), drop one (_not the groceries_), or reply *yes* to save, or *cancel*.'].join('\n');
+        `Add another (_change the taxi to 50_), change one (_make the groceries 250_), drop some (_not the groceries_${items.length + m > 1 ? `, _only 1-${items.length + m - 1}_` : ''}), or reply *yes* to save, or *cancel*.`].join('\n');
     }
     return 'Sure, what should it be instead? Just say it, like _make it 50_ or _it was on 5 Oct_.';
   }
@@ -1262,11 +1774,22 @@ async function onReply(r, ctx) {
     // ONLY WHAT WAS SHOWN LAST. Another reply came in between, so this yes
     // may not be about the preview: it is shown again, and the next yes saves.
     if (pending.shownLast === false) return showAgain(ctx);
+    /**
+     * A BIG CHANGE, SAID TWICE (his list 2026-10-08): over 20 expenses, or
+     * over AED 10,000 moved, takes "yes 25", so a stray yes can't do it.
+     */
+    const big = bigDraft(pending);
+    if (big && r.n !== big.count) {
+      return `That's *${big.count} ${big.count === 1 ? 'expense' : 'expenses'}*${big.aed >= BIG_AED ? `, moving *${format.money('AED', Math.round(big.aed * 100) / 100)}*` : ''}. To be sure, reply *yes ${big.count}*, or *cancel*.`;
+    }
     if (pending.kind === 'add') return saveAdd(ctx);
     if (pending.kind === 'edit') return saveEdit(ctx);
     if (pending.kind === 'remove') return saveRemove(ctx);
     if (pending.kind === 'undo') return saveUndo(ctx);
+    if (pending.kind === 'settle') return saveSettle(ctx);
   }
+  if (r.kind === 'lineOut') return `There ${r.count === 1 ? 'is' : 'are'} only ${r.count} in this preview. Pick from 1–${r.count}, like *only 1-${Math.max(1, r.count - 1)}* or *not ${r.count}*.`;
+  if (r.kind === 'lines') return keepLines(r.keep, ctx);
   // add: skip / only / fixes
   const items = pending.items.map((x) => ({ ...x }));
   // THEIR OWN RATE TO AED: for the currency they named, or the only one.
@@ -1375,12 +1898,21 @@ async function startEdit(r, ctx, { stack = false } = {}) {
 }
 
 function editPreviewFor(row, changes, ctx) {
+  // SETTLED IS LOCKED (his call 2026-10-08): refunded is final; the CRM admin reopens it
+  if (row.settle_status === 'settled') {
+    ctx.locked = [...new Set([...(ctx.locked ?? []), row.description])];
+    const waiting = ctx.state.pending?.kind === 'edit' ? editItems(ctx.state.pending) : [];
+    const msg = `🔒 The *${row.description}* is settled (refunded), so it can't be changed. The CRM admin can reopen it.`;
+    return waiting.length ? `${msg}
+
+${format.editsPreview(waiting, { group: ctx.group === find.ALL, removes: ctx.state.pending.removes ?? [] })}` : msg;
+  }
   // "SPENT BY ME": the admin, by name in the preview and linked on save
   const me = changes.spentBy != null && ME.test(String(changes.spentBy).trim());
   if (me && ctx.admin?.name) changes = { ...changes, spentBy: ctx.admin.name };
   else if (me) return 'Who should it be spent by? Send their name.';
   const before = SNAP(row);
-  const fields = Object.fromEntries(Object.entries(changes).filter(([f, v]) => String(before[f] ?? '') !== String(v)));
+  const fields = Object.fromEntries(Object.entries(changes).filter(([f, v]) => String(before[f] ?? '') !== String(v ?? '')));
   // EVERY CHANGE JOINS THE ONES WAITING: one preview, one yes
   const waiting = ctx.state.pending?.kind === 'edit' ? editItems(ctx.state.pending) : [];
   if (!Object.keys(fields).length) {
@@ -1389,18 +1921,81 @@ function editPreviewFor(row, changes, ctx) {
     return `The *${before.description}* already says that.\n\n${format.editsPreview(waiting, { group: ctx.group === find.ALL, removes: removesNow })}`;
   }
   const at = waiting.findIndex((x) => x.id === row.id);
-  const item = { id: row.id, before, fields: { ...(at >= 0 ? waiting[at].fields : {}), ...fields }, me: (me && 'spentBy' in fields) || (at >= 0 && waiting[at].me) };
+  const splits = ctx.splitNow?.[row.id] ?? (at >= 0 ? waiting[at].splits : undefined);
+  const item = { id: row.id, before, fields: { ...(at >= 0 ? waiting[at].fields : {}), ...fields }, me: (me && 'spentBy' in fields) || (at >= 0 && waiting[at].me), ...(splits?.length ? { splits } : {}) };
   const items = at >= 0 ? waiting.map((x, i) => (i === at ? item : x)) : [...waiting, item];
   const removes = ctx.state.pending?.kind === 'edit' ? (ctx.state.pending.removes ?? []).filter((x) => x.id !== row.id) : [];
-  ctx.state.pending = { kind: 'edit', items, removes };
+  ctx.state.pending = draft(items, removes, ctx.state.pending);
   const lead = waiting.length && at < 0 ? `Added the *${before.description}*. ` : '';
   return `${lead ? `${lead}\n\n` : ''}${format.editsPreview(items, { group: ctx.group === find.ALL, removes })}`;
+}
+
+const BIG_LINES = 20;
+const BIG_AED = 10000;
+/** A change or removal big enough to need "yes 25": how many, and the AED it moves. */
+function bigDraft(p) {
+  if (p.kind !== 'edit' && p.kind !== 'remove') return null;
+  const rate = (b) => (b.currency === 'AED' ? 1 : Number(b.exchangeRate) || 0);
+  const items = p.kind === 'edit' ? editItems(p) : [];
+  const removes = p.kind === 'edit' ? p.removes ?? [] : p.before.map((before, i) => ({ id: p.ids[i], before }));
+  const count = items.length + removes.length;
+  const aed = items.reduce((n, x) => n + ('rawAmount' in x.fields ? Math.abs(Number(x.fields.rawAmount) - Number(x.before.rawAmount)) * rate(x.before) : 0), 0)
+    + removes.reduce((n, r) => n + Number(r.before.rawAmount) * rate(r.before), 0);
+  return count > BIG_LINES || aed >= BIG_AED ? { count, aed } : null;
+}
+
+/** A draft of changes and removals for one yes. A split rides on its change (item.splits). */
+function draft(items, removes = []) {
+  return { kind: 'edit', items, removes };
+}
+
+/**
+ * THE LIST ON SCREEN STAYS until a new list replaces it (his list
+ * 2026-10-08), or for 6 hours, like a preview: "2 to 50" after a question
+ * or two still means No. 2 of that list.
+ */
+const LIST_MS = 6 * 60 * 60 * 1000;
+function listOnScreen(state) {
+  if (!state.listIds?.length) return false;
+  return state.listTime ? Date.now() - state.listTime < LIST_MS : (state.history ?? []).length - (state.listAt ?? -99) <= 6;
+}
+function showList(ctx, ids) {
+  ctx.state.listIds = ids;
+  ctx.state.listAt = (ctx.state.history ?? []).length;
+  ctx.state.listTime = Date.now();
 }
 
 /** The changes waiting, in the list shape (one change, before stacking, too). */
 function editItems(p) {
   if (!p) return [];
   return p.items ?? (p.id ? [{ id: p.id, before: p.before, fields: p.fields, me: p.me }] : []);
+}
+
+/**
+ * ONLY THESE LINES OF WHAT WAITS ("only 1-3", "not 5-6"): the rest left out,
+ * the preview shown again, numbered afresh. Changes are 1..n, removals after.
+ */
+function keepLines(keep, ctx) {
+  const p = ctx.state.pending;
+  const isRemove = p.kind === 'remove';
+  const items = isRemove ? [] : editItems(p);
+  const removes = isRemove ? p.ids.map((id, i) => ({ id, before: p.before[i] })) : p.removes ?? [];
+  const total = items.length + removes.length;
+  const left = total - keep.length;
+  const what = isRemove ? 'removed' : 'changed';
+  if (!keep.length) { ctx.state.pending = null; return `Okay, all ${total} left out. Nothing will be ${what}.`; }
+  if (!left) { ctx.keepShown = true; return `All ${total} are already in it. Reply *yes* to go ahead, or *cancel*.`; }
+  const keptItems = items.filter((_, i) => keep.includes(i + 1));
+  const keptRemoves = removes.filter((_, i) => keep.includes(items.length + i + 1));
+  // "now the rest to zayn": the ones left out, kept in mind
+  ctx.state.leftOut = [...items.filter((_, i) => !keep.includes(i + 1)), ...removes.filter((_, i) => !keep.includes(items.length + i + 1))].map((x) => x.id);
+  const lead = `Okay, only No. ${format.ranges(keep)}. Left out ${left}.${keep.some((n, i) => n !== i + 1) ? ' _Numbered again below._' : ''}`;
+  if (isRemove) {
+    ctx.state.pending = { kind: 'remove', ids: keptRemoves.map((x) => x.id), before: keptRemoves.map((x) => x.before) };
+    return `${lead}\n\n${format.removePreview(keptRemoves.map((x) => x.before), { group: ctx.group === find.ALL })}`;
+  }
+  ctx.state.pending = draft(keptItems, keptRemoves, p);
+  return `${lead}\n\n${format.editsPreview(keptItems, { group: ctx.group === find.ALL, removes: keptRemoves })}`;
 }
 
 /** "groceries to 300 and internet bill to 800" → each part, as a change. */
@@ -1492,6 +2087,7 @@ async function stackEdits(asks, ctx) {
 async function stale(id, before) {
   const now = await expensesRepo.findById(id);
   if (!now) return 'that expense has since been removed';
+  if (now.settle_status === 'settled') return 'that expense was settled (refunded) since I showed it, so it is locked';
   return same(now, before) ? null : 'that expense was changed since I showed it';
 }
 
@@ -1525,6 +2121,18 @@ async function saveEdit(ctx) {
     done.push({ id, before, fields, check });
     /* eslint-enable no-await-in-loop */
   }
+  // A SPLIT'S NEW EXPENSES: the same expense in every way but who and how much
+  const made = [];
+  for (const x of items.filter((i) => i.splits?.length)) {
+    const b = x.before;
+    // eslint-disable-next-line no-await-in-loop
+    const rows = await expensesRepo.createMany(x.splits.map((p) => ({
+      spentOn: x.fields.spentOn ?? b.spentOn, description: x.fields.description ?? b.description, payee: 'payee' in x.fields ? x.fields.payee : b.payee,
+      currency: b.currency, rawAmount: p.rawAmount, exchangeRate: b.exchangeRate, groupName: b.groupName ?? ctx.group, spentBy: p.spentBy,
+      category: 'category' in x.fields ? x.fields.category : b.category, savedBy: ctx.admin?.name ?? null,
+    })));
+    made.push(...rows.map((m) => Object.assign(m, { fromId: x.id })));
+  }
   // THE REMOVALS IN THE SAME DRAFT: their receipts kept for undo
   const gone = [];
   for (const x of removes) {
@@ -1536,18 +2144,51 @@ async function saveEdit(ctx) {
   const back = (x) => `${x.before.description}: ${Object.keys(x.fields).map((f) => `${format.LABEL[f] ?? f} back to ${f === 'spentOn' ? format.day(x.before[f]) : f === 'rawAmount' ? format.amount(x.before[f]) : x.before[f]}`).join(', ')}`;
   await store.recordAction(require('../../../configs/db'), {
     phone: ctx.phone, group: ctx.group, kind: 'edit',
-    changes: [...done.map((x) => ({ id: x.id, before: x.before, after: SNAP(x.check) })), ...gone.map((g) => ({ ...g, removed: true }))],
-    summary: [...done.map(back), ...gone.map((g) => `bring back ${g.before.description}`)].join('; '),
+    changes: [...done.map((x) => ({ id: x.id, before: x.before, after: SNAP(x.check) })), ...gone.map((g) => ({ ...g, removed: true })), ...made.map((m) => ({ id: m.id, after: SNAP(m), created: true, from: m.fromId }))],
+    summary: [...done.map(back), ...gone.map((g) => `bring back ${g.before.description}`), ...made.map((m) => `take back the split ${m.description} by ${m.spent_by ?? 'nobody'}`)].join('; '),
   });
   broadcast(null, EVENT, { action: 'updated', ids: done.map((x) => x.id), via: 'whatbot' });
+  if (made.length) broadcast(null, EVENT, { action: 'imported', count: made.length, via: 'whatbot' });
   ctx.state.pending = null;
   ctx.state.lastIds = done.map((x) => x.id);
+  rememberChange(items, ctx);
   if (gone.length) broadcast(null, EVENT, { action: 'deleted', count: gone.length, via: 'whatbot' });
   const changedText = !done.length ? '' : done.length === 1 ? format.changed(find.asItem(done[0].check), { group: ctx.group === find.ALL })
     : format.changedMany(done.map((x) => find.asItem(x.check)), { group: ctx.group === find.ALL });
-  if (!gone.length) return changedText;
-  const removedText = format.removed(gone.map((g) => g.before));
-  return done.length ? `${changedText.replace(/\n*Reply \*undo\*[^\n]*$/, '')}\n\n${removedText.replace(/\n*Reply \*undo\*[^\n]*$/, '')}\n\nReply *undo* to put it all back.` : removedText;
+  const madeText = made.length ? `\n\n➕ *Split off:* ${made.map((m) => `${format.money(m.currency, Number(m.raw_amount))} by ${m.spent_by ?? 'nobody'}`).join(' · ')}` : '';
+  const recap = await recapFor(done, ctx);
+  if (!gone.length) return `${changedText}${madeText}${recap}`;
+  const removedText = format.removed(gone.map((g) => g.before), { start: done.length });
+  return done.length ? `${changedText.replace(/\n*Reply \*undo\*[^\n]*$/, '')}\n\n${removedText.replace(/\n*Reply \*undo\*[^\n]*$/, '')}${madeText}${recap}\n\nReply *undo* to put it all back, or *undo only 2*.` : removedText;
+}
+
+/**
+ * WHAT WAS JUST DONE, for "do the same for 5 and 6" (his list 2026-10-08):
+ * the change in words when every expense got the same one.
+ */
+function rememberChange(items, ctx) {
+  const shape = (x) => JSON.stringify(Object.entries(x.fields).filter(([f]) => f !== 'rawAmount' || !x.splits?.length).sort());
+  const same = items.length && items.every((x) => shape(x) === shape(items[0]));
+  const what = same ? Object.entries(items[0].fields).map(([f, v]) => `${f} → ${v == null ? '(empty)' : v}`).join(', ') : items.map((x) => `${x.before.description}: ${Object.entries(x.fields).map(([f, v]) => `${f} → ${v}`).join(', ')}`).slice(0, 5).join('; ');
+  ctx.state.lastChange = what ? { what, n: items.length, at: Date.now() } : null;
+  // the ones left out stay in mind for "now the rest", minus any just changed
+  if (ctx.state.leftOut?.length) ctx.state.leftOut = ctx.state.leftOut.filter((id) => !items.some((x) => x.id === id));
+}
+
+/**
+ * AFTER A CHANGE OF WHO SPENT IT: where they stand now, this month (his
+ * list 2026-10-08): "Gloria now has 9 expenses this month (AED 2,340.00)".
+ */
+async function recapFor(done, ctx) {
+  const names = [...new Set(done.filter((x) => 'spentBy' in x.fields && x.fields.spentBy).map((x) => String(x.check.spent_by ?? x.fields.spentBy)))].slice(0, 3);
+  if (!names.length) return '';
+  const rows = (await find.between(ctx.group, `${ctx.today.slice(0, 8)}01`, ctx.today)).map(find.asItem);
+  const lines = names.map((name) => {
+    const theirs = rows.filter((r) => String(r.spentBy ?? '').toLowerCase() === name.toLowerCase());
+    const aed = theirs.reduce((n, r) => n + (r.aed ?? 0), 0);
+    return `${name} now has ${theirs.length} ${theirs.length === 1 ? 'expense' : 'expenses'} this month (*${format.money('AED', Math.round(aed * 100) / 100)}*)`;
+  });
+  return `\n\n📊 ${lines.join('\n📊 ')}`;
 }
 
 // ---- removing ----
@@ -1594,8 +2235,7 @@ async function whichToChange(ctx, who = null) {
   // the name as it is saved ("Zayn"), not as typed ("zayn")
   const shown = name ? (pickFrom.rows.find((r) => r.spentBy)?.spentBy ?? name) : null;
   ctx.state.awaiting = 'change';
-  ctx.state.listIds = pickFrom.rows.map((r) => r.id);
-  ctx.state.listAt = (ctx.state.history ?? []).length;
+  showList(ctx, pickFrom.rows.map((r) => r.id));
   return [`Which one should I change${shown ? ` for *${shown}*` : ''}? ${pickFrom.heading}`, '', ...pickFrom.lines, '',
     'Say the change, like _2 to 50_, _change the taxi to 50_ or _change the date of the petrol to 6 Oct_.'].join('\n');
 }
@@ -1651,29 +2291,98 @@ async function plannerContext(ctx) {
   const rowsOf = async (ids) => (await Promise.all((ids ?? []).map((id) => expensesRepo.findById(id)))).filter(Boolean).map(find.asItem);
   // this month and the last days of the one before: enough to find any "the X"
   const month = (await find.between(group, minus(today, 35), today)).map(find.asItem).slice(0, 45);
-  const listFresh = state.listIds?.length && (state.history ?? []).length - (state.listAt ?? -99) <= 6;
+  const listFresh = listOnScreen(state);
   const list = listFresh ? await rowsOf(state.listIds) : [];
   const about = await rowsOf((state.lastIds ?? []).slice(0, 5));
   const last = (await find.lastSaved(group, 3)).filter((r) => !about.some((a) => a.id === r.id));
   const p = state.pending;
   let waiting = null;
   if (p?.kind === 'add') waiting = `A PREVIEW OF NEW EXPENSES (not saved yet):\n${p.items.filter((x) => !x.skipped).map((x) => `${x.n}. ${x.description ?? '?'} | ${x.payee ?? '?'} | ${x.currency} ${x.rawAmount ?? '?'} | ${x.spentOn ?? '?'}`).join('\n')}`;
+  // numbered as the preview shows them: "only the groceries and 4" reads both
   if (p?.kind === 'edit') {
     const lines = [...editItems(p).map((x) => `change id ${x.id} (${x.before.description}): ${Object.entries(x.fields).map(([f, v]) => `${f} → ${v}`).join(', ')}`),
-      ...(p.removes ?? []).map((x) => `remove id ${x.id} (${x.before.description})`)];
+      ...(p.removes ?? []).map((x) => `remove id ${x.id} (${x.before.description})`)].map((l, i) => `P${i + 1}. ${l}`);
     // in the order they were asked: "actually no, the X" swaps the LAST
     if (lines.length > 1) lines[lines.length - 1] += '   ← added last';
     waiting = lines.join('\n');
   }
-  if (p?.kind === 'remove') waiting = p.ids.map((id, i) => `remove id ${id} (${p.before?.[i]?.description ?? ''})`).join('\n');
+  if (p?.kind === 'remove') waiting = p.ids.map((id, i) => `P${i + 1}. remove id ${id} (${p.before?.[i]?.description ?? ''})`).join('\n');
   if (p?.kind === 'pick') waiting = `They were asked WHICH ONE (to ${p.then.kind}): ${p.choices.map((id, i) => `${i + 1} = id ${id}`).join(', ')}`;
   const all = new Map([...month, ...list, ...last].map((r) => [r.id, r]));
   if (p?.kind === 'pick') for (const r of await rowsOf(p.choices)) all.set(r.id, r);
   for (const r of about) all.set(r.id, r);
-  return { view: { today, group, list, month, last, waiting, about }, known: all };
+  // THE LAST TWO TURNS, short: "gloria" answers "Spent by who?"
+  const cut = (t, n) => String(t ?? '').replace(/\s+/g, ' ').slice(0, n);
+  const talk = (state.history ?? []).slice(-2).map((h) => `Them: ${cut(h.said, 200)}\nBot: ${cut(typeof h.reply === 'string' ? h.reply : '', 400)}`).join('\n') || null;
+  // "do the same for 5 and 6", "now the rest to zayn"
+  const lastChange = state.lastChange ? `${state.lastChange.what} (on ${state.lastChange.n} ${state.lastChange.n === 1 ? 'expense' : 'expenses'})` : null;
+  const leftRows = await rowsOf((state.leftOut ?? []).slice(0, 30));
+  for (const r of leftRows) all.set(r.id, r);
+  const leftOut = leftRows.length ? leftRows.map((r) => `id ${r.id} (${r.description})`).join('\n') : null;
+  return { view: { today, group, list, month, last, waiting, about, talk, lastChange, leftOut }, known: all };
 }
 
 const addDays = (day, n) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
+function addMonths(day, n) {
+  const [y, m, d] = String(day).split('-').map(Number);
+  const first = new Date(Date.UTC(y, m - 1 + n, 1));
+  const last = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), Math.min(d, last))).toISOString().slice(0, 10);
+}
+
+/**
+ * A SET BY ITS RULE, found by code (his list 2026-10-08): "gloria's taxis
+ * this week", "over 500", "all except the cleaner". This month unless they
+ * said dates; the same exact words as everywhere else.
+ */
+async function idsByFilter(f, ctx) {
+  const day = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v ?? '')) ? v : null);
+  const from = day(f.from) ?? `${ctx.today.slice(0, 8)}01`;
+  const to = day(f.to) ?? ctx.today;
+  const rows = (await find.between(ctx.group, from, to)).map(find.asItem);
+  const has = (text, words) => { const have = find.wordsOf(text); return find.wordsOf(words).every((w) => have.some((h) => h === w || h.startsWith(w))); };
+  const out = rows.filter((r) => {
+    if (f.spent_by && !has(r.spentBy, f.spent_by)) return false;
+    if (f.category && r.category !== f.category) return false;
+    if (f.payee && !has(r.payee, f.payee)) return false;
+    if (f.words && !has(`${r.description} ${r.payee}`, f.words)) return false;
+    const aed = r.aed ?? r.rawAmount;
+    if (f.min_amount != null && !(aed >= Number(f.min_amount))) return false;
+    if (f.max_amount != null && !(aed <= Number(f.max_amount))) return false;
+    if (f.except && String(f.except).split(/\s*(?:,|\band\b|&|\bor\b)\s*/i).filter(Boolean).some((w) => has(`${r.description} ${r.payee} ${r.spentBy}`, w))) return false;
+    return true;
+  });
+  return out.map((r) => r.id);
+}
+
+/**
+ * "SPLIT 3 BETWEEN GLORIA AND ZAYN" (his list 2026-10-08): the first part
+ * keeps the expense, each other part is a new one, the same in every way
+ * but who and how much. Shares not said are equal; parts never add up to
+ * more than it is.
+ */
+function splitFor(op, row) {
+  const parts = (op.parts ?? []).filter((p) => p.spent_by || p.amount != null);
+  if (parts.length < 2) return { why: 'say who it is split between, like _split it between Gloria and Zayn_' };
+  const total = Number(row.rawAmount);
+  const said = parts.filter((p) => p.amount != null).reduce((n, p) => n + Number(p.amount), 0);
+  const open = parts.filter((p) => p.amount == null).length;
+  if (said > total + 0.005 || (!open && Math.abs(said - total) > 0.005)) return { why: `the parts come to ${format.amount(said)}, and it is ${format.money(row.currency, total)}` };
+  const share = open ? Math.floor(((total - said) / open) * 100) / 100 : 0;
+  let left = Math.round((total - said - share * open) * 100) / 100;
+  const amounts = parts.map((p) => {
+    if (p.amount != null) return Number(p.amount);
+    const a = Math.round((share + left) * 100) / 100;
+    left = 0;
+    return a;
+  });
+  if (amounts.some((a) => !(a > 0))) return { why: 'every part has to be above 0' };
+  const [first, ...rest] = parts;
+  return {
+    changes: { rawAmount: amounts[0], ...(first.spent_by ? { spentBy: String(first.spent_by).trim().slice(0, 60) } : {}) },
+    splits: rest.map((p, i) => ({ rawAmount: amounts[i + 1], spentBy: p.spent_by ? String(p.spent_by).trim().slice(0, 60) : row.spentBy })),
+  };
+}
 
 /** One planner change on one expense, as checked field values (or why not). */
 function changesForOp(op, row) {
@@ -1702,6 +2411,11 @@ function changesForOp(op, row) {
     out.rawAmount = v;
   }
   if (op.shift_days && !out.spentOn) out.spentOn = addDays(row.spentOn, Number(op.shift_days));
+  // "PUSH THEM TO NEXT MONTH": the same day, a month on (the 31st becomes the month's last day)
+  if (op.shift_months && !out.spentOn) out.spentOn = addMonths(row.spentOn, Number(op.shift_months));
+  // "NO PAYEE ON 2": emptied, never the description, amount or date
+  const CLEAR = { payee: 'payee', spent_by: 'spentBy', category: 'category' };
+  for (const f of op.clear ?? []) if (CLEAR[f] && !(CLEAR[f] in out)) out[CLEAR[f]] = null;
   return Object.keys(out).length ? { changes: out } : { why: 'nothing to change was said' };
 }
 
@@ -1739,7 +2453,9 @@ async function runPlanner(said, ctx) {
      */
     const list = context.view.list;
     if (list.length) {
-      said = String(said).replace(/^(\s*)(?:no\.?\s*|#)?(\d{1,2})\s*[.):-]\s*/gim, (m, sp, n) => (list[Number(n) - 1] ? `${sp}No. ${n} (id ${list[Number(n) - 1].id}, a SAVED one): ` : m));
+      // a dash before a digit is a run, not a line: "1-6 spent by zayn"
+      // was read as "No. 1: 6 spent by zayn" (his report 2026-10-08)
+      said = String(said).replace(/^(\s*)(?:no\.?\s*|#)?(\d{1,2})\s*(?:[.):]|-(?!\s*\d))\s*/gim, (m, sp, n) => (list[Number(n) - 1] ? `${sp}No. ${n} (id ${list[Number(n) - 1].id}, a SAVED one): ` : m));
     }
     let strong = planner.needsCare(said);
     let p = await planner.plan(said, context.view, { client: ctx.client, strong });
@@ -1787,13 +2503,39 @@ async function applyPlan(p, said, ctx, context) {
       const d = ctx.state.pending;
       const out = new Set((op.ids ?? []).filter((id) => editItems(d).some((x) => x.id === id) || (d.removes ?? []).some((x) => x.id === id)));
       if (!out.size) continue;
-      ctx.state.pending = { kind: 'edit', items: editItems(d).filter((x) => !out.has(x.id)), removes: (d.removes ?? []).filter((x) => !out.has(x.id)) };
+      ctx.state.pending = draft(editItems(d).filter((x) => !out.has(x.id)), (d.removes ?? []).filter((x) => !out.has(x.id)), d);
       dropped = true;
+      continue;
+    }
+    // "ONLY THE CLEANER ONES" while removals wait: the others out
+    if (op.kind === 'drop' && ctx.state.pending?.kind === 'remove') {
+      const d = ctx.state.pending;
+      const out = new Set((op.ids ?? []).filter((id) => d.ids.includes(id)));
+      if (!out.size) continue;
+      ctx.state.pending = { kind: 'edit', items: [], removes: d.ids.map((id, i) => ({ id, before: d.before[i] })).filter((x) => !out.has(x.id)) };
+      dropped = true;
+      continue;
+    }
+    // "SPLIT 3 BETWEEN GLORIA AND ZAYN": one expense, shared out
+    if (op.kind === 'split') {
+      const id = (op.ids ?? []).find((x) => context.known.has(x));
+      const row = id && await expensesRepo.findById(id);
+      if (!row) { asks.push('Which one should I split? Say it like _split 3 between Gloria and Zayn_.'); continue; }
+      const got = splitFor(op, find.asItem(row));
+      if (got.why) { asks.push(`*${row.description}*: ${got.why}.`); continue; }
+      edits.push({ row, changes: got.changes, splits: got.splits });
       continue;
     }
     if (op.kind !== 'change' && op.kind !== 'remove') continue;
     let ids = (op.ids ?? []).filter((id) => context.known.has(id));
-    if ((op.ids ?? []).some((id) => !context.known.has(id))) unknownIds = true;
+    // A SET BY ITS RULE: every one that fits, found here, never guessed (its
+    // ids, if the model gave any too, are not what decides)
+    const rule = op.filter && Object.values(op.filter).some((v) => v != null && v !== '');
+    if (!rule && (op.ids ?? []).some((id) => !context.known.has(id))) unknownIds = true;
+    if (rule) {
+      ids = await idsByFilter(op.filter, ctx);
+      if (!ids.length) { asks.push(`Nothing this month fits _${op.match || 'that'}_.`); continue; }
+    }
     if (!ids.length && op.match) {
       const hits = thisMonthOr(await find.findTarget(ctx.group, { words: op.match }, { today: ctx.today, lastIds: ctx.state.lastIds ?? [] }), ctx.today);
       if (hits.length === 1) ids = [hits[0].id];
@@ -1823,9 +2565,17 @@ async function applyPlan(p, said, ctx, context) {
       const row = await expensesRepo.findById(id);
       if (!row) continue;
       const got = changesForOp(op, find.asItem(row));
+      // asked for the value already ("Spent by who?"): not asked again per expense
+      if (got.why === 'nothing to change was said' && ops.some((o) => o.kind === 'unclear')) continue;
       if (got.why) asks.push(`*${row.description}*: ${got.why}.`);
       else edits.push({ row, changes: got.changes });
     }
+  }
+  // IN THE LIST'S ORDER, so the preview's "1-3" is the list's 1-3
+  if (context.view.list.length) {
+    const at = (id) => { const i = context.view.list.findIndex((r) => r.id === id); return i < 0 ? 1e9 : i; };
+    edits.sort((a, b) => at(a.row.id) - at(b.row.id));
+    removeIds.sort((a, b) => at(a) - at(b));
   }
   if (unknownIds && !p.strong) return { retry: 'it named an expense id that is not in the context', ops: summary };
   if (removeIds.length >= 3 && !p.strong) return { retry: `it would remove ${removeIds.length}: check each one is meant`, ops: summary };
@@ -1840,7 +2590,9 @@ async function applyPlan(p, said, ctx, context) {
     }
     const d = ctx.state.pending;
     if (!editItems(d).length && !(d.removes ?? []).length) { ctx.state.pending = null; return { reply: 'Okay, nothing is waiting now.', ops: summary }; }
-    return { reply: `Left that out.\n\n${format.editsPreview(editItems(d), { group: ctx.group === find.ALL, removes: d.removes ?? [] })}`, ops: summary };
+    const was = pendingBefore?.kind === 'remove' ? pendingBefore.ids.length : editItems(pendingBefore).length + (pendingBefore?.removes ?? []).length;
+    const gone = was - editItems(d).length - (d.removes ?? []).length;
+    return { reply: `${gone > 1 ? `Left ${gone} out.` : 'Left that out.'}\n\n${format.editsPreview(editItems(d), { group: ctx.group === find.ALL, removes: d.removes ?? [] })}`, ops: summary };
   }
   // NOTHING TO DO BUT ASK
   if (!edits.length && !removeIds.length && !adds.length && !questionsAsked.length) {
@@ -1870,22 +2622,29 @@ async function applyPlan(p, said, ctx, context) {
   if (pending?.kind === 'remove') ctx.state.pending = { kind: 'edit', items: [], removes: pending.ids.map((id, i) => ({ id, before: pending.before[i] })) };
   if (pending?.kind === 'pick' || pending?.kind === 'undo' || pending?.kind === 'either') ctx.state.pending = null;
   let reply = null;
-  for (const e of edits) reply = editPreviewFor(e.row, e.changes, ctx);
+  for (const e of edits) {
+    ctx.splitNow = e.splits ? { [e.row.id]: e.splits } : null;
+    reply = editPreviewFor(e.row, e.changes, ctx);
+  }
+  ctx.splitNow = null;
   if (removeIds.length) {
     if (removeIds.length > 20) return { reply: await whichToRemove(ctx), ops: summary };
-    const rows = (await Promise.all([...new Set(removeIds)].map((id) => expensesRepo.findById(id)))).filter(Boolean);
-    const draft = ctx.state.pending?.kind === 'edit' ? ctx.state.pending : { kind: 'edit', items: [], removes: [] };
-    const removes = [...(draft.removes ?? []), ...rows.filter((r) => !(draft.removes ?? []).some((x) => x.id === r.id)).map((r) => ({ id: r.id, before: SNAP(r) }))];
+    const all = (await Promise.all([...new Set(removeIds)].map((id) => expensesRepo.findById(id)))).filter(Boolean);
+    // settled ones are locked: left out, and said
+    const rows = all.filter((r) => r.settle_status !== 'settled');
+    if (rows.length < all.length) ctx.locked = [...new Set([...(ctx.locked ?? []), ...all.filter((r) => r.settle_status === 'settled').map((r) => r.description)])];
+    const cur = ctx.state.pending?.kind === 'edit' ? ctx.state.pending : { kind: 'edit', items: [], removes: [] };
+    const removes = [...(cur.removes ?? []), ...rows.filter((r) => !(cur.removes ?? []).some((x) => x.id === r.id)).map((r) => ({ id: r.id, before: SNAP(r) }))];
     // an expense removed is not also changed
-    const items = editItems(draft).filter((x) => !removes.some((r) => r.id === x.id));
-    ctx.state.pending = { kind: 'edit', items, removes };
+    const items = editItems(cur).filter((x) => !removes.some((r) => r.id === x.id));
+    ctx.state.pending = draft(items, removes, ctx.state.pending);
   }
-  const draft = ctx.state.pending;
-  if (draft?.kind !== 'edit' || (!editItems(draft).length && !(draft.removes ?? []).length)) return { reply: reply ?? (asks.length ? asks.join('\n') : null), ops: summary };
-  const n = editItems(draft).length;
-  const m = (draft.removes ?? []).length;
+  const plan = ctx.state.pending;
+  if (plan?.kind !== 'edit' || (!editItems(plan).length && !(plan.removes ?? []).length)) return { reply: reply ?? (asks.length ? asks.join('\n') : null), ops: summary };
+  const n = editItems(plan).length;
+  const m = (plan.removes ?? []).length;
   const lead = ops.length > 1 || n + m > 1 ? `Got it: ${[n ? `${n} ${n === 1 ? 'change' : 'changes'}` : '', m ? `${m} to remove` : ''].filter(Boolean).join(' and ')}.\n\n` : '';
-  reply = `${lead}${format.editsPreview(editItems(draft), { group: ctx.group === find.ALL, removes: draft.removes ?? [] })}`;
+  reply = `${lead}${format.editsPreview(editItems(plan), { group: ctx.group === find.ALL, removes: plan.removes ?? [] })}`;
   if (asks.length) reply += `\n\n❓ ${asks.join('\n❓ ')}`;
   // new expenses said in the same message come right after this yes
   if (adds.length) {
@@ -1905,13 +2664,27 @@ async function applyPlan(p, said, ctx, context) {
 async function questionReply(r, ctx, pending) {
   // ctx.answer receives the same answer as a table, for the picture
   ctx.answer = {};
-  const text = await find.answer(ctx.group, r.query, { today: ctx.today, out: ctx.answer });
+  /**
+   * AS IF THE WAITING CHANGES WERE SAVED (his list 2026-10-08): "how much is
+   * gloria's total after this?" counts the draft as done, and says so.
+   */
+  const asIf = pending?.kind === 'edit' && AS_IF.test(String(ctx.said ?? ''));
+  let { query } = r;
+  if (asIf) {
+    const q2 = quickRoute(String(ctx.said).replace(AS_IF, ' ').replace(/\s+/g, ' ').trim(), { today: ctx.today, groups: ctx.groups, group: ctx.group });
+    if (q2?.kind === 'question') query = q2.query;
+  }
+  const text = await find.answer(ctx.group, query, { today: ctx.today, out: ctx.answer, overlay: asIf ? { items: editItems(pending), removes: pending.removes ?? [] } : null });
   // WHAT WAS JUST SHOWN is what "it" means next ("show me the groceries",
   // then "bin it": his harness 2026-10-07 removed the last saved instead)
-  if (ctx.answer.ids?.length && ctx.answer.ids.length <= 10) ctx.state.lastIds = ctx.answer.ids;
+  if (ctx.answer.ids?.length && ctx.answer.ids.length <= 10) ctx.state.lastIds = ctx.answer.ids.filter(Boolean);
+  // A NUMBERED LIST is the list on screen now: "1-3 spent by gloria" means these
+  if (!asIf && ctx.answer.listIds?.length > 1) showList(ctx, ctx.answer.listIds.filter(Boolean));
   const waiting = pending?.kind === 'add' ? pending.items.filter((x) => !x.skipped).length : 0;
-  ctx.answer.note = waiting ? `\n\n_Not counted: ${waiting} in your preview, not saved yet. Reply *yes* to save them._`
-    : pending ? `\n\n_${waitingLine(pending)}_` : '';
+  const n = asIf ? editItems(pending).length + (pending.removes ?? []).length : 0;
+  ctx.answer.note = asIf ? `\n\n_As if your ${n === 1 ? 'change was' : `${n} changes were`} saved. Nothing is saved yet: reply *yes* to save._`
+    : waiting ? `\n\n_Not counted: ${waiting} in your preview, not saved yet. Reply *yes* to save them._`
+      : pending ? `\n\n_${waitingLine(pending)}_` : '';
   // a question in between is not looking away: a yes after it still counts
   if (pending) ctx.keepShown = true;
   return `${text}${ctx.answer.note}`;
@@ -1933,6 +2706,7 @@ function waitingLine(p) {
   if (p.kind === 'remove') return `Still waiting: removing ${p.ids.length === 1 ? (p.before?.[0]?.description ? `the *${p.before[0].description}*` : '1 expense') : `${p.ids.length} expenses`}. Reply *yes* to remove, or *cancel*.`;
   if (p.kind === 'pick') return `Still waiting: which one did you mean? Reply with its number (1–${p.choices.length}).`;
   if (p.kind === 'undo') return 'Still waiting: reply *yes* to undo, or *cancel*.';
+  if (p.kind === 'settle') return `Still waiting: ${{ settled: 'settling', unsettled: 'reopening', review: 'marking for review' }[p.to]} ${p.ids.length} ${p.ids.length === 1 ? 'expense' : 'expenses'}. Reply *yes*, or *cancel*.`;
   return '';
 }
 
@@ -1969,8 +2743,7 @@ async function whichToRemove(ctx) {
   const pickFrom = await recentToPick(ctx);
   if (!pickFrom.rows.length) return 'There are no expenses in the last 2 months to remove.';
   ctx.state.awaiting = 'remove';
-  ctx.state.listIds = pickFrom.rows.map((r) => r.id);
-  ctx.state.listAt = (ctx.state.history ?? []).length;
+  showList(ctx, pickFrom.rows.map((r) => r.id));
   return [`Which ones should I remove? ${pickFrom.heading}`, '', ...pickFrom.lines, '',
     'Reply with their numbers, like _2 and 3_, or say them, like _remove the cleaner and the petrol_.'].join('\n');
 }
@@ -2060,6 +2833,13 @@ async function moreToRemove(said, ctx, { fresh = false } = {}) {
 }
 
 function removePreviewFor(rows, ctx) {
+  // SETTLED IS LOCKED: left out, and said
+  const locked = rows.filter((r) => r.settle_status === 'settled');
+  if (locked.length) {
+    ctx.locked = [...new Set([...(ctx.locked ?? []), ...locked.map((r) => r.description)])];
+    rows = rows.filter((r) => r.settle_status !== 'settled');
+    if (!rows.length) return `🔒 ${locked.length === 1 ? `The *${locked[0].description}* is` : `Those ${locked.length} are`} settled (refunded), so ${locked.length === 1 ? 'it' : 'they'} can't be removed. The CRM admin can reopen ${locked.length === 1 ? 'it' : 'them'}.`;
+  }
   ctx.state.pending = { kind: 'remove', ids: rows.map((r) => r.id), before: rows.map(SNAP) };
   return format.removePreview(rows.map(find.asItem), { group: ctx.group === find.ALL });
 }
@@ -2094,15 +2874,49 @@ async function saveRemove(ctx) {
 
 // ---- undo: always asks ----
 
-async function startUndo(ctx) {
-  // "UNDO THE CLEANER REMOVAL": the latest of theirs that names it, not
-  // just the latest (his sweep 2026-10-07: it offered the petrol)
-  const words = find.wordsOf(String(ctx.said ?? '').replace(/\b(?:undo|revert|restore|bring|put|get|take|back|it|that|them|those|this|please|pls|removal|removed|remove|deletion|deleted|delete|change|changed|edit|saving|saved|save|added|add|the|my|last)\b/gi, ' '));
+const COUNT_WORD = { two: 2, three: 3, four: 4, five: 5 };
+
+async function startUndo(ctx, said = ctx.said) {
+  const t = String(said ?? '').trim();
+  /**
+   * "UNDO ONLY 2", "undo 2 and 3" (his list 2026-10-08): those lines of the
+   * last thing done, as numbered in its ✅ message; the rest stay.
+   */
+  const some = /^(?:(?:pls|please)\s+)?(?:(?:only|just)\s+)?(?:undo|revert|put back|take back)\s+(?:only\s+|just\s+)?(?:no\.?\s*|#|numbers?\s+)?([\d\s,&\-–to]+?(?:\s*and\s*\d+)?)[.!]*$/i.exec(t);
+  if (some && numberSet(some[1])) {
+    const ns = numberSet(some[1]);
+    const action = await store.lastAction(ctx.phone, ctx.group);
+    if (!action) return 'There is nothing of yours to undo.';
+    const open = (action.changes ?? []).filter((c) => !c.created);
+    if (!ns.every((n) => n >= 1 && n <= open.length)) return `The last thing you did had ${open.length} ${open.length === 1 ? 'line' : 'lines'}. Pick from 1–${open.length}, like *undo only 2*.`;
+    if (ns.some((n) => open[n - 1].undone)) return `No. ${ns.find((n) => open[n - 1].undone)} was already undone.`;
+    ctx.state.pending = { kind: 'undo', actionId: action.id, only: ns };
+    return format.undoPreview({ kind: action.kind, summary: `No. ${format.ranges(ns)}: ${actionText({ ...action, changes: open }, ns)}` });
+  }
+  // "UNDO THE LAST 2 THINGS": that many of theirs, newest first
+  const lastN = /^(?:undo|revert)\s+(?:the\s+)?last\s+(\d+|two|three|four|five)\s+(?:things|changes|actions|ones|saves|edits)\b/i.exec(t);
+  if (lastN) {
+    const n = Math.min(COUNT_WORD[lastN[1].toLowerCase()] ?? Number(lastN[1]), 10);
+    const recent = await store.recentActions(ctx.phone, ctx.group, n);
+    if (!recent.length) return 'There is nothing of yours to undo.';
+    ctx.state.pending = { kind: 'undo', actionIds: recent.map((a) => a.id) };
+    return format.undoPreview({ kind: 'many', summary: `${recent.length === n ? `the last ${n}` : `only ${recent.length} to undo`}:\n${recent.map((a, i) => `${i + 1}. ${actionText(a)}`).join('\n')}` });
+  }
+  // "UNDO THE CLEANER REMOVAL", "undo the gloria change": the latest of
+  // theirs that names it in what it was OR what it became
+  const words = find.wordsOf(t.replace(/\b(?:undo|revert|restore|bring|put|get|take|back|it|that|them|those|this|please|pls|removal|removed|remove|deletion|deleted|delete|change|changed|changes|edit|update|saving|saved|save|added|add|split|the|my|last)\b/gi, ' '));
   let action = null;
   if (words.length) {
     const recent = await store.recentActions(ctx.phone, ctx.group, 15);
-    action = recent.find((a) => words.every((w) => find.wordsOf(a.summary).some((h) => h === w || h.startsWith(w) || w.startsWith(h)))) ?? null;
-    if (!action) return `I couldn't find a recent change of yours about _${words.join(' ')}_. Say *undo* to take back the last one.`;
+    action = recent.find((a) => {
+      const text = find.wordsOf(`${a.summary} ${(a.changes ?? []).map((c) => Object.values(c.after ?? {}).join(' ')).join(' ')}`);
+      return words.every((w) => text.some((h) => h === w || h.startsWith(w) || w.startsWith(h)));
+    }) ?? null;
+    // NOTHING AT ALL to undo is said plainly, as plain "undo" says it; their
+    // sentence read back as keywords ("about _name gloria not spent_") was
+    // noise (two agent test 2026-10-09).
+    if (!action && !recent.length) return 'There is nothing of yours to undo.';
+    if (!action) return `None of your recent changes is about that. Your last one: ${actionText(recent[0])}. Say *undo* to take it back.`;
   } else {
     action = await store.lastAction(ctx.phone, ctx.group);
   }
@@ -2112,15 +2926,33 @@ async function startUndo(ctx) {
 }
 
 async function saveUndo(ctx) {
-  const pool = require('../../../configs/db');
-  const { rows } = await pool.query('SELECT * FROM tb_expense_actions WHERE id = $1 AND undone_at IS NULL', [ctx.state.pending.actionId]);
-  const action = rows[0];
+  const { actionId, actionIds, only } = ctx.state.pending;
   ctx.state.pending = null;
+  const out = [];
+  for (const id of actionIds ?? [actionId]) {
+    // eslint-disable-next-line no-await-in-loop
+    out.push(await undoOne(id, ctx, only ?? null));
+  }
+  if (out.length === 1) return out[0];
+  return out.map((x, i) => `${i + 1}. ${x}`).join('\n');
+}
+
+/** One action taken back, whole or only some of its lines. */
+async function undoOne(actionId, ctx, only) {
+  const pool = require('../../../configs/db');
+  const { rows } = await pool.query('SELECT * FROM tb_expense_actions WHERE id = $1 AND undone_at IS NULL', [actionId]);
+  const action = rows[0];
   if (!action) return 'That was already undone. Nothing changed.';
   const done = [];
   const skipped = [];
+  // the numbered lines are the ones not split off; a split's new one goes with its line
+  const open = action.changes.filter((c) => !c.created);
+  const chosen = only ? new Set(only.map((n) => open[n - 1]).filter(Boolean)) : null;
   for (const c of action.changes) {
     /* eslint-disable no-await-in-loop */
+    if (c.undone) continue;
+    if (chosen && !chosen.has(c) && !(c.created && [...chosen].some((x) => x.id === c.from))) continue;
+    c.undone = true;
     if (action.kind === 'add') {
       const now = await expensesRepo.findById(c.id);
       if (!now) continue;
@@ -2132,6 +2964,13 @@ async function saveUndo(ctx) {
         await receipts.forget(now);
         await expensesRepo.remove(c.id);
       }
+      done.push(c.id);
+    } else if (action.kind === 'edit' && c.created) {
+      // a split's new expense: taken back, unless it changed since
+      const now = await expensesRepo.findById(c.id);
+      if (!now) continue;
+      if (!same(now, c.after)) { skipped.push(c.after.description); continue; }
+      await expensesRepo.remove(c.id);
       done.push(c.id);
     } else if (action.kind === 'edit' && c.removed) {
       const back = await expensesRepo.create(c.before);
@@ -2151,12 +2990,15 @@ async function saveUndo(ctx) {
     }
     /* eslint-enable no-await-in-loop */
   }
-  await pool.query('UPDATE tb_expense_actions SET undone_at = now() WHERE id = $1', [action.id]);
-  await store.recordAction(pool, { phone: ctx.phone, group: ctx.group, kind: 'undo', changes: [{ undid: action.id }], summary: `undid: ${action.summary}` });
+  // SOME LINES: the rest stay undoable; all of them, and the action is done
+  const whole = action.changes.every((c) => c.undone);
+  await pool.query(`UPDATE tb_expense_actions SET changes = $2${whole ? ', undone_at = now()' : ''} WHERE id = $1`, [action.id, JSON.stringify(action.changes)]);
+  await store.recordAction(pool, { phone: ctx.phone, group: ctx.group, kind: 'undo', changes: [{ undid: action.id, only }], summary: `undid${only ? ` No. ${format.ranges(only)} of` : ''}: ${action.summary}` });
   broadcast(null, EVENT, { action: 'reverted', via: 'whatbot' });
   ctx.state.lastIds = [];
   const verb = { add: 'Taken back', edit: 'Put back', remove: 'Brought back' }[action.kind];
-  return `✅ *${verb}:* ${action.summary}${skipped.length ? `\n⚠️ Left alone, changed since: ${skipped.join(', ')}` : ''}`;
+  const what = only ? `No. ${format.ranges(only)} (${done.length} ${done.length === 1 ? 'expense' : 'expenses'})${whole ? '' : '. The rest stay as they are'}` : action.summary;
+  return `✅ *${verb}:* ${what}${skipped.length ? `\n⚠️ Left alone, changed since: ${skipped.join(', ')}` : ''}`;
 }
 
 // ---- helpers ----

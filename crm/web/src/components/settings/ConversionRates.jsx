@@ -355,7 +355,7 @@ export default function ConversionRates() {
         />
       )}
 
-      <BulkBar count={sel.count} noun="rate" onClear={sel.clear}>
+      <BulkBar count={sel.count} onClear={sel.clear}>
         <BulkAction icon={TrashIcon} variant="danger" onClick={() => setConfirming(sel.ids)}>
           Clear
         </BulkAction>

@@ -250,7 +250,7 @@ export default function LogsPage() {
         />
       )}
 
-      <BulkBar count={sel.count} noun="log" onClear={sel.clear}>
+      <BulkBar count={sel.count} onClear={sel.clear}>
         <BulkAction icon={DownloadIcon} onClick={exportSelected}>Export JSON</BulkAction>
         <BulkAction icon={TrashIcon} variant="danger" onClick={() => setConfirmDelete(true)}>
           Delete

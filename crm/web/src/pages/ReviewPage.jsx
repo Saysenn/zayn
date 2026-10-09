@@ -358,7 +358,7 @@ export default function ReviewPage() {
            * paid in full and then time is up, the palm stops, the same palm
            * the master sheet uses, and red like it: No ends somebody's
            * pay. Final and No still confirm first. */}
-      <BulkBar count={sel.count} noun="deal" onClear={sel.clear}>
+      <BulkBar count={sel.count} onClear={sel.clear}>
         <BulkAction icon={CheckIcon} onClick={() => press(REVIEW_ANSWER.YES)}>
           {REVIEW_ANSWER_LABEL[REVIEW_ANSWER.YES]}
         </BulkAction>

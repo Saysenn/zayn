@@ -113,6 +113,8 @@ export default function EditableCell({
   // Committing on blur while ALSO committing on Enter double-fires,
   // because Enter blurs the input on its way out.
   const committed = useRef(false);
+  // What the draft was when the cell opened. See commit.
+  const opened = useRef('');
 
   useEffect(() => {
     onEditingChange?.(editing);
@@ -124,7 +126,8 @@ export default function EditableCell({
 
   function start() {
     if (!editable) return;
-    setDraft(toEditValue(value, type));
+    opened.current = toEditValue(value, type);
+    setDraft(opened.current);
     setError(null);
     committed.current = false;
     setEditing(true);
@@ -146,6 +149,15 @@ export default function EditableCell({
 
   function commit({ moveNext = false } = {}) {
     if (committed.current) return;
+
+    // UNTOUCHED, SO NOTHING TO CHECK. A stored value outside today's
+    // options (a payday 'partial' under Paid / Unpaid) used to fail
+    // validation the moment the cell was clicked away from.
+    if (draft === opened.current) {
+      cancel();
+      if (moveNext) focusNextCell(cellRef.current);
+      return;
+    }
 
     const problem = validate(draft, type, options);
     if (problem) {

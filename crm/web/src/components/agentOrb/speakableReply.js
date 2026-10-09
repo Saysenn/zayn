@@ -27,5 +27,11 @@
  * cells aloud is a separate decision and nobody has asked for it.
  */
 export function speakableReply(reply) {
-  return String(reply ?? '').trim();
+  // NEVER A LINK OR A SOURCE MARKER (his call 2026-10-10, HMRC mode): "[2]"
+  // and web addresses are for the eye; the sources are drawn under the answer
+  return String(reply ?? '')
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/\s?\[\d+\](?:\[\d+\])*/g, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
 }

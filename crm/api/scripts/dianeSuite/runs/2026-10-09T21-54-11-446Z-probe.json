@@ -1,0 +1,61 @@
+{
+  "set": "probe",
+  "at": "2026-10-09T21:54:11.446Z",
+  "seconds": 20,
+  "cases": 2,
+  "passed": 2,
+  "passRate": 100,
+  "groups": {
+    "main": {
+      "cases": 2,
+      "passed": 2,
+      "passRate": 100
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 0,
+    "db": 0
+  },
+  "calcAccuracy": null,
+  "inventedRate": 0,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0,
+  "recoveryRate": null,
+  "perTurn": {
+    "turns": 7,
+    "modelRounds": 0.7,
+    "toolCalls": 1,
+    "retries": 0,
+    "inputTokens": 18581,
+    "cachedPct": 89,
+    "outputTokens": 38,
+    "medianMs": 2232,
+    "slowestMs": 5311
+  },
+  "tokens": {
+    "input": 130067,
+    "cached": 115200,
+    "output": 265
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "adds several deals from one line with mixed separators",
+      "name": "adds several deals from one line with mixed separators",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a deal added over a few messy messages, corrected, saved on yes",
+      "name": "a deal added over a few messy messages, corrected, saved on yes",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}

@@ -19,7 +19,18 @@
 import { readFile } from "node:fs/promises";
 import { Completions } from "openai/resources/chat/completions";
 
-if (process.env.DATA_SOURCE !== "fake" || !process.env.REDIS_URL || /:6390\b/.test(process.env.REDIS_URL)) {
+// The live bot's Redis: whatever .env names (local 127.0.0.1:6379 since
+// 2026-10-09), and the ones it used before (Upstash, local 6390). Read from
+// the file, not the environment, so an override cannot hide it.
+const liveRedis = /^REDIS_URL=(.*)$/m.exec(await readFile(new URL("../../../.env", import.meta.url), "utf8").catch(() => ""))?.[1]?.trim();
+const samePlace = (a, b) => {
+  try {
+    const x = new URL(a); const y = new URL(b);
+    const host = (h) => (h === "localhost" ? "127.0.0.1" : h);
+    return host(x.hostname) === host(y.hostname) && (x.port || "6379") === (y.port || "6379");
+  } catch { return false; }
+};
+if (process.env.DATA_SOURCE !== "fake" || !process.env.REDIS_URL || (liveRedis && samePlace(process.env.REDIS_URL, liveRedis)) || /:6390\b|upstash\.io/.test(process.env.REDIS_URL)) {
   process.stderr.write("refusing: run with DATA_SOURCE=fake and a throwaway REDIS_URL (not the live bot's)\n");
   process.exit(1);
 }
@@ -40,6 +51,21 @@ Completions.prototype.create = async function counted(body, ...rest) {
     model: body.model,
     usd: ((u.prompt_tokens ?? 0) * pin + (u.completion_tokens ?? 0) * pout) / 1e6,
     tools: (res.choices?.[0]?.message?.tool_calls ?? []).map((t) => t.function?.name),
+  });
+  return res;
+};
+// the payments agent v2 (PAYMENTS_V2=1) speaks the Responses API: counted
+// the same way. Prices for newer models from EVAL_PRICE_IN/OUT ($ per 1M).
+const { Responses } = await import("openai/resources/responses/responses");
+const respond = Responses.prototype.create;
+Responses.prototype.create = async function counted(body, ...rest) {
+  const res = await respond.call(this, body, ...rest);
+  const [pin, pout] = PRICE[body.model] ?? [Number(process.env.EVAL_PRICE_IN ?? 2), Number(process.env.EVAL_PRICE_OUT ?? 8)];
+  const u = res.usage ?? {};
+  calls.push({
+    model: body.model,
+    usd: ((u.input_tokens ?? 0) * pin + (u.output_tokens ?? 0) * pout) / 1e6,
+    tools: (res.output ?? []).filter((o) => o.type === "function_call").map((o) => o.name),
   });
   return res;
 };

@@ -432,9 +432,9 @@ test('SEVERAL CHANGES, ONE PREVIEW, ONE YES (his call 2026-10-07)', () => {
   ];
   const text = format.editsPreview(items);
   assert.match(text, /^✏️ \*CHANGE 2 EXPENSES\?\*/);
-  assert.match(text, /• \*Groceries\* · 04 Oct: Amount AED 139\.91 ➜ \*AED 300\.00\*/);
-  assert.match(text, /• \*Internet bill Sep 2026\* · 01 Oct: Amount AED 471\.45 ➜ \*AED 800\.00\*/);
-  assert.match(text, /Reply \*yes\* to change them all · \*cancel\* · add another, or drop one \(_not the groceries_\)$/);
+  assert.match(text, /• \*1\.\* \*Groceries\* · 04 Oct: Amount AED 139\.91 ➜ \*AED 300\.00\*/);
+  assert.match(text, /• \*2\.\* \*Internet bill Sep 2026\* · 01 Oct: Amount AED 471\.45 ➜ \*AED 800\.00\*/);
+  assert.match(text, /Reply \*yes\* to change them all · \*cancel\* · add another, or pick some \(_only 1_ · _not 2_\)$/);
   assert.match(format.editsPreview(items.slice(0, 1)), /Reply \*yes\* · \*cancel\* · or add another change$/);
 });
 
@@ -457,6 +457,26 @@ test('"1. ADD 500 / 2. DEDUCT 100 / 3. MAKE IT 800": a list answered by number (
   assert.match(src, /function changeFromWords\(words, row, today\)/);
   assert.match(src, /ALL OR NOTHING: every line read first/);
   assert.match(src, /\|\| ctx\.awaiting \|\| pending\) \{/, 'never handed to the pay side right after it asked');
+});
+
+test('"1-6 SPENT BY ZAYN": one change, a run of numbers from the list (his report 2026-10-08)', () => {
+  const { numberRun } = require('./quick');
+  assert.deepEqual(numberRun('1-6 spent by zayn'), { ns: [1, 2, 3, 4, 5, 6], words: 'spent by zayn' });
+  assert.deepEqual(numberRun('1 to 3 to 50'), { ns: [1, 2, 3], words: 'to 50' });
+  assert.deepEqual(numberRun('change 1, 3 and 5 paid to Careem').ns, [1, 3, 5]);
+  assert.deepEqual(numberRun('2-4 & 7 category fuel').ns, [2, 3, 4, 7]);
+  for (const t of ['2 to 50', '3 make it 800', '1-6', '6-1 spent by zayn', '1. add 500\n2. deduct 100']) assert.equal(numberRun(t), null, `${t}: not a run`);
+  const src = require('fs').readFileSync(require.resolve('./brain'), 'utf8');
+  // read in code BEFORE the planner is asked (2026-10-08: "1-3 gloria, 4-6
+  // zayn" was the planner's; the run now goes first and falls through)
+  const runAt = src.indexOf('if (run && run.ns.every(');
+  assert.ok(runAt > 0 && runAt < src.indexOf('if (PLANNER_ON && !pending && !files.length'), 'a run is read in code, before the planner');
+  // the planner's line tags: "1-6" is a run, never "No. 1: 6 …"
+  const tag = /^(\s*)(?:no\.?\s*|#)?(\d{1,2})\s*(?:[.):]|-(?!\s*\d))\s*/im;
+  assert.ok(src.includes(tag.source), 'the tagging rule');
+  assert.equal(tag.test('1-6 spent by zayn'), false);
+  assert.equal(tag.test('3. add 80'), true);
+  assert.equal(tag.test('3- add 80'), true);
 });
 
 test('MESSY REPLIES TO A PREVIEW, read in code (his harness 2026-10-07)', () => {
@@ -486,4 +506,13 @@ test('CHANGES SAID EVERY WAY, read in code (his harness 2026-10-07)', () => {
   assert.equal(q('update the last expense to 99').target.last, true);
   assert.equal(q('the 120.43 one should be 125').target.amount, '120.43');
   assert.equal(q('change the MANBAT groceries to 300').target.words, 'groceries', 'a group is not part of the name');
+});
+
+test('"1-2 PAID TO TAXII" IS WHO WAS PAID, even while who spent it is asked too (two agent test 2026-10-09)', () => {
+  const { readReply } = require('./reply');
+  const pending = { kind: 'add', items: [{ n: 1, missing: ['payee', 'spentBy'], doubts: [] }, { n: 2, missing: ['payee', 'spentBy'], doubts: [] }] };
+  const fix = (t) => readReply(t, pending).parts.map((p) => `${p.which.join('-')} ${p.fixes.map((f) => `${f.field}=${f.value}`).join(',')}`).join(' | ');
+  assert.equal(fix('1-2 paid to Taxii'), '1-2 payee=Taxii', 'the bot\'s own suggested reply');
+  assert.equal(fix('1-2 spent by gloria'), '1-2 spentBy=gloria');
+  assert.equal(fix('1-2 Ahmed'), '1-2 spentBy=Ahmed', 'a bare name is still who spent it');
 });

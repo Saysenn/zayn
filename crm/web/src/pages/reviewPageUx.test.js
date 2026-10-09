@@ -210,8 +210,8 @@ test('THE THREE ANSWERS ARE CONTEXTUAL, not three permanent colours', () => {
   assert.match(bar, /const open = count > 0;/);
   assert.match(bar, /if \(!open\) return null;/);
   assert.doesNotMatch(bulk, /disabled=/);
-  // And the bar says how many rows the button in front of it will touch.
-  assert.match(bar, /\{countOf\(count, noun\)\} selected/);
+  // NO "N selected" count in the bar, his call 2026-10-08.
+  assert.doesNotMatch(bar, /\} selected/);
   // No colour per answer, the shape carries it. The one exception is the
   // answer that STOPS a deal: red, like every other Stop.
   assert.equal((bulk.match(/variant=/g) ?? []).length, 1, 'only one answer is coloured');

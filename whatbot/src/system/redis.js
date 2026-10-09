@@ -4,8 +4,15 @@ import { logger } from "./logger.js";
 
 // maxRetriesPerRequest MUST be null or BullMQ breaks — it uses blocking
 // commands that ioredis would otherwise give up on
+//
+// UPSTASH DROPS QUIET SOCKETS (read ECONNRESET, 2026-10-08), and a job whose
+// lock could not be renewed through the drop was failed as "stalled". A TCP
+// keep-alive every 10s keeps the line warm; no ready check, as Upstash
+// advises for BullMQ, so a reconnect is one round trip shorter.
 export const redis = new Redis(env.REDIS_URL, {
   maxRetriesPerRequest: null,
+  enableReadyCheck: false,
+  keepAlive: 10_000,
 });
 
 redis.on("error", (err) => logger.error({ err: err.message }, "redis error"));

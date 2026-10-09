@@ -1,0 +1,232 @@
+{
+  "set": "auto-mac-after",
+  "at": "2026-10-09T21:04:04.420Z",
+  "seconds": 241,
+  "cases": 24,
+  "passed": 16,
+  "passRate": 66.7,
+  "groups": {
+    "main": {
+      "cases": 24,
+      "passed": 16,
+      "passRate": 66.7
+    }
+  },
+  "failuresByLabel": {
+    "tool": 1,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 1,
+    "db": 7
+  },
+  "calcAccuracy": null,
+  "inventedRate": 0,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0,
+  "recoveryRate": 50,
+  "perTurn": {
+    "turns": 95,
+    "modelRounds": 1,
+    "toolCalls": 1,
+    "retries": 0.02,
+    "inputTokens": 28007,
+    "cachedPct": 98,
+    "outputTokens": 34,
+    "medianMs": 2332,
+    "slowestMs": 8237
+  },
+  "tokens": {
+    "input": 2660693,
+    "cached": 2618752,
+    "output": 3198
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "a question about someone is answered in words, a card only when asked to see it",
+      "name": "a question about someone is answered in words, a card only when asked to see it",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a change previews, applies on yes, and undo puts it back",
+      "name": "a change previews, applies on yes, and undo puts it back",
+      "group": "main",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    },
+    {
+      "id": "adds several deals from one line with mixed separators",
+      "name": "adds several deals from one line with mixed separators",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "take N days off moves every deal BY N, once, and undo puts them back",
+      "name": "take N days off moves every deal BY N, once, and undo puts them back",
+      "group": "main",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    },
+    {
+      "id": "deduct with no field named is the monthly, and the payable follows it",
+      "name": "deduct with no field named is the monthly, and the payable follows it",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a percentage raise previews every deal, applies on yes, and one undo takes it back",
+      "name": "a percentage raise previews every deal, applies on yes, and one undo takes it back",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a change and a question in one message: the answer reads the NEW figure",
+      "name": "a change and a question in one message: the answer reads the NEW figure",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a yes applies the deal the preview named, never asks which",
+      "name": "a yes applies the deal the preview named, never asks which",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a change shown with an owed question gives the new figure on the yes",
+      "name": "a change shown with an owed question gives the new figure on the yes",
+      "group": "main",
+      "pass": false,
+      "labels": [
+        "answer"
+      ]
+    },
+    {
+      "id": "a next month add on for all of a person's deals parks one per deal, finished values",
+      "name": "a next month add on for all of a person's deals parks one per deal, finished values",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "undo the FEE change undoes the fee, not the monthly change before it",
+      "name": "undo the FEE change undoes the fee, not the monthly change before it",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "\"put X's deal back\" resumes it, and only says so when it did",
+      "name": "\"put X's deal back\" resumes it, and only says so when it did",
+      "group": "main",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    },
+    {
+      "id": "a rename renames the company row and leaves no second one",
+      "name": "a rename renames the company row and leaves no second one",
+      "group": "main",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    },
+    {
+      "id": "\"actually scrap that\" undoes the change just made",
+      "name": "\"actually scrap that\" undoes the change just made",
+      "group": "main",
+      "pass": false,
+      "labels": [
+        "tool",
+        "db"
+      ]
+    },
+    {
+      "id": "a close with a reason closes the company, and \"ok reopen it\" puts it back",
+      "name": "a close with a reason closes the company, and \"ok reopen it\" puts it back",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "closing \"at the end of this month\" is scheduled for the 1st, nothing closes now",
+      "name": "closing \"at the end of this month\" is scheduled for the 1st, nothing closes now",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a deal added over a few messy messages, corrected, saved on yes",
+      "name": "a deal added over a few messy messages, corrected, saved on yes",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "two closures in one month both stay scheduled, and \"instead\" moves one",
+      "name": "two closures in one month both stay scheduled, and \"instead\" moves one",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a change in auto mode is answered in words, never a card",
+      "name": "a change in auto mode is answered in words, never a card",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "\"add 100 to all of a person's deals\" is one change, applied once (auto off)",
+      "name": "\"add 100 to all of a person's deals\" is one change, applied once (auto off)",
+      "group": "main",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    },
+    {
+      "id": "\"add 100 to all of a person's deals\" is one change, applied once (auto on)",
+      "name": "\"add 100 to all of a person's deals\" is one change, applied once (auto on)",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "\"both\" answers \"which one, or both?\"",
+      "name": "\"both\" answers \"which one, or both?\"",
+      "group": "main",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    },
+    {
+      "id": "auto mode: two people in one sentence are one preview, both saved, both undone",
+      "name": "auto mode: two people in one sentence are one preview, both saved, both undone",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "auto mode: a change says what it was, \"make it X\" changes it again, one undo puts it all back",
+      "name": "auto mode: a change says what it was, \"make it X\" changes it again, one undo puts it all back",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}

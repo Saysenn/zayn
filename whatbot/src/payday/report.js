@@ -6,7 +6,7 @@ import { allRecords, closeStale } from "./records.js";
 
 /**
  * Tell the CRM about the people the sweep just gave up on, so its
- * Confirmed column stops saying "awaiting reply" for someone who was never
+ * record says no_response for someone who was never
  * going to answer.
  *
  * Sequential and awaited, unlike every other CRM call in this codebase.

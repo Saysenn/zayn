@@ -75,7 +75,8 @@ test('but the amount is still reachable on its own', () => {
 test('and both when both are said', () => {
   const fields = fieldsAsked(CARD, 'give me his payable and his payable days');
   assert.deepEqual(fields.map((f) => f.label), ['Payable', 'Payable days']);
-  assert.equal(fieldAnswer('Richard', fields), 'Richard: payable 500, payable days 30.');
+  // Money as money since 2026-10-08: "payable 500" read as a bare count.
+  assert.equal(fieldAnswer('Richard', fields), 'Richard: payable GBP 500, payable days 30.');
 });
 
 test('a two word label is matched through its spacing', () => {

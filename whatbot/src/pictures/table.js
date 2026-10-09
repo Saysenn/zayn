@@ -29,6 +29,26 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 // chalkboard's Patrick Hand. Bundled so the PC draws what this Mac draws.
 const FONT_DIR = path.join(HERE, '../../assets/fonts');
 const FONT_FILES = fs.readdirSync(FONT_DIR).filter((f) => f.endsWith('.ttf')).map((f) => path.join(FONT_DIR, f));
+
+/**
+ * ===============================
+ * * NEVER EVERY FONT ON THE MACHINE
+ * ===============================
+ * `loadSystemFonts: true` read every font installed, on every page: 2.4s on
+ * the Windows PC, during which the whole worker stands still (resvg is
+ * synchronous). A three page picture froze it for 11.6s, WhatsApp's
+ * heartbeat went unanswered ("Connection was lost"), the socket reconnected
+ * and the job's lock lapsed ("job stalled"): the bot "restarting" on some
+ * messages, 2026-10-09. Every face we draw with is bundled above, so only a
+ * few system fonts are added BY PATH, for what those lack (emoji, Arabic
+ * and other scripts in a name). With them a page is ~40ms.
+ */
+const FALLBACK_FONTS = [
+  'C:\\Windows\\Fonts\\arial.ttf', 'C:\\Windows\\Fonts\\segoeui.ttf', 'C:\\Windows\\Fonts\\seguiemj.ttf',
+  '/System/Library/Fonts/Supplemental/Arial Unicode.ttf', '/System/Library/Fonts/Supplemental/Arial.ttf',
+  '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+].filter((f) => fs.existsSync(f));
+const FONTS = { loadSystemFonts: false, fontFiles: [...FONT_FILES, ...FALLBACK_FONTS], defaultFontFamily: 'Inter' };
 const STYLES = ['sheet', 'notebook', 'receipt', 'ledger', 'chalkboard'];
 const WIDTH = 1000;
 const MIN_ROWS = 4;
@@ -464,9 +484,7 @@ function renderTable(spec) {
     const svg = style === 'notebook' ? notebook(spec, page, at)
       : style === 'receipt' ? receipt(spec, page, at)
         : sheet(spec, page, at, THEMES[style]);
-    return new Resvg(svg, {
-      font: { loadSystemFonts: true, fontFiles: FONT_FILES, defaultFontFamily: 'Helvetica' },
-    }).render().asPng();
+    return new Resvg(svg, { font: FONTS }).render().asPng();
   });
 }
 

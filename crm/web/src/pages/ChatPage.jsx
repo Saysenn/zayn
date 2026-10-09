@@ -307,7 +307,7 @@ export default function ChatPage() {
         </div>
       </div>
 
-      <BulkBar count={sel.count} noun="thread" onClear={sel.clear}>
+      <BulkBar count={sel.count} onClear={sel.clear}>
         <BulkAction icon={MailOpenIcon} onClick={markSelectedRead}>Mark read</BulkAction>
       </BulkBar>
     </div>

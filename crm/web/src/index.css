@@ -572,10 +572,16 @@
   .badge-not_received { @apply bg-danger-tint text-danger; }
   .badge-no_response { @apply bg-warning-tint text-warning; }
   .badge-sent { @apply bg-surface-sunken text-text-muted; }
-  /* Paid, but short. Warning tint rather than the accent one confirmed
-     gets: money arrived, so it isn't a failure, but somebody still has to
-     find out why it wasn't all of it. */
+  /* Portion: some of it arrived. Amber, between Paid's green and Unpaid's
+     red, and an admin still has to mark which deals were paid. */
   .badge-partial { @apply bg-warning-tint text-warning; }
+  /* An expense refunded or not: see BADGE_LABELS. */
+  .badge-settle_settled { @apply bg-success-tint text-success-strong; }
+  .badge-settle_open { @apply bg-surface-sunken text-text-muted; }
+  .badge-settle_late { @apply bg-accent-tint text-accent-strong; }
+  .badge-settle_unpaid { @apply bg-warning-tint text-warning; }
+  .badge-settle_review { @apply bg-warning-tint text-warning; }
+  .badge-settle_overdue { @apply bg-danger-tint text-danger; }
 
   .field-label {
     @apply text-sm font-semibold text-text-muted;

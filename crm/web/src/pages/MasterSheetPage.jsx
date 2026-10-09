@@ -53,8 +53,9 @@ import { monthLabel } from '../helpers/monthLabel';
 import { countOf } from '../helpers/pluralNoun';
 import {
   SearchIcon, ImportIcon, DownloadIcon, PlusIcon, TrashIcon, EditIcon, StopHandIcon,
-  AlertCircleIcon, StarIcon, PaidIcon, ShouldBePaidIcon,
+  AlertCircleIcon, StarIcon,
 } from '../components/icons';
+import PaymentReceived, { dealReceived, DEAL_RECEIVED_OPTIONS } from '../components/badges/PaymentReceived';
 import EditableCell from '../components/forms/EditableCell';
 import StatusBadge from '../components/badges/StatusBadge';
 import { PERIOD, PERIOD_FILTER_OPTIONS } from '../helpers/paymentPeriod';
@@ -143,7 +144,7 @@ const PERSON_SECTIONS = [
   { title: 'Money', keys: ['monthlyAmount', 'currency', 'paymentMethod', 'payableDays', 'payableAmount', 'assignedOn', 'paymentStartOn', 'presetOn', 'endOn'] },
   { title: 'Address', keys: ['location', 'doorNumber', 'postcode', 'acceptingPostals'] },
   { title: 'Banking', keys: ['bankDetails', 'accountNumber', 'sortCode'] },
-  { title: 'Admin', keys: ['label', 'paidToggles', 'notes'] },
+  { title: 'Admin', keys: ['label', 'notes'] },
 ];
 
 const PERSON_KEYS = PERSON_SECTIONS.flatMap((s) => s.keys);
@@ -164,7 +165,6 @@ const PERSON_KEYS = PERSON_SECTIONS.flatMap((s) => s.keys);
  *            `custom: false` — the sheet writes real postcodes AND
  *            "Handled internally" in one column, so a closed list would
  *            block the exact rows that need entering by hand.
- *   toggles  a pair of switches on one row.
  */
 const FIELDS = [
   /**
@@ -234,20 +234,8 @@ const FIELDS = [
   { key: 'acceptingPostals', label: 'Accepting postals', type: 'pick', suggest: ['Yes', 'No', INTERNAL], custom: true },
   { key: 'phone', label: 'Phone number', type: 'text', placeholder: '+447911123456' },
   { key: 'label', label: 'Label', type: 'text' },
-  // The admin's decision, as switches, writing override_should_be_paid and
-  // override_paid — the same two columns the table's own switches write,
-  // so the control means one thing wherever you meet it. The sheet's raw
-  // should_be_paid / paid text stays untouched and is not entered here: a
-  // row added by hand has no sheet behind it to quote.
-  // `fallback` is what an UNDECIDED row shows, and it is the same default
-  // the table's own switches and the People page resolve against. The
-  // column keeps three states (true / false / null "nobody decided"); the
-  // switch only has two, so null renders as the default rather than as a
-  // third UI state nobody can act on.
-  { key: 'paidToggles', toggles: [
-    { key: 'overrideShouldBePaid', label: 'Should be paid', fallback: true },
-    { key: 'overridePaid', label: 'Paid', fallback: false },
-  ] },
+  // NO SHOULD BE PAID / PAID SWITCHES. They are the person's, his call
+  // 2026-10-08, and set on the People pages. This form is the deal's.
   { key: 'notes', label: 'Notes', type: 'textarea' },
   { key: 'bankDetails', label: 'Bank details of individual', type: 'pick', suggest: [NEVER_BANK], custom: true, searchable: true },
   { key: 'accountNumber', label: 'Account number', type: 'pick', suggest: [NEVER_BANK], custom: true, searchable: true },
@@ -276,16 +264,10 @@ const COLUMN_FOR = {
   acceptingPostals: 'accepting_postals',
   phone: 'phone',
   label: 'label',
-  shouldBePaid: 'should_be_paid',
-  paid: 'paid',
   notes: 'notes',
   bankDetails: 'bank_details',
   accountNumber: 'account_number',
   sortCode: 'sort_code',
-  // The admin's decision, distinct from the sheet's own should_be_paid /
-  // paid free text, which this form no longer writes.
-  overrideShouldBePaid: 'override_should_be_paid',
-  overridePaid: 'override_paid',
 };
 
 // A `date` column arrives as an ISO timestamp; <input type="date"> wants
@@ -295,29 +277,10 @@ function toDateInput(v) {
   return v ? String(v).slice(0, 10) : '';
 }
 
-// Flat list of every real form key, with the toggle pair unpacked. The
-// pair is one entry in FIELDS (so it renders as one row of switches) but
-// two actual columns, and everything below works in columns.
-const FORM_FIELDS = FIELDS.flatMap((f) =>
-  f.toggles ? f.toggles.map((t) => ({ ...t, type: 'toggle' })) : [f],
-);
-
 function rowToForm(row) {
   const form = {};
-  for (const { key, type } of FORM_FIELDS) {
+  for (const { key, type } of FIELDS) {
     const value = row?.[COLUMN_FOR[key]];
-    if (type === 'toggle') {
-      // NULL IS KEPT, not resolved to its default here.
-      //
-      // Three states live in the column (true / false / null "nobody has
-      // decided") and only two in the switch. Baking the default in at
-      // this point meant opening a row to fix a typo and pressing Save
-      // silently recorded a payment decision on every untouched row that
-      // passed through the form. The switch renders the fallback; the
-      // value stays null until somebody actually moves it.
-      form[key] = value === true || value === false ? value : null;
-      continue;
-    }
     // A 'rows' field is edited as a list even when the row holds one
     // value; a 'join' field stays the raw comma separated string and is
     // split by the control (see Field).
@@ -346,55 +309,12 @@ const EMPTY_FORM = {
 /** One handler's worth of a row, at the defaults an empty row resolves to. */
 function blankHandler() {
   const h = {};
-  for (const key of PERSON_KEYS) {
-    if (key === 'paidToggles') continue; // not a column, a pair of switches
-    h[key] = '';
-  }
-  return {
-    ...h,
-    currency: 'GBP',
-    paymentMethod: 'cash',
-    // null, not false: an untouched row is UNDECIDED, and the switch shows
-    // the fallback rather than recording a decision nobody made.
-    overrideShouldBePaid: null,
-    overridePaid: null,
-  };
+  for (const key of PERSON_KEYS) h[key] = '';
+  return { ...h, currency: 'GBP', paymentMethod: 'cash' };
 }
 
 function Field({ field, form, onChange, options, isNew, single = false }) {
   const id = `msf-${field.key}`;
-
-  // A pair of switches on one row. They are two halves of one question,
-  // and the two-column grid was splitting them across separate rows with
-  // an unrelated field in between.
-  if (field.toggles) {
-    return (
-      <div className="flex flex-wrap gap-x-8 gap-y-3">
-        {field.toggles.map((t) => {
-          const decided = form[t.key] === true || form[t.key] === false;
-          return (
-            <label key={t.key} className="flex items-center gap-2.5">
-              {/* Faded until somebody actually decides, so "defaulting to
-                  this" still reads differently from "an admin set this".
-                  Same treatment the table's own switches get. */}
-              <span
-                className={decided ? '' : 'opacity-60'}
-                title={decided ? undefined : 'No decision recorded yet, showing the default'}
-              >
-                <Toggle
-                  checked={decided ? form[t.key] : t.fallback}
-                  onChange={(v) => onChange(t.key, v)}
-                  label={t.label}
-                />
-              </span>
-              <span className="field-label">{t.label}</span>
-            </label>
-          );
-        })}
-      </div>
-    );
-  }
-
   const value = form[field.key];
 
   // TWO KINDS OF MULTIPLE, and they are not interchangeable. See FIELDS.
@@ -604,15 +524,7 @@ function RowModal({ row, onClose }) {
     const source = (form.handlers ?? [])[0];
     if (!source) return;
     const patch = {};
-    for (const key of keys) {
-      // Not a column: the pair of switches standing in for two.
-      if (key === 'paidToggles') {
-        patch.overrideShouldBePaid = source.overrideShouldBePaid;
-        patch.overridePaid = source.overridePaid;
-        continue;
-      }
-      patch[key] = source[key];
-    }
+    for (const key of keys) patch[key] = source[key];
     setHandler(patch);
   }
 
@@ -705,19 +617,33 @@ function RowModal({ row, onClose }) {
       {/* The sync takes the human sheet as-is, so a row the strict parse
           couldn't make sense of still arrives — with the reason attached.
           This is the "CRM asks the questions, admin answers them" step. */}
-      {!isNew && row.needs_review && (
-        <div className="mb-3 rounded-lg bg-warning-tint p-3 text-sm">
-          <p className="font-semibold text-warning mb-1">This row came in messy</p>
-          <p className="text-text-muted">{row.review_reason || 'The sheet parse flagged it, with no reason given.'}</p>
-          <Button
-            className="mt-2"
-            disabled={isPending}
-            onClick={() => update.mutate({ id: row.id, fields: { ...form, needsReview: false } }, { onSuccess: onClose })}
-          >
-            Save and mark it sorted
-          </Button>
-        </div>
-      )}
+      {/* A PAYDAY FLAG IS NOT SORTED HERE, his call 2026-10-08. It clears
+          when Payment received is set, so the button only offers to clear
+          the import's own reasons, and is gone when payday is all there is. */}
+      {!isNew && row.needs_review && (() => {
+        const payday = /payday/i.test(row.review_reason ?? '');
+        const other = String(row.review_reason ?? '').replace(/payday[^,]*/gi, '').replace(/[,\s]/g, '') !== '' || !row.review_reason;
+        return (
+          <div className="mb-3 rounded-lg bg-warning-tint p-3 text-sm">
+            <p className="font-semibold text-warning mb-1">This row needs a check</p>
+            <p className="text-text-muted">{row.review_reason || 'Flagged, with no reason given.'}</p>
+            {payday && (
+              <p className="mt-1 text-text-muted">
+                The payday part clears when you set this deal&apos;s Payment received to Paid or Unpaid.
+              </p>
+            )}
+            {other && (
+              <Button
+                className="mt-2"
+                disabled={isPending}
+                onClick={() => update.mutate({ id: row.id, fields: { ...form, needsReview: false } }, { onSuccess: onClose })}
+              >
+                {payday ? 'Save and mark the rest sorted' : 'Save and mark it sorted'}
+              </Button>
+            )}
+          </div>
+        );
+      })()}
 
       <form onSubmit={handleSubmit}>
         {/* THE DEAL, asked once and above everyone.
@@ -818,7 +744,7 @@ function RowModal({ row, onClose }) {
                   {section.keys.map((key) => byKey[key]).filter(Boolean).map((field) => (
                     <div
                       key={field.key}
-                      className={field.type === 'textarea' || field.toggles ? 'sm:col-span-2' : ''}
+                      className={field.type === 'textarea' ? 'sm:col-span-2' : ''}
                     >
                       <Field
                         field={field}
@@ -875,7 +801,7 @@ function RowModal({ row, onClose }) {
               {FIELDS.map((field) => (
                 <div
                   key={field.key}
-                  className={field.type === 'textarea' || field.toggles ? 'sm:col-span-2' : ''}
+                  className={field.type === 'textarea' ? 'sm:col-span-2' : ''}
                 >
                   <Field field={field} form={form} onChange={set} options={options} isNew={false} />
                 </div>
@@ -1010,21 +936,9 @@ const EDITABLE = {
   sort_code: ['sortCode', 'sort code'],
   // whatbot's own payday answer, correctable by hand — see the route's
   // PAYMENT_OUTCOMES for why it's a closed set and not free text.
-  payment_outcome: ['paymentOutcome', 'confirmation'],
+  // Offered as Paid / Unpaid only. See DEAL_RECEIVED_OPTIONS.
+  payment_outcome: ['paymentOutcome', 'payment received'],
 };
-
-// Every outcome a payday check can end in, same set and same order as the
-// People page's own filter (PeoplePage.jsx) and payment_status's CHECK
-// (migrations 004 and 021). Blank is the real extra state: nobody has been
-// asked yet. Labelled, because 'not_received' is a column value, not
-// something an admin should have to read in a dropdown.
-const PAYMENT_OUTCOMES = [
-  { value: 'sent', label: 'Awaiting reply' },
-  { value: 'confirmed', label: 'Confirmed' },
-  { value: 'partial', label: 'Partial' },
-  { value: 'not_received', label: 'Not received' },
-  { value: 'no_response', label: 'No response' },
-];
 
 // A thin wrapper so each cell in the row stays one line. Owns the
 // snake_case -> camelCase translation and the editing guard, both of
@@ -1307,9 +1221,8 @@ function dateSuggestions(row, onCellSave, useEndDate) {
  * phone is actually holding ("what does this person earn here, and have
  * they been paid") and everything else is one tap away in the editor.
  *
- * NO SWITCHES ON THE CARD ANY MORE. Should be paid and Paid are the bulk
- * bar's now: tick the card (or several) and set them there, one place for
- * the act on every screen size.
+ * NO SWITCHES ON THE CARD. Should be paid and Paid are the person's, set on
+ * the People pages (his call 2026-10-08).
  */
 function DealCard({ row, selected, onToggleSelect, onEdit }) {
   const notices = orphanNotices(row);
@@ -1617,9 +1530,12 @@ const SheetRow = memo(function SheetRow({
           everything else here: the admin is the final word on this table,
           and a reply the bot misread or never got is exactly the case that
           needs correcting by hand. */}
+      {/* PAID OR UNPAID, nothing else, his call 2026-10-08. A portion
+          reads Unpaid with the review flag until somebody sets it here,
+          which is the review and clears the flag. */}
       <Cell
-        row={row} col="payment_outcome" type="select" options={PAYMENT_OUTCOMES}
-        display={row.payment_outcome ? <StatusBadge status={row.payment_outcome} /> : '—'}
+        row={row} col="payment_outcome" type="select" options={DEAL_RECEIVED_OPTIONS}
+        display={<PaymentReceived value={dealReceived(row.payment_outcome)} />}
         onSave={onCellSave}
       />
     </tr>
@@ -1773,10 +1689,8 @@ export default function MasterSheetPage() {
   // and the link param is named needsReview so the two cannot be confused.
   const [review, setReview] = useStickyState('masterSheet.review', '', LINK_FILTER.needsReview); // '' | 'true' | 'false'
   const [status, setStatus] = useStickyState('masterSheet.status', '', LINK_FILTER.period); // '' | one of PERIOD
-  // undefined, not 'false', when cleared: the filter has to disappear
-  // rather than become a filter for the opposite value.
-  const [shouldBePaid, setShouldBePaid] = useStickyState('masterSheet.shouldBePaid', undefined); // undefined | 'true'
-  const [paid, setPaid] = useStickyState('masterSheet.paid', undefined);
+  // NO SHOULD BE PAID / PAID FILTERS. Both are the person's now, his call
+  // 2026-10-08: they live on the People page, filters and switches alike.
   // The deal's COMPANY status. "What have I still to set" once a company is
   // winding down is one click, not a read of ninety six rows.
   const [companyStatus, setCompanyStatus] = useStickyState('masterSheet.companyStatus', '');
@@ -1825,11 +1739,11 @@ export default function MasterSheetPage() {
   // row computes its rated figure from the same value the export uses.
   const cryptoPercent = Number(settings?.cryptoPercent) || 0;
 
-  const tableRef = useStickyColumns(2, [page, group, source, review, status, shouldBePaid, paid, companyStatus, amount, debouncedQuery, searchField, currency, paymentMethod, dealStatus, specialCase]);
+  const tableRef = useStickyColumns(2, [page, group, source, review, status, companyStatus, amount, debouncedQuery, searchField, currency, paymentMethod, dealStatus, specialCase]);
 
   // Any filter change can put the current page past the end of the new
   // result set — same reset every other paginated page here does.
-  useEffect(() => setPage(1), [group, source, review, status, shouldBePaid, paid, companyStatus, amount, debouncedQuery, searchField, currency, paymentMethod, dealStatus, specialCase]);
+  useEffect(() => setPage(1), [group, source, review, status, companyStatus, amount, debouncedQuery, searchField, currency, paymentMethod, dealStatus, specialCase]);
 
   // Inline cell edits. Separate from the modal's own update mutation:
   // this one is optimistic, because a cell has no Save button and no
@@ -1857,8 +1771,6 @@ export default function MasterSheetPage() {
     source: source || undefined,
     needsReview: review || undefined,
     status: status || undefined,
-    shouldBePaid,
-    paid,
     companyStatus: companyStatus || undefined,
     amountField: amount.field || undefined,
     amountMin: amount.min || undefined,
@@ -1913,7 +1825,7 @@ export default function MasterSheetPage() {
   // left the screen; a widened filter would keep old ticks beside rows
   // nobody ticked, so the bar would act on a mix you never chose.
   const clearSelection = sel.clear;
-  useEffect(() => { clearSelection(); }, [clearSelection, group, source, review, status, shouldBePaid, paid, companyStatus, amount, debouncedQuery, searchField, currency, paymentMethod, dealStatus, specialCase, page]);
+  useEffect(() => { clearSelection(); }, [clearSelection, group, source, review, status, companyStatus, amount, debouncedQuery, searchField, currency, paymentMethod, dealStatus, specialCase, page]);
 
   const groups = useMemo(() => groupNames ?? [], [groupNames]);
   // The lists the bar's Edit offers: the same ones the cells and the
@@ -1926,9 +1838,8 @@ export default function MasterSheetPage() {
   }), [filterOptions, groups]);
 
   /**
-   * A SWITCH COLUMN ONTO EVERY TICKED DEAL. Should be paid, Paid and
-   * Special case all skip a stopped deal: it is owed nothing, so deciding
-   * its pay means nothing. The rows flip on the click, the same skip
+   * A SWITCH COLUMN ONTO EVERY TICKED DEAL. Special case skips a stopped
+   * deal: it is owed nothing, so deciding its pay means nothing. The rows flip on the click, the same skip
    * applied on screen as the server applies; Undo is on the toast at once.
    */
   const bulkSwitch = useCallback((fields, verb, already) => {
@@ -1999,12 +1910,7 @@ export default function MasterSheetPage() {
     sel.clear();
   };
 
-  // What each row's own switch SHOWS, undecided rows at their default, so
-  // the hint above Yes / No counts what is on screen.
-  const shownShouldBePaid = (r) => (r.override_should_be_paid === true || r.override_should_be_paid === false
-    ? r.override_should_be_paid : true);
-  const shownPaid = (r) => (r.override_paid === true || r.override_paid === false ? r.override_paid : false);
-  const filterActive = Boolean(group || source || review || status || shouldBePaid || paid || companyStatus || amount.field || currency || paymentMethod || dealStatus || specialCase);
+  const filterActive = Boolean(group || source || review || status || companyStatus || amount.field || currency || paymentMethod || dealStatus || specialCase);
   const isEmpty = !isLoading && rows && rows.length === 0;
 
   return (
@@ -2175,14 +2081,13 @@ export default function MasterSheetPage() {
         // `review` is absent on purpose: it has no control in the panel,
         // so opening it would show nothing. It stays in filtersCount, so
         // Clear still shows and still undoes it.
-        filtersActive={Boolean(group || status || companyStatus || amount.field || query || currency || paymentMethod || dealStatus || specialCase || shouldBePaid || paid)}
-        filtersCount={[group, source, status, review, shouldBePaid, paid, companyStatus, amount.field, currency, paymentMethod, dealStatus, specialCase].filter(Boolean).length}
+        filtersActive={Boolean(group || status || companyStatus || amount.field || query || currency || paymentMethod || dealStatus || specialCase)}
+        filtersCount={[group, source, status, review, companyStatus, amount.field, currency, paymentMethod, dealStatus, specialCase].filter(Boolean).length}
         storageKey="masterSheet.panel"
         onClearFilters={() => {
           setGroup(''); setSource(''); setStatus(''); setReview(''); setQuery(''); setSearchField(SEARCH_ANY); setCurrency(''); setPaymentMethod('');
           setDealStatus('');
           setSpecialCase('');
-          setShouldBePaid(undefined); setPaid(undefined);
           setCompanyStatus(''); setAmount({}); setPage(1);
           // AND FORGET THEM. Resetting the state alone leaves the old
           // values in storage, so Clear would work until you walked to a
@@ -2230,29 +2135,6 @@ export default function MasterSheetPage() {
                 value: o.value, label: `Deal: ${o.label.toLowerCase()}`,
               }))}
               placeholder="All deal statuses"
-            />
-            {/* SHOULD BE PAID AND PAID, IN THE PANEL. They were two switches
-                beside the search, and once the bulk bar arrived a switch in
-                the toolbar read as an ACTION on the ticked rows rather than
-                a filter. Here they are filters like every other, and both
-                sides are offered: "who is not paid yet" is the question. */}
-            <Select
-              size="sm" className="w-48"
-              value={shouldBePaid ?? ''} onChange={(v) => { setShouldBePaid(v || undefined); setPage(1); }}
-              options={[
-                { value: 'true', label: 'Should be paid: yes' },
-                { value: 'false', label: 'Should be paid: no' },
-              ]}
-              placeholder="Should be paid: any"
-            />
-            <Select
-              size="sm" className="w-40"
-              value={paid ?? ''} onChange={(v) => { setPaid(v || undefined); setPage(1); }}
-              options={[
-                { value: 'true', label: 'Paid: yes' },
-                { value: 'false', label: 'Paid: no' },
-              ]}
-              placeholder="Paid: any"
             />
             {/* SPECIAL CASE: a deal paid a month its own dates exclude.
                 Diane can narrow by it and this page could not, so the same
@@ -2383,10 +2265,9 @@ export default function MasterSheetPage() {
                 <th className="th">Account no.</th>
                 <th className="th">Sort code</th>
                 <th className="th">Payment period</th>
-                {/* whatbot's payday answer. Should be paid and Paid are
-                    set from the bulk bar now, and filtered by the two
-                    toggles above; no column of switches. */}
-                <th className="th">Confirmed</th>
+                {/* whatbot's payday answer, Paid or Unpaid per deal.
+                    Should be paid and Paid are the person's, on People. */}
+                <th className="th">Payment received</th>
               </tr>
             </thead>
             <tbody>
@@ -2517,25 +2398,9 @@ export default function MasterSheetPage() {
           The bar rises from the bottom when a row is ticked. Stop and Delete
           are both red, told apart by the palm and the bin. Nothing here
           waits for the server, so nothing is ever disabled. */}
-      <BulkBar count={sel.count} noun="deal" onClear={sel.clear}>
-        <BulkMenu
-          icon={ShouldBePaidIcon}
-          label="Should be paid"
-          hint={splitHint(selectedRows, shownShouldBePaid)}
-          options={[
-            { label: 'Yes', onSelect: () => bulkSwitch({ overrideShouldBePaid: true }, 'marked should be paid', 'already yes') },
-            { label: 'No', onSelect: () => bulkSwitch({ overrideShouldBePaid: false }, 'marked not to be paid', 'already no') },
-          ]}
-        />
-        <BulkMenu
-          icon={PaidIcon}
-          label="Paid"
-          hint={splitHint(selectedRows, shownPaid)}
-          options={[
-            { label: 'Yes', onSelect: () => bulkSwitch({ overridePaid: true }, 'marked paid', 'already yes') },
-            { label: 'No', onSelect: () => bulkSwitch({ overridePaid: false }, 'marked unpaid', 'already no') },
-          ]}
-        />
+      {/* NO SHOULD BE PAID / PAID HERE. They are the person's, his call
+          2026-10-08, and set from the People page's bar. */}
+      <BulkBar count={sel.count} onClear={sel.clear}>
         <BulkMenu
           icon={EditIcon}
           label="Edit"

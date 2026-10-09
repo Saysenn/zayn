@@ -11,6 +11,8 @@ const { closureTools } = require('./tools/closure');
 const { companyTools } = require('./tools/companies');
 // The dead list, read only. See tools/deadPeople.js.
 const { deadPeopleTools } = require('./tools/deadPeople');
+// People and their pay state, read only. See tools/people.js.
+const { peopleTools } = require('./tools/people');
 // Work parked for a later month, and the standing list of it.
 const { scheduledTools, withWhen } = require('./tools/parkForMonth');
 const { withDisabled } = require('./disabledTools');
@@ -53,7 +55,7 @@ const CONTEXTS = {
     // tests, and only the handler stops doing the thing.
     tools: () => withDisabled(withWhen([
       ...masterSheetTools, ...monthlyReviewTools, ...closureTools, ...companyTools, ...deadPeopleTools,
-      ...scheduledTools, ...sharedTools,
+      ...peopleTools, ...scheduledTools, ...sharedTools,
     ])),
   },
 };

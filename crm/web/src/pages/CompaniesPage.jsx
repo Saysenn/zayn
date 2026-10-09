@@ -343,7 +343,7 @@ export default function CompaniesPage() {
 
       {!isLoading && <Pagination page={page} pageSize={pageSize} total={total} onPageChange={setPage} />}
 
-      <BulkBar count={sel.count} noun="company" onClear={sel.clear}>
+      <BulkBar count={sel.count} onClear={sel.clear}>
         <BulkAction icon={UserIcon} onClick={() => setAddingHandler(true)}>
           Add handlers
         </BulkAction>

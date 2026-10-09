@@ -76,6 +76,10 @@ export const apiService = {
     remove: (id) => api.delete(`${apiPath}/expenses/${id}`),
     bulkUpdate: (ids, fields) => api.post(`${apiPath}/expenses/bulk-update`, { ids, fields }),
     bulkDelete: (ids) => api.post(`${apiPath}/expenses/bulk-delete`, { ids }),
+    // REFUNDED OR NOT, by hand (migration 078): settle, reopen, or for review
+    settle: (ids) => api.post(`${apiPath}/expenses/settle`, { ids }),
+    unsettle: (ids) => api.post(`${apiPath}/expenses/unsettle`, { ids }),
+    review: (ids) => api.post(`${apiPath}/expenses/review`, { ids }),
     // The month as a sheet, fetched with progress rather than navigating
     // away. Resolves { blob, filename }.
     download: (params = {}, onProgress) => (
@@ -188,6 +192,15 @@ export const apiService = {
     get: (id) => api.download(`${apiPath}/agent-images/${encodeURIComponent(id)}`),
   },
   // Who may send expenses to each group's WhatBot number.
+  // Diane's HMRC & CIS knowledge: GOV.UK sources and our own notes
+  hmrc: {
+    status: () => api.get(`${apiPath}/hmrc/status`),
+    notes: () => api.get(`${apiPath}/hmrc/notes`),
+    addNote: (body) => api.post(`${apiPath}/hmrc/notes`, body),
+    updateNote: (id, fields) => api.patch(`${apiPath}/hmrc/notes/${id}`, fields),
+    removeNote: (id) => api.delete(`${apiPath}/hmrc/notes/${id}`),
+    refresh: () => api.post(`${apiPath}/hmrc/refresh`, {}),
+  },
   expenseAdmins: {
     list: () => api.get(`${apiPath}/expense-admins`),
     add: (body) => api.post(`${apiPath}/expense-admins`, body),
@@ -258,8 +271,8 @@ export const apiService = {
     // delete tabs. History shows the difference.
     bulkDelete: ({ ids, via }) => api.post(`${apiPath}/master-sheet/bulk-delete`, { ids, via }),
     // One value onto many rows, from the export modal's warnings panel.
-    bulkUpdate: (ids, fields, { skipStopped = false } = {}) =>
-      api.post(`${apiPath}/master-sheet/bulk-update`, { ids, fields, skipStopped }),
+    bulkUpdate: (ids, fields, { skipStopped = false, wholePerson = false } = {}) =>
+      api.post(`${apiPath}/master-sheet/bulk-update`, { ids, fields, skipStopped, wholePerson }),
     // The bulk bar's Stop and the Archive's Resume. One batch each, so one
     // Undo puts the lot back.
     bulkStop: (ids) => api.post(`${apiPath}/master-sheet/bulk-stop`, { ids }),

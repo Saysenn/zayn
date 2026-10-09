@@ -257,7 +257,7 @@ function ArchiveDeals({ onTotal }) {
       {!isLoading && <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />}
 
       {/* No Delete: deleting a deal is the Master Sheet's alone. */}
-      <BulkBar count={sel.count} noun="deal" onClear={sel.clear}>
+      <BulkBar count={sel.count} onClear={sel.clear}>
         <BulkAction icon={ResumeIcon} variant="accent" onClick={resumeSelected}>
           Resume
         </BulkAction>
@@ -453,7 +453,7 @@ function DeadPeopleTab({ onTotal }) {
 
       {!isLoading && <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />}
 
-      <BulkBar count={sel.count} noun="person" onClear={sel.clear}>
+      <BulkBar count={sel.count} onClear={sel.clear}>
         <BulkAction icon={ResumeIcon} variant="accent" onClick={restoreSelected}>
           Restore
         </BulkAction>

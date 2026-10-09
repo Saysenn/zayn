@@ -623,11 +623,13 @@ router.patch('/master-sheet/:id', async (req, res, next) => {
       }
     }
 
+    row = await settlePaydayFlag(row, fields);
+
     broadcast(null, 'master-sheet:changed', { action: 'updated', id: row.id });
-    // The return leg of the override mirror: a should-be-paid/paid toggle
-    // here also writes calculator_overrides (masterSheetRows.repo.js's
-    // update), which is what the People page reads. Without this, People
-    // stays stale in every tab but the one that made the edit.
+    // Payment received is summed per person on the People pages.
+    if ('paymentOutcome' in fields) broadcast(null, 'people:changed', { action: 'updated', personId: row.person_id });
+    // Should be paid / Paid are summed per person on the People pages, so
+    // they go stale in every tab but this one without it.
     if ('overrideShouldBePaid' in fields || 'overridePaid' in fields) {
       broadcast(null, 'assignments:changed', {
         groupName: row.group_name,
@@ -776,7 +778,10 @@ router.get('/master-sheet/preset-roll', async (req, res, next) => {
 router.post('/master-sheet/bulk-update', async (req, res, next) => {
   try {
     const { ids: rawIds, fields: body } = req.body || {};
-    const ids = parseIds(rawIds);
+    // WHOLE PERSON: the ids name people, and the write lands on every live
+    // deal each of them holds. Should be paid / Paid are the person's.
+    const wholePerson = req.body?.wholePerson === true;
+    const ids = wholePerson ? await repo.liveDealIdsOfPeople(parseIds(rawIds)) : parseIds(rawIds);
     const fields = toFields(body || {}, { partial: true });
     if (Object.keys(fields).length === 0) {
       return next(new AppError(400, 'No fields to set.'));
@@ -786,9 +791,10 @@ router.post('/master-sheet/bulk-update', async (req, res, next) => {
     // shows "Paid → yes on 3 deals" once and the toast's Undo puts all
     // three back with one press.
     const batchId = randomUUID();
-    // The bulk bar sends this for Paid / Should be paid / Special case: a
-    // stopped deal is owed nothing, so deciding its pay is meaningless.
-    const skipStopped = req.body?.skipStopped === true;
+    // Sent by the People pages' Paid / Should be paid and the master sheet's
+    // Special case: a stopped deal is owed nothing, so deciding its pay is
+    // meaningless.
+    const skipStopped = req.body?.skipStopped === true || wholePerson;
     const updated = [];
     const skipped = { same: 0, stopped: 0, gone: 0 };
     for (const id of ids) {
@@ -806,10 +812,11 @@ router.post('/master-sheet/bulk-update', async (req, res, next) => {
       const patch = { ...fields };
       const derived = recomputePayable(before, patch);
       const row = await repo.update(id, patch, 'admin', { derived, batchId });
-      if (row) updated.push(row);
+      if (row) updated.push(await settlePaydayFlag(row, fields));
     }
 
     broadcast(null, 'master-sheet:changed', { action: 'bulk-updated', ids: updated.map((r) => r.id) });
+    if (updated.length && 'paymentOutcome' in fields) broadcast(null, 'people:changed', { action: 'bulk-updated' });
     // The same return leg the single PATCH has: People reads these two
     // columns, and without it stays stale in every other open tab.
     if (updated.length && ('overrideShouldBePaid' in fields || 'overridePaid' in fields)) {
@@ -821,6 +828,20 @@ router.post('/master-sheet/bulk-update', async (req, res, next) => {
     next(err);
   }
 });
+
+/**
+ * ===============================
+ * * THE PAYDAY FLAG CLEARS ON AN ANSWER, NOT ON A TICK
+ * ===============================
+ * His call 2026-10-08. Setting Payment received IS the payday review, so it
+ * clears the flag. "Mark it sorted" (needsReview false) is not: it clears
+ * the import's reasons and leaves the payday one standing.
+ */
+async function settlePaydayFlag(row, fields) {
+  if ('paymentOutcome' in fields) return await repo.clearPaydayFlag(row.id) ?? row;
+  if (fields.needsReview === false) return await repo.keepPaydayFlag(row.id) ?? row;
+  return row;
+}
 
 /**
  * Is every field in this patch already the row's value? Only for the
@@ -1081,12 +1102,19 @@ router.post('/master-sheet/agent', async (req, res, next) => {
           for (const image of images) if (open) send(image);
         }));
       };
-      const result = elsewhere
+      // eslint-disable-next-line global-require
+      const turnStats = require('./agent/turnStats');
+      const [result, stats] = await turnStats.run(() => (elsewhere
         // who is signed in: "me" and "saved by" in the expense brain
         // eslint-disable-next-line global-require
-        ? await elsewhere(trimmed, (e) => { if (open) send(e); }, { user: require('./shared/session.helper').sessionUser(req) })
-        : await runAgent(trimmed, context, sendAndDraw);
+        ? elsewhere(trimmed, (e) => { if (open) send(e); }, { user: require('./shared/session.helper').sessionUser(req) })
+        // DIANE V2 beside v1, on the same route, while the two are scored
+        // against each other (agent/v2/index.js). Off unless DIANE_V2=1.
+        : (process.env.DIANE_V2 === '1' ? require('./agent/v2').runAgentV2 : runAgent)(trimmed, context, sendAndDraw)));
       await Promise.all(drawing);
+      // THE SUITE'S SCORECARD ONLY: what she did this turn. Never sent unless
+      // DIANE_TRACE_EVENTS=1, which only the suite's own server sets.
+      if (stats && open) send({ type: 'stats', stats });
       // The canonical reply, whole and post-processed. The client replaces
       // whatever it accumulated from tokens with this, so a cleaning pass
       // that shortened the text mid-stream cannot leave it out of step.

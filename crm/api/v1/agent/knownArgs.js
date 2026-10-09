@@ -27,7 +27,9 @@
 
 // Injected by runAgent AFTER this check, never sent by the model. Listed
 // so that adding one here is a deliberate act rather than a hole.
-const INJECTED = ['said', 'saidRecent', 'priorAnswer', 'open', 'onProgress', 'turn'];
+// `approvedNewGroup`: set by a file-check plan they said yes to, and dropped
+// by runAgent from any call that is not a plan run (2026-10-08).
+const INJECTED = ['said', 'saidRecent', 'priorAnswer', 'open', 'onProgress', 'turn', 'approvedNewGroup'];
 
 /** Folded for comparison, so `payment_method` reads as `paymentMethod`. */
 const fold = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');

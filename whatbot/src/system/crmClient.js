@@ -71,6 +71,18 @@ export const createConcern = (personId, groupName, category, message) =>
     message: message.slice(0, 500),
   });
 
+/**
+ * THE EXPENSES CHECK (the CRM's, migration 078): what is still theirs to be
+ * refunded in this group, as the text to send, or `{ check: null }`. The
+ * CRM checks the phone is that person in that group before reading anything.
+ */
+export const startExpenseCheck = ({ period, personId, group, phone, name }) =>
+  post("/api/v1/agent/expenses/check", { period, personId, group, phone, name });
+
+/** Their answer to it (yes / no / partial / mistake); the reply to send comes back. */
+export const answerExpenseCheck = ({ checkId, phone, group, answer, note }) =>
+  post("/api/v1/agent/expenses/check/answer", { checkId, phone, group, answer, note: note ? String(note).slice(0, 500) : null });
+
 /** Feeds the CRM chatbox's thread history. Called after we've already
  * replied — never on the path that answers someone. */
 export const recordMessage = (personId, groupName, body) =>

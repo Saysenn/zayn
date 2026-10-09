@@ -6,6 +6,9 @@ For what the system currently IS, see `state.md`. For running commands,
 `run-it.md`. For what is still to do, `todo.md`.
 
 ---
+ After a PC restart: Redis won't start on its own. Double-click C:\Users\yatsen\redis\start-redis.cmd. To stop it: redis-cli shutdown nosave from that folder, or end redis-server in Task Manager.
+
+
 
 ## Change AI provider or API key
 

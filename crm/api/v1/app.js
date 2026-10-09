@@ -15,6 +15,7 @@ const { router: peopleRouter } = require('./people');
 const { router: settingsRouter } = require('./settings');
 const expenseBot = require('./expenseBot');
 const { router: agentContextRouter } = require('./agentContext');
+const { router: hmrcRouter } = require('./hmrc');
 const { router: conversationsRouter } = require('./conversations');
 const { router: logsRouter } = require('./logs');
 const { router: masterSheetRouter } = require('./masterSheet');
@@ -49,6 +50,8 @@ queueSummaryRepair();
 startBackupScheduler();
 // RECEIPTS: the 3 month clear and the backup copy, every 6 hours
 require('./expenses/bot/receipts').startReceiptsKeeper();
+// EXPENSES NOT REFUNDED by the 1st: a flag for the CRM admin, weekly
+require('./expenses/unpaidAlerts').startUnpaidAlerts();
 startSnapshotScheduler();
 
 // Behind nginx in production: without this, every request looks like it
@@ -85,6 +88,7 @@ app.use('/api/v1', messagesRouter);
 app.use('/api/v1', settingsRouter);
 app.use('/api/v1', expenseBot.admin);
 app.use('/api/v1', agentContextRouter);
+app.use('/api/v1', hmrcRouter);
 app.use('/api/v1', conversationsRouter);
 app.use('/api/v1', logsRouter);
 app.use('/api/v1', masterSheetRouter);

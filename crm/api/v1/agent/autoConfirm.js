@@ -135,7 +135,28 @@ const EVERY_OF_THEIRS = {
 const ENDS_A_DEAL = /stop|end|status|close|delete|archive|review/i;
 const PER_PERSON_ONLY = new Set(['perPerson', 'confirmed', 'said', 'saidRecent', 'turn', 'onProgress', 'priorAnswer']);
 
-function spelledOut(name, tool, args, said) {
+/**
+ * "BOTH" TO HER OWN "WHICH GROUP, OR BOTH?" The admin's call 2026-10-09,
+ * auto mode on: "add 100 to zayn" → "which group, or both?" → "both" still
+ * asked "shall I go ahead and make both changes?". Nothing had changed yet
+ * (she asked before writing), so their answer IS the every-deal they spell
+ * out. Only a bare answer counts, and only to a question that offered it.
+ */
+const ALL_ANSWER = /^(?:(?:yes|yeah|yep|ok|okay)[,\s]+)?(?:both|all)(?:\s+(?:of\s+(?:them|their\s+deals)|groups?|deals?|pls|please))?[.!\s]*$/i;
+function answeredAll(asked, reply) {
+  return /\b(?:both|all)\b[^?]*\?\s*$/i.test(String(asked ?? '').trim()) && ALL_ANSWER.test(String(reply ?? '').trim());
+}
+
+/**
+ * THE PERSON'S OWN SWITCHES (his call 2026-10-08: Should be paid and Paid are
+ * the person's, set on People for every live deal). "mark kiran vale paid"
+ * names every deal of hers by meaning, so it is spelled out (library PAY-010,
+ * auto on, 2026-10-10: it asked, then a stray call asked "which group?").
+ */
+const PERSON_LEVEL = new Set(['overridePaid', 'overrideShouldBePaid']);
+const personLevel = (e) => !e.add && Object.keys(e.set ?? {}).length > 0 && Object.keys(e.set).every((k) => PERSON_LEVEL.has(k));
+
+function spelledOut(name, tool, args, said, { allAnswered = false } = {}) {
   if (tool?.stops || !tool?.parameters?.properties?.confirmed) return false;
   const text = String(said ?? '');
   if (name !== 'bulk_update_master_sheet') return false;
@@ -144,9 +165,9 @@ function spelledOut(name, tool, args, said) {
   if (Object.keys(args).some((k) => !PER_PERSON_ONLY.has(k))) return false;
   return entries.every((e) => e?.person && personMentionedIn(text, e.person)
     && Object.keys(e.set ?? {}).every((k) => !ENDS_A_DEAL.test(k))
-    && (e.company ? fold(text).includes(fold(e.company)) : e.allDeals === true && EVERY_OF_THEIRS.test(text)));
+    && (e.company ? fold(text).includes(fold(e.company)) : e.allDeals === true && (allAnswered || EVERY_OF_THEIRS.test(text) || personLevel(e))));
 }
 
 module.exports = {
-  mayAutoConfirm, couldSkip, spelledOut, autoConfirmOffer, MAY_SKIP,
+  mayAutoConfirm, couldSkip, spelledOut, answeredAll, autoConfirmOffer, MAY_SKIP,
 };

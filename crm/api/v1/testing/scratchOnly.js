@@ -47,7 +47,7 @@ const WRITES = [
   'create', 'update', 'updateMany', 'remove', 'removeMany',
   'stop', 'stopIfLive', 'stopMany', 'stopCompany', 'resume', 'resumeCompany',
   'setReviewMonthlyForCompany', 'setGoingConcernForCompany', 'setDealStatus',
-  'clearOrphanFlags',
+  'clearOrphanFlags', 'clearPaydayFlag', 'keepPaydayFlag',
 ];
 
 const REVIEW_WRITES = ['answerOne'];
@@ -269,6 +269,15 @@ function arm() {
     if (group !== SCRATCH) refuse(`clear the orphan flags on #${id}`, group);
     return real.clearOrphanFlags(id, ...rest);
   };
+
+  // THE PAYDAY FLAG, both ways (2026-10-08). One row by id: the ordinary check.
+  for (const name of ['clearPaydayFlag', 'keepPaydayFlag']) {
+    repo[name] = async (id, ...rest) => {
+      const group = await groupOf(id);
+      if (group !== SCRATCH) refuse(`change the payday flag on #${id}`, group);
+      return real[name](id, ...rest);
+    };
+  }
 
   /**
    * The profile write, which reaches tb_people and therefore every deal

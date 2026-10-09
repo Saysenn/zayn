@@ -1,5 +1,6 @@
 const { Router } = require('express');
 const settingsRepo = require('./repos/settings.repo');
+const expenseChecks = require('./repos/expenseChecks.repo');
 const fxRatesRepo = require('./repos/fxRates.repo');
 const fxRates = require('./shared/fxRates.helper');
 const { AED_PER_USD, codeFor } = require('./shared/toUsd.helper');
@@ -176,11 +177,11 @@ router.get('/settings', async (req, res, next) => {
     // A new column in get()'s SELECT would take down every other reader
     // on a deploy that forgot the migration.
     // Auto mode is its own query too, and for the same reason.
-    const [row, loginBriefing, agentAutoConfirm, expenseStyle, employeeExpenses] = await Promise.all([
+    const [row, loginBriefing, agentAutoConfirm, expenseStyle, employeeExpenses, expenseCheck] = await Promise.all([
       settingsRepo.get(), settingsRepo.loginBriefing(), settingsRepo.agentAutoConfirm(), settingsRepo.expenseStyle(),
-      settingsRepo.employeeExpenses(),
+      settingsRepo.employeeExpenses(), expenseChecks.switchOn(),
     ]);
-    res.json({ ...toSettings(row), loginBriefing, agentAutoConfirm, expenseStyle, employeeExpenses });
+    res.json({ ...toSettings(row), loginBriefing, agentAutoConfirm, expenseStyle, employeeExpenses, expenseCheck });
   } catch (err) {
     next(err);
   }
@@ -199,13 +200,13 @@ router.patch('/settings', async (req, res, next) => {
     const {
       devMode, whatbotWrites, localLocations, colorUsesEndDate,
       cryptoPercent, dashboardHistoryMonths: historyMonths, loginBriefing,
-      agentAutoConfirm, expenseStyle, employeeExpenses,
+      agentAutoConfirm, expenseStyle, employeeExpenses, expenseCheck,
     } = req.body || {};
     if (devMode === undefined && whatbotWrites === undefined
       && localLocations === undefined && colorUsesEndDate === undefined
       && cryptoPercent === undefined && historyMonths === undefined
       && loginBriefing === undefined && agentAutoConfirm === undefined
-      && expenseStyle === undefined && employeeExpenses === undefined) {
+      && expenseStyle === undefined && employeeExpenses === undefined && expenseCheck === undefined) {
       return res.status(400).json({ error: 'nothing to change' });
     }
 
@@ -323,6 +324,14 @@ router.patch('/settings', async (req, res, next) => {
       await settingsRepo.setEmployeeExpenses(employeeExpenses);
     }
 
+    // THE EXPENSES CHECK (migration 078): asked on payday, after the payday check
+    if (expenseCheck !== undefined) {
+      if (typeof expenseCheck !== 'boolean') {
+        return res.status(400).json({ error: 'expenseCheck must be a boolean' });
+      }
+      await expenseChecks.setSwitch(expenseCheck);
+    }
+
     // Same reason as the GET: each flag is its own query.
     res.json({
       ...toSettings(row ?? (await settingsRepo.get())),
@@ -330,6 +339,7 @@ router.patch('/settings', async (req, res, next) => {
       agentAutoConfirm: await settingsRepo.agentAutoConfirm(),
       expenseStyle: await settingsRepo.expenseStyle(),
       employeeExpenses: await settingsRepo.employeeExpenses(),
+      expenseCheck: await expenseChecks.switchOn(),
     });
   } catch (err) {
     next(err);

@@ -47,7 +47,7 @@ export async function sendPaydayMessage(job) {
       phone,
       sentAt: new Date().toISOString(),
     });
-    // The CRM's Confirmed column starts at "awaiting reply" rather than
+    // The CRM's Payment received column starts at "Awaiting" rather than
     // blank, so an admin can tell "we asked, they haven't answered" from
     // "nobody has asked them". Best-effort, never awaited into the send
     // path — the Redis record above is the source of truth either way.

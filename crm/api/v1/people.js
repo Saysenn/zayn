@@ -8,6 +8,7 @@ const { AppError } = require('./middlewares/errors');
 const { messages } = require('./shared/messages');
 const { broadcast } = require('./sockets/index');
 const { MAX_PERCENT } = require('./shared/rates.helper');
+const { PAY_STATES, RECEIVED_STATES } = require('./shared/personPayState.helper');
 
 /**
  * The People page — the CRM's operations surface.
@@ -50,6 +51,11 @@ function filtersFrom(query) {
     currency: query.currency || undefined,
     status: query.status || undefined,
     needsReview: parseBool(query.needsReview),
+    // The person's switch state across their live deals: yes, no or mixed.
+    // Anything else is no filter, not an error.
+    shouldBePaid: PAY_STATES.includes(query.shouldBePaid) ? query.shouldBePaid : undefined,
+    paid: PAY_STATES.includes(query.paid) ? query.paid : undefined,
+    paymentReceived: RECEIVED_STATES.includes(query.paymentReceived) ? query.paymentReceived : undefined,
   };
 }
 

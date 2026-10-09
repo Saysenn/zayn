@@ -1,0 +1,54 @@
+{
+  "set": "probe",
+  "at": "2026-10-09T21:53:13.653Z",
+  "seconds": 19,
+  "cases": 1,
+  "passed": 1,
+  "passRate": 100,
+  "groups": {
+    "main": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 0,
+    "db": 0
+  },
+  "calcAccuracy": null,
+  "inventedRate": 0,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0,
+  "recoveryRate": null,
+  "perTurn": {
+    "turns": 3,
+    "modelRounds": 1.3,
+    "toolCalls": 2,
+    "retries": 0,
+    "inputTokens": 40388,
+    "cachedPct": 98,
+    "outputTokens": 165,
+    "medianMs": 2318,
+    "slowestMs": 12509
+  },
+  "tokens": {
+    "input": 121163,
+    "cached": 118656,
+    "output": 494
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "adds several deals from one line with mixed separators",
+      "name": "adds several deals from one line with mixed separators",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}

@@ -184,8 +184,8 @@ export const REOPEN_INTENT = new RegExp(
  * NOTHING is tested FIRST and that ordering is load-bearing: "I received
  * nothing, the amount never came" contains the word amount, and reading
  * that as a short payment would record somebody who got zero as partly
- * paid — and then turn their Paid toggle ON in the CRM. The expensive
- * mistake only runs one way, so the cautious branch goes first.
+ * paid, a Portion in the CRM rather than Unpaid. The cautious branch goes
+ * first.
  *
  * Neither matching is the normal case for a real question ("who do I speak
  * to?"), which must stay unclassified and reach the model. This only ever

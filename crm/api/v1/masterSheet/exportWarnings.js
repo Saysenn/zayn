@@ -70,7 +70,9 @@ const SCENARIOS = [
     severity: 'info',
     hit: (r) => r.override_should_be_paid === false,
     text: (n) => `${n} ${n === 1 ? 'row is' : 'rows are'} marked should not be paid, and are out of the total`,
-    fix: () => ({ label: () => 'Set them to yes', field: 'overrideShouldBePaid', value: true }),
+    // THE PERSON'S, his call 2026-10-08: yes goes onto every live deal of
+    // each person listed, or they would be left half yes, half no.
+    fix: () => ({ label: () => 'Set these people to yes', field: 'overrideShouldBePaid', value: true, wholePerson: true }),
   },
   {
     kind: 'no-monthly-amount',
@@ -210,7 +212,7 @@ function exportWarnings(rows, { month, template, unanswered } = {}) {
         ids: hits.map((r) => r.id).filter((id) => id != null),
         text: scenario.text(hits.length, { monthLabel }),
         // A bulk fix, or the field the panel should edit per row.
-        fix: fix ? { label: fix.label(monthLabel), field: fix.field, value: fix.value } : null,
+        fix: fix ? { label: fix.label(monthLabel), field: fix.field, value: fix.value, wholePerson: Boolean(fix.wholePerson) } : null,
         field: scenario.field ?? null,
         input: scenario.input ?? null,
         // Enough to draw a row without a second request.

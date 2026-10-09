@@ -281,7 +281,8 @@ test('1. "Social work FIRST PR" is never taken for "Social work PARTNERS PR"', a
 });
 
 test('3. ANSWERS TO HER QUESTIONS fill the new deal, and nothing else', () => {
-  const step = { n: 2, action: 'add_deal', person: 'Fresh Hire', group: 'MANBAT', company: null, changes: [{ field: 'monthlyAmount', mode: 'set', value: '700' }], need: ['company', 'roleLabel'], question: 'Step 2: …', line: 7 };
+  // With its appointment date: a new deal without one still asks for it (2026-10-08).
+  const step = { n: 2, action: 'add_deal', person: 'Fresh Hire', group: 'MANBAT', company: null, changes: [{ field: 'monthlyAmount', mode: 'set', value: '700' }, { field: 'assignedOn', mode: 'set', value: '2026-10-01' }], need: ['company', 'roleLabel'], question: 'Step 2: …', line: 7 };
   const half = applyAnswers(step, [{ step: 2, field: 'roleLabel', value: 'Mid 1' }]);
   assert.deepEqual(half.need, ['company']);
   assert.match(half.question, /still needs: company/);

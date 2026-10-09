@@ -1,0 +1,82 @@
+{
+  "set": "probe",
+  "at": "2026-10-09T21:11:47.109Z",
+  "seconds": 70,
+  "cases": 4,
+  "passed": 1,
+  "passRate": 25,
+  "groups": {
+    "main": {
+      "cases": 4,
+      "passed": 1,
+      "passRate": 25
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 1,
+    "db": 3
+  },
+  "calcAccuracy": null,
+  "inventedRate": null,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0.07,
+  "recoveryRate": 33.3,
+  "perTurn": {
+    "turns": 15,
+    "modelRounds": 1.7,
+    "toolCalls": 1.2,
+    "retries": 0.27,
+    "inputTokens": 46964,
+    "cachedPct": 99,
+    "outputTokens": 75,
+    "medianMs": 5209,
+    "slowestMs": 11742
+  },
+  "tokens": {
+    "input": 704455,
+    "cached": 695680,
+    "output": 1121
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "adds several deals from one line with mixed separators",
+      "name": "adds several deals from one line with mixed separators",
+      "group": "main",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    },
+    {
+      "id": "take N days off moves every deal BY N, once, and undo puts them back",
+      "name": "take N days off moves every deal BY N, once, and undo puts them back",
+      "group": "main",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    },
+    {
+      "id": "a change finds the deal by one word of its company",
+      "name": "a change finds the deal by one word of its company",
+      "group": "main",
+      "pass": false,
+      "labels": [
+        "answer",
+        "db"
+      ]
+    },
+    {
+      "id": "a bump next month on a deal named by its GROUP is parked, then called off",
+      "name": "a bump next month on a deal named by its GROUP is parked, then called off",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}

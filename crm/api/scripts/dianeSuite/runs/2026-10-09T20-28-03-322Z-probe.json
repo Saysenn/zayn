@@ -1,0 +1,56 @@
+{
+  "set": "probe",
+  "at": "2026-10-09T20:28:03.322Z",
+  "seconds": 7,
+  "cases": 1,
+  "passed": 0,
+  "passRate": 0,
+  "groups": {
+    "pay": {
+      "cases": 1,
+      "passed": 0,
+      "passRate": 0
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 0,
+    "db": 1
+  },
+  "calcAccuracy": null,
+  "inventedRate": null,
+  "unsafeRate": 0,
+  "wastedCallsPerTurn": 0,
+  "recoveryRate": null,
+  "perTurn": {
+    "turns": 2,
+    "modelRounds": 1.5,
+    "toolCalls": 2,
+    "retries": 0,
+    "inputTokens": 39032,
+    "cachedPct": 98,
+    "outputTokens": 31,
+    "medianMs": 2989,
+    "slowestMs": 2989
+  },
+  "tokens": {
+    "input": 78063,
+    "cached": 76544,
+    "output": 62
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "PAY-010",
+      "name": "\"mark kiran vale paid\" is every live deal of hers, after a yes",
+      "group": "pay",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 const { asText, sameStoredValue } = require('./compareValues');
 const { SEEDED_NOT_ASKED, COMPANIONS, COMPANION_COLUMNS } = require('./importColumns');
+const { keepingPayday } = require('../shared/paydayFlag.helper');
 
 /**
  * WHAT AN UPLOAD WOULD DO, worked out before it does any of it.
@@ -123,7 +124,8 @@ function buildImportDiff({
       if (SEEDED_NOT_ASKED.has(column)) continue;
       // Part of another cell, asked about there. See importColumns.
       if (COMPANION_COLUMNS.has(column)) continue;
-      const to = values[column];
+      // A payday flag survives the upload, so it is not offered as a change.
+      const to = keepingPayday(column, values[column], old);
       /**
        * ===============================
        * * HIS WORDS WHERE THE VALUE WOULD BE

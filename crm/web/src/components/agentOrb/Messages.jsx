@@ -8,6 +8,7 @@
  * The two callers own their own scroll container and sizing; this owns
  * nothing but the bubbles.
  */
+import { useState } from 'react';
 import DealForm from './forms/DealForm';
 import DealCard from './forms/DealCard';
 import DealList from './forms/DealList';
@@ -92,17 +93,86 @@ function linkify(text, onOpenDeal) {
  * A REPLY THAT NEEDS HIDING IS A REPLY THAT NEEDS REWRITING, and hiding it
  * is what stops anybody noticing.
  */
+function Sources({ sources }) {
+  const [open, setOpen] = useState(false);
+  const site = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
+  return (
+    <div className="mt-2">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="inline-flex min-h-0 items-center gap-1.5 rounded-full border border-diane-line/40 bg-transparent px-2 py-0.5 text-[10px] text-diane-dim hover:border-diane-signal/60 hover:text-diane-signal"
+      >
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5" /><path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5" />
+        </svg>
+        {sources.length} {sources.length === 1 ? 'source' : 'sources'}
+      </button>
+      {open && (
+        <ul className="mt-1.5 space-y-1 text-[10px] leading-snug">
+          {sources.map((s) => (
+            <li key={s.n} className="min-w-0">
+              {s.url ? (
+                <a href={s.url} target="_blank" rel="noopener noreferrer" className="block truncate text-diane-signal underline-offset-2 hover:text-white hover:underline" title={s.title}>
+                  {s.title}
+                  <span className="ml-1.5 text-white/40">
+                    {site(s.url)}
+                    {s.updatedOn ? ` · updated ${new Date(s.updatedOn).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}
+                  </span>
+                </a>
+              ) : (
+                <span className="block truncate text-white/70">Our note · {s.title}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function Bubble({ text, onOpenDeal }) {
   return linkify(text, onOpenDeal);
+}
+
+/**
+ * ===============================
+ * * A PICTURE SAYS IT: THE LONG TEXT STEPS ASIDE
+ * ===============================
+ * His call 2026-10-08: when her answer comes as a picture, the same answer
+ * as a long list and a long reply under it is the clutter. In a turn with a
+ * picture the list is not drawn, and her reply keeps its first line and its
+ * last paragraph (what she found, and what she asks). Nothing is removed:
+ * the conversation still holds every word, and she still reads it.
+ */
+function picturedTurns(history) {
+  const turnOf = [];
+  let turn = 0;
+  for (const m of history) {
+    if (m.role === 'user' && !m.list && !m.image && !m.card && !m.form && !m.check) turn += 1;
+    turnOf.push(turn);
+  }
+  const withPicture = new Set(history.map((m, i) => (m.image?.id ? turnOf[i] : null)).filter((t) => t !== null));
+  return (i) => withPicture.has(turnOf[i]);
+}
+function shortOf(text) {
+  const all = String(text ?? '').trim();
+  const paras = all.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  if (paras.length <= 2 && all.split('\n').length <= 4) return all;
+  const first = paras[0].split('\n')[0];
+  const last = paras[paras.length - 1];
+  return first === last ? first : `${first}\n\n${last}`;
 }
 
 export default function Messages({
   history, isSending, workingText, progress = null, streamingReply = '', onFormSubmit, onCellEdit,
   onExportPause, onOpenDeal, onRetry, onOffer, onOpenImage,
 }) {
+  const pictured = picturedTurns(history);
   return (
     <>
-      {history.map((m, i) => (
+      {history.map((m, i) => (pictured(i) && m.list && !m.image) ? null : (
         /**
          * A FORM IS A TURN, so it sits in the transcript rather than
          * floating somewhere else on screen. It scrolls away with the
@@ -202,9 +272,14 @@ export default function Messages({
           }`}
         >
           <Bubble
-            text={m.content}
+            text={m.role === 'assistant' && pictured(i) ? shortOf(m.content) : m.content}
             onOpenDeal={m.role === 'assistant' ? onOpenDeal : null}
           />
+
+          {/* HER SOURCES, LIKE CHATGPT (his call 2026-10-10): hidden behind a
+              small button under the answer, clickable links when opened. Never
+              in her words, so she never reads a link aloud. */}
+          {m.role === 'assistant' && m.sources?.length > 0 && <Sources sources={m.sources} />}
 
           {/* RETRY, on the turn that failed. Her excuse is in character and
               deliberately vague, which left retyping the question as the

@@ -32,9 +32,11 @@ const router = Router();
 // money. `undefined` means "says nothing about it", which is why 'sent'
 // and 'no_response' are absent rather than false — see the Paid toggle
 // rule in PATCH /payment-status below.
+//
+// 'partial' is absent too, his call 2026-10-08: a portion is flagged for an
+// admin to mark which deals were paid, so the switch is theirs to set.
 const PAID_BY_OUTCOME = {
   confirmed: true,
-  partial: true, // short, but it arrived
   not_received: false,
 };
 
@@ -91,12 +93,9 @@ router.patch('/payment-status', async (req, res, next) => {
     const row = await masterSheetRowsRepo.findBySyncKey(syncKey);
     if (!row) return res.status(404).json({ error: 'Deal not found' });
 
-    // The payday answer drives the Paid toggle, and the rule is "did any
-    // money arrive", not "was it right": 'partial' is paid (they received
-    // something, it was short), 'not_received' is not. Explicit user
-    // instruction, and it defines Paid as "the person received it" rather
-    // than "we sent it" — the person's word wins over the admin's on this
-    // one column, which is the whole point of asking them.
+    // The payday answer drives the Paid toggle: 'confirmed' turns it on,
+    // 'not_received' off. 'partial' leaves it for the admin, who is asked
+    // to review it (applyPaydayOutcome flags the deal).
     //
     // 'sent' and 'no_response' deliberately touch nothing. Nobody has told
     // us anything, and defaulting a silent person to unpaid would erase an

@@ -42,6 +42,8 @@ const FIELDS = Object.freeze({
   status: { label: 'status', column: 'status' },
   oldGroup: { label: 'old group', column: 'old_group' },
   overridePaid: { label: 'paid', column: 'override_paid', bool: true },
+  // The other switch, set per person like Paid. 2026-10-08.
+  overrideShouldBePaid: { label: 'should be paid', column: 'override_should_be_paid', bool: true },
   addonPercent: { label: 'add on %', column: 'addon_percent', number: true },
   feePercent: { label: 'fee %', column: 'fee_percent', number: true },
 });
@@ -177,7 +179,7 @@ function callsFor(step) {
     case 'rate':
       return [park('update_person', { person: step.person, ...set, ...Object.fromEntries(Object.entries(add).map(([k, v]) => [`${k}Delta`, v])) })];
     case 'add_deal':
-      return [{ name: 'add_deal', args: { ...set, personName: step.person, groupName: step.group, company: step.company, confirmed: true } }];
+      return [{ name: 'add_deal', args: { ...set, personName: step.person, groupName: step.group, company: step.company, confirmed: true, ...(step.newGroup ? { approvedNewGroup: step.group } : {}) } }];
     case 'rename_company':
       return [{ name: 'rename_company', args: { name: step.company, newName: step.newName, confirmed: true } }];
     // A PERSON'S OWN profile and a COMPANY's record, through their own tools.
@@ -224,13 +226,88 @@ function groupedSections(plan) {
   }));
 }
 
+/**
+ * ===============================
+ * * WHAT SHE UNDERSTOOD, AND WHAT TO CHECK FIRST
+ * ===============================
+ * The box's preview, 2026-10-08. One plain sentence of what she read the
+ * request as, so a wrong guess is caught before anything runs, and the
+ * unusual items named by number so a long list is not skimmed past them.
+ */
+const UNUSUAL = /\bstopped\b|\balready\b|\bno change\b|⚠|\bended\b|\bnot on\b|\bdifferent currency\b|\bover (?:the )?(?:monthly|31)\b/i;
+function understood(plan) {
+  const verbs = {
+    update: 'change', stop: 'stop', resume: 'bring back', add_deal: 'add', rate: 'set a rate on', rename_company: 'rename', person: 'update', company: 'update',
+  };
+  const live = plan.steps.filter((s) => !s.skipped && !s.question);
+  if (!live.length) return '';
+  const byVerb = new Map();
+  for (const s of live) {
+    // A GROUP RENAMED is said as the group, never as deals of a person:
+    // "change 13 deals for Abe Lincoln" folded two renames into his notes.
+    // A DEAL MOVED is said with where it goes: "change 4 deals for Gary" hid it.
+    if (s.kind === 'move_deal') {
+      const key = `move to ${s.to}`;
+      const e = byVerb.get(key) ?? { deals: 0, who: new Set() };
+      e.deals += 1;
+      if (s.person) e.who.add(s.person);
+      byVerb.set(key, e);
+      continue;
+    }
+    if (s.kind === 'rename_group') {
+      const e = byVerb.get('rename group') ?? { deals: 0, who: new Set(), groups: true };
+      e.deals += 1;
+      e.who.add(`${s.from} → ${s.to}`);
+      byVerb.set('rename group', e);
+      continue;
+    }
+    const verb = verbs[s.action] ?? s.action;
+    const who = s.person ?? s.company ?? '';
+    const deals = s.ids?.length || s.lines?.length || 1;
+    const e = byVerb.get(verb) ?? { deals: 0, who: new Set() };
+    e.deals += deals;
+    if (who) e.who.add(who);
+    byVerb.set(verb, e);
+  }
+  const parts = [...byVerb].map(([verb, e]) => {
+    const names = [...e.who];
+    const named = names.length ? ` for ${names.length > 3 ? `${names.slice(0, 3).join(', ')} and ${names.length - 3} more` : names.join(', ')}` : '';
+    if (e.groups) return `rename ${names.join(', ')}`;
+    if (verb.startsWith('move to ')) return `move ${e.deals} ${e.deals === 1 ? 'deal' : 'deals'}${named} to ${verb.slice(8)}`;
+    return `${verb} ${e.deals} ${e.deals === 1 ? 'deal' : 'deals'}${named}`;
+  });
+  return `I understood: ${parts.join('; ')}.`;
+}
+function checkFirst(plan) {
+  const odd = plan.steps.filter((s) => !s.skipped && (s.question || (s.lines ?? []).some((l) => UNUSUAL.test(String(l.detail ?? '')))));
+  if (!odd.length) return '';
+  return `Check first: ${odd.slice(0, 6).map((s) => `${s.n} (${s.person ?? s.company ?? 'this one'})`).join(', ')}${odd.length > 6 ? ` and ${odd.length - 6} more` : ''}.`;
+}
+
+/** Over this long without a word, a waiting plan is closed. His rule, 2026-10-08. */
+const PLAN_IDLE_MS = 30 * 60 * 1000;
+
 /** The card the plan is drawn as, with the plan itself carried inside it. */
 function planCard(plan) {
+  // TOUCHED NOW: the idle close counts from the last time it was shown.
+  plan = { ...plan, at: Date.now() };
   const icon = { stop: '⛔', resume: '↩︎', add_deal: '➕', rename_company: '✎', rate: '%', update: '' };
   const verb = {
     update: 'Change', stop: 'Stop', resume: 'Resume', add_deal: 'New deal', rate: 'Rate', rename_company: 'Rename company', person: 'Person', company: 'Company',
   };
   const done = plan.status === 'done';
+  // GROUPS FIRST: only her questions, until they are answered.
+  if (plan.groupQs?.length && !plan.steps.length) {
+    return {
+      kind: 'plan',
+      title: `Checked ${plan.checked} rows · ${plan.groupQs.length} ${plan.groupQs.length === 1 ? 'question' : 'questions'} first`,
+      note: plan.status === 'cancelled' ? 'Cancelled, nothing changed' : 'Nothing has changed yet',
+      // The questions are in her reply, numbered; drawn here too they were said twice.
+      sections: [],
+      footer: (plan.readout ?? []).join('\n'),
+      plan,
+    };
+  }
   return {
     kind: 'plan',
     title: done
@@ -243,6 +320,8 @@ function planCard(plan) {
     // A NOTE ABOUT THE WHOLE FILE is a sentence under the title, so it wraps
     // rather than being cut off as a row.
     note: [done ? '' : plan.status === 'asking' ? 'A few things to check first' : 'Nothing has changed yet',
+      // Only while it waits for a yes: a finished plan says what was done.
+      ...(['preview', 'asking'].includes(plan.status) ? [understood(plan), checkFirst(plan)] : []),
       ...(plan.notes ?? []).filter((x) => /^Another month/.test(x.label)).flatMap((x) => x.rows.map((r) => `${r.name}: ${r.detail}.`))]
       .filter(Boolean).join('\n'),
     sections: [
@@ -284,6 +363,8 @@ function pendingPlan(history = []) {
       return null;
     }
     const plan = m?.list?.kind === 'plan' ? m.list.plan : null;
+    // CLOSED AFTER 30 MINUTES WITHOUT A WORD: a yes then is not to it.
+    if (plan && plan.at && Date.now() - plan.at > PLAN_IDLE_MS) return null;
     if (plan) return ['preview', 'asking'].includes(plan.status) ? plan : null;
   }
   return null;

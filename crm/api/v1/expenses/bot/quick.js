@@ -269,4 +269,29 @@ function quickRoute(said, { today, groups = [], group = null } = {}) {
   return null;
 }
 
-module.exports = { quickRoute, periodOf, canonicalVerbs, VERBS };
+/**
+ * ONE CHANGE, A RUN OF NUMBERS from the list on screen (his report
+ * 2026-10-08): "1-6 spent by zayn" → { ns: [1..6], words: 'spent by zayn' },
+ * or null. Two numbers at least; "2 to 50" is No. 2's change, never a run,
+ * since a run needs words after it.
+ */
+const NUM_RUN = /^(?:change\s+|update\s+|set\s+|make\s+)?(?:nos?\.?\s*|numbers?\s*|#)?(\d{1,2}(?:\s*(?:-|–|to|,|&|and)\s*\d{1,2})+)\s*[.):]?\s+(.+)$/i;
+function numberRun(said) {
+  if (/\n/.test(String(said ?? ''))) return null;
+  const m = NUM_RUN.exec(String(said ?? '').trim());
+  if (!m) return null;
+  const ns = [];
+  for (const part of m[1].split(/\s*(?:,|&|\band\b)\s*/i)) {
+    const span = /^(\d+)\s*(?:-|–|to)\s*(\d+)$/i.exec(part);
+    if (span) {
+      const [from, to] = [Number(span[1]), Number(span[2])];
+      if (from < 1 || to < from) return null;
+      for (let n = from; n <= to; n += 1) ns.push(n);
+    } else if (/^\d+$/.test(part) && Number(part) >= 1) ns.push(Number(part));
+    else return null;
+  }
+  const unique = [...new Set(ns)];
+  return unique.length > 1 ? { ns: unique, words: m[2] } : null;
+}
+
+module.exports = { quickRoute, periodOf, canonicalVerbs, numberRun, VERBS };

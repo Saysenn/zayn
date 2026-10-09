@@ -502,7 +502,8 @@ export function useDeleteMasterSheetRow() {
  */
 export function useBulkUpdateMasterSheetRows() {
   return useInvalidatingMutation(
-    ({ ids, fields }) => apiService.masterSheet.bulkUpdate(ids, fields),
+    // `wholePerson`: onto every live deal of each person these ids belong to.
+    ({ ids, fields, wholePerson }) => apiService.masterSheet.bulkUpdate(ids, fields, { wholePerson }),
     {
       describe: ({ ids, label }) => `${ids.length} ${ids.length === 1 ? 'row' : 'rows'}${label ? `: ${label}` : ''}`,
       verb: 'updated',

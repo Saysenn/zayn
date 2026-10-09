@@ -216,6 +216,7 @@ function workingPhrase() {
  * something sensible rather than nothing.
  */
 const TOOL_PHRASES = {
+  hmrc_search: 'Checking HMRC guidance…',
   find_and_show_details: 'Looking them up…',
   filter_master_sheet: 'Narrowing the sheet…',
   export_sheet: 'Setting up your sheet…',
@@ -958,7 +959,7 @@ export default function AgentOverlay({ open, onClose }) {
       // per token: history is what gets sent back to the model next turn,
       // and a half-finished sentence must never end up in it.
       const {
-        reply, claims = [], offer = null, spoken = null,
+        reply, claims = [], offer = null, spoken = null, evidence = null, sources = null,
       } = await whenReachable(() => apiService.masterSheet.agentTurn(
         nextHistory,
         inContext ?? context,
@@ -1242,7 +1243,9 @@ export default function AgentOverlay({ open, onClose }) {
        */
       setHistory((h) => [
         ...h,
-        { role: 'assistant', content: reply, claims },
+        // `evidence`: the deal ids behind a figure, so "where did that come
+        // from?" can list them (api agent/evidence.js). Only on a money answer.
+        { role: 'assistant', content: reply, claims, ...(evidence ? { evidence } : {}), ...(sources?.length ? { sources } : {}) },
         /**
          * AUTO MODE, AS ITS OWN TURN. After the answer, never inside it:
          * a change she just made and a question about how she works are
@@ -1973,7 +1976,9 @@ export default function AgentOverlay({ open, onClose }) {
             )}
             <div
               ref={drawerScrollRef}
-              className={`agent-scroll h-full overflow-y-auto flex flex-col gap-2 px-4 py-4 ${buildingSheet ? 'session-alive' : ''}`}
+              // hidden (not unmounted) under Attachments: the chat never shows
+              // through, and its scroll place is kept for "Back to the conversation"
+              className={`agent-scroll h-full overflow-y-auto flex flex-col gap-2 px-4 py-4 ${buildingSheet ? 'session-alive' : ''} ${showAttachments ? 'invisible' : ''}`}
             >
               <Messages
                 history={history}
@@ -2117,6 +2122,8 @@ export default function AgentOverlay({ open, onClose }) {
               }
               after={
                 <>
+                  {/* NO PAPERCLIP IN HMRC & CIS: it answers questions, it reads no files (yet) */}
+                  {context !== 'hmrc' && (<>
                   <input
                     ref={fileRef}
                     type="file"
@@ -2139,6 +2146,7 @@ export default function AgentOverlay({ open, onClose }) {
                   >
                     <PaperclipIcon width={17} height={17} />
                   </button>
+                  </>)}
                   {/* NO LEVEL METER AND NO KEY HINT. The meter said what the
                       vitals panel's SIGNAL and the orb itself already say,
                       and the hint was a permanent line of text inside a box
@@ -2170,7 +2178,12 @@ export default function AgentOverlay({ open, onClose }) {
       {/* One deal, opened from a chip in her list. It fetches its own card
           rather than asking her to look the row up again. */}
       {openDeal && <DealModal row={openDeal} onClose={() => setOpenDeal(null)} />}
-      <ImageViewer image={viewing} onClose={() => setViewing(null)} />
+      <ImageViewer
+        image={viewing}
+        images={history.filter((m) => m.image?.id).map((m) => m.image)}
+        onMove={setViewing}
+        onClose={() => setViewing(null)}
+      />
 
       {/* NAMES WHAT SURVIVES, because "reset" alone reads as though the
           conversation is being deleted from the CRM, and it is not. */}

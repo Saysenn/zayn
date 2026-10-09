@@ -21,7 +21,10 @@ import { groupName } from "../tools/format/money.js";
  */
 
 const fold = (s) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
-export const ANOTHER_MONTH = /\b(?:last|next|previous|past|coming)\s+month\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b|\b20\d\d\b|\bago\b|\bhistory\b|\bbefore\b/i;
+// WHOLE MONTH WORDS ONLY: "maybe" read as May, and "this month's pay status
+// pls … maybe the weather" was told "I can't show you past months" (two agent
+// test 2026-10-09). "may" as in "may I ask" is not the month.
+export const ANOTHER_MONTH = /\b(?:last|next|previous|past|coming)\s+month\b|\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may(?!\s+(?:i|we|you|be|have|ask|know)\b)|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b|\b20\d\d\b|\bago\b|\bhistory\b|\bbefore\b/i;
 const TWO_ASKS = /\b(?:and|also|plus)\b.*\b(?:when|how|what|which|who)\b|[?].+\S/i;
 const MONEY = /\b(?:how much|pay(?:s|ing)?|paid|earn\w*|get(?:ting)?|owe[ds]?|salary|wage|money|amount)\b/i;
 

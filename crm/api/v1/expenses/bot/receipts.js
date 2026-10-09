@@ -154,10 +154,25 @@ async function clearOld({ today = new Date() } = {}) {
   const cleared = [];
   for (const e of entries) {
     if (!e.isDirectory() || !/^\d{4}-\d{2}$/.test(e.name) || keepSet.has(e.name) || e.name > [...keepSet][0]) continue;
+    /**
+     * NOT REFUNDED YET, KEPT (his call 2026-10-08, migration 078): an
+     * expense still owed keeps its receipt past 3 months, until it is
+     * settled; everything else in the month goes.
+     */
     // eslint-disable-next-line no-await-in-loop
-    await fs.rm(path.join(ROOT, e.name), { recursive: true, force: true });
+    const owed = new Set((await pool.query("SELECT receipt_path FROM tb_expenses WHERE receipt_path LIKE $1 AND settle_status <> 'settled'", [`${e.name}/%`]).catch(() => ({ rows: [] }))).rows.map((r) => r.receipt_path));
+    if (owed.size) {
+      // eslint-disable-next-line no-await-in-loop
+      for (const f of await fs.readdir(path.join(ROOT, e.name)).catch(() => [])) {
+        // eslint-disable-next-line no-await-in-loop
+        if (!owed.has(`${e.name}/${f}`)) await fs.rm(path.join(ROOT, e.name, f), { recursive: true, force: true });
+      }
+    } else {
+      // eslint-disable-next-line no-await-in-loop
+      await fs.rm(path.join(ROOT, e.name), { recursive: true, force: true });
+    }
     // eslint-disable-next-line no-await-in-loop
-    await pool.query("UPDATE tb_expenses SET receipt_path = NULL, receipt_cleared_at = now() WHERE receipt_path LIKE $1", [`${e.name}/%`]);
+    await pool.query("UPDATE tb_expenses SET receipt_path = NULL, receipt_cleared_at = now() WHERE receipt_path LIKE $1 AND receipt_path <> ALL($2::text[])", [`${e.name}/%`, [...owed]]);
     cleared.push(e.name);
   }
   const held = await fs.readdir(PENDING).catch(() => []);

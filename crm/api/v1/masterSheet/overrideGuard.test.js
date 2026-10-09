@@ -30,8 +30,11 @@ test('the guard is ON unless a caller says otherwise', () => {
 });
 
 test('the CASE is built only when the guard is on', () => {
-  assert.match(REPO, /respectOverrides\s*\n?\s*\?\s*`\$\{c\} = CASE WHEN/);
-  assert.match(REPO, /:\s*`\$\{c\} = EXCLUDED\.\$\{c\}`/);
+  // The value is built first and then wrapped by keepingPaydaySql, which
+  // carries a payday flag across the upload (2026-10-08).
+  assert.match(REPO, /respectOverrides\s*\n?\s*\?\s*`CASE WHEN '\$\{c\}' = ANY\(tb_mastersheet\.manually_overridden_fields\)/);
+  assert.match(REPO, /:\s*`EXCLUDED\.\$\{c\}`/);
+  assert.match(REPO, /`\$\{c\} = \$\{keepingPaydaySql\(c, value\)\}`/);
 });
 
 test('ONLY the commit turns it off', () => {

@@ -22,6 +22,29 @@ module.exports = [
   { name: 'add: "ok save them" after a full preview', steps: ['taxi 45 paid to careem today spent by me', 'ok save them'], check: ({ db }) => expect(newRows(db).length === 1, `saved ${newRows(db).length}`) },
   { name: 'add: a large one is flagged, then saved', steps: ['new laptop 25000 apple store today spent by me', 'yes'], check: ({ db }) => expect(newRows(db).some((r) => r.amount === 25000), 'not saved') },
 
+  // ---------- ADDING: EVERY FIELD EXACT (plan item 26, 2026-10-08) ----------
+  // What is SAVED, field by field: amount, currency, payee, day, category, who.
+  ...[
+    ['taxi to the office 45 aed paid to careem on 5 oct, spent by me', 'yes', { amount: 45, currency: 'AED', payee: /careem/i, day: '2026-10-05', category: 'travel' }],
+    ['train to leeds £86.40 trainline 6 oct, me', 'yes', { amount: 86.4, currency: 'GBP', payee: /trainline/i, day: '2026-10-06', category: 'travel' }],
+    ['super 98 petrol 120 at enoc on 2 oct, me', 'yes', { amount: 120, currency: 'AED', payee: /enoc/i, day: '2026-10-02', category: 'fuel' }],
+    ['team lunch 320 at zuma on 4 oct, me', 'yes', { amount: 320, currency: 'AED', payee: /zuma/i, day: '2026-10-04', category: 'food' }],
+  ].map(([say, yes, want]) => ({
+    name: `exact: ${say}`,
+    steps: [say, yes],
+    check: ({ db }) => {
+      const r = newRows(db)[0];
+      const bad = !r ? 'not saved' : [
+        Math.abs(r.amount - want.amount) < 0.005 ? null : `amount ${r.amount}`,
+        r.currency === want.currency ? null : `currency ${r.currency}`,
+        want.payee.test(r.payee ?? '') ? null : `payee ${r.payee}`,
+        r.day === want.day ? null : `day ${r.day}`,
+        r.category === want.category ? null : `category ${r.category}`,
+      ].filter(Boolean).join(', ');
+      return expect(!bad, bad);
+    },
+  })),
+
   // ---------- ADDING: files ----------
   { name: 'file: taxi receipt', steps: [{ files: ['receipt-02-careem.png'] }], check: ({ pending }) => expect(live(pending)[0]?.rawAmount === 45, String(live(pending)[0]?.rawAmount)) },
   { name: 'file: DEWA pdf', steps: [{ files: ['invoice-01-dewa.pdf'] }], check: ({ pending }) => expect(Math.abs((live(pending)[0]?.rawAmount ?? 0) - 919.28) < 0.01, String(live(pending)[0]?.rawAmount)) },
@@ -229,5 +252,62 @@ module.exports = [
   { name: 'r6 most expensive', steps: ['which is our most expensive this month'], check: ({ last }) => expect(/BIGGEST|Electricity|919/i.test(last), last.slice(0, 80)) },
   { name: 'r6 remove duplicate dewa', steps: ['remove the duplicate dewa', 'yes'], check: ({ db }) => expect(gone(db, /Electricity/), 'still there') },
   { name: 'r6 halve it', steps: ['the internet bill should be half', 'yes'], check: ({ db }) => expect(Math.abs(amt(db, /Internet/) - 235.73) < 0.02, String(amt(db, /Internet/))) },
-  { name: 'r6 move a date by days', steps: ['move the taxi one day later', 'yes'], check: ({ db }) => expect(db.find((r) => /Taxi/.test(r.description))?.day === '2026-10-06', db.find((r) => /Taxi/.test(r.description))?.day) },
+  { name: 'bulk 1-6 spent by laud', steps: ["update zayn's expenses", '1-6 spent by laud', 'yes'], check: ({ db }) => expect(db.filter((r) => /laud/i.test(r.spent_by ?? '')).length === 6, `spent by laud: ${db.filter((r) => /laud/i.test(r.spent_by ?? '')).length}`) },
+  { name: 'r6 move a date by days',steps: ['move the taxi one day later', 'yes'], check: ({ db }) => expect(db.find((r) => /Taxi/.test(r.description))?.day === '2026-10-06', db.find((r) => /Taxi/.test(r.description))?.day) },
+
+  // ---------- PICKING LINES OF A WAITING PREVIEW (2026-10-08) ----------
+  // the list: 1 Cleaner, 2 Team lunch, 3 petrol, 4 Taxi, 5 Groceries, 6 Lunch with client, 7 DEWA, 8 Internet
+  { name: 'pick: pls only 1-3 of six', steps: ["update zayn's expenses", '1-6 spent by gloria', 'pls only 1-3', 'yes'], check: ({ db }) => expect(db.filter((r) => /gloria/i.test(r.spent_by ?? '')).length === 3, `gloria: ${db.filter((r) => /gloria/i.test(r.spent_by ?? '')).length}`) },
+  { name: 'pick: 1-3 only', steps: ["update zayn's expenses", '1-6 spent by gloria', '1-3 only', 'yes'], check: ({ db }) => expect(db.filter((r) => /gloria/i.test(r.spent_by ?? '')).length === 3, `gloria: ${db.filter((r) => /gloria/i.test(r.spent_by ?? '')).length}`) },
+  { name: 'pick: not 5-6', steps: ["update zayn's expenses", '1-6 spent by gloria', 'not 5-6', 'yes'], check: ({ db }) => expect(db.filter((r) => /gloria/i.test(r.spent_by ?? '')).length === 4 && !/gloria/i.test(db.find((r) => /^Groceries$/.test(r.description))?.spent_by ?? ''), 'wrong ones') },
+  { name: 'pick: except 2', steps: ["update zayn's expenses", '1-6 spent by gloria', 'except 2', 'yes'], check: ({ db }) => expect(db.filter((r) => /gloria/i.test(r.spent_by ?? '')).length === 5 && !/gloria/i.test(db.find((r) => /Team lunch/.test(r.description))?.spent_by ?? ''), 'team lunch changed') },
+  { name: 'pick: only the first two', steps: ["update zayn's expenses", '1-6 spent by gloria', 'only the first 2', 'yes'], check: ({ db }) => expect(db.filter((r) => /gloria/i.test(r.spent_by ?? '')).length === 2, `gloria: ${db.filter((r) => /gloria/i.test(r.spent_by ?? '')).length}`) },
+  { name: 'pick: a number not there', steps: ["update zayn's expenses", '1-6 spent by gloria', 'only 1-9'], check: ({ last, pending }) => expect(/only 6/.test(last) && (pending?.items ?? []).length === 6, last.slice(0, 80)) },
+  { name: 'pick: a removal, only 1', steps: ['remove the taxi and the team lunch', 'only 1', 'yes'], check: ({ db }) => expect(gone(db, /Taxi/) !== gone(db, /Team lunch/), 'both or neither gone') },
+  { name: 'pick: the preview is numbered', steps: ["update zayn's expenses", '1-3 spent by gloria'], check: ({ last }) => expect(/\*1\.\*[\s\S]*\*2\.\*[\s\S]*\*3\.\*/.test(last) && /only 1-2/.test(last), last.slice(0, 120)) },
+  { name: 'pick: now the rest', steps: ["update zayn's expenses", '1-6 spent by gloria', 'only 1-3', 'yes', 'now the rest to abe', 'yes'], check: ({ db }) => expect(db.filter((r) => /^abe$/i.test(r.spent_by ?? '')).length === 3, `abe: ${db.filter((r) => /^abe$/i.test(r.spent_by ?? '')).length}`) },
+
+  // ---------- LISTS ----------
+  { name: 'list: a question numbers its list', steps: ["show me this month's expenses", '1-3 spent by abe', 'yes'], check: ({ db }) => expect(db.filter((r) => /^abe$/i.test(r.spent_by ?? '')).length === 3, `abe: ${db.filter((r) => /^abe$/i.test(r.spent_by ?? '')).length}`) },
+  { name: 'list: sort by amount', steps: ["show me this month's expenses", 'sort by amount'], check: ({ last }) => expect(/SORTED BY AMOUNT/.test(last) && /\*1\.\* Electricity/.test(last), last.slice(0, 120)) },
+  { name: 'list: only food', steps: ["show me this month's expenses", 'only food'], check: ({ last }) => expect(/only food/.test(last) && !/Cleaner/.test(last), last.slice(0, 120)) },
+  { name: 'list: hide the cleaner', steps: ["show me this month's expenses", 'hide the cleaner'], check: ({ last }) => expect(/7 OF 8/.test(last) && !/Cleaner/.test(last), last.slice(0, 120)) },
+  { name: 'list: still on screen after a question', steps: ["show me this month's expenses", 'how much this month?', '4 to 50', 'yes'], check: ({ db }) => expect(amt(db, /Taxi/) === 50, `taxi ${amt(db, /Taxi/)}`) },
+
+  // ---------- SMARTER CHANGES ----------
+  { name: 'change: by a rule, over 400', steps: ['make everything over 400 spent by abe', 'yes'], check: ({ db }) => expect(db.filter((r) => /^abe$/i.test(r.spent_by ?? '')).length === 2, `abe: ${db.filter((r) => /^abe$/i.test(r.spent_by ?? '')).length}`) },
+  { name: 'change: a value per range', steps: ["update zayn's expenses", '1-2 spent by gloria, 3-4 spent by abe', 'yes'], check: ({ db }) => expect(db.filter((r) => /gloria/i.test(r.spent_by ?? '')).length === 2 && db.filter((r) => /^abe$/i.test(r.spent_by ?? '')).length === 2, 'per range wrong') },
+  { name: 'change: split one in two', steps: ['split the dewa bill between gloria and abe', 'yes'], check: ({ db }) => expect(db.filter((r) => /Electricity/.test(r.description)).length === 2 && Math.abs(db.filter((r) => /Electricity/.test(r.description)).reduce((n, r) => n + r.amount, 0) - 919.28) < 0.01, 'split wrong') },
+  { name: 'change: clear the payee', steps: ['no payee on the taxi', 'yes'], check: ({ db }) => expect(!db.find((r) => /Taxi/.test(r.description))?.payee, db.find((r) => /Taxi/.test(r.description))?.payee) },
+  { name: 'change: copy a date', steps: ["update zayn's expenses", "make 4's date the same as 1", 'yes'], check: ({ db }) => expect(db.find((r) => /Taxi/.test(r.description))?.day === '2026-10-07', db.find((r) => /Taxi/.test(r.description))?.day) },
+  { name: 'change: 5% on several', steps: ["update zayn's expenses", 'add 5% to 4 and 5', 'yes'], check: ({ db }) => expect(Math.abs(amt(db, /Taxi/) - 47.25) < 0.01 && Math.abs(amt(db, /^Groceries$/) - 146.91) < 0.02, `${amt(db, /Taxi/)} ${amt(db, /^Groceries$/)}`) },
+  { name: 'change: do the same for another', steps: ['change the taxi to spent by abe', 'yes', 'do the same for the groceries', 'yes'], check: ({ db }) => expect(/^abe$/i.test(db.find((r) => /^Groceries$/.test(r.description))?.spent_by ?? ''), db.find((r) => /^Groceries$/.test(r.description))?.spent_by) },
+  { name: 'change: correcting yourself', steps: ['change the taxi to spent by gloria... no wait, abe', 'yes'], check: ({ db }) => expect(/^abe$/i.test(db.find((r) => /Taxi/.test(r.description))?.spent_by ?? ''), db.find((r) => /Taxi/.test(r.description))?.spent_by) },
+  { name: 'change: asks only the missing value', steps: ['update the spent by of the taxi', 'abe', 'yes'], check: ({ db }) => expect(/^abe$/i.test(db.find((r) => /Taxi/.test(r.description))?.spent_by ?? ''), db.find((r) => /Taxi/.test(r.description))?.spent_by) },
+
+  // ---------- SAFETY ----------
+  { name: 'safety: a 100x jump is warned', steps: ['change the taxi to 4500'], check: ({ last }) => expect(/100× more/.test(last), last.slice(-160)) },
+  { name: 'safety: a big change needs yes N', steps: ['make the dewa bill 15000', 'yes', 'yes 1'], check: ({ db }) => expect(amt(db, /Electricity/) === 15000, String(amt(db, /Electricity/))) },
+  { name: 'safety: a big change, a plain yes waits', steps: ['make the dewa bill 15000', 'yes'], check: ({ db, last }) => expect(amt(db, /Electricity/) === 919.28 && /yes 1/.test(last), last.slice(0, 80)) },
+  { name: 'safety: a future date is warned', steps: ['change the taxi date to 20 dec'], check: ({ last }) => expect(/in the future/.test(last), last.slice(-160)) },
+
+  // ---------- CONVERSATION ----------
+  { name: 'talk: total as if saved', steps: ["update zayn's expenses", '1-3 spent by abe', 'how much did abe spend this month after this?'], check: ({ last, pending }) => expect(/As if/.test(last) && pending?.kind === 'edit', last.slice(0, 120)) },
+  { name: 'talk: only 1-3 and remove 5', steps: ["update zayn's expenses", '1-4 spent by gloria', 'only 1-3, and remove 5', 'yes'], check: ({ db }) => expect(db.filter((r) => /gloria/i.test(r.spent_by ?? '')).length === 3 && gone(db, /^Groceries$/), 'not both') },
+
+  // ---------- AFTER SAVING ----------
+  { name: 'after: recap who has what', steps: ['change the taxi to spent by abe', 'yes'], check: ({ last }) => expect(/Abe now has 1 expense this month/i.test(last), last.slice(-120)) },
+  { name: 'after: undo only 2', steps: ["update zayn's expenses", '1-3 spent by abe', 'yes', 'undo only 2', 'yes'], check: ({ db }) => expect(db.filter((r) => /^abe$/i.test(r.spent_by ?? '')).length === 2 && !/^abe$/i.test(db.find((r) => /Team lunch/.test(r.description))?.spent_by ?? ''), 'wrong one put back') },
+  { name: 'after: undo the last 2 things', steps: ['change the taxi to 50', 'yes', 'change the groceries to 300', 'yes', 'undo the last 2 things', 'yes'], check: ({ db }) => expect(amt(db, /Taxi/) === 45 && amt(db, /^Groceries$/) === 139.91, `${amt(db, /Taxi/)} ${amt(db, /^Groceries$/)}`) },
+  { name: 'after: undo by the new value', steps: ['change the taxi to spent by abe', 'yes', 'change the groceries to 300', 'yes', 'undo the abe change', 'yes'], check: ({ db }) => expect(!/^abe$/i.test(db.find((r) => /Taxi/.test(r.description))?.spent_by ?? '') && amt(db, /^Groceries$/) === 300, 'wrong one undone') },
+  { name: 'after: what did you just change', steps: ['change the taxi to 50', 'yes', 'what did you just change?'], check: ({ last }) => expect(/Last thing you did/.test(last) && /Taxi/.test(last), last.slice(0, 120)) },
+  { name: 'after: who changed 4', steps: ['change the taxi to 50', 'yes', "show me this month's expenses", 'who changed 4?'], check: ({ last }) => expect(/Changed by/.test(last), last.slice(0, 160)) },
+
+  // ---------- FINDING ----------
+  { name: 'find: search by text', steps: ['find careem'], check: ({ last }) => expect(/WITH "CAREEM"/.test(last) && /Taxi/.test(last), last.slice(0, 120)) },
+  { name: 'find: missing payee, filled by number', steps: ['no payee on the taxi', 'yes', 'which have no payee?', '1 careem', 'yes'], check: ({ db }) => expect(/careem/i.test(db.find((r) => /Taxi/.test(r.description))?.payee ?? ''), db.find((r) => /Taxi/.test(r.description))?.payee) },
+  { name: 'find: receipt for a list number', steps: ["show me this month's expenses", 'receipt for 2'], check: ({ last }) => expect(/2\. Team lunch/.test(last), last.slice(0, 120)) },
+
+  // ---------- SETTLING (the CRM admin only) ----------
+  { name: 'settle: refused on WhatsApp', steps: ["show me this month's expenses", 'settle 1-3'], check: ({ last }) => expect(/Only the CRM admin/.test(last), last.slice(0, 80)) },
 ];

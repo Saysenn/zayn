@@ -118,14 +118,21 @@ function personMentionedIn(said, name) {
   const words = String(said ?? '').split(/[^A-Za-z0-9]+/).filter(Boolean);
   const heard = words.map(fold).join('');
   const starts = [];
+  const ends = new Set();
   let at = 0;
-  for (const w of words) { starts.push(at); at += fold(w).length; }
+  for (const w of words) { starts.push(at); at += fold(w).length; ends.add(at); }
   if (starts.some((i) => heard.startsWith(wanted, i))) return true;
   const slack = TYPO_LIMIT(wanted);
   if (slack === 0) return false;
+  /**
+   * AND A SLIP ENDS WHERE A WORD ENDS. Library 2026-10-08: "how much is john
+   * smith owed" ran on into "ow" and was a slip of John Smithson, who then
+   * covered the John Smith they typed exactly. "gloria - diference" still
+   * lands: its slip is inside the name's own last word.
+   */
   for (const i of starts) {
     for (let len = wanted.length - slack; len <= wanted.length + slack; len += 1) {
-      if (i + len <= heard.length && within(heard.slice(i, i + len), wanted, slack)) return true;
+      if (i + len <= heard.length && ends.has(i + len) && within(heard.slice(i, i + len), wanted, slack)) return true;
     }
   }
   return false;

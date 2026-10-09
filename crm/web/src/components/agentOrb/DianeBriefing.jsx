@@ -67,6 +67,14 @@ const STACK_PERSPECTIVE_PX = 1200;
 const STACK_EDGE_FRONT = 0.34;
 const STACK_EDGE_BACK = 0.16;
 
+// THE CARD FITS THE SCREEN. A long topic, a dozen people not paid, grew the
+// card past the top and bottom of the viewport. The panel is capped, leaving
+// room for the HUD readouts and the controls; its rows scroll inside it.
+const CARD_MAX_H = 'max(9rem, calc(100dvh - 16rem))';
+// How far past an edge counts as "more there", so rounding never does.
+const ROWS_EDGE_PX = 8;
+const ROWS_FADE = '1.25rem';
+
 /** One line, revealed a character at a time while she says it. Nothing yet while pending. */
 function useTyped(text, active, pending) {
   const [shown, setShown] = useState(0);
@@ -142,6 +150,7 @@ function Breakdown({ entries, lit }) {
         return (
           <span
             key={e.id}
+            data-read={state}
             className="briefing-row-in whitespace-nowrap"
             style={{ animationDelay: `${Math.min(order, ROW_STAGGER_CAP) * ROW_STAGGER_MS}ms` }}
           >
@@ -163,9 +172,10 @@ function DetailRow({ row, keyName, order, state = READ_STATE.DONE }) {
   const where = [row.company ?? (row.deals > 1 ? `${row.deals} deals` : null), row.group].filter(Boolean).join(' · ');
   const figure = keyName === 'payableOver'
     ? `${formatMoney(row.amount, row.currency)} of ${formatMoney(row.monthly, row.currency)} monthly`
-    : keyName === 'unpaid' ? owedText(row, formatMoney) : formatMoney(row.amount, row.currency);
+    : keyName === 'unpaid' || keyName === 'payday' ? owedText(row, formatMoney) : formatMoney(row.amount, row.currency);
   return (
     <div
+      data-read={state}
       className="briefing-row-in flex items-baseline gap-3 px-1 py-0.5 text-[13px]"
       style={{ animationDelay: `${Math.min(order, ROW_STAGGER_CAP) * ROW_STAGGER_MS}ms`, opacity: sorted ? 0.4 : 1 }}
     >
@@ -175,6 +185,73 @@ function DetailRow({ row, keyName, order, state = READ_STATE.DONE }) {
         <span className="ml-2" style={{ color: tint(0.75, palette.dim) }}>{where}</span>
       </span>
       <span className="shrink-0 tabular-nums" style={litStyle(state, palette.signal)}>{figure}</span>
+    </div>
+  );
+}
+
+/**
+ * A card's rows, scrolling inside the capped card. No bar, the agent panel's
+ * rule (`.agent-scroll`): the edges fade where there is more, a mark says so
+ * at the bottom, and the row she is reading is brought into view, so nothing
+ * on a long card is ever out of reach.
+ */
+function CardRows({ children }) {
+  const { tint, signal, hot, panel } = useDianePalette();
+  const boxRef = useRef(null);
+  const followedRef = useRef(null);
+  const [edges, setEdges] = useState({ above: false, below: false });
+
+  const checkRef = useRef(null);
+  checkRef.current = () => {
+    const box = boxRef.current;
+    if (!box) return;
+    const above = box.scrollTop > ROWS_EDGE_PX;
+    const below = box.scrollHeight - box.scrollTop - box.clientHeight > ROWS_EDGE_PX;
+    setEdges((e) => (e.above === above && e.below === below ? e : { above, below }));
+  };
+  useEffect(() => {
+    const box = boxRef.current;
+    const check = () => checkRef.current();
+    box.addEventListener('scroll', check, { passive: true });
+    window.addEventListener('resize', check);
+    return () => { box.removeEventListener('scroll', check); window.removeEventListener('resize', check); };
+  }, []);
+  // Every render too: a row arriving while she talks changes only the content.
+  useEffect(() => checkRef.current());
+
+  // FOLLOW HER VOICE: she reads a batch of rows at once, so when any of the
+  // batch is out of view, its first row is brought up to just under the fade.
+  useEffect(() => {
+    const box = boxRef.current;
+    const rows = box?.querySelectorAll(`[data-read="${READ_STATE.ACTIVE}"]`);
+    const first = rows?.[0];
+    if (!first || first === followedRef.current) return;
+    followedRef.current = first;
+    const top = first.getBoundingClientRect().top;
+    const bottom = rows[rows.length - 1].getBoundingClientRect().bottom;
+    const b = box.getBoundingClientRect();
+    if (top >= b.top && bottom <= b.bottom - ROWS_EDGE_PX * 3) return;
+    box.scrollBy({ top: top - b.top - ROWS_EDGE_PX * 3, behavior: 'smooth' });
+  });
+
+  const fade = `linear-gradient(to bottom, ${edges.above ? 'transparent' : 'black'} 0, black ${ROWS_FADE}, black calc(100% - ${ROWS_FADE}), ${edges.below ? 'transparent' : 'black'} 100%)`;
+  return (
+    <div className="relative mt-3 flex min-h-0 flex-col">
+      <div ref={boxRef} className="agent-scroll min-h-0 overflow-y-auto overscroll-contain" style={{ maskImage: fade, WebkitMaskImage: fade }}>
+        <div className="flex flex-col gap-1">{children}</div>
+      </div>
+      {edges.below && (
+        <button
+          type="button"
+          onClick={() => boxRef.current?.scrollBy({ top: boxRef.current.clientHeight * 0.8, behavior: 'smooth' })}
+          className="absolute -bottom-3 left-1/2 min-h-0 -translate-x-1/2 border px-2 py-0.5 text-[9px] uppercase tracking-[0.25em] transition-colors"
+          style={{ fontFamily: HUD_FONT, color: tint(0.85, signal), background: panel, borderColor: tint(0.35, signal) }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = hot; e.currentTarget.style.borderColor = signal; }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = tint(0.85, signal); e.currentTarget.style.borderColor = tint(0.35, signal); }}
+        >
+          ▾ More
+        </button>
+      )}
     </div>
   );
 }
@@ -541,7 +618,7 @@ function BriefingScreen({ items: initialItems, greeting: madeAhead, onDone }) {
         return (
           <>
             {lines}
-            <div className="mt-3 flex flex-col gap-1">{breakdown(segment.key, lit)}</div>
+            <CardRows>{breakdown(segment.key, lit)}</CardRows>
           </>
         );
       }
@@ -551,7 +628,7 @@ function BriefingScreen({ items: initialItems, greeting: madeAhead, onDone }) {
         return (
           <>
             {lines}
-            {arrived.length > 0 && <div className="mt-3"><Breakdown entries={entries} lit={() => READ_STATE.DONE} /></div>}
+            {arrived.length > 0 && <CardRows><Breakdown entries={entries} lit={() => READ_STATE.DONE} /></CardRows>}
           </>
         );
       }
@@ -601,9 +678,9 @@ function BriefingScreen({ items: initialItems, greeting: madeAhead, onDone }) {
             {/* The frame is the fill showing 1px around the panel: a clipped border with cut corners. */}
             <div style={{ clipPath: HUD_CHAMFER, background: edge, padding: 1 }}>
               <div
-                className="relative overflow-hidden px-6 pb-5 pt-3"
+                className="relative flex flex-col overflow-hidden px-6 pb-5 pt-3"
                 // Solid, so the card behind never ghosts through. No blur: it lagged over the orb.
-                style={{ clipPath: HUD_CHAMFER, background: `linear-gradient(180deg, ${palette.panel}, ${palette.void})` }}
+                style={{ clipPath: HUD_CHAMFER, background: `linear-gradient(180deg, ${palette.panel}, ${palette.void})`, maxHeight: CARD_MAX_H }}
               >
                 {depth === 0 && (
                   <span
@@ -611,7 +688,7 @@ function BriefingScreen({ items: initialItems, greeting: madeAhead, onDone }) {
                     style={{ background: `linear-gradient(180deg, transparent 0%, ${tint(0.07, palette.signal)} 50%, transparent 100%)` }}
                   />
                 )}
-                <div className="mb-2 flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.25em]" style={{ fontFamily: HUD_FONT, color: tint(0.8, palette.dim) }}>
+                <div className="mb-2 flex shrink-0 items-center justify-between gap-3 text-[10px] uppercase tracking-[0.25em]" style={{ fontFamily: HUD_FONT, color: tint(0.8, palette.dim) }}>
                   <span className="truncate">{`▸ ${label}`}</span>
                   {reads.length > 0 && (
                     <span className="flex shrink-0 gap-[3px]" aria-hidden="true">
@@ -625,7 +702,7 @@ function BriefingScreen({ items: initialItems, greeting: madeAhead, onDone }) {
                     </span>
                   )}
                 </div>
-                <div className="briefing-card-in">{cardBody(card)}</div>
+                <div className="briefing-card-in flex min-h-0 flex-col">{cardBody(card)}</div>
               </div>
             </div>
             <Brackets colour={depth === 0 ? palette.hot : tint(0.35, palette.signal)} />

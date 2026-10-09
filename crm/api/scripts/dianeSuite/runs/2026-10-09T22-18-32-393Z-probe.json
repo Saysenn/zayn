@@ -1,0 +1,103 @@
+{
+  "set": "probe",
+  "at": "2026-10-09T22:18:32.393Z",
+  "seconds": 103,
+  "cases": 8,
+  "passed": 8,
+  "passRate": 100,
+  "groups": {
+    "main": {
+      "cases": 8,
+      "passed": 8,
+      "passRate": 100
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 0,
+    "db": 0
+  },
+  "calcAccuracy": null,
+  "inventedRate": 0,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0.05,
+  "recoveryRate": 100,
+  "perTurn": {
+    "turns": 39,
+    "modelRounds": 1.2,
+    "toolCalls": 1.2,
+    "retries": 0.05,
+    "inputTokens": 34006,
+    "cachedPct": 92,
+    "outputTokens": 46,
+    "medianMs": 2172,
+    "slowestMs": 14921
+  },
+  "tokens": {
+    "input": 1326236,
+    "cached": 1223936,
+    "output": 1795
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "a change previews, applies on yes, and undo puts it back",
+      "name": "a change previews, applies on yes, and undo puts it back",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "take N days off moves every deal BY N, once, and undo puts them back",
+      "name": "take N days off moves every deal BY N, once, and undo puts them back",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "undo reverts a fee change",
+      "name": "undo reverts a fee change",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a percentage raise previews every deal, applies on yes, and one undo takes it back",
+      "name": "a percentage raise previews every deal, applies on yes, and one undo takes it back",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "undo the FEE change undoes the fee, not the monthly change before it",
+      "name": "undo the FEE change undoes the fee, not the monthly change before it",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "\"actually scrap that\" undoes the change just made",
+      "name": "\"actually scrap that\" undoes the change just made",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "auto mode: two people in one sentence are one preview, both saved, both undone",
+      "name": "auto mode: two people in one sentence are one preview, both saved, both undone",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "auto mode: a change says what it was, \"make it X\" changes it again, one undo puts it all back",
+      "name": "auto mode: a change says what it was, \"make it X\" changes it again, one undo puts it all back",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}
