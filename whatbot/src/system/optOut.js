@@ -10,7 +10,10 @@ const KEY = "optout";
  * by the payments eval, 2026-10-07). A word or two of politeness is fine.
  */
 const TAIL = String.raw`(?:\s+(?:please|pls|now|it|all|messages|texting|texting me|messaging me|again|thanks|thank you))*[.!\s]*$`;
-const STOP = new RegExp(String.raw`^(stop|unsubscribe|cancel|end|quit|stopall)${TAIL}`, "i");
+// NOT "cancel" OR "end" (break test 2026-10-10): on WhatsApp they cancel a
+// preview or end a chat, and an expense admin's "cancel" opted them out of
+// every message, silently. Only words that can only mean "stop messaging me".
+const STOP = new RegExp(String.raw`^(stop|unsubscribe|quit|stopall)${TAIL}`, "i");
 const START = new RegExp(String.raw`^(start|unstop|resume|subscribe)${TAIL}`, "i");
 
 /** run before anything else, so STOP is never treated as a question */

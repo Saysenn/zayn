@@ -206,7 +206,9 @@ export async function handleMessage(input) {
         if (!(await employees.identify(phone, channelGroup).catch(() => null))) {
           return words(MODE_REPLIES.notForExpenses(channelGroup));
         }
-        const answered = await answerAsEmployee(input);
+        // HANDED OVER, NEVER AN OPT-OUT: a word meant for the expense side
+        // must not stop every message to them
+        const answered = await answerAsEmployee({ ...input, handedOver: true });
         return answered === NO_REPLY ? answered : { ...answered, text: `${answered.text}${MODE_REPLIES.handedOver}` };
       }
     }
@@ -220,7 +222,8 @@ async function answerAsEmployee(input) {
   const { phone, channelGroup, text } = input;
 
   // STOP first, before anything. it must never be treated as a question.
-  const intent = optOutIntent(text);
+  // (not for a message the expense side handed over: see above)
+  const intent = input.handedOver ? null : optOutIntent(text);
   switch (intent) {
     case "stop":
       await setOptedOut(phone, true);

@@ -28,13 +28,15 @@ export function sendOnce(messageId, { store = redis, guard = withRedisTimeout } 
     part += 1;
     if (!messageId) return send();
     const key = `sent:${jobIdOf(messageId, part)}`;
-    const done = await guard(() => store.get(key)).catch(() => null);
+    // withRedisTimeout takes the PROMISE, not a function (a function came back
+    // as "already sent" and every reply was skipped, 2026-10-10)
+    const done = await guard(store.get(key)).catch(() => null);
     if (done) {
       logger.info({ messageId, part }, "already sent on an earlier try, skipped");
       return undefined;
     }
     const out = await send();
-    await guard(() => store.set(key, "1", "EX", DAY)).catch((err) => logger.warn({ err: err?.message, messageId, part }, "could not mark a part as sent"));
+    await guard(store.set(key, "1", "EX", DAY)).catch((err) => logger.warn({ err: err?.message, messageId, part }, "could not mark a part as sent"));
     return out;
   };
 }

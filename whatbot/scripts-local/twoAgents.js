@@ -85,9 +85,14 @@ const CHARACTERS = {
   ],
 };
 
+// Your own characters (a JSON file: { "expenses": [...], "payments": [...] }) and model, for a harder run.
+if (process.env.TWO_AGENTS_CHARACTERS) {
+  const fs = await import("node:fs");
+  Object.assign(CHARACTERS, JSON.parse(fs.readFileSync(process.env.TWO_AGENTS_CHARACTERS, "utf8")));
+}
 async function nextLine(character, transcript, i) {
   const res = await openai.chat.completions.create({
-    model: "gpt-4.1-mini",
+    model: process.env.TWO_AGENTS_MODEL ?? "gpt-4.1-mini",
     temperature: 1,
     messages: [
       { role: "system", content: `You play a REAL person texting a company WhatsApp bot (${mode === "payments" ? "about your own pay" : "you are an expense admin logging and editing expenses"}). You are ${character}. Write ONLY your next WhatsApp message, short, the way such a person types. React to what the bot just said. Message ${i + 1} of about ${turns}. Never explain yourself. If the conversation is clearly finished, reply exactly END.` },
@@ -134,7 +139,7 @@ out(`${C.cyan}== ${mode.toUpperCase()} · ${conversations} conversations · up t
 
 for (let c = 1; c <= conversations; c += 1) {
   const person = pick(roster);
-  const character = pick(CHARACTERS[mode]);
+  const character = process.env.TWO_AGENTS_IN_ORDER ? CHARACTERS[mode][(c - 1) % CHARACTERS[mode].length] : pick(CHARACTERS[mode]);
   await clearConversation(person.phone).catch(() => {});
   out(`\n${C.cyan}--- conversation ${c}: ${person.name} (${person.phone}) on ${person.group}\n    playing: ${character}${C.off}`);
   const transcript = [];

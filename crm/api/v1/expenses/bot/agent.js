@@ -28,7 +28,8 @@ const ROUNDS = 5;
 const HISTORY_TURNS = 6;
 // tools that SHOW the admin something: once a round only used these, the
 // reply is ready, and a second model call to say nothing more is skipped
-const SHOWING = new Set(['act', 'answer', 'show_list', 'undo', 'preview_answer', 'decide']);
+// (not decide: "save it AND remove the cleaner" needs the round after the save)
+const SHOWING = new Set(['act', 'answer', 'show_expenses', 'show_list', 'undo', 'preview_answer']);
 
 const SYSTEM = [
   'You are the EXPENSES assistant a company admin talks to on WhatsApp (or in the CRM). UK English, short and warm.',
@@ -38,6 +39,8 @@ const SYSTEM = [
   'HOW TO WORK',
   '- Read the WHOLE conversation: their message often only makes sense with what the bot said just before',
   '  (a list it showed, a question it asked, what it just did). "it", "that one", "the cheapest one", "the rest" are about that.',
+  '- look_up ONE thing at a time (one payee, one category per call: "careem and enoc" = two calls). Never say none exist',
+  '  until you have looked up each one.',
   '- When the expense they mean depends on a rule you cannot see in the context ("the most expensive food one", "all of',
   '  last week\'s taxis", "anything Gary paid over 100"), call look_up FIRST, then act on the ids it returns.',
   '- Everything they ask in one message is done in one go: changes, removals and new ones together in ONE act call',
@@ -55,11 +58,39 @@ const SYSTEM = [
   '- A DATE THAT ONLY SAYS WHICH ONES ("the bills for october", "october\'s taxis") never changes their date.',
   '  "delete anything from 1st oct" = the ones DATED 1 Oct; "since / after / onwards / from … to …" = a range.',
   '- "how much / what\'s left / total / how many" is a QUESTION (answer), even when it sits in the same message as a change.',
+  '  answer.question = their question as they asked it: never add an expense name they did not say ("the new total for',
+  '  this month" is every expense this month, not the one just changed).',
   '- Removing 4 or more by a rule: look_up first, and if the rule is loose, list them and ask before acting.',
   '- Undo: they can take back the whole of something done, or only part of it ("undo the cleaner only"): use undo with',
   '  the action and the line numbers of the parts to put back (RECENT ACTIONS lists each line).',
   '- While a preview of NEW expenses waits, answers about it ("1 me", "the coffee is food", "date is yesterday", "skip 2")',
-  '  go to preview_answer with their words.',
+  '  go to preview_answer with their FINAL intent in clean words ("1 spent by me"), never their whole message with its',
+  '  retractions; if they also agree, then decide(save). A NEW expense while it waits ("add another, £60 train") = act add.',
+  '- SHOWING EXPENSES: never write a list of expenses yourself and never show an id, a "|" or "No. 1 (id …)". Use',
+  '  show_expenses with the ids (it draws the numbered list they can pick from), or answer for totals.',
+  '- YOUR OWN QUESTION, ANSWERED: when your last message asked for a value ("who spent it?", "which date?", "1 or 2?") and',
+  '  they reply with just that (a name like "abe", a number, a date), that IS the answer: act on it at once, never ask again.',
+  '  Any name is fine for spent_by; code warns if it is not on the master sheet.',
+  '- When a preview WAITS and they agree in any words ("yeh do it", "yes cheers", "go on then"), call decide(save=true).',
+  '  Never act again to re-show the same preview.',
+  '- NEVER SAY SOMETHING WAS DONE (saved, changed, undone, removed) unless a tool did it in THIS turn. Nothing to do = say',
+  '  plainly that nothing changed.',
+  '- "The last taxi", "that last one" = the most recent one (latest date, or the one saved last), not an older one.',
+  '- FIELDS: there is NO payment method field (cash, card, bank): say so in one line if they ask. spent_by is a PERSON.',
+  '- While a preview of NEW expenses waits, words about THOSE new ones (their payee, amount, "the other one", "add another")',
+  '  are about the preview (preview_answer / act add). Change a SAVED one only when they clearly name it (its name or date).',
+  '- FIELDS: "rate" is the exchange rate to AED (for GBP, EUR, USD…), set like "1 gbp to aed is 4.85". VAT is not stored:',
+  '  say so in one line, once, and do not keep asking.',
+  '- A NEGATIVE amount ("-£10 coffee"): ask in one line whether it is money back (a refund) or £10 spent, before adding.',
+  '  A REFUND is not saved as an expense (amounts cannot be negative). Say so ONCE, and offer the one thing that helps: take',
+  '  it off the expense it came back for (look_up, then a change or a removal). Never ask them to confirm a refund twice.',
+  '- Mention VAT only when they do.',
+  '- EVERY WORD THEY GIVE MUST FIT: "the lunch from 1 Oct" is an expense that is a lunch AND on 1 Oct. If none fits all of it,',
+  '  say so and show the closest; never pick one by the date (or any one word) alone.',
+  '- WHO THE ADMINS ARE: the ADMINS line in the context (names only, never their numbers).',
+  '- WHO CAN SEE THEM: this group\'s registered expense admins (on this WhatsApp number and in the CRM), and the CRM admin,',
+  '  who sees every group. A worker sees only their OWN expenses, and only if that is switched on in the CRM. Say only this.',
+  '- DATES: use the weekday given with today and with each expense. "Last Friday" = the most recent Friday before today.',
   '- If it is truly unclear which expense or what value, ask ONE short question (number the options). Never guess money.',
   '  A TIE is unclear: "the oldest", "the cheapest", "the biggest" when two or more share it → ask which (or both).',
   '- When a tool has shown the admin something, do not repeat it, and never add "shall I go ahead?" or "save this?": the',
@@ -108,12 +139,28 @@ const ACT = {
     },
   },
 };
+/**
+ * A QUESTION, IN ITS PARTS (break test 2026-10-10: "total for June so far"
+ * searched for the word "June"; "the new food total" searched "new food").
+ * The model fills the parts; code counts.
+ */
 const ANSWER = {
   type: 'function',
   function: {
     name: 'answer',
-    description: 'Answer a question about saved expenses (totals, lists, biggest, by person or category). Shown to the admin.',
-    parameters: { type: 'object', additionalProperties: false, properties: { question: { type: 'string', description: 'the question, in plain words, with the dates/people it is about' } }, required: ['question'] },
+    description: 'Answer a question about saved expenses: a total, a count, the biggest, a list, or split by category/person/payee/day. Shown to the admin.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        from: { type: 'string', description: 'YYYY-MM-DD; "this month" = the 1st to today; a month name = that whole month (this year unless said)' },
+        to: { type: 'string', description: 'YYYY-MM-DD' },
+        measure: { type: 'string', enum: ['total', 'count', 'biggest', 'list'] },
+        group_by: { type: 'string', enum: ['', 'category', 'spentBy', 'payee', 'day', 'currency'] },
+        words: { type: 'string', description: 'ONLY words that filter what it was for or who was paid ("food", "careem", "gloria"); "" for none. Never "new", "total", "so far", a month or a date.' },
+      },
+      required: ['from', 'to', 'measure', 'group_by', 'words'],
+    },
   },
 };
 const UNDO = {
@@ -146,6 +193,14 @@ const DECIDE = {
   },
 };
 
+const SHOW_EXPENSES = {
+  type: 'function',
+  function: {
+    name: 'show_expenses',
+    description: 'Show the admin these saved expenses as the proper numbered list (they can then say "change 2", "remove 1-3").',
+    parameters: { type: 'object', additionalProperties: false, properties: { ids: { type: 'array', items: { type: 'integer' } }, title: { type: 'string' } }, required: ['ids', 'title'] },
+  },
+};
 const SHOW_LIST = {
   type: 'function',
   function: {
@@ -176,7 +231,8 @@ async function recentText(ctx) {
   }).join('\n')}`;
 }
 
-const rowLine = (r) => `id ${r.id}|${r.spentOn}|${r.description}|${r.payee || '?'}|${r.currency} ${Number(r.rawAmount)}${r.currency !== 'AED' && r.aed ? ` (AED ${r.aed})` : ''}|${r.category || '-'}|${r.spentBy || '?'}${r.settled ? '|REFUNDED, locked' : ''}`;
+const WEEKDAY = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' });
+const rowLine = (r) => `id ${r.id}|${r.spentOn} ${WEEKDAY(r.spentOn)}|${r.description}|${r.payee || '?'}|${r.currency} ${Number(r.rawAmount)}${r.currency !== 'AED' && r.aed ? ` (AED ${r.aed})` : ''}|${r.category || '-'}|${r.spentBy || '?'}${r.settled ? '|REFUNDED, locked' : ''}`;
 
 /**
  * @param {string} said
@@ -189,13 +245,14 @@ async function agentTurn(said, ctx, b) {
   // THE LATEST 30, not 45: look_up finds any other (cost, 2026-10-10)
   context.view = { ...context.view, month: (context.view.month ?? []).slice(0, 30) };
   const view = planner.contextText(context.view);
-  const situation = [`Admin: ${ctx.admin?.name ?? '?'} (${ctx.channel === 'diane' ? 'in the CRM, every group' : `WhatsApp, group ${ctx.group}`}). "me" = them.`, view, await recentText(ctx)].join('\n\n');
+  const admins = ctx.channel === 'diane' ? [] : (await store.listAdmins().catch(() => [])).filter((a) => a.group_name === ctx.group && a.active).map((a) => a.name);
+  const situation = [...(admins.length ? [`ADMINS of ${ctx.group}: ${[...new Set(admins)].join(', ')}.`] : []), `Today: ${ctx.today} (${new Date(`${ctx.today}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'UTC' })}).`, `Admin: ${ctx.admin?.name ?? '?'} (${ctx.channel === 'diane' ? 'in the CRM, every group' : `WhatsApp, group ${ctx.group}`}). "me" = them.`, view, await recentText(ctx)].join('\n\n');
   const messages = [
     { role: 'system', content: SYSTEM },
     ...talk(ctx.state),
     { role: 'user', content: `${situation}\n\nTHEIR MESSAGE:\n${cut(said, 2000)}` },
   ];
-  const tools = [LOOK_UP, ACT, ANSWER, SHOW_LIST, UNDO, DECIDE, ...(ctx.state.pending?.kind === 'add' ? [PREVIEW_ANSWER] : [])];
+  const tools = [LOOK_UP, ACT, ANSWER, SHOW_EXPENSES, SHOW_LIST, UNDO, DECIDE, ...(ctx.state.pending?.kind === 'add' ? [PREVIEW_ANSWER] : [])];
   const shown = [];
   const trail = [];
   /**
@@ -283,14 +340,32 @@ async function run(name, args, { said, ctx, b, context, shown }) {
         if (o.filter?.from && (!o.filter.to || o.filter.to >= ctx.today)) o.filter = { ...o.filter, to: o.filter.from };
       }
     }
+    /**
+     * A NEW CURRENCY WITHOUT THE AMOUNT THEY SAID ("change that one to
+     * £18.50" came back as only AED ➜ GBP, the 18.50 lost): read again.
+     */
+    if (ops.some((o) => o.kind === 'change' && o.set?.currency && o.set?.amount == null && !Object.values(o.adjust ?? {}).some((v) => v != null))
+      && /\d/.test(said)) {
+      return 'refused: a change sets a new currency but no amount, though they gave one. Put the amount in set.amount too.';
+    }
+    // HOW IT WAS PAID IS NOT A PERSON ("put it as cash not card" became spent by: cash)
+    if (ops.some((o) => /^(?:cash|card|credit card|debit card|bank|bank transfer|company card|amex|visa|apple pay)$/i.test(String(o.set?.spent_by ?? '').trim()))) {
+      return 'refused: cash/card is how it was paid, not who spent it, and how it was paid is not stored. Tell them that in one line.';
+    }
     const removing = new Set(ops.filter((o) => o.kind === 'remove').flatMap((o) => o.ids ?? []));
     ops = ops.filter((o) => !(o.kind === 'drop' && (o.ids ?? []).every((id) => removing.has(id))));
     const empty = ops.filter((o) => o.kind === 'change' && !Object.values(o.set ?? {}).some((v) => v != null) && !Object.values(o.adjust ?? {}).some((v) => v != null) && !o.shift_days && !o.shift_months && !(o.clear ?? []).length);
     if (empty.length && empty.length === ops.length) return 'refused: no new value was said. Ask them, in one short line, what to change on it (name the expense).';
     ops = ops.filter((o) => !empty.includes(o));
     const onlyAdds = ops.length && ops.every((o) => o.kind === 'add');
+    // A MINUS SIGN is asked about first: money back, or a typo? (break test 2026-10-10)
+    if (ops.some((o) => o.kind === 'add' && /(?:^|[\s(])[-−]\s?[£$€]?\s?\d/.test(`${o.text} ${said}`))) {
+      return 'refused: an amount has a minus sign. Ask them in one short line whether it is money back (a refund) or the amount spent, before adding.';
+    }
+    // "ADD ANOTHER" while new ones wait JOINS the preview (it was read as a correction:
+    // "those were all already in your preview", and later replaced the first one)
     if (onlyAdds && ctx.state.pending?.kind === 'add') {
-      const text = await b.reviseFrom(ops.map((o) => o.text).join('\n'), ctx);
+      const text = await b.addFrom({ text: ops.map((o) => o.text).join('\n') }, ctx);
       shown.push(text);
       return SHOWN(text);
     }
@@ -309,9 +384,10 @@ async function run(name, args, { said, ctx, b, context, shown }) {
     return SHOWN(out.reply);
   }
   if (name === 'answer') {
-    const q = String(args.question).replace(new RegExp(`\\b${String(ctx.group).replace(/[^\w ]/g, '')}\\b`, 'gi'), ' ').replace(/\s+/g, ' ').trim();
-    const r = b.quickRoute(q, { today: ctx.today, groups: ctx.groups, group: ctx.group }) ?? await b.route(q, { today: ctx.today, client: ctx.client, groups: ctx.groups });
-    if (r?.kind !== 'question') return 'Could not read that as a question about saved expenses. Answer from look_up instead.';
+    const iso = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(String(d ?? '')) ? d : '');
+    const words = String(args.words ?? '').replace(new RegExp(`\\b${String(ctx.group).replace(/[^\w ]/g, '')}\\b`, 'gi'), ' ')
+      .replace(/\b(?:new|total|so far|now|again|latest|updated|current|expenses?|spending|spent|this|month|week|year|my|our)\b/gi, ' ').replace(/\s+/g, ' ').trim();
+    const r = { kind: 'question', query: { from: iso(args.from), to: iso(args.to), group: '', groupBy: args.group_by ?? '', measure: args.measure ?? 'total', words } };
     const text = await b.questionReply(r, ctx, ctx.state.pending);
     shown.push(text);
     return SHOWN(text);
@@ -337,6 +413,13 @@ async function run(name, args, { said, ctx, b, context, shown }) {
     shown.push(text);
     return SHOWN(text);
   }
+  if (name === 'show_expenses') {
+    const ids = (args.ids ?? []).filter((id) => context.known.has(id)).slice(0, 40);
+    if (!ids.length) return 'None of those ids are known: look_up first.';
+    const text = await b.showRows(ids, String(args.title ?? 'Expenses'), ctx);
+    shown.push(text);
+    return SHOWN(text);
+  }
   if (name === 'show_list') {
     const text = args.purpose === 'remove' ? await b.whichToRemove(ctx) : await b.whichToChange(ctx, args.spent_by);
     shown.push(text);
@@ -344,12 +427,29 @@ async function run(name, args, { said, ctx, b, context, shown }) {
   }
   if (name === 'preview_answer') {
     if (ctx.state.pending?.kind !== 'add') return 'No preview of new expenses is waiting.';
+    const before = ctx.state.pending;
     const text = await b.reviseFrom(args.text, ctx);
+    /**
+     * NOTHING LEFT, NOT ASKED FOR (break test 2026-10-10: "…delete… no, leave
+     * it as me and confirm" emptied the preview): put back, read again.
+     */
+    const left = (ctx.state.pending?.items ?? []).filter((x) => !x.skipped).length;
+    if (before.items.some((x) => !x.skipped) && ctx.state.pending?.kind === 'add' && !left && !/^(?:skip|drop|remove|leave out|cancel)\b/i.test(String(args.text).trim())) {
+      ctx.state.pending = before;
+      return 'refused: that would leave nothing in the preview. Pass ONLY their final intent, in plain words (like "1 spent by me"), and decide(save) if they also said yes.';
+    }
     shown.push(text);
     return SHOWN(text);
   }
   if (name === 'decide') {
     if (!ctx.state.pending) return 'Nothing is waiting for a yes.';
+    /**
+     * A SAVE NEEDS THEIR AGREEMENT IN WORDS. A bare "2" under a one-line
+     * preview was taken as a yes and saved (break test 2026-10-10).
+     */
+    if (args.save && !/\b(?:y(?:es|eah|eh|ep|up|a)|ok(?:ay)?|sure|save|do it|go(?: ahead| on| for it)?|confirm\w*|correct|right|fine|crack on|sorted|proceed|approved?)\b|👍|✅/i.test(said)) {
+      return 'refused: they did not say yes. Ask in one short line what they meant.';
+    }
     const text = await b.onReply({ kind: args.save ? 'yes' : 'no' }, ctx);
     shown.push(text);
     return SHOWN(text);

@@ -7,10 +7,13 @@ describe("optOutIntent", () => {
     "stop",
     "Stop please",
     "unsubscribe",
-    "CANCEL",
     "quit",
-    "end",
   ])("treats %s as opting out", (t) => expect(optOutIntent(t)).toBe("stop"));
+
+  // 2026-10-10: an expense admin's "cancel" (of a preview) opted them out of every message
+  it.each(["cancel", "CANCEL", "end", "cancel that"])("never opts out on %s", (t) =>
+    expect(optOutIntent(t)).toBeNull(),
+  );
 
   it.each(["START", "start", "unstop", "resume", "Subscribe"])(
     "treats %s as opting back in",

@@ -42,6 +42,8 @@ async function between(group, from, to) {
 /** Saved expenses as the bot shows them (camel case). */
 const asItem = (r) => ({
   groupName: r.group_name, id: r.id, spentOn: iso(r.spent_on), description: r.description, payee: r.payee, rawAmount: Number(r.raw_amount), currency: r.currency, spentBy: r.spent_by, aed: r.aed_amount == null ? null : Number(r.aed_amount), category: r.category ?? null,
+  // the saved rate, so a "✅ CHANGED" never shows it as missing (break test 2026-10-10)
+  ...(r.currency && r.currency !== 'AED' && r.exchange_rate != null ? { exchangeRate: Number(r.exchange_rate) } : {}),
 });
 
 // Split FIRST, then fold each word: fold() drops spaces, so "Stationery Sara"
@@ -279,7 +281,11 @@ async function answer(scopeGroup, query, { today, out = null, overlay = null }) 
   const list = sorted.slice(0, 15);
   // THE NUMBERS MEAN SOMETHING (his list 2026-10-08): "1-3 spent by gloria" after a list
   if (out) out.listIds = sorted.map((r) => r.id);
-  const head = `📋 *${query.measure === 'biggest' ? 'BIGGEST EXPENSES' : 'EXPENSES'}* · ${scope}`;
+  // "THAT ONE'S WRONG" after "the biggest" is the biggest one (it picked the cleaner payment)
+  if (out && query.measure === 'biggest' && sorted[0]) out.ids = [sorted[0].id];
+  // "WHICH IS THE BIGGEST?" IS ANSWERED IN WORDS too, not only by the picture (break test 2026-10-10)
+  const top = query.measure === 'biggest' && sorted[0] ? `\nBiggest: *${sorted[0].description}* · ${format.money(sorted[0].currency, sorted[0].rawAmount)} · ${format.day(sorted[0].spentOn)}${sorted[0].payee ? ` · ${sorted[0].payee}` : ''}` : '';
+  const head = `📋 *${query.measure === 'biggest' ? 'BIGGEST EXPENSES' : 'EXPENSES'}* · ${scope}${top}`;
   if (out) {
     // THE PICTURE HOLDS EVERY ROW, not the first 15: that is what it is for.
     const shown = sorted;

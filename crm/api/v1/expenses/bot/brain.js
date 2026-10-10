@@ -124,6 +124,8 @@ function showAgain(ctx) {
         : p.kind === 'settle' ? settlePreview(p, ctx)
         : p.kind === 'undo' ? 'Undo the last thing you did?\nReply *yes* to undo it, or *cancel*.'
           : p.kind === 'either' ? 'Do you mean *change* the saved ones, or add them as *new*?' : null;
+  // SHOWN NOW: the next "yes" counts (it looped: "yes" → "just to be sure" → "yes" → …)
+  if (again) { p.shownLast = true; ctx.keepShown = true; }
   return again ? `Just to be sure, this is still waiting:\n\n${again}` : 'Okay.';
 }
 
@@ -175,6 +177,8 @@ async function turn(msg, { client = null, today = currentDay(), channel = 'whats
       if (then) ctx.then = [...(ctx.then ?? []), then];
     }
     // SET ASIDE, NOW BACK: once the new thing is done, the old one waits again
+    // AN UNDO ASKED EARLIER IS NOT KEPT FOR LATER: it came back after an unrelated save (break test)
+    if (state.parked?.kind === 'undo') state.parked = null;
     if (state.parked && !state.pending) {
       state.pending = { ...state.parked, shownLast: true, at: Date.now() };
       state.parked = null;
@@ -425,6 +429,13 @@ function rowFits(r, phrase) {
 }
 
 /** A list, numbered from 1, and made the list on screen. */
+/** These saved expenses as the numbered list (the agent's show_expenses). */
+async function showRows(ids, title, ctx) {
+  const rows = (await Promise.all(ids.map((id) => expensesRepo.findById(id)))).filter(Boolean).map(find.asItem);
+  if (!rows.length) return 'None of those are saved any more.';
+  return listReply(rows, title.toUpperCase().slice(0, 60), ctx);
+}
+
 function listReply(rows, title, ctx, { all = false } = {}) {
   showList(ctx, rows.map((r) => r.id));
   const aed = rows.reduce((n, r) => n + (r.aed ?? 0), 0);
@@ -716,10 +727,60 @@ async function agentFirst(said, files, ctx) {
     || (!pending && short && /^(?:y|ya|yes|yep|yeah|yup|ok|okay|sure|go ahead|do it|save(?: it)?|no|nope|cancel)\b[\s!.]*$/i.test(t))
     // A TYPED NEW EXPENSE ("45 aed careem taxi", "taxi 45 / lunch 30 / parking 15"): the
     // reader below, with its own "change or new?" check, did these right every time
-    || (!pending && !askedLast && pureNewExpense(t))
+    // (a minus sign goes to the agent, which asks: a refund, or a typo?)
+    || (!pending && !askedLast && pureNewExpense(t) && !/(?:^|\s)[-−]\s?[£$€]?\s?\d/.test(t))
   ctx.state.agentAsked = false;
+  /**
+   * A YES IN THEIR OWN WORDS while something waits: "yes cheers", "yeh do it",
+   * "ffs i said yes just update it pls" re-showed the same preview three
+   * times (break test 2026-10-10). Agreement with no change in it is a yes.
+   */
+  // THE LAST THING SAID DECIDES: "no, cancel, oh actually, yes, put it back!" is a yes
+  const tail = t.split(/\b(?:actually|wait|oh|sorry|hold on|hang on)\b/i).pop().replace(/^[\s,.!—-]+/, '');
+  const yesWords = /\b(?:y(?:es|eah|eh|ep|up|a)|ok(?:ay)?|sure|do it|go ahead|go on|crack on|save (?:it|them)|update it|put it back|confirm|i said yes|go for it|sounds good|that'?s (?:fine|right|correct))\b/i;
+  const changeCues = /\d|\b(?:no|nope|nah|not|don'?t|cancel|stop|wait|hold|change|remove|delete|only|except|instead|but|undo|add|also|and)\b/i;
+  const agrees = (x) => x && x.split(/\s+/).length <= 14 && yesWords.test(x) && !changeCues.test(x.replace(/\b(?:i said yes|update it|put it back)\b/gi, ''));
+  if (pending && !files.length && (agrees(t) || (tail !== t && agrees(tail)))) {
+    return onReply({ kind: 'yes' }, ctx);
+  }
+  // "ACTUALLY NEVER MIND, LEAVE IT": a no, in code (it said "nothing changed" and left it waiting)
+  const dropsIt = /^(?:(?:actually|oh|sorry|ok(?:ay)?|no)[,!.\s]+)*(?:never ?mind|nvm|forget (?:it|that)|leave it(?: as it (?:was|is))?|scrap (?:it|that)|don'?t bother|cancel (?:it|that))(?:[,!.\s]+(?:leave it|thanks|cheers|ta|please|pls))*[.!\s]*$/i;
+  if (pending && !files.length && dropsIt.test(t)) return onReply({ kind: 'no' }, ctx);
+  // A BARE NUMBER TO "WHICH ONE?" is the pick (it was read as "add that too")
+  if (pending?.kind === 'pick' && /^\s*(?:no\.?\s*|#)?\d{1,2}[.!\s]*$/i.test(t)) {
+    const n = Number(t.replace(/\D/g, ''));
+    if (n >= 1 && n <= pending.choices.length) return onReply({ kind: 'pick', n }, ctx);
+  }
+  // "UNDO" AGAIN while that undo waits is the yes to it, not a cancel
+  if (pending?.kind === 'undo' && UNDO.test(t)) return onReply({ kind: 'yes' }, ctx);
+  /**
+   * ANOTHER GROUP'S EXPENSES, asked on this group's number: said plainly
+   * (it answered "No expenses found for MANBAT · INDIGO").
+   */
+  if (ctx.channel !== 'diane' && !files.length) {
+    const other = (await knownGroups()).find((g) => g !== ctx.group && new RegExp(`(?:^|[^a-z0-9])${g.toLowerCase().replace(/[^a-z0-9 ]/g, '')}(?:$|[^a-z0-9])`).test(t.toLowerCase()));
+    if (other && /\b(?:show|see|list|spend\w*|expenses?|total|how much|what)\b/i.test(t)) {
+      return `This number is for *${ctx.group}* expenses only, so I can't show *${other}*'s here. Each group's admins see their own group; the CRM admin sees every group.`;
+    }
+  }
   if (instant && /^(?:the\s+)?receipts?\b/i.test(t) && !RECEIPT_ASK.test(t)) return receiptFor(t, ctx);
-  if (instant) return answerTurn(said, files, ctx);
+  // "SHOW EXPENSES" WITH NO PREVIEW OPEN is this month's list ("there is no preview open" before)
+  if (!pending && SHOW_PREVIEW.test(t) && /\bexpenses?\b/i.test(t)) {
+    return questionReply({ kind: 'question', query: { from: '', to: '', group: '', groupBy: '', measure: 'list', words: '' } }, ctx, null);
+  }
+  if (instant) {
+    const out = await answerTurn(said, files, ctx);
+    /**
+     * "OK SAVE IT, 1 ME": the answer, then the save, when nothing else is
+     * open (break test 2026-10-10: it answered and asked for yes again).
+     */
+    const p2 = ctx.state.pending;
+    if (pending?.kind === 'add' && p2?.kind === 'add' && /\b(?:save|yes|yeah|yep)\b/i.test(t) && !/^\s*(?:yes|yeah|yep|save)[\s!.]*$/i.test(t)
+      && !format.questions(p2.items.filter((x) => !x.skipped)).length) {
+      return onReply({ kind: 'yes' }, ctx);
+    }
+    return out;
+  }
   /**
    * EXACT COMMANDS STAY IN CODE (the harness, 2026-10-10: the agent did them
    * worse): sort, only, hide, show all, find, what was just done, who changed
@@ -738,10 +799,12 @@ async function agentFirst(said, files, ctx) {
   try {
     // eslint-disable-next-line global-require
     const out = await require('./agent').agentTurn(said, ctx, {
-      plannerContext, applyPlan, onReply, questionReply, reviseFrom, actionText, quickRoute, route, whichToChange, whichToRemove,
+      plannerContext, applyPlan, onReply, questionReply, reviseFrom, actionText, quickRoute, route, whichToChange, whichToRemove, showRows, addFrom,
     });
     // a question of its own: the short answer comes back to it, not to a code path
-    ctx.state.agentAsked = Boolean(out) && !ctx.state.pending && /\?\s*$/.test(String(out).trim());
+    ctx.state.agentAsked = Boolean(out) && !ctx.state.pending && (/\?\s*$/.test(String(out).trim()) || /\?\s*\n|reply with \d|^\s*1[.)]\s/im.test(String(out)));
+    // ITS OWN NUMBERED QUESTION: "1" answers it, never an older list (break test: "1" changed the DEWA bill)
+    if (ctx.state.agentAsked) { ctx.state.listIds = null; ctx.state.awaiting = null; }
     if (out) return out;
   } catch (err) {
     if (err.code === 'NO_AI') throw err;

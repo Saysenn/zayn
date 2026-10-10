@@ -516,3 +516,12 @@ test('"1-2 PAID TO TAXII" IS WHO WAS PAID, even while who spent it is asked too 
   assert.equal(fix('1-2 spent by gloria'), '1-2 spentBy=gloria');
   assert.equal(fix('1-2 Ahmed'), '1-2 spentBy=Ahmed', 'a bare name is still who spent it');
 });
+
+// THE AGENT LOADS. A slip in its instructions made it throw on every message, and
+// the old reader quietly answered instead (2026-10-10): this fails loudly.
+test('the expense agent loads, with its tools', () => {
+  // eslint-disable-next-line global-require
+  const agent = require('./agent');
+  assert.equal(typeof agent.agentTurn, 'function');
+  assert.ok(agent.SYSTEM.length > 1000);
+});

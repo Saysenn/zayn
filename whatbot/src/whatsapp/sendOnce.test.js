@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("../system/redis.js", () => ({ redis: {}, withRedisTimeout: (op) => op() }));
+vi.mock("../system/redis.js", () => ({ redis: {}, withRedisTimeout: (op) => op }));
 vi.mock("../system/logger.js", () => ({ logger: { info: () => {}, warn: () => {} } }));
 
 const { sendOnce } = await import("./sendOnce.js");
@@ -9,7 +9,10 @@ const memory = () => {
   const m = new Map();
   return { get: async (k) => m.get(k) ?? null, set: async (k, v) => { m.set(k, v); return "OK"; }, m };
 };
-const guard = (op) => op();
+// THE REAL SHAPE: withRedisTimeout races the promise it is given. A function
+// passed by mistake is returned as-is, truthy: this guard does the same, so
+// that mistake fails here (it shipped once and skipped every reply).
+const guard = async (op) => (typeof op === "function" ? op : op);
 
 describe("sendOnce: a retried job never sends a part twice", () => {
   it("a retry skips the parts already sent and sends the rest", async () => {

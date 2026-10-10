@@ -1,0 +1,2269 @@
+{
+  "set": "expenses",
+  "at": "2026-10-09T22:55:58.818Z",
+  "cases": 243,
+  "passed": 237,
+  "passRate": 97.5,
+  "groups": {
+    "add": {
+      "cases": 11,
+      "passed": 11,
+      "passRate": 100
+    },
+    "exact": {
+      "cases": 4,
+      "passed": 3,
+      "passRate": 75
+    },
+    "file": {
+      "cases": 6,
+      "passed": 6,
+      "passRate": 100
+    },
+    "unlock": {
+      "cases": 13,
+      "passed": 13,
+      "passRate": 100
+    },
+    "edit": {
+      "cases": 21,
+      "passed": 21,
+      "passRate": 100
+    },
+    "remove": {
+      "cases": 10,
+      "passed": 10,
+      "passRate": 100
+    },
+    "mixed": {
+      "cases": 3,
+      "passed": 3,
+      "passRate": 100
+    },
+    "ask": {
+      "cases": 7,
+      "passed": 7,
+      "passRate": 100
+    },
+    "either": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "undo": {
+      "cases": 4,
+      "passed": 4,
+      "passRate": 100
+    },
+    "r3 add": {
+      "cases": 6,
+      "passed": 6,
+      "passRate": 100
+    },
+    "r3 add+edit in one": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r3 preview": {
+      "cases": 7,
+      "passed": 7,
+      "passRate": 100
+    },
+    "r3 edit": {
+      "cases": 10,
+      "passed": 10,
+      "passRate": 100
+    },
+    "r3 remove": {
+      "cases": 7,
+      "passed": 6,
+      "passRate": 85.7
+    },
+    "r3 ask": {
+      "cases": 5,
+      "passed": 5,
+      "passRate": 100
+    },
+    "r3 unlock": {
+      "cases": 4,
+      "passed": 4,
+      "passRate": 100
+    },
+    "r4 diane": {
+      "cases": 4,
+      "passed": 4,
+      "passRate": 100
+    },
+    "r4 session": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r4 mind": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r4 help while waiting": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r4 typos": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r4 caps and emoji": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r4 number words": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r4 pounds sign": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r4 date in the name": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r4 two fields one target": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r4 remove 1 with no list": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r4 save with nothing": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r4 thanks after save": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r4 voice-ish": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r4 receipt ask": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r4 change by date": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r4 remove by date and payee": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r5 big sheet": {
+      "cases": 2,
+      "passed": 2,
+      "passRate": 100
+    },
+    "r5 sorted = yes": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r5 that's it = yes": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r5 nah leave it = cancel": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r5 hang on, then yes": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r5 cheers mate after save": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r5 ta = thanks": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r5 yes twice": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r5 undo with nothing": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r5 same file twice": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r5 paste a line back": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r5 change two in a sentence": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r5 remove with because": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r5 bin it after preview of a saved one": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r5 lower case everything": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r5 spent by fix while preview": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r5 payee fix while preview": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r5 cancel then new": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 screenshot list": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 three ops one message": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 amount and date": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 two named two values": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 both 100": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 all lunches 50": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 percent": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 amount and payee": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 rename and category": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 mistake taxi": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 the cleaner one, delete it": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 kill the last two": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 except": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 by payees": {
+      "cases": 1,
+      "passed": 0,
+      "passRate": 0
+    },
+    "r6 list remove ranges": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 list change and remove": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 list number words": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 the third one": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 first and last": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 change it again after save": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 ask food and travel": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 ask the 6th": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 ask over 100": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 rambling fix": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 date and amount thanks": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 swap amounts": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 in pounds": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 payee change": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 two under travel": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 never mind leave it": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 yes but first": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 category for a day": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 the 45 one is 47": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 the one i added last": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 which lunch then pick by words": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 two wrong ones": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 change waits, remove too": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 removal waits, change too": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 preview then change saved": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 change and save in one": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 most expensive": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 remove duplicate dewa": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 halve it": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "bulk 1-6 spent by laud": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "r6 move a date by days": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    },
+    "pick": {
+      "cases": 9,
+      "passed": 8,
+      "passRate": 88.9
+    },
+    "list": {
+      "cases": 5,
+      "passed": 5,
+      "passRate": 100
+    },
+    "change": {
+      "cases": 9,
+      "passed": 7,
+      "passRate": 77.8
+    },
+    "safety": {
+      "cases": 4,
+      "passed": 4,
+      "passRate": 100
+    },
+    "talk": {
+      "cases": 2,
+      "passed": 2,
+      "passRate": 100
+    },
+    "after": {
+      "cases": 6,
+      "passed": 6,
+      "passRate": 100
+    },
+    "find": {
+      "cases": 3,
+      "passed": 3,
+      "passRate": 100
+    },
+    "settle": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    }
+  },
+  "failuresByLabel": {
+    "answer": 6
+  },
+  "calcAccuracy": null,
+  "inventedRate": null,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": null,
+  "recoveryRate": null,
+  "perTurn": {
+    "turns": 558,
+    "modelRounds": 0.27,
+    "toolCalls": null,
+    "retries": null,
+    "inputTokens": null,
+    "cachedPct": null,
+    "outputTokens": null,
+    "medianMs": 422,
+    "slowestMs": 3197
+  },
+  "costUsd": 0.31,
+  "results": [
+    {
+      "id": "add: one typed line",
+      "name": "add: one typed line",
+      "group": "add",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "add: two in one line",
+      "name": "add: two in one line",
+      "group": "add",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "add: someone else spent it",
+      "name": "add: someone else spent it",
+      "group": "add",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "add: pounds",
+      "name": "add: pounds",
+      "group": "add",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "add: three dates, one line",
+      "name": "add: three dates, one line",
+      "group": "add",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "add: a typed list",
+      "name": "add: a typed list",
+      "group": "add",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "add: commas in amounts",
+      "name": "add: commas in amounts",
+      "group": "add",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "add: then answer and save",
+      "name": "add: then answer and save",
+      "group": "add",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "add: answers in one go, messy",
+      "name": "add: answers in one go, messy",
+      "group": "add",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "add: \"ok save them\" after a full preview",
+      "name": "add: \"ok save them\" after a full preview",
+      "group": "add",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "add: a large one is flagged, then saved",
+      "name": "add: a large one is flagged, then saved",
+      "group": "add",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "exact: taxi to the office 45 aed paid to careem on 5 oct, spent by me",
+      "name": "exact: taxi to the office 45 aed paid to careem on 5 oct, spent by me",
+      "group": "exact",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "exact: train to leeds £86.40 trainline 6 oct, me",
+      "name": "exact: train to leeds £86.40 trainline 6 oct, me",
+      "group": "exact",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "exact: super 98 petrol 120 at enoc on 2 oct, me",
+      "name": "exact: super 98 petrol 120 at enoc on 2 oct, me",
+      "group": "exact",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "exact: team lunch 320 at zuma on 4 oct, me",
+      "name": "exact: team lunch 320 at zuma on 4 oct, me",
+      "group": "exact",
+      "pass": false,
+      "labels": [
+        "answer"
+      ]
+    },
+    {
+      "id": "file: taxi receipt",
+      "name": "file: taxi receipt",
+      "group": "file",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "file: DEWA pdf",
+      "name": "file: DEWA pdf",
+      "group": "file",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "file: messy csv",
+      "name": "file: messy csv",
+      "group": "file",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "file: word notes",
+      "name": "file: word notes",
+      "group": "file",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "file: slides",
+      "name": "file: slides",
+      "group": "file",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "file: two receipts, then all me and save",
+      "name": "file: two receipts, then all me and save",
+      "group": "file",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "unlock: question while a preview waits",
+      "name": "unlock: question while a preview waits",
+      "group": "unlock",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "unlock: question while a change waits",
+      "name": "unlock: question while a change waits",
+      "group": "unlock",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "unlock: question while a removal waits",
+      "name": "unlock: question while a removal waits",
+      "group": "unlock",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "unlock: new expense while a change waits",
+      "name": "unlock: new expense while a change waits",
+      "group": "unlock",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "unlock: new expense while a removal waits",
+      "name": "unlock: new expense while a removal waits",
+      "group": "unlock",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "unlock: set aside, save the new, the old comes back",
+      "name": "unlock: set aside, save the new, the old comes back",
+      "group": "unlock",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "unlock: a change while new expenses wait",
+      "name": "unlock: a change while new expenses wait",
+      "group": "unlock",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "unlock: a removal while new expenses wait",
+      "name": "unlock: a removal while new expenses wait",
+      "group": "unlock",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "unlock: moving on, then back to save",
+      "name": "unlock: moving on, then back to save",
+      "group": "unlock",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "unlock: hi while a change waits",
+      "name": "unlock: hi while a change waits",
+      "group": "unlock",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "unlock: thanks while a removal waits",
+      "name": "unlock: thanks while a removal waits",
+      "group": "unlock",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "unlock: ignore it and start another change",
+      "name": "unlock: ignore it and start another change",
+      "group": "unlock",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "unlock: show me the list while a removal waits",
+      "name": "unlock: show me the list while a removal waits",
+      "group": "unlock",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "edit: plain",
+      "name": "edit: plain",
+      "group": "edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "edit: by payee",
+      "name": "edit: by payee",
+      "group": "edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "edit: by amount",
+      "name": "edit: by amount",
+      "group": "edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "edit: two fields",
+      "name": "edit: two fields",
+      "group": "edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "edit: date words",
+      "name": "edit: date words",
+      "group": "edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "edit: arrow",
+      "name": "edit: arrow",
+      "group": "edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "edit: colon, asked change or new",
+      "name": "edit: colon, asked change or new",
+      "group": "edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "edit: dewa bill",
+      "name": "edit: dewa bill",
+      "group": "edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "edit: last expense",
+      "name": "edit: last expense",
+      "group": "edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "edit: a list in one message, asked change or new",
+      "name": "edit: a list in one message, asked change or new",
+      "group": "edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "edit: spent by",
+      "name": "edit: spent by",
+      "group": "edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "edit: category",
+      "name": "edit: category",
+      "group": "edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "edit: currency",
+      "name": "edit: currency",
+      "group": "edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "edit: add to amount",
+      "name": "edit: add to amount",
+      "group": "edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "edit: knock off",
+      "name": "edit: knock off",
+      "group": "edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "edit: correction mid-way",
+      "name": "edit: correction mid-way",
+      "group": "edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "edit: list then numbers, messy",
+      "name": "edit: list then numbers, messy",
+      "group": "edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "edit: stack, drop, save",
+      "name": "edit: stack, drop, save",
+      "group": "edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "edit: cancel all",
+      "name": "edit: cancel all",
+      "group": "edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "edit: typo verb and name",
+      "name": "edit: typo verb and name",
+      "group": "edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "edit: polite long",
+      "name": "edit: polite long",
+      "group": "edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "remove: two named",
+      "name": "remove: two named",
+      "group": "remove",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "remove: by amount",
+      "name": "remove: by amount",
+      "group": "remove",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "remove: by payee",
+      "name": "remove: by payee",
+      "group": "remove",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "remove: a day",
+      "name": "remove: a day",
+      "group": "remove",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "remove: that, after saving",
+      "name": "remove: that, after saving",
+      "group": "remove",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "remove: list then numbers",
+      "name": "remove: list then numbers",
+      "group": "remove",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "remove: stack, swap, save",
+      "name": "remove: stack, swap, save",
+      "group": "remove",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "remove: duplicate reason",
+      "name": "remove: duplicate reason",
+      "group": "remove",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "remove: typo",
+      "name": "remove: typo",
+      "group": "remove",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "remove: all lunches",
+      "name": "remove: all lunches",
+      "group": "remove",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "mixed: change and remove in one",
+      "name": "mixed: change and remove in one",
+      "group": "mixed",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "mixed: remove then change",
+      "name": "mixed: remove then change",
+      "group": "mixed",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "mixed: save then remove",
+      "name": "mixed: save then remove",
+      "group": "mixed",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "ask: month total",
+      "name": "ask: month total",
+      "group": "ask",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "ask: on fuel",
+      "name": "ask: on fuel",
+      "group": "ask",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "ask: biggest",
+      "name": "ask: biggest",
+      "group": "ask",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "either: they are new",
+      "name": "either: they are new",
+      "group": "either",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "ask: at a payee",
+      "name": "ask: at a payee",
+      "group": "ask",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "ask: yesterday",
+      "name": "ask: yesterday",
+      "group": "ask",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "ask: by category",
+      "name": "ask: by category",
+      "group": "ask",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "ask: count this week",
+      "name": "ask: count this week",
+      "group": "ask",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "undo: after a save",
+      "name": "undo: after a save",
+      "group": "undo",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "undo: after a change",
+      "name": "undo: after a change",
+      "group": "undo",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "undo: change it back",
+      "name": "undo: change it back",
+      "group": "undo",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "undo: bring back removed",
+      "name": "undo: bring back removed",
+      "group": "undo",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 add: no payees",
+      "name": "r3 add: no payees",
+      "group": "r3 add",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 add: amount first",
+      "name": "r3 add: amount first",
+      "group": "r3 add",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 add: by someone",
+      "name": "r3 add: by someone",
+      "group": "r3 add",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 add: three on monday",
+      "name": "r3 add: three on monday",
+      "group": "r3 add",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 add: 25k",
+      "name": "r3 add: 25k",
+      "group": "r3 add",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 add: same as saved",
+      "name": "r3 add: same as saved",
+      "group": "r3 add",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 add+edit in one",
+      "name": "r3 add+edit in one",
+      "group": "r3 add+edit in one",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 preview: it was 50",
+      "name": "r3 preview: it was 50",
+      "group": "r3 preview",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 preview: drop the second",
+      "name": "r3 preview: drop the second",
+      "group": "r3 preview",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 preview: first was yesterday",
+      "name": "r3 preview: first was yesterday",
+      "group": "r3 preview",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 preview: add one more",
+      "name": "r3 preview: add one more",
+      "group": "r3 preview",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 preview: bare payee answer",
+      "name": "r3 preview: bare payee answer",
+      "group": "r3 preview",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 preview: only the first two",
+      "name": "r3 preview: only the first two",
+      "group": "r3 preview",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 preview: wait then yes",
+      "name": "r3 preview: wait then yes",
+      "group": "r3 preview",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 edit: no to",
+      "name": "r3 edit: no to",
+      "group": "r3 edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 edit: should be",
+      "name": "r3 edit: should be",
+      "group": "r3 edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 edit: equals",
+      "name": "r3 edit: equals",
+      "group": "r3 edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 edit: set at",
+      "name": "r3 edit: set at",
+      "group": "r3 edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 edit: dirhams",
+      "name": "r3 edit: dirhams",
+      "group": "r3 edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 edit: date yesterday",
+      "name": "r3 edit: date yesterday",
+      "group": "r3 edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 edit: description",
+      "name": "r3 edit: description",
+      "group": "r3 edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 edit: correct, it's 480",
+      "name": "r3 edit: correct, it's 480",
+      "group": "r3 edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 edit: u and pls",
+      "name": "r3 edit: u and pls",
+      "group": "r3 edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 edit: 50 for the taxi not 45",
+      "name": "r3 edit: 50 for the taxi not 45",
+      "group": "r3 edit",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 remove: three named",
+      "name": "r3 remove: three named",
+      "group": "r3 remove",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 remove: with date",
+      "name": "r3 remove: with date",
+      "group": "r3 remove",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 remove: 30 aed lunch",
+      "name": "r3 remove: 30 aed lunch",
+      "group": "r3 remove",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 remove: last 2",
+      "name": "r3 remove: last 2",
+      "group": "r3 remove",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 remove: clear today",
+      "name": "r3 remove: clear today",
+      "group": "r3 remove",
+      "pass": false,
+      "labels": [
+        "answer"
+      ]
+    },
+    {
+      "id": "r3 remove: del",
+      "name": "r3 remove: del",
+      "group": "r3 remove",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 remove: everything",
+      "name": "r3 remove: everything",
+      "group": "r3 remove",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 ask: total so far",
+      "name": "r3 ask: total so far",
+      "group": "r3 ask",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 ask: by person",
+      "name": "r3 ask: by person",
+      "group": "r3 ask",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 ask: careem list",
+      "name": "r3 ask: careem list",
+      "group": "r3 ask",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 ask: food this week",
+      "name": "r3 ask: food this week",
+      "group": "r3 ask",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 ask: today?",
+      "name": "r3 ask: today?",
+      "group": "r3 ask",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 unlock: wait no during removal",
+      "name": "r3 unlock: wait no during removal",
+      "group": "r3 unlock",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 unlock: hello? during preview",
+      "name": "r3 unlock: hello? during preview",
+      "group": "r3 unlock",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 unlock: receipt while a change waits",
+      "name": "r3 unlock: receipt while a change waits",
+      "group": "r3 unlock",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r3 unlock: new expense while picking",
+      "name": "r3 unlock: new expense while picking",
+      "group": "r3 unlock",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r4 diane: change",
+      "name": "r4 diane: change",
+      "group": "r4 diane",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r4 diane: remove",
+      "name": "r4 diane: remove",
+      "group": "r4 diane",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r4 diane: question",
+      "name": "r4 diane: question",
+      "group": "r4 diane",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r4 diane: add",
+      "name": "r4 diane: add",
+      "group": "r4 diane",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r4 session: add, ask, change, both saved",
+      "name": "r4 session: add, ask, change, both saved",
+      "group": "r4 session",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r4 mind: actually change instead",
+      "name": "r4 mind: actually change instead",
+      "group": "r4 mind",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r4 help while waiting",
+      "name": "r4 help while waiting",
+      "group": "r4 help while waiting",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r4 typos: two",
+      "name": "r4 typos: two",
+      "group": "r4 typos",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r4 caps and emoji",
+      "name": "r4 caps and emoji",
+      "group": "r4 caps and emoji",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r4 number words",
+      "name": "r4 number words",
+      "group": "r4 number words",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r4 pounds sign",
+      "name": "r4 pounds sign",
+      "group": "r4 pounds sign",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r4 date in the name",
+      "name": "r4 date in the name",
+      "group": "r4 date in the name",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r4 two fields one target",
+      "name": "r4 two fields one target",
+      "group": "r4 two fields one target",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r4 remove 1 with no list",
+      "name": "r4 remove 1 with no list",
+      "group": "r4 remove 1 with no list",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r4 save with nothing",
+      "name": "r4 save with nothing",
+      "group": "r4 save with nothing",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r4 thanks after save",
+      "name": "r4 thanks after save",
+      "group": "r4 thanks after save",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r4 voice-ish",
+      "name": "r4 voice-ish",
+      "group": "r4 voice-ish",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r4 receipt ask",
+      "name": "r4 receipt ask",
+      "group": "r4 receipt ask",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r4 change by date",
+      "name": "r4 change by date",
+      "group": "r4 change by date",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r4 remove by date and payee",
+      "name": "r4 remove by date and payee",
+      "group": "r4 remove by date and payee",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r5 big sheet: skip a range, answer, save",
+      "name": "r5 big sheet: skip a range, answer, save",
+      "group": "r5 big sheet",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r5 big sheet: save the rest",
+      "name": "r5 big sheet: save the rest",
+      "group": "r5 big sheet",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r5 sorted = yes",
+      "name": "r5 sorted = yes",
+      "group": "r5 sorted = yes",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r5 that's it = yes",
+      "name": "r5 that's it = yes",
+      "group": "r5 that's it = yes",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r5 nah leave it = cancel",
+      "name": "r5 nah leave it = cancel",
+      "group": "r5 nah leave it = cancel",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r5 hang on, then yes",
+      "name": "r5 hang on, then yes",
+      "group": "r5 hang on, then yes",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r5 cheers mate after save",
+      "name": "r5 cheers mate after save",
+      "group": "r5 cheers mate after save",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r5 ta = thanks",
+      "name": "r5 ta = thanks",
+      "group": "r5 ta = thanks",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r5 yes twice",
+      "name": "r5 yes twice",
+      "group": "r5 yes twice",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r5 undo with nothing",
+      "name": "r5 undo with nothing",
+      "group": "r5 undo with nothing",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r5 same file twice",
+      "name": "r5 same file twice",
+      "group": "r5 same file twice",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r5 paste a line back",
+      "name": "r5 paste a line back",
+      "group": "r5 paste a line back",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r5 change two in a sentence",
+      "name": "r5 change two in a sentence",
+      "group": "r5 change two in a sentence",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r5 remove with because",
+      "name": "r5 remove with because",
+      "group": "r5 remove with because",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r5 bin it after preview of a saved one",
+      "name": "r5 bin it after preview of a saved one",
+      "group": "r5 bin it after preview of a saved one",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r5 lower case everything",
+      "name": "r5 lower case everything",
+      "group": "r5 lower case everything",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r5 spent by fix while preview",
+      "name": "r5 spent by fix while preview",
+      "group": "r5 spent by fix while preview",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r5 payee fix while preview",
+      "name": "r5 payee fix while preview",
+      "group": "r5 payee fix while preview",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r5 cancel then new",
+      "name": "r5 cancel then new",
+      "group": "r5 cancel then new",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 screenshot list",
+      "name": "r6 screenshot list",
+      "group": "r6 screenshot list",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 three ops one message",
+      "name": "r6 three ops one message",
+      "group": "r6 three ops one message",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 amount and date",
+      "name": "r6 amount and date",
+      "group": "r6 amount and date",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 two named two values",
+      "name": "r6 two named two values",
+      "group": "r6 two named two values",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 both 100",
+      "name": "r6 both 100",
+      "group": "r6 both 100",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 all lunches 50",
+      "name": "r6 all lunches 50",
+      "group": "r6 all lunches 50",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 percent",
+      "name": "r6 percent",
+      "group": "r6 percent",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 amount and payee",
+      "name": "r6 amount and payee",
+      "group": "r6 amount and payee",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 rename and category",
+      "name": "r6 rename and category",
+      "group": "r6 rename and category",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 mistake taxi",
+      "name": "r6 mistake taxi",
+      "group": "r6 mistake taxi",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 the cleaner one, delete it",
+      "name": "r6 the cleaner one, delete it",
+      "group": "r6 the cleaner one, delete it",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 kill the last two",
+      "name": "r6 kill the last two",
+      "group": "r6 kill the last two",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 except",
+      "name": "r6 except",
+      "group": "r6 except",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 by payees",
+      "name": "r6 by payees",
+      "group": "r6 by payees",
+      "pass": false,
+      "labels": [
+        "answer"
+      ]
+    },
+    {
+      "id": "r6 list remove ranges",
+      "name": "r6 list remove ranges",
+      "group": "r6 list remove ranges",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 list change and remove",
+      "name": "r6 list change and remove",
+      "group": "r6 list change and remove",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 list number words",
+      "name": "r6 list number words",
+      "group": "r6 list number words",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 the third one",
+      "name": "r6 the third one",
+      "group": "r6 the third one",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 first and last",
+      "name": "r6 first and last",
+      "group": "r6 first and last",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 change it again after save",
+      "name": "r6 change it again after save",
+      "group": "r6 change it again after save",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 ask food and travel",
+      "name": "r6 ask food and travel",
+      "group": "r6 ask food and travel",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 ask the 6th",
+      "name": "r6 ask the 6th",
+      "group": "r6 ask the 6th",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 ask over 100",
+      "name": "r6 ask over 100",
+      "group": "r6 ask over 100",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 rambling fix",
+      "name": "r6 rambling fix",
+      "group": "r6 rambling fix",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 date and amount thanks",
+      "name": "r6 date and amount thanks",
+      "group": "r6 date and amount thanks",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 swap amounts",
+      "name": "r6 swap amounts",
+      "group": "r6 swap amounts",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 in pounds",
+      "name": "r6 in pounds",
+      "group": "r6 in pounds",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 payee change",
+      "name": "r6 payee change",
+      "group": "r6 payee change",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 two under travel",
+      "name": "r6 two under travel",
+      "group": "r6 two under travel",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 never mind leave it",
+      "name": "r6 never mind leave it",
+      "group": "r6 never mind leave it",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 yes but first",
+      "name": "r6 yes but first",
+      "group": "r6 yes but first",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 category for a day",
+      "name": "r6 category for a day",
+      "group": "r6 category for a day",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 the 45 one is 47",
+      "name": "r6 the 45 one is 47",
+      "group": "r6 the 45 one is 47",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 the one i added last",
+      "name": "r6 the one i added last",
+      "group": "r6 the one i added last",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 which lunch then pick by words",
+      "name": "r6 which lunch then pick by words",
+      "group": "r6 which lunch then pick by words",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 two wrong ones",
+      "name": "r6 two wrong ones",
+      "group": "r6 two wrong ones",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 change waits, remove too",
+      "name": "r6 change waits, remove too",
+      "group": "r6 change waits, remove too",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 removal waits, change too",
+      "name": "r6 removal waits, change too",
+      "group": "r6 removal waits, change too",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 preview then change saved",
+      "name": "r6 preview then change saved",
+      "group": "r6 preview then change saved",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 change and save in one",
+      "name": "r6 change and save in one",
+      "group": "r6 change and save in one",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 most expensive",
+      "name": "r6 most expensive",
+      "group": "r6 most expensive",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 remove duplicate dewa",
+      "name": "r6 remove duplicate dewa",
+      "group": "r6 remove duplicate dewa",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 halve it",
+      "name": "r6 halve it",
+      "group": "r6 halve it",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "bulk 1-6 spent by laud",
+      "name": "bulk 1-6 spent by laud",
+      "group": "bulk 1-6 spent by laud",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "r6 move a date by days",
+      "name": "r6 move a date by days",
+      "group": "r6 move a date by days",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "pick: pls only 1-3 of six",
+      "name": "pick: pls only 1-3 of six",
+      "group": "pick",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "pick: 1-3 only",
+      "name": "pick: 1-3 only",
+      "group": "pick",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "pick: not 5-6",
+      "name": "pick: not 5-6",
+      "group": "pick",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "pick: except 2",
+      "name": "pick: except 2",
+      "group": "pick",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "pick: only the first two",
+      "name": "pick: only the first two",
+      "group": "pick",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "pick: a number not there",
+      "name": "pick: a number not there",
+      "group": "pick",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "pick: a removal, only 1",
+      "name": "pick: a removal, only 1",
+      "group": "pick",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "pick: the preview is numbered",
+      "name": "pick: the preview is numbered",
+      "group": "pick",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "pick: now the rest",
+      "name": "pick: now the rest",
+      "group": "pick",
+      "pass": false,
+      "labels": [
+        "answer"
+      ]
+    },
+    {
+      "id": "list: a question numbers its list",
+      "name": "list: a question numbers its list",
+      "group": "list",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "list: sort by amount",
+      "name": "list: sort by amount",
+      "group": "list",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "list: only food",
+      "name": "list: only food",
+      "group": "list",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "list: hide the cleaner",
+      "name": "list: hide the cleaner",
+      "group": "list",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "list: still on screen after a question",
+      "name": "list: still on screen after a question",
+      "group": "list",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "change: by a rule, over 400",
+      "name": "change: by a rule, over 400",
+      "group": "change",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "change: a value per range",
+      "name": "change: a value per range",
+      "group": "change",
+      "pass": false,
+      "labels": [
+        "answer"
+      ]
+    },
+    {
+      "id": "change: split one in two",
+      "name": "change: split one in two",
+      "group": "change",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "change: clear the payee",
+      "name": "change: clear the payee",
+      "group": "change",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "change: copy a date",
+      "name": "change: copy a date",
+      "group": "change",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "change: 5% on several",
+      "name": "change: 5% on several",
+      "group": "change",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "change: do the same for another",
+      "name": "change: do the same for another",
+      "group": "change",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "change: correcting yourself",
+      "name": "change: correcting yourself",
+      "group": "change",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "change: asks only the missing value",
+      "name": "change: asks only the missing value",
+      "group": "change",
+      "pass": false,
+      "labels": [
+        "answer"
+      ]
+    },
+    {
+      "id": "safety: a 100x jump is warned",
+      "name": "safety: a 100x jump is warned",
+      "group": "safety",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "safety: a big change needs yes N",
+      "name": "safety: a big change needs yes N",
+      "group": "safety",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "safety: a big change, a plain yes waits",
+      "name": "safety: a big change, a plain yes waits",
+      "group": "safety",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "safety: a future date is warned",
+      "name": "safety: a future date is warned",
+      "group": "safety",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "talk: total as if saved",
+      "name": "talk: total as if saved",
+      "group": "talk",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "talk: only 1-3 and remove 5",
+      "name": "talk: only 1-3 and remove 5",
+      "group": "talk",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "after: recap who has what",
+      "name": "after: recap who has what",
+      "group": "after",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "after: undo only 2",
+      "name": "after: undo only 2",
+      "group": "after",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "after: undo the last 2 things",
+      "name": "after: undo the last 2 things",
+      "group": "after",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "after: undo by the new value",
+      "name": "after: undo by the new value",
+      "group": "after",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "after: what did you just change",
+      "name": "after: what did you just change",
+      "group": "after",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "after: who changed 4",
+      "name": "after: who changed 4",
+      "group": "after",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "find: search by text",
+      "name": "find: search by text",
+      "group": "find",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "find: missing payee, filled by number",
+      "name": "find: missing payee, filled by number",
+      "group": "find",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "find: receipt for a list number",
+      "name": "find: receipt for a list number",
+      "group": "find",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "settle: refused on WhatsApp",
+      "name": "settle: refused on WhatsApp",
+      "group": "settle",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}
