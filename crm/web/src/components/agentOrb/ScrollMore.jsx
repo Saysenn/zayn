@@ -41,7 +41,7 @@ export default function ScrollMore({ targetRef, label = 'More', watch }) {
         top: targetRef.current.scrollHeight,
         behavior: 'smooth',
       })}
-      className="absolute bottom-1.5 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-diane-line/40 bg-diane-panel/95 px-2 py-0.5 text-[9px] uppercase tracking-wide text-diane-dim shadow-lg backdrop-blur-sm transition-colors hover:border-diane-signal/60 hover:text-diane-signal"
+      className="dm-latest absolute bottom-1.5 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-diane-line/40 bg-diane-panel/95 px-2 py-0.5 text-[9px] uppercase tracking-wide text-diane-dim shadow-lg backdrop-blur-sm transition-colors hover:border-diane-signal/60 hover:text-diane-signal"
     >
       <ChevronIcon width={10} height={10} className="rotate-90" />
       {label}

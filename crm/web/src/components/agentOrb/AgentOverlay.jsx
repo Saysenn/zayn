@@ -40,6 +40,8 @@ import {
 import { BASE_URL } from '../../helpers/api.helper';
 import { readSwitch } from './contextSwitch';
 
+const CommandCenterV2 = lazy(() => import('./v2/CommandCenterV2'));
+
 // THE PARTICLES ORB, here and on the welcome page (his calls 2026-09-27 and
 // 2026-09-28). The loading screen keeps the particle field.
 const ParticlesOrb = lazy(() => import('./particlesOrb/ParticlesOrb'));
@@ -385,6 +387,31 @@ export default function AgentOverlay({ open, onClose }) {
   // transcript deliberately survives a close and reopen.
   const { save: saveConversation, noteTouched, endConversation } = useConversationLog(history);
   const [input, setInput] = useState('');
+  /**
+   * WHAT THEY SENT BEFORE, for ↑ / ↓ in the box like a terminal (his call
+   * 2026-10-10). Their own words only (no file names), newest last, no
+   * repeats in a row, the last 50, kept in this browser across refreshes.
+   */
+  const [sentLog, setSentLog] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('diane.sent') ?? '[]').filter((x) => typeof x === 'string').slice(-50); } catch { return []; }
+  });
+  // A FIRST USE starts from what this conversation already holds
+  useEffect(() => {
+    if (sentLog.length) return;
+    const theirs = history.filter((m) => m.role === 'user' && typeof m.content === 'string')
+      .map((m) => m.content.split('\n').filter((l) => !/^\s*📎/u.test(l)).join('\n').trim()).filter(Boolean);
+    if (theirs.length) setSentLog([...new Set(theirs)].slice(-50));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const remember = (said) => {
+    const words = String(said ?? '').split('\n').filter((l) => !/^\s*📎/u.test(l)).join('\n').trim();
+    if (!words) return;
+    setSentLog((log) => {
+      const next = [...log.filter((x) => x !== words), words].slice(-50);
+      try { localStorage.setItem('diane.sent', JSON.stringify(next)); } catch { /* storage off: this tab only */ }
+      return next;
+    });
+  };
   const [isSending, setIsSending] = useState(false);
   // Row by row, while a mass write runs. Declared with the rest of the
   // state rather than beside its use: a const is not hoisted, and a
@@ -396,6 +423,10 @@ export default function AgentOverlay({ open, onClose }) {
   // never end up in it.
   const [streamingReply, setStreamingReply] = useState('');
   const [muted, setMuted] = useState(false);
+  // V1 or V2 of the command center (his call 2026-10-10: V2 is added, V1
+  // stays, he compares). Same Diane underneath; only the room changes.
+  const [ui, setUiState] = useState(() => { try { return localStorage.getItem('diane.ui') === 'v2' ? 'v2' : 'v1'; } catch { return 'v1'; } });
+  const setUi = (v) => { setUiState(v); try { localStorage.setItem('diane.ui', v); } catch { /* this tab only */ } };
   // Clearing the transcript is destructive to what is on screen and takes
   // a half built export with it, so it asks first.
   const [confirmingReset, setConfirmingReset] = useState(false);
@@ -922,6 +953,7 @@ export default function AgentOverlay({ open, onClose }) {
     if (!extra && !inContext && await switchByWords(trimmed, base)) return;
 
     const nextHistory = [...base, { role: 'user', content: trimmed, ...(extra ?? {}) }];
+    remember(trimmed);
     // They just spoke, so they are reading the bottom: follow the answer.
     stuckRef.current = true;
     setHistory(nextHistory);
@@ -1661,6 +1693,303 @@ export default function AgentOverlay({ open, onClose }) {
   const { theme } = useTheme();
   const commandCenter = useMemo(() => commandCenterOf(dianeOf(theme)), [theme]);
   const tint = (alpha) => tintOf(alpha, commandCenter.signal);
+  // ---- THE PIECES, shared by V1 and V2: the same elements, each placed by its own layout ----
+  const exportCardEl = (
+              openCard && !openCard.paused && (
+                <div className="pointer-events-none absolute inset-3 z-20 flex items-center justify-center sm:inset-5">
+                  <div className="pointer-events-auto max-h-full w-full max-w-[34rem]">
+                    <ExportSession
+                      overlay
+                      session={openCard.exportSession}
+                      busy={isSending}
+                      onBuild={buildExport}
+                      onSay={sendMessage}
+                      onPause={() => pauseExport(openCardIndex, true)}
+                      onCancel={() => cancelExport(openCardIndex)}
+                    />
+                  </div>
+                </div>
+              )
+  );
+  const convoToolsEl = (
+            <div className="flex items-center gap-1">
+              {/* TOP RIGHT, because the header is the one part of the panel
+                  that cannot scroll. On the card alone it disappeared three
+                  questions in, and nothing said an export was half built. */}
+              {openCard && cardStages && (
+                <SessionTracker stages={cardStages} paused={Boolean(openCard.paused)} />
+              )}
+              {/* Developer mode only: this is for reporting exactly what she
+                  was asked and exactly what she said back. */}
+              {devMode && (
+                <button
+                  type="button"
+                  onClick={downloadConversation}
+                  disabled={history.length === 0}
+                  className="btn-quiet w-8 h-8 min-h-0 p-0 border-0 bg-transparent text-diane-dim/60 hover:text-diane-signal disabled:opacity-30"
+                  aria-label="Download the whole conversation"
+                  title="Download the whole conversation"
+                >
+                  <DownloadIcon width={16} height={16} />
+                </button>
+              )}
+              {/* Not developer only: the transcript survives a close and a
+                  reload on purpose, so without this the only way out of a
+                  conversation gone sideways was to wait thirty minutes. */}
+              {/* EVERYTHING SENT, in one list: her pictures and your files. */}
+              <button
+                type="button"
+                onClick={() => setShowAttachments((v) => !v)}
+                disabled={!showAttachments && attachmentsOf(history).length === 0}
+                aria-pressed={showAttachments}
+                className={`btn-quiet relative w-8 h-8 min-h-0 p-0 border-0 bg-transparent hover:text-diane-signal disabled:opacity-30 ${showAttachments ? 'text-diane-signal' : 'text-diane-dim/60'}`}
+                aria-label="Attachments in this conversation"
+                title="Attachments in this conversation"
+              >
+                <ImageIcon width={16} height={16} />
+                {attachmentsOf(history).length > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 min-w-[14px] rounded-full bg-diane-signal px-1 text-[9px] font-semibold leading-[14px] text-diane-void">
+                    {attachmentsOf(history).length}
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmingReset(true)}
+                disabled={isSending || history.length <= 1}
+                className="btn-quiet w-8 h-8 min-h-0 p-0 border-0 bg-transparent text-diane-dim/60 hover:text-diane-signal disabled:opacity-30"
+                aria-label="Start a new conversation"
+                title="Start a new conversation"
+              >
+                <ResetIcon width={16} height={16} />
+              </button>
+            </div>
+  );
+  const convoBodyEl = (
+          <div className="relative flex-1 min-h-0">
+            {showAttachments && (
+              <div className="absolute inset-0 z-10 bg-diane-panel/95">
+                <AttachmentsPanel history={history} onOpenImage={setViewing} onClose={() => setShowAttachments(false)} />
+              </div>
+            )}
+            <div
+              ref={drawerScrollRef}
+              // hidden (not unmounted) under Attachments: the chat never shows
+              // through, and its scroll place is kept for "Back to the conversation"
+              className={`agent-scroll h-full overflow-y-auto flex flex-col gap-2 px-4 py-4 ${buildingSheet ? 'session-alive' : ''} ${showAttachments ? 'invisible' : ''}`}
+            >
+              <Messages
+                history={history}
+                isSending={isSending}
+                workingText={workingText}
+                progress={progress}
+                streamingReply={streamingReply}
+                onFormSubmit={submitForm}
+                onCellEdit={editCell}
+                onExportPause={pauseExport}
+                onOpenDeal={setOpenDeal}
+                onRetry={retryLastTurn}
+                onOffer={answerOffer}
+                onOpenImage={setViewing}
+              />
+            </div>
+
+            {/* One mark, at the bottom centre, only while there is
+                something below. It replaced both the scrollbar and a
+                separate "jump to latest" pill: they were the same signal
+                twice. */}
+            <ScrollMore targetRef={drawerScrollRef} label="Latest" watch={history.length} />
+          </div>
+  );
+  const buildProgressEl = (
+          <div className="shrink-0 px-4 pb-4 space-y-2">
+            {/* THE FILE BEING MADE, wherever the card has got to. */}
+            {buildProgress && (
+              <div className="border border-diane-line/35 bg-diane-sunken/80 px-2.5 py-2">
+                <div className="mb-1.5 flex items-baseline justify-between gap-2">
+                  <span className="truncate text-[11px] text-diane-signal">
+                    {buildProgress.saving ? 'Saving' : 'Building'} {buildProgress.fileName}
+                  </span>
+                  <span className="shrink-0 text-[10px] tabular-nums text-white/40">
+                    {buildProgress.saving ? 'choose where' : `${buildProgress.pct}%`}
+                  </span>
+                </div>
+                <span className="block h-1 w-full overflow-hidden rounded-full bg-white/10">
+                  {/* While SAVING there is no percentage to show: the
+                      dialogue is open and the write happens after. A full
+                      bar that keeps moving says working, not finished. */}
+                  <span
+                    className="block h-full rounded-full bg-diane-signal tracker-live transition-[width] duration-300 ease-out"
+                    style={{ width: buildProgress.saving ? '100%' : `${buildProgress.pct}%` }}
+                  />
+                </span>
+              </div>
+            )}
+
+          </div>
+  );
+  const pausedPillEl = (
+          openCard && openCard.paused && (
+            <button
+              type="button"
+              onClick={() => pauseExport(openCardIndex, false)}
+              className="session-pill self-center flex items-center gap-2 rounded-full border border-diane-signal/40 bg-diane-sunken px-3 py-1.5 text-[11px] text-diane-signal hover:bg-diane-signal/10"
+            >
+              Export paused
+            </button>
+          )
+  );
+  const composerEl = (
+          <form onSubmit={handleSubmit}>
+            {attached && (
+              <div className="mb-2 flex items-center gap-2">
+                <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-diane-signal/50 bg-diane-signal/10 px-3 py-1 text-[11px] text-diane-signal">
+                  <PaperclipIcon width={12} height={12} />
+                  <span className="truncate max-w-[16rem]">{attached.filename}</span>
+                  <span className="text-white/40">· {attached.fileId ? attached.kind : `${attached.lines} lines`}</span>
+                  <button
+                    type="button"
+                    onClick={() => setAttached(null)}
+                    className="ml-1 min-h-0 border-0 bg-transparent p-0 text-white/50 hover:text-white"
+                    aria-label={`Remove ${attached.filename}`}
+                    title="Remove this file"
+                  >
+                    ✕
+                  </button>
+                </span>
+                <span className="text-[10px] text-white/40">Tell her what to do with it, then send.</span>
+              </div>
+            )}
+            {/* RichInput owns both rows and the pill's own outline: the
+                formatting toolbar has to sit OUTSIDE that outline, and only
+                whatever draws it can say where the edge is. */}
+            <RichInput
+              ref={inputRef}
+              history={sentLog}
+              onChange={setInput}
+              onSubmit={() => sendTyped()}
+              disabled={isSending}
+              placeholder={placeholder}
+              maxHeight="6rem"
+              before={
+                stt.supported && (
+                  <button
+                    type="button"
+                    onClick={toggleMic}
+                    className={`dm-mic ${stt.listening ? 'is-on' : ''} shrink-0 w-11 h-11 rounded-full flex items-center justify-center border transition-all duration-200 min-h-0 p-0 ${
+                      stt.listening
+                        ? 'border-diane-signal text-diane-void bg-diane-signal'
+                        : 'border-diane-line/60 text-diane-signal bg-transparent hover:border-diane-signal'
+                    }`}
+                    style={stt.listening ? { boxShadow: `0 0 18px ${tint(0.5)}` } : undefined}
+                    aria-label={stt.listening ? 'Stop listening' : 'Talk to Diane'}
+                    aria-pressed={stt.listening}
+                    title={stt.listening ? 'Stop listening (space)' : 'Talk to Diane (space)'}
+                  >
+                    <MicIcon width={19} height={19} />
+                  </button>
+                )
+              }
+              after={
+                <>
+                  {/* NO PAPERCLIP IN HMRC & CIS: it answers questions, it reads no files (yet) */}
+                  {context !== 'hmrc' && (<>
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept={context === 'expenses'
+                      ? 'image/*,.pdf,.xlsx,.csv,.txt,.tsv,.json,.docx,.pptx'
+                      : '.xlsx,.csv,.txt,.tsv,.json,.docx,.pptx'}
+                    className="hidden"
+                    multiple={context === 'expenses'}
+                    onChange={(e) => attachFile(context === 'expenses' ? e.target.files : e.target.files?.[0])}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileRef.current?.click()}
+                    disabled={isSending || attaching || (Boolean(attached) && !(context === 'expenses' && (attached.files?.length ?? 0) < 20))}
+                    className="dm-round shrink-0 w-11 h-11 rounded-full flex items-center justify-center border min-h-0 p-0 transition-colors disabled:opacity-30 border-diane-line/60 bg-transparent text-diane-signal hover:border-diane-signal"
+                    aria-label={context === 'expenses' ? 'Attach a receipt or file for Diane' : 'Attach a sheet for Diane to check'}
+                    title={context === 'expenses'
+                      ? 'Attach a receipt photo, PDF or sheet of expenses'
+                      : 'Attach a sheet (.xlsx, .csv, .txt) to check against the CRM'}
+                  >
+                    <PaperclipIcon width={17} height={17} />
+                  </button>
+                  </>)}
+                  {/* NO LEVEL METER AND NO KEY HINT. The meter said what the
+                      vitals panel's SIGNAL and the orb itself already say,
+                      and the hint was a permanent line of text inside a box
+                      you type in. */}
+                  <button
+                    type="submit"
+                    className="dm-send shrink-0 w-11 h-11 rounded-full flex items-center justify-center border min-h-0 p-0 transition-colors disabled:opacity-30 border-diane-signal/50 bg-transparent text-diane-signal hover:bg-diane-signal/10"
+                    disabled={isSending || (!input.trim() && !attached?.fileId)}
+                    aria-label="Send"
+                  >
+                    <SendIcon width={17} height={17} />
+                  </button>
+                </>
+              }
+            />
+          </form>
+  );
+  const overlaysEl = (
+    <>
+      {/* One deal, opened from a chip in her list. It fetches its own card
+          rather than asking her to look the row up again. */}
+      {openDeal && <DealModal row={openDeal} onClose={() => setOpenDeal(null)} />}
+      <ImageViewer
+        image={viewing}
+        images={history.filter((m) => m.image?.id).map((m) => m.image)}
+        onMove={setViewing}
+        onClose={() => setViewing(null)}
+      />
+
+      {/* NAMES WHAT SURVIVES, because "reset" alone reads as though the
+          conversation is being deleted from the CRM, and it is not. */}
+      {confirmingReset && (
+        <ConfirmDialog
+          title="Start a new conversation"
+          subject={`This clears ${history.length - 1} ${history.length === 2 ? 'message' : 'messages'} off the screen.`}
+          detail={[
+            'The conversation is SAVED first, so it stays searchable in the log. This clears the screen, not the record.',
+            openCard
+              ? 'The half built export goes with it, and nothing has been generated. You would start that again.'
+              : 'Nothing on the master sheet changes.',
+          ]}
+          confirmLabel="Start again"
+          icon={<ResetIcon width={20} height={20} />}
+          onConfirm={resetConversation}
+          onCancel={() => setConfirmingReset(false)}
+        />
+      )}
+    </>
+  );
+
+  // V2: the 3D command center (his call 2026-10-10). V1 below is unchanged.
+  if (ui === 'v2') {
+    return (
+      <DianePaletteProvider value={commandCenter}>
+        <Suspense fallback={<div className="fixed inset-0 z-30 bg-black" />}>
+        <CommandCenterV2
+          flareKey={history.filter((m) => m.role === 'assistant').length}
+          open={open} onClose={onClose} onSwitchUi={() => setUi('v1')}
+          contexts={CONTEXTS} context={context} isSending={isSending}
+          onPickContext={(key) => { setContext(key); resetConversation(); }}
+          muted={muted} onToggleMute={() => setMuted((m) => !m)}
+          orbState={orbState} orbLevelRef={orbLevelRef} mode={mode} level={level} vitals={vitals}
+          statusText={statusText} busy={busy} micHint={micHint}
+          listening={stt.listening} onToggleMic={stt.supported ? toggleMic : null}
+          autoChip={<AutoModeChip on={autoConfirm} busy={updateSettings.isPending} onToggle={() => toggleAutoConfirm()} />}
+          convoTools={convoToolsEl} convoBody={convoBodyEl} buildProgress={buildProgressEl}
+          pausedPill={pausedPillEl} composer={composerEl} exportCard={exportCardEl} overlays={overlaysEl}
+        />
+        </Suspense>
+      </DianePaletteProvider>
+    );
+  }
+
   return (
     // Diane's command center, in the chosen theme.
     //
@@ -1730,6 +2059,14 @@ export default function AgentOverlay({ open, onClose }) {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => setUi('v2')}
+            title="Try the V2 command center"
+            className="h-9 px-3 rounded-full border border-diane-signal/40 bg-diane-signal/10 text-[11px] font-semibold tracking-[0.18em] text-white/85 hover:bg-diane-signal/20 hover:border-diane-signal transition"
+          >
+            V2
+          </button>
           <HeaderButton
             onClick={() => setMuted((m) => !m)}
             label={muted ? 'Unmute Diane' : 'Mute Diane'}
@@ -1834,21 +2171,7 @@ export default function AgentOverlay({ open, onClose }) {
                 disagree. The active export now floats over the orb as one
                 glass card; the transcript keeps only a small reference.
               */}
-              {openCard && !openCard.paused && (
-                <div className="pointer-events-none absolute inset-3 z-20 flex items-center justify-center sm:inset-5">
-                  <div className="pointer-events-auto max-h-full w-full max-w-[34rem]">
-                    <ExportSession
-                      overlay
-                      session={openCard.exportSession}
-                      busy={isSending}
-                      onBuild={buildExport}
-                      onSay={sendMessage}
-                      onPause={() => pauseExport(openCardIndex, true)}
-                      onCancel={() => cancelExport(openCardIndex)}
-                    />
-                  </div>
-                </div>
-              )}
+              {exportCardEl}
             </div>
 
             {/*
@@ -1912,124 +2235,16 @@ export default function AgentOverlay({ open, onClose }) {
         <aside className="row-start-1 row-span-2 col-start-1 z-10 lg:row-start-1 lg:col-start-2 lg:row-span-2 lg:z-auto min-h-0 flex flex-col overflow-hidden rounded-lg border border-diane-line/35 bg-diane-panel/55 backdrop-blur-sm lg:bg-diane-panel/70 lg:backdrop-blur-none">
           <div className="flex items-center justify-between gap-2 px-4 py-3 shrink-0 border-b border-diane-line/30">
             <PanelLabel>Conversation</PanelLabel>
-            <div className="flex items-center gap-1">
-              {/* TOP RIGHT, because the header is the one part of the panel
-                  that cannot scroll. On the card alone it disappeared three
-                  questions in, and nothing said an export was half built. */}
-              {openCard && cardStages && (
-                <SessionTracker stages={cardStages} paused={Boolean(openCard.paused)} />
-              )}
-              {/* Developer mode only: this is for reporting exactly what she
-                  was asked and exactly what she said back. */}
-              {devMode && (
-                <button
-                  type="button"
-                  onClick={downloadConversation}
-                  disabled={history.length === 0}
-                  className="btn-quiet w-8 h-8 min-h-0 p-0 border-0 bg-transparent text-diane-dim/60 hover:text-diane-signal disabled:opacity-30"
-                  aria-label="Download the whole conversation"
-                  title="Download the whole conversation"
-                >
-                  <DownloadIcon width={16} height={16} />
-                </button>
-              )}
-              {/* Not developer only: the transcript survives a close and a
-                  reload on purpose, so without this the only way out of a
-                  conversation gone sideways was to wait thirty minutes. */}
-              {/* EVERYTHING SENT, in one list: her pictures and your files. */}
-              <button
-                type="button"
-                onClick={() => setShowAttachments((v) => !v)}
-                disabled={!showAttachments && attachmentsOf(history).length === 0}
-                aria-pressed={showAttachments}
-                className={`btn-quiet relative w-8 h-8 min-h-0 p-0 border-0 bg-transparent hover:text-diane-signal disabled:opacity-30 ${showAttachments ? 'text-diane-signal' : 'text-diane-dim/60'}`}
-                aria-label="Attachments in this conversation"
-                title="Attachments in this conversation"
-              >
-                <ImageIcon width={16} height={16} />
-                {attachmentsOf(history).length > 0 && (
-                  <span className="absolute -right-0.5 -top-0.5 min-w-[14px] rounded-full bg-diane-signal px-1 text-[9px] font-semibold leading-[14px] text-diane-void">
-                    {attachmentsOf(history).length}
-                  </span>
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfirmingReset(true)}
-                disabled={isSending || history.length <= 1}
-                className="btn-quiet w-8 h-8 min-h-0 p-0 border-0 bg-transparent text-diane-dim/60 hover:text-diane-signal disabled:opacity-30"
-                aria-label="Start a new conversation"
-                title="Start a new conversation"
-              >
-                <ResetIcon width={16} height={16} />
-              </button>
-            </div>
+            {convoToolsEl}
           </div>
 
           {/* `relative` so the jump pill can sit over the foot of the
               transcript rather than taking a row of its own. */}
-          <div className="relative flex-1 min-h-0">
-            {showAttachments && (
-              <div className="absolute inset-0 z-10 bg-diane-panel/95">
-                <AttachmentsPanel history={history} onOpenImage={setViewing} onClose={() => setShowAttachments(false)} />
-              </div>
-            )}
-            <div
-              ref={drawerScrollRef}
-              // hidden (not unmounted) under Attachments: the chat never shows
-              // through, and its scroll place is kept for "Back to the conversation"
-              className={`agent-scroll h-full overflow-y-auto flex flex-col gap-2 px-4 py-4 ${buildingSheet ? 'session-alive' : ''} ${showAttachments ? 'invisible' : ''}`}
-            >
-              <Messages
-                history={history}
-                isSending={isSending}
-                workingText={workingText}
-                progress={progress}
-                streamingReply={streamingReply}
-                onFormSubmit={submitForm}
-                onCellEdit={editCell}
-                onExportPause={pauseExport}
-                onOpenDeal={setOpenDeal}
-                onRetry={retryLastTurn}
-                onOffer={answerOffer}
-                onOpenImage={setViewing}
-              />
-            </div>
-
-            {/* One mark, at the bottom centre, only while there is
-                something below. It replaced both the scrollbar and a
-                separate "jump to latest" pill: they were the same signal
-                twice. */}
-            <ScrollMore targetRef={drawerScrollRef} label="Latest" watch={history.length} />
-          </div>
+          {convoBodyEl}
 
           {/* Build progress stays beside the conversation while the live
               preview and its choices occupy the orb stage. */}
-          <div className="shrink-0 px-4 pb-4 space-y-2">
-            {/* THE FILE BEING MADE, wherever the card has got to. */}
-            {buildProgress && (
-              <div className="border border-diane-line/35 bg-diane-sunken/80 px-2.5 py-2">
-                <div className="mb-1.5 flex items-baseline justify-between gap-2">
-                  <span className="truncate text-[11px] text-diane-signal">
-                    {buildProgress.saving ? 'Saving' : 'Building'} {buildProgress.fileName}
-                  </span>
-                  <span className="shrink-0 text-[10px] tabular-nums text-white/40">
-                    {buildProgress.saving ? 'choose where' : `${buildProgress.pct}%`}
-                  </span>
-                </div>
-                <span className="block h-1 w-full overflow-hidden rounded-full bg-white/10">
-                  {/* While SAVING there is no percentage to show: the
-                      dialogue is open and the write happens after. A full
-                      bar that keeps moving says working, not finished. */}
-                  <span
-                    className="block h-full rounded-full bg-diane-signal tracker-live transition-[width] duration-300 ease-out"
-                    style={{ width: buildProgress.saving ? '100%' : `${buildProgress.pct}%` }}
-                  />
-                </span>
-              </div>
-            )}
-
-          </div>
+          {buildProgressEl}
         </aside>
 
         {/*
@@ -2043,15 +2258,7 @@ export default function AgentOverlay({ open, onClose }) {
         <div className="row-start-3 col-start-1 lg:row-start-2 flex flex-col gap-2">
           {/* PAUSED, so there is nothing to answer. One tap back to the
               card, which is where resuming and cancelling live. */}
-          {openCard && openCard.paused && (
-            <button
-              type="button"
-              onClick={() => pauseExport(openCardIndex, false)}
-              className="session-pill self-center flex items-center gap-2 rounded-full border border-diane-signal/40 bg-diane-sunken px-3 py-1.5 text-[11px] text-diane-signal hover:bg-diane-signal/10"
-            >
-              Export paused
-            </button>
-          )}
+          {pausedPillEl}
 
         <div className="flex items-end gap-3 lg:gap-4">
           {/* The status box, beside the bar rather than out in the margin.
@@ -2071,98 +2278,7 @@ export default function AgentOverlay({ open, onClose }) {
               busy={updateSettings.isPending}
               onToggle={() => toggleAutoConfirm()}
             />
-          <form onSubmit={handleSubmit}>
-            {attached && (
-              <div className="mb-2 flex items-center gap-2">
-                <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-diane-signal/50 bg-diane-signal/10 px-3 py-1 text-[11px] text-diane-signal">
-                  <PaperclipIcon width={12} height={12} />
-                  <span className="truncate max-w-[16rem]">{attached.filename}</span>
-                  <span className="text-white/40">· {attached.fileId ? attached.kind : `${attached.lines} lines`}</span>
-                  <button
-                    type="button"
-                    onClick={() => setAttached(null)}
-                    className="ml-1 min-h-0 border-0 bg-transparent p-0 text-white/50 hover:text-white"
-                    aria-label={`Remove ${attached.filename}`}
-                    title="Remove this file"
-                  >
-                    ✕
-                  </button>
-                </span>
-                <span className="text-[10px] text-white/40">Tell her what to do with it, then send.</span>
-              </div>
-            )}
-            {/* RichInput owns both rows and the pill's own outline: the
-                formatting toolbar has to sit OUTSIDE that outline, and only
-                whatever draws it can say where the edge is. */}
-            <RichInput
-              ref={inputRef}
-              onChange={setInput}
-              onSubmit={() => sendTyped()}
-              disabled={isSending}
-              placeholder={placeholder}
-              maxHeight="6rem"
-              before={
-                stt.supported && (
-                  <button
-                    type="button"
-                    onClick={toggleMic}
-                    className={`shrink-0 w-11 h-11 rounded-full flex items-center justify-center border transition-all duration-200 min-h-0 p-0 ${
-                      stt.listening
-                        ? 'border-diane-signal text-diane-void bg-diane-signal'
-                        : 'border-diane-line/60 text-diane-signal bg-transparent hover:border-diane-signal'
-                    }`}
-                    style={stt.listening ? { boxShadow: `0 0 18px ${tint(0.5)}` } : undefined}
-                    aria-label={stt.listening ? 'Stop listening' : 'Talk to Diane'}
-                    aria-pressed={stt.listening}
-                    title={stt.listening ? 'Stop listening (space)' : 'Talk to Diane (space)'}
-                  >
-                    <MicIcon width={19} height={19} />
-                  </button>
-                )
-              }
-              after={
-                <>
-                  {/* NO PAPERCLIP IN HMRC & CIS: it answers questions, it reads no files (yet) */}
-                  {context !== 'hmrc' && (<>
-                  <input
-                    ref={fileRef}
-                    type="file"
-                    accept={context === 'expenses'
-                      ? 'image/*,.pdf,.xlsx,.csv,.txt,.tsv,.json,.docx,.pptx'
-                      : '.xlsx,.csv,.txt,.tsv,.json,.docx,.pptx'}
-                    className="hidden"
-                    multiple={context === 'expenses'}
-                    onChange={(e) => attachFile(context === 'expenses' ? e.target.files : e.target.files?.[0])}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => fileRef.current?.click()}
-                    disabled={isSending || attaching || (Boolean(attached) && !(context === 'expenses' && (attached.files?.length ?? 0) < 20))}
-                    className="shrink-0 w-11 h-11 rounded-full flex items-center justify-center border min-h-0 p-0 transition-colors disabled:opacity-30 border-diane-line/60 bg-transparent text-diane-signal hover:border-diane-signal"
-                    aria-label={context === 'expenses' ? 'Attach a receipt or file for Diane' : 'Attach a sheet for Diane to check'}
-                    title={context === 'expenses'
-                      ? 'Attach a receipt photo, PDF or sheet of expenses'
-                      : 'Attach a sheet (.xlsx, .csv, .txt) to check against the CRM'}
-                  >
-                    <PaperclipIcon width={17} height={17} />
-                  </button>
-                  </>)}
-                  {/* NO LEVEL METER AND NO KEY HINT. The meter said what the
-                      vitals panel's SIGNAL and the orb itself already say,
-                      and the hint was a permanent line of text inside a box
-                      you type in. */}
-                  <button
-                    type="submit"
-                    className="shrink-0 w-11 h-11 rounded-full flex items-center justify-center border min-h-0 p-0 transition-colors disabled:opacity-30 border-diane-signal/50 bg-transparent text-diane-signal hover:bg-diane-signal/10"
-                    disabled={isSending || (!input.trim() && !attached?.fileId)}
-                    aria-label="Send"
-                  >
-                    <SendIcon width={17} height={17} />
-                  </button>
-                </>
-              }
-            />
-          </form>
+          {composerEl}
           </div>
         </div>
 
@@ -2175,34 +2291,7 @@ export default function AgentOverlay({ open, onClose }) {
         </div>
       </div>
 
-      {/* One deal, opened from a chip in her list. It fetches its own card
-          rather than asking her to look the row up again. */}
-      {openDeal && <DealModal row={openDeal} onClose={() => setOpenDeal(null)} />}
-      <ImageViewer
-        image={viewing}
-        images={history.filter((m) => m.image?.id).map((m) => m.image)}
-        onMove={setViewing}
-        onClose={() => setViewing(null)}
-      />
-
-      {/* NAMES WHAT SURVIVES, because "reset" alone reads as though the
-          conversation is being deleted from the CRM, and it is not. */}
-      {confirmingReset && (
-        <ConfirmDialog
-          title="Start a new conversation"
-          subject={`This clears ${history.length - 1} ${history.length === 2 ? 'message' : 'messages'} off the screen.`}
-          detail={[
-            'The conversation is SAVED first, so it stays searchable in the log. This clears the screen, not the record.',
-            openCard
-              ? 'The half built export goes with it, and nothing has been generated. You would start that again.'
-              : 'Nothing on the master sheet changes.',
-          ]}
-          confirmLabel="Start again"
-          icon={<ResetIcon width={20} height={20} />}
-          onConfirm={resetConversation}
-          onCancel={() => setConfirmingReset(false)}
-        />
-      )}
+      {overlaysEl}
     </div>
     </DianePaletteProvider>
   );

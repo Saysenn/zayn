@@ -119,10 +119,14 @@ const RichInput = forwardRef(function RichInput(
     // message visibly shrank Diane. Three lines covers almost every reply,
     // and past that it scrolls instead of pushing.
     maxHeight = '4.5rem',
+    // what they sent before, oldest first: ↑ / ↓ walk it like a terminal
+    history = [],
   },
   ref,
 ) {
   const editorRef = useRef(null);
+  // where ↑ / ↓ are in `history` (null = their own draft), and that draft
+  const recall = useRef({ at: null, draft: '' });
   const [active, setActive] = useState({});
   const [empty, setEmpty] = useState(true);
 
@@ -179,6 +183,7 @@ const RichInput = forwardRef(function RichInput(
 
   useImperativeHandle(ref, () => ({
     clear() {
+      recall.current = { at: null, draft: '' };
       const el = editorRef.current;
       if (!el) return;
       el.innerHTML = '';
@@ -225,7 +230,58 @@ const RichInput = forwardRef(function RichInput(
     return false;
   }
 
+  /** Is the caret on the box's first (or last) line? An empty box is both. */
+  function caretOnEdge(edge) {
+    const el = editorRef.current;
+    const sel = window.getSelection();
+    if (!el || !sel || sel.rangeCount === 0 || !toPlainText(el)) return true;
+    const range = sel.getRangeAt(0).cloneRange();
+    range.collapse(true);
+    const caret = range.getClientRects()[0];
+    if (!caret) return true;
+    const box = el.getBoundingClientRect();
+    const line = parseFloat(getComputedStyle(el).lineHeight) || 18;
+    return edge === 'top' ? caret.top - box.top + el.scrollTop < line : box.bottom - caret.bottom + (el.scrollHeight - el.clientHeight - el.scrollTop) < line;
+  }
+
+  /** The box holds `text`, plain, with the caret at its end. */
+  function show(text) {
+    const el = editorRef.current;
+    if (!el) return;
+    el.innerText = text;
+    el.focus();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    emit();
+  }
+
   function handleKeyDown(e) {
+    /**
+     * ↑ / ↓ LIKE A TERMINAL (his call 2026-10-10): ↑ on the first line brings
+     * back what they sent before, newest first; ↓ on the last line goes
+     * forward, and past the newest gives their draft back. Anywhere else
+     * in a long message, the arrows move the caret as always.
+     */
+    if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey && history.length) {
+      const r = recall.current;
+      if (e.key === 'ArrowUp' && caretOnEdge('top') && (r.at === null || r.at > 0)) {
+        e.preventDefault();
+        if (r.at === null) r.draft = toPlainText(editorRef.current);
+        r.at = r.at === null ? history.length - 1 : r.at - 1;
+        show(history[r.at]);
+        return;
+      }
+      if (e.key === 'ArrowDown' && r.at !== null && caretOnEdge('bottom')) {
+        e.preventDefault();
+        r.at += 1;
+        if (r.at >= history.length) { r.at = null; show(r.draft); } else show(history[r.at]);
+        return;
+      }
+    }
     // The shortcuts browsers already map to execCommand work for free.
     // Enter is the one that needs taking over.
     if (e.key !== 'Enter') return;
@@ -262,7 +318,7 @@ const RichInput = forwardRef(function RichInput(
   // controls that belong to a message (talk, send, read it all); the
   // formatting sits over it, where an editor's toolbar goes.
   const toolbar = (
-    <div className="flex items-center justify-end gap-0.5 px-2">
+    <div className="dm-tools flex items-center justify-end gap-0.5 px-2">
       {TOOLS.map(({ key, cmd, Icon, label, shortcut }) => (
         <button
           key={key}
@@ -305,7 +361,8 @@ const RichInput = forwardRef(function RichInput(
           aria-multiline="true"
           aria-label="Message Diane"
           suppressContentEditableWarning
-          onInput={emit}
+          // typing ends ↑ / ↓ recall: what is in the box is theirs now
+          onInput={() => { recall.current.at = null; emit(); }}
           onKeyUp={refreshActive}
           onMouseUp={refreshActive}
           onFocus={refreshActive}
@@ -340,7 +397,7 @@ const RichInput = forwardRef(function RichInput(
       {/* THE PILL IS THE MESSAGE BOX, so its outline lives here rather than
           on the form around it: the toolbar has to sit outside that outline
           and only whatever draws it can say where the edge is. */}
-      <div className="rounded-full border border-diane-line/40 bg-diane-sunken/70 px-2.5 py-2">
+      <div className="dm-pill rounded-full border border-diane-line/40 bg-diane-sunken/70 px-2.5 py-2">
         {row}
       </div>
     </div>

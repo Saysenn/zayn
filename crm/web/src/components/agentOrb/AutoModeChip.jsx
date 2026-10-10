@@ -44,7 +44,7 @@ export default function AutoModeChip({ on, busy, onToggle }) {
         disabled={busy}
         aria-pressed={on}
         title={WHY[state]}
-        className={`min-h-0 gap-1.5 rounded-full border bg-transparent px-2.5 py-1 text-[10px] font-semibold transition-colors disabled:opacity-40 ${
+        className={`dm-auto min-h-0 gap-1.5 rounded-full border bg-transparent px-2.5 py-1 text-[10px] font-semibold transition-colors disabled:opacity-40 ${
           on
             ? 'border-diane-signal/50 text-diane-signal hover:bg-diane-signal/10'
             : 'border-transparent text-diane-dim hover:border-diane-line/50 hover:text-white/70'

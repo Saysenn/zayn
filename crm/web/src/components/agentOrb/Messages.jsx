@@ -102,7 +102,7 @@ function Sources({ sources }) {
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="inline-flex min-h-0 items-center gap-1.5 rounded-full border border-diane-line/40 bg-transparent px-2 py-0.5 text-[10px] text-diane-dim hover:border-diane-signal/60 hover:text-diane-signal"
+        className="dm-chip inline-flex min-h-0 items-center gap-1.5 rounded-full border border-diane-line/40 bg-transparent px-2 py-0.5 text-[10px] text-diane-dim hover:border-diane-signal/60 hover:text-diane-signal"
       >
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5" /><path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5" />
@@ -188,7 +188,7 @@ export default function Messages({
          * is one nobody comes back to.
          */
         m.exportSession ? (
-          <div key={i} data-export-summary className="self-start w-full max-w-[95%]">
+          <div key={i} data-export-summary className="dm-turn self-start w-full max-w-[95%]">
             {m.paused ? (
               <button
                 type="button"
@@ -214,7 +214,7 @@ export default function Messages({
           </div>
         ) : m.check ? (
           /* THE SHEET CHECK. Its own turn, and no card: see SheetCheck. */
-          <div key={i} className="self-start w-full max-w-[95%]">
+          <div key={i} className="dm-turn self-start w-full max-w-[95%]">
             <SheetCheck check={m.check} onOpen={onOpenDeal} />
           </div>
         ) : m.offer ? (
@@ -222,7 +222,7 @@ export default function Messages({
              deal is a special case. Its own turn in the transcript, so it
              scrolls away with the thing it is about rather than floating
              somewhere else on screen. See TurnOffer. */
-          <div key={i} className="self-start w-full max-w-[95%]">
+          <div key={i} className="dm-turn self-start w-full max-w-[95%]">
             <TurnOffer
               offer={m.offer}
               answered={m.answered}
@@ -232,11 +232,11 @@ export default function Messages({
           </div>
         ) : m.image ? (
           /* THE EXPENSE PICTURE, under her card. Click to open it large. */
-          <div key={i} className="self-start w-full max-w-[95%]">
+          <div key={i} className="dm-turn self-start w-full max-w-[95%]">
             <ExpenseImage image={m.image} onOpen={onOpenImage} />
           </div>
         ) : m.list ? (
-          <div key={i} className="self-start w-full max-w-[95%]">
+          <div key={i} className="dm-turn self-start w-full max-w-[95%]">
             {m.list.kind === 'recent-changes'
               ? <RecentChangesList list={m.list} onOpen={onOpenDeal} />
               : m.list.kind === 'companies'
@@ -246,7 +246,7 @@ export default function Messages({
                   : <DealList list={m.list} onOpen={onOpenDeal} />}
           </div>
         ) : m.card ? (
-          <div key={i} className="self-start w-full max-w-[95%]">
+          <div key={i} className="dm-turn self-start w-full max-w-[95%]">
             <DealCard
               card={m.card}
               disabled={isSending}
@@ -254,7 +254,7 @@ export default function Messages({
             />
           </div>
         ) : m.form ? (
-          <div key={i} className="self-start w-full max-w-[95%]">
+          <div key={i} className="dm-turn self-start w-full max-w-[95%]">
             <DealForm
               form={m.form}
               disabled={isSending}
@@ -264,7 +264,7 @@ export default function Messages({
         ) : (
         <div
           key={i}
-          className={`max-w-[85%] rounded-lg px-3 py-2 text-[11px] leading-snug whitespace-pre-wrap break-words ${
+          className={`dm-msg ${m.role === 'assistant' ? 'dm-her' : 'dm-you'} max-w-[85%] rounded-lg px-3 py-2 text-[11px] leading-snug whitespace-pre-wrap break-words ${
             m.role === 'assistant'
               ? 'self-start text-white/90 border border-diane-line/35 bg-diane-panel/70'
               // Their words in the orb's own sweep, signal into accent.
@@ -288,7 +288,7 @@ export default function Messages({
             <button
               type="button"
               onClick={onRetry}
-              className="mt-1.5 min-h-0 rounded-full border border-diane-line/40 bg-transparent px-2 py-0.5 text-[10px] text-diane-dim hover:border-diane-signal/60 hover:text-diane-signal"
+              className="dm-chip mt-1.5 min-h-0 rounded-full border border-diane-line/40 bg-transparent px-2 py-0.5 text-[10px] text-diane-dim hover:border-diane-signal/60 hover:text-diane-signal"
             >
               Ask again
             </button>
@@ -302,9 +302,9 @@ export default function Messages({
           nothing on screen shifts or restyles — it simply stops growing.
           A caret marks it as still being written. */}
       {isSending && streamingReply && (
-        <div className="self-start max-w-[85%] rounded-lg px-3 py-2 text-[11px] leading-snug whitespace-pre-wrap break-words text-white/90 border border-diane-line/35 bg-diane-panel/70">
+        <div className="dm-msg dm-her dm-live self-start max-w-[85%] rounded-lg px-3 py-2 text-[11px] leading-snug whitespace-pre-wrap break-words text-white/90 border border-diane-line/35 bg-diane-panel/70">
           {streamingReply}
-          <span className="ml-0.5 inline-block w-[2px] h-[1em] align-text-bottom bg-diane-signal animate-pulse" />
+          <span className="dm-caret ml-0.5 inline-block w-[2px] h-[1em] align-text-bottom bg-diane-signal animate-pulse" />
         </div>
       )}
 
@@ -321,7 +321,7 @@ export default function Messages({
         * things saying "still going" is one too many.
         */}
       {isSending && progress && (
-        <div className="self-start w-full max-w-[95%] rounded-lg border border-diane-line/35 bg-diane-panel/70 px-3 py-2">
+        <div className="dm-progress self-start w-full max-w-[95%] rounded-lg border border-diane-line/35 bg-diane-panel/70 px-3 py-2">
           <div className="flex items-center justify-between gap-2 text-[11px] text-white/80">
             <Working>{progress.label ?? 'Working'}</Working>
             <span className="tabular-nums text-white/50">
@@ -334,7 +334,7 @@ export default function Messages({
 
           <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10">
             <div
-              className="h-full rounded-full bg-diane-signal transition-[width] duration-200 ease-out"
+              className="dm-progress-bar h-full rounded-full bg-diane-signal transition-[width] duration-200 ease-out"
               style={{ width: `${Math.round((progress.done / Math.max(progress.total, 1)) * 100)}%` }}
             />
           </div>
@@ -351,7 +351,7 @@ export default function Messages({
           themselves are the progress and a "one second" bubble underneath
           them reads as a second, stuck reply. */}
       {isSending && !streamingReply && !progress && (
-        <div className="self-start max-w-[85%] rounded-lg px-3 py-2 text-[11px] text-white/50 border border-diane-line/25 bg-diane-panel/50">
+        <div className="dm-msg dm-her dm-working self-start max-w-[85%] rounded-lg px-3 py-2 text-[11px] text-white/50 border border-diane-line/25 bg-diane-panel/50">
           <Working>{workingText}</Working>
         </div>
       )}
