@@ -232,7 +232,10 @@ function theyAre(said, history, roster, pending) {
   const last = [...(history ?? [])].slice(0, -1).reverse().find((m) => m.role === 'assistant' && (m.list || /\n/.test(String(m.content ?? ''))));
   if (!last) return said;
   const text = [String(last.content ?? ''), ...(last.list?.rows ?? []).map((r) => r.name ?? r.person ?? '')].join('\n');
-  const named = people.filter((n) => new RegExp(`(^|\\n|\\d\\.\\s)${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(text));
+  // A WHOLE NAME, not the start of a longer one: "Ali" is not in a list that
+  // only showed "Ali Khan" (code review 2026-10-10)
+  const named = people.filter((n) => [...text.matchAll(new RegExp(`(^|\\n|\\d\\.\\s)${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi'))]
+    .some((m) => !/^ +[A-Z]/.test(text.slice(m.index + m[0].length))));
   return named.length ? `${said} (them = ${named.join(', ')})` : said;
 }
 
@@ -3224,6 +3227,21 @@ async function runAgentTurn(history, contextName, onEvent) {
     const bare = asked.trim().replace(/[?.!]+$/, '').replace(/^(?:and |what about |how about |show me |show )/i, '').trim();
     const roster = await require('../repos/people.repo').filterOptions().catch(() => null);
     const person = (roster?.people ?? []).map((p) => p.name).find((n) => fold(n) === fold(bare));
+    /**
+     * "AND NICOLA?" AFTER "HOW MUCH IS NATHAN OWED?" is what she is owed, not
+     * her deals (clone check 2026-10-10). A follow up takes the last ask.
+     */
+    // the question a chain of follow ups goes back to ("and nicola?", then "what about drew")
+    const FOLLOW = /^\s*(?:and|what about|how about|and what about|same for)\b/i;
+    const prevAsk = String([...history].slice(0, -1).reverse()
+      .find((m) => m.role === 'user' && typeof m.content === 'string' && !FOLLOW.test(m.content))?.content ?? '');
+    const followsAmount = person && FOLLOW.test(asked)
+      && /\b(?:owed?|owing|getting|paid|pay|earn\w*|how much|total)\b/i.test(prevAsk);
+    if (followsAmount) {
+      turnState.model = 'code';
+      const result = await invokeTool(context.tools, 'total_master_sheet', JSON.stringify({ person }), history, onEvent, turnState);
+      if (result?.reply) return { reply: result.reply, changedRowIds: [], context: context.key, claims: [] };
+    }
     if (person && bare.split(/\s+/).length >= 1) {
       turnState.model = 'code';
       const result = await invokeTool(context.tools, 'find_and_show_details', JSON.stringify({ name: person }), history, onEvent, turnState);
@@ -3260,7 +3278,8 @@ async function runAgentTurn(history, contextName, onEvent) {
       const names = { people: (roster?.people ?? []).map((p) => p.name), groups: roster?.groups ?? [], companies: roster?.companies ?? [] };
       const recent = history.slice(0, -1).filter((m) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && !m.list && !m.card).slice(-3);
       const shape = await readRoute(asked, { recent, ...names, model: LIGHT_MODEL });
-      const call = shape && readToolCall(shape, { ...names, said: asked });
+      const prev = String([...recent].reverse().find((m) => m.role === 'user')?.content ?? '');
+      const call = shape && readToolCall(shape, { ...names, said: asked, prev });
       if (shape) logger.info({ shape, call }, 'diane: read routed');
       if (call && context.tools.some((t) => t.name === call.name)) {
         turnState.model = LIGHT_MODEL;

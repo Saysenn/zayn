@@ -26,8 +26,9 @@ const TTL_SECONDS = 60 * 60 * 24 * 14;
 // "sorry, I meant no" right after answering it is about THIS question
 const RECENT_MS = 24 * 60 * 60 * 1000;
 
+// UK English only (his call 2026-10-10)
 const THANKS = "(?:[,!.\\s]+(?:thanks|thank you|thx|ty|cheers|all good))?";
-const YES_WORDS = new RegExp(`^(?:y|ya|ye|yes+|yeah|yea|yep|yup|ok(?:ay)?|sure|correct|sige|oo|haan|ji|refunded|received|got (?:it|them)|all (?:refunded|received)|yes,? (?:refunded|received|all|i (?:did|have)))${THANKS}[.!👍]*$|^👍$`, "i");
+const YES_WORDS = new RegExp(`^(?:y|ya|ye|yes+|yeah|yea|yep|yup|ok(?:ay)?|sure|correct|refunded|received|got (?:it|them)|all (?:refunded|received)|yes,? (?:refunded|received|all|i (?:did|have)))${THANKS}[.!👍]*$|^👍$`, "i");
 const NO_WORDS = new RegExp(`^(?:n|no+|nope|nah|not yet|not refunded|none|nothing|no,? not (?:yet|refunded|received))${THANKS}[.!]*$`, "i");
 const PARTIAL_WORDS = /\b(?:partial|partly|some of (?:it|them)|some (?:were|was|of the)|only (?:some|part|a few|one|two|half)|half of (?:it|them)|not all(?: of (?:it|them))?|part of (?:it|them))\b/i;
 const MISTAKE = /\b(?:mistake|by mistake|wrong(?:ly)?|i meant|meant (?:to say )?(?:no|yes)|didn'?t mean|sorry,? (?:no|not)|not (?:actually )?refunded|haven'?t been refunded|wasn'?t refunded)\b/i;

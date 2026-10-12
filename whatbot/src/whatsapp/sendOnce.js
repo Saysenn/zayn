@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { redis, withRedisTimeout } from "../system/redis.js";
 import { jobIdOf } from "../system/jobId.js";
 import { logger } from "../system/logger.js";
@@ -23,11 +24,23 @@ import { logger } from "../system/logger.js";
 const DAY = 24 * 60 * 60;
 
 export function sendOnce(messageId, { store = redis, guard = withRedisTimeout } = {}) {
+  /**
+   * EACH PART IS KNOWN BY WHAT IT SAYS, not only where it falls (code review
+   * 2026-10-10): a retry can build the reply in a different shape (the brain
+   * answers a message it has seen with only the text, no picture), and by
+   * number alone the text landed on a slot already marked, so it was skipped
+   * and never arrived. `label` is the part's content (its text, a caption,
+   * a file name and size); the same content twice in one reply counts apart.
+   */
+  const seen = new Map();
   let part = 0;
-  return async function once(send) {
+  return async function once(send, label) {
     part += 1;
     if (!messageId) return send();
-    const key = `sent:${jobIdOf(messageId, part)}`;
+    const what = label === undefined ? `#${part}` : createHash("sha1").update(String(label)).digest("hex").slice(0, 16);
+    const nth = (seen.get(what) ?? 0) + 1;
+    seen.set(what, nth);
+    const key = `sent:${jobIdOf(messageId, `${what}-${nth}`)}`;
     // withRedisTimeout takes the PROMISE, not a function (a function came back
     // as "already sent" and every reply was skipped, 2026-10-10)
     const done = await guard(store.get(key)).catch(() => null);

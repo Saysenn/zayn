@@ -15,7 +15,8 @@ const {
 // and the whole message goes to the model instead. A wrong read is worse
 // than no read.
 
-const YES = /^(?:sorted|all sorted|done|all done|all good|crack on|go on|good to go|that'?s it|thats it|spot on|bang on|y|ye|yes+|yse|yess+|yeas|yeah|yea|yep|yup|ok(?:ay)?|k|sure(?: thing)?|confirm(?:ed)?|go(?: ahead)?|ok go|save(?: (?:it|them|all))?|do it|correct|approved?|👍|✅|yes(?: please| pls| save(?: it| them)?)?|fine|proceed|send it|that'?s? (?:is )?(?:correct|right|fine)|all (?:correct|right)|sige|oo|tama|tamam|yalla|haan|theek hai|go for it|👌|👌🏻|👍🏻|👍🏼|👍🏽|🆗|✔️|☑️|🙏)$/iu;
+// UK English only (his call 2026-10-10): no other language's words here
+const YES = /^(?:sorted|all sorted|done|all done|all good|crack on|go on|good to go|that'?s it|thats it|spot on|bang on|y|ye|yes+|yse|yess+|yeas|yeah|yea|yep|yup|ok(?:ay)?|k|sure(?: thing)?|confirm(?:ed)?|go(?: ahead)?|ok go|save(?: (?:it|them|all))?|do it|correct|approved?|👍|✅|yes(?: please| pls| save(?: it| them)?)?|fine|proceed|send it|that'?s? (?:is )?(?:correct|right|fine)|all (?:correct|right)|go for it|👌|👌🏻|👍🏻|👍🏼|👍🏽|🆗|✔️|☑️|🙏)$/iu;
 // "HOLD ON": nothing changes, it waits
 const HOLD = /^(?:hold on|wait|one sec(?:ond)?|1 sec|a sec|hang on|brb|give me a (?:sec|minute|moment)|let me check|one moment)[.!\s]*$/i;
 // "NO, CANCEL THAT" is a cancel. It went to the router as "undo" and offered
@@ -283,7 +284,7 @@ function readReply(said, pending, { year = new Date().getUTCFullYear(), groups =
    * (live 2026-10-07). A save word, no figures, nothing to change.
    */
   if (/\b(?:save|confirm|go ahead|looks? (?:good|great|right|fine)|all (?:good|correct|fine)|approve|that'?s (?:right|correct|fine)|perfect|good to go)\b/i.test(bare)
-    && !/\d|\b(?:don'?t|do not|not|never|except|but|change|wrong|skip|cancel|without|instead|only|remove|leave out)\b/i.test(bare)) return { kind: 'yes' };
+    && !/\?|\d|\b(?:don'?t|do not|not|never|except|but|change|wrong|skip|cancel|without|instead|only|remove|leave out)\b/i.test(bare)) return { kind: 'yes' }; // a question is never a yes
   if (NO.test(bare)) return { kind: 'no' };
   // "MODIFY" on its own: they want to change something, and say what next.
   if (/^(?:modify|change|change (?:it|something|that)|edit|amend|fix(?: it)?|correct(?: it)?)$/i.test(bare)) return { kind: 'modify' };

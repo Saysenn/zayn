@@ -277,7 +277,11 @@ function runRefresh() {
   if (refreshState.running) return refreshState;
   Object.assign(refreshState, { running: true, startedAt: new Date().toISOString(), progress: null, error: null });
   refresh({ onProgress: (p) => { refreshState.progress = p; } })
-    .then((out) => Object.assign(refreshState, { running: false, last: { ...out, at: new Date().toISOString() } }))
+    .then(async (out) => {
+      // timed from here, not from the newest page (see 081_hmrc_refreshes.sql)
+      await repo.recordRefresh({ pages: out?.pages ?? null, changed: out?.added ?? null }).catch(() => {});
+      Object.assign(refreshState, { running: false, last: { ...out, at: new Date().toISOString() } });
+    })
     .catch((err) => Object.assign(refreshState, { running: false, error: err.message }));
   return refreshState;
 }
@@ -293,7 +297,10 @@ function startAutoRefresh() {
   const tick = async () => {
     try {
       const govuk = (await repo.status()).find((r) => r.kind === 'govuk');
-      if (govuk?.sources > 0 && Date.now() - new Date(govuk.last).getTime() > 24 * 60 * 60 * 1000) {
+      // the last FULL refresh (a quiet one counts); the newest page only
+      // until the first refresh has been recorded
+      const last = (await repo.lastRefresh().catch(() => null)) ?? govuk?.last;
+      if (govuk?.sources > 0 && Date.now() - new Date(last).getTime() > 24 * 60 * 60 * 1000) {
         logger.info('hmrc: daily refresh from GOV.UK');
         runRefresh();
       }

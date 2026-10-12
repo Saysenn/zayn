@@ -87,7 +87,7 @@ const percent = (p) => (p == null ? '—' : `${p.toFixed(p === 100 ? 0 : 1)}%`);
 
 export default function CommandCenterV2({
   open, onClose, onSwitchUi, contexts, context, isSending, onPickContext, muted, onToggleMute,
-  orbState, orbLevelRef, mode, level, vitals, statusText, busy, micHint, listening, onToggleMic, flareKey,
+  orbState, orbLevelRef, mode, level, vitals, busy, micHint, listening, onToggleMic, flareKey,
   autoChip, convoTools, convoBody, buildProgress, pausedPill, composer, exportCard, overlays,
 }) {
   const palette = useDianePalette();
@@ -97,6 +97,9 @@ export default function CommandCenterV2({
   const anchorRef = useRef(null);
   // Stars was removed (his call 2026-10-10); a saved 'stars' falls back to Nebula
   const [orbStyle, setOrbStyle] = useState(() => { const v = read('diane.orbStyle', 'nebula'); return STYLES.some((x) => x.key === v) ? v : 'nebula'; });
+  // FOCUS MODE (his call 2026-10-10): the left side hides, she grows
+  const [focus, setFocusState] = useState(() => read('diane.focus', '0') === '1');
+  const setFocus = (on) => { setFocusState(on); try { localStorage.setItem('diane.focus', on ? '1' : '0'); } catch { /* this tab only */ } };
   const pickStyle = (s) => { setOrbStyle(s); try { localStorage.setItem('diane.orbStyle', s); } catch { /* this tab only */ } };
 
   /**
@@ -126,7 +129,11 @@ export default function CommandCenterV2({
     const measure = () => {
       const r = el.getBoundingClientRect();
       if (!r.width) return;
-      anchorRef.current = { x: (r.left + r.width / 2) / window.innerWidth, y: (r.top + r.height / 2) / window.innerHeight };
+      anchorRef.current = {
+        x: (r.left + r.width / 2) / window.innerWidth, y: (r.top + r.height / 2) / window.innerHeight,
+        // its share of the screen, so the scene can fit her into it
+        fw: r.width / window.innerWidth, fh: r.height / window.innerHeight,
+      };
     };
     const ro = new ResizeObserver(measure);
     ro.observe(el);
@@ -168,6 +175,10 @@ export default function CommandCenterV2({
     const b = e.target.closest?.('button');
     if (!b || b.disabled || b.type === 'submit') return;
     sfx.play(b.closest('.cc2-modes, .cc2-segment') ? 'switch' : 'tick');
+    // SPACE IS "TALK", but not while a button holds focus (AgentOverlay's
+    // key handler skips buttons). A V2 button kept it after a click, so space
+    // then did nothing; the header and mode buttons hand focus back.
+    if (b.closest('.cc2-left')) setTimeout(() => b.blur(), 0);
   };
   const onHover = (e) => {
     const b = e.target.closest?.('button');
@@ -181,7 +192,7 @@ export default function CommandCenterV2({
   return (
     <div
       ref={rootRef}
-      className={`cc2 fixed inset-0 z-30 ${open ? 'block' : 'hidden'} is-${orbState ?? 'idle'}`}
+      className={`cc2 fixed inset-0 z-30 ${open ? 'block' : 'hidden'} is-${orbState ?? 'idle'} ${focus ? 'is-focus' : ''}`}
       style={vars}
       role="dialog"
       aria-modal="true"
@@ -201,6 +212,7 @@ export default function CommandCenterV2({
             active={open}
             flareKey={flareKey}
             onOrbClick={onToggleMic}
+            zoom={focus ? 1.45 : 1}
             anchorRef={anchorRef}
           />
         </Suspense>
@@ -210,37 +222,19 @@ export default function CommandCenterV2({
       {/* ---- THE FLOATING LAYER: panels at depth, tilting with the mouse ---- */}
       <div className="cc2-stage">
         {/* TOP: who she is, the time, the controls */}
+        {/* TOP: only who she is. The controls live at the bottom left, in a
+            column under the modes (his call 2026-10-10) */}
         <header className="cc2-top cc2-depth-near">
-          <div className="flex items-center gap-4 min-w-0">
-            <div className="cc2-brand">
-              <span className="cc2-brand-name">DIANE</span>
-              <span className="cc2-brand-sub">Command Center · V2</span>
-            </div>
-            <div className={`cc2-status ${busy ? 'is-busy' : ''}`} aria-live="polite">
-              <span className="cc2-status-dot" />
-              <span className="truncate">{statusText}</span>
-            </div>
-          </div>
-          <Clock />
-          <div className="flex items-center gap-2 justify-end">
-            <div className="cc2-segment" role="radiogroup" aria-label="Orb style">
-              {STYLES.map((s) => (
-                <button key={s.key} type="button" role="radio" aria-checked={orbStyle === s.key} onClick={() => pickStyle(s.key)} className={orbStyle === s.key ? 'is-on' : ''}>
-                  {s.label}
-                </button>
-              ))}
-            </div>
-            <button type="button" className="cc2-chip" onClick={onSwitchUi} title="Back to the V1 command center">V1</button>
-            <button type="button" className={`cc2-chip ${muted ? '' : 'is-on'}`} onClick={onToggleMute} aria-pressed={!muted} title={muted ? 'Unmute Diane' : 'Mute Diane'}>
-              {muted ? 'Muted' : 'Voice'}
-            </button>
-            <button type="button" className="cc2-chip cc2-chip-strong" onClick={onClose} title="Go to portal">Portal</button>
+          <div className="cc2-brand">
+            <span className="cc2-brand-name">DIANE</span>
+            <span className="cc2-brand-sub">Command Center · V2</span>
           </div>
         </header>
 
         <div className="cc2-body">
           {/* LEFT: what she focuses on */}
-          <nav className="cc2-modes cc2-depth-left" aria-label="What Diane focuses on" role="radiogroup">
+          <div className="cc2-left cc2-depth-left" aria-hidden={focus || undefined} inert={focus ? '' : undefined}>
+          <nav className="cc2-modes" aria-label="What Diane focuses on" role="radiogroup">
             <span className="cc2-panel-label">Mode</span>
             {contexts.map((c) => {
               const on = c.key === context;
@@ -269,13 +263,32 @@ export default function CommandCenterV2({
             </div>
           </nav>
 
+          {/* THE CONTROLS, columnised under the modes */}
+          <div className="cc2-controls">
+            <Clock />
+            <div className="cc2-segment" role="radiogroup" aria-label="Orb style">
+              {STYLES.map((s) => (
+                <button key={s.key} type="button" role="radio" aria-checked={orbStyle === s.key} onClick={() => pickStyle(s.key)} className={orbStyle === s.key ? 'is-on' : ''}>
+                  {s.label}
+                </button>
+              ))}
+            </div>
+            <div className="cc2-controls-row">
+              <button type="button" className="cc2-chip" onClick={onSwitchUi} title="Back to the V1 command center">V1</button>
+              <button type="button" className={`cc2-chip ${muted ? '' : 'is-on'}`} onClick={onToggleMute} aria-pressed={!muted} title={muted ? 'Unmute Diane' : 'Mute Diane'}>
+                {muted ? 'Muted' : 'Voice'}
+              </button>
+            </div>
+            <button type="button" className="cc2-chip cc2-chip-strong" onClick={onClose} title="Go to portal">Portal</button>
+          </div>
+          </div>
+
           {/* CENTRE: her. The orb is in the scene; this keeps her space and
               carries the readouts on her rings and the export card */}
           <section className="cc2-center">
             <div ref={orbSpaceRef} className="cc2-orb-space" aria-hidden="true">
               <span className="cc2-orb-tag cc2-orb-tag-top">{(mode ?? 'idle').toUpperCase()}</span>
               <span className="cc2-orb-tag cc2-orb-tag-left">{STYLES.find((s) => s.key === orbStyle)?.label.toUpperCase()}</span>
-              <span className="cc2-orb-tag cc2-orb-tag-right">{listening ? 'LISTENING' : onToggleMic ? 'TAP TO TALK' : ''}</span>
             </div>
             {exportCard && <div className="cc2-export cc2-depth-near">{exportCard}</div>}
             <div className="cc2-dock cc2-depth-dock">
@@ -283,7 +296,18 @@ export default function CommandCenterV2({
               <div className="cc2-dock-row">
                 <VoiceWave levelRef={orbLevelRef} on={listening || orbState === 'speaking'} />
                 <span className={`cc2-wave-label ${listening || orbState === 'speaking' ? 'is-on' : ''}`}>{listening ? 'Listening' : 'Speaking'}</span>
-                <div className="ml-auto">{autoChip}</div>
+                <div className="ml-auto flex items-center gap-2">
+                  <button
+                    type="button"
+                    className={`cc2-focus ${focus ? 'is-on' : ''}`}
+                    onClick={() => setFocus(!focus)}
+                    aria-pressed={focus}
+                    title={focus ? 'Show the side panel again' : 'Focus: hide the side panel, bring Diane forward'}
+                  >
+                    {focus ? '◆ Exit focus' : '◇ Focus'}
+                  </button>
+                  {autoChip}
+                </div>
               </div>
               <div className={`cc2-composer ${listening ? 'is-listening' : ''} ${busy ? 'is-thinking' : ''}`}>
                 {composer}

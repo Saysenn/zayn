@@ -2029,10 +2029,17 @@ async function update(id, fields, changedVia = 'admin', { derived = [], batchId 
      * identical keys, and the second move failed on the unique constraint
      * (upload test 2026-10-10: "Done 35 of 36", one deal left behind).
      */
+    /**
+     * Its own "|d<id>" from an earlier clash comes OFF first (code review
+     * 2026-10-10): a move into a clash and its undo left "a|…|gary|d123",
+     * which the next upload of A's sheet ("a|…|gary") never matched, so a
+     * second Gary deal was made. Put back on only if the key clashes again.
+     */
     const { rows: [k] } = await pool.query(
-      `SELECT CASE WHEN position('|' in sync_key) > 0
-         THEN $1 || substring(sync_key from position('|' in sync_key)) ELSE sync_key END AS key
-         FROM tb_mastersheet WHERE id = $2`,
+      `WITH base AS (SELECT regexp_replace(sync_key, '\\|d' || id || '$', '') AS key FROM tb_mastersheet WHERE id = $2)
+       SELECT CASE WHEN position('|' in key) > 0
+         THEN $1 || substring(key from position('|' in key)) ELSE key END AS key
+         FROM base`,
       [fields.groupName.trim().toLowerCase(), id],
     );
     if (k) {

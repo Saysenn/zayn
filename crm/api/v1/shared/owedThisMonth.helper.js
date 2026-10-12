@@ -114,6 +114,24 @@ function specialCaseDeal(row) {
 }
 
 /**
+ * ===============================
+ * * MONTH 3 OF A WEEK ONE APPOINTMENT IS PAID IN FULL
+ * ===============================
+ * His call 2026-10-10: appointed in the first week of a month, the third
+ * month is owed in full whenever the payment starts. The Payable formula
+ * already said so (computePayable, forcesFullMonth); this rule did not, so
+ * eight August appointments with a November start showed £4,000 on the
+ * sheet and were left out of Diane's totals and the payout sheets.
+ * Required lazily: this helper keeps no dependencies at the top.
+ */
+function fullMonthThree(row, preset) {
+  // eslint-disable-next-line global-require
+  const { forcesFullMonth } = require('./fromAppointment.helper');
+  const appointed = asDate(row.assigned_on);
+  return Boolean(appointed && forcesFullMonth(appointed, preset));
+}
+
+/**
  * Is anything owed for the month this row is marked for?
  *
  * A row with NO PRESET is the standing roster: owed every month, so there
@@ -129,6 +147,7 @@ function isOwedThisMonth(row, { useEndDate = false } = {}) {
   // saying this month pays it, and the order here is the whole of that.
   if (stoppedBeforeMonth(row, preset)) return false;
   if (specialCaseDeal(row)) return true;
+  if (fullMonthThree(row, preset)) return true;
   if (startsAfterMonth(row, preset)) return false;
   if (useEndDate && endedBeforeMonth(row, preset)) return false;
   return true;

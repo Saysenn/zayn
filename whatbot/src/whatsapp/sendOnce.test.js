@@ -56,6 +56,29 @@ describe("sendOnce: a retried job never sends a part twice", () => {
   it("the key has no colon from the message id (BullMQ / jobIdOf)", async () => {
     const store = memory();
     await sendOnce("a:b", { store, guard })(async () => {});
-    expect([...store.m.keys()]).toEqual(["sent:a-b-1"]);
+    expect([...store.m.keys()]).toEqual(["sent:a-b-#1-1"]);
+  });
+
+  it("a retry in a different shape still delivers the text (parts are known by content)", async () => {
+    const store = memory();
+    const sent = [];
+    // first try: the reading note, the picture, then the preview text throws
+    const first = sendOnce("MSG4", { store, guard });
+    await first(async () => sent.push("Got 2 files"), "Got 2 files");
+    await first(async () => sent.push("picture"), "image:900:caption");
+    await expect(first(async () => { throw new Error("dropped"); }, "Reply yes to save")).rejects.toThrow();
+    // the retry: the brain has seen this message, so only the text comes back
+    const retry = sendOnce("MSG4", { store, guard });
+    await retry(async () => sent.push("Reply yes to save"), "Reply yes to save");
+    expect(sent).toEqual(["Got 2 files", "picture", "Reply yes to save"]);
+  });
+
+  it("the same text twice in one reply is sent twice", async () => {
+    const store = memory();
+    const sent = [];
+    const once = sendOnce("MSG5", { store, guard });
+    await once(async () => sent.push("ok"), "ok");
+    await once(async () => sent.push("ok"), "ok");
+    expect(sent).toEqual(["ok", "ok"]);
   });
 });

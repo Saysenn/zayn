@@ -30,8 +30,18 @@ agent.post('/message', async (req, res, next) => {
     const { phone, group, text, attachments, messageId } = req.body ?? {};
     if (!phone || !group) return res.status(400).json({ error: 'phone and group are required' });
     // A burst of receipts arrives as one turn (WhatBot's expenses/batch.js).
-    const list = Array.isArray(attachments) ? attachments.slice(0, 20) : [];
+    const all = Array.isArray(attachments) ? attachments : [];
+    const list = all.slice(0, 20);
     const out = await brain.turn({ phone, group, text, attachments: list, messageId: messageId ? String(messageId) : null });
+    /**
+     * MORE THAN 20 FILES: said, never dropped in silence (code review
+     * 2026-10-10: "Got 25 files", a preview of 20, and 5 never mentioned).
+     */
+    const over = all.length - list.length;
+    if (over > 0 && out?.reply) {
+      const left = all.slice(20).map((a) => a?.filename).filter(Boolean);
+      out.reply = `${out.reply}\n\n_I read the first 20 files. ${over} more ${over === 1 ? 'was' : 'were'} not read${left.length ? ` (${left.slice(0, 5).join(', ')}${left.length > 5 ? ', …' : ''})` : ''}: please send ${over === 1 ? 'it' : 'them'} again._`;
+    }
     res.json({ ...out, usd: Number(meter.dollars.toFixed(4)) });
   } catch (err) {
     next(err);

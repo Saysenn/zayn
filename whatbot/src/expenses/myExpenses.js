@@ -38,7 +38,8 @@ function someoneElse(text) {
   return false;
 }
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
-const ANOTHER = /\b(?:last|next|previous|past)\s+(?:month|week|year)\b|\b20\d\d\b|\bago\b|\bhistory\b/i;
+// a year counts only when it is not this one ("October 2026" is this month)
+const ANOTHER = /\b(?:last|next|previous|past)\s+(?:month|week|year)\b|\bago\b|\bhistory\b/i;
 
 export { someoneElse };
 
@@ -52,7 +53,9 @@ export function asksExpenses(text) {
 function otherMonthIn(text, now = new Date()) {
   const t = String(text ?? "").toLowerCase();
   if (ANOTHER.test(t)) return true;
-  const named = MONTHS.filter((m) => new RegExp(`\\b${m}[a-z]*\\b`).test(t));
+  if ([...t.matchAll(/\b(20\d\d)\b/g)].some((m) => Number(m[1]) !== now.getFullYear())) return true;
+  // "may I see…" is asking, not the month of May (code review 2026-10-10)
+  const named = MONTHS.filter((m) => new RegExp(`\\b${m}[a-z]*\\b`).test(m === "may" ? t.replace(/\bmay\s+(?:i|we|you|he|she|they)\b/g, " ") : t));
   const here = MONTHS[now.getMonth()];
   return named.some((m) => m !== here);
 }

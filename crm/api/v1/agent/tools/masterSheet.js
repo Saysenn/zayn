@@ -949,6 +949,23 @@ const rowDetails = {
     const expectedMatch = expectedNames.length === actualNames.length
       && actualNames.every((name) => expectedNames.includes(name));
 
+    /**
+     * ONE PERSON, BUT NOT THE ONE THEY NAMED (clone check 2026-10-10): asked
+     * about Louis, she filtered him, then passed id 1, and Johnathon's deal
+     * was read out as part of the answer. When their words name someone on
+     * the sheet and these rows are someone else's, nothing is shown.
+     */
+    if (names.length === 1 && heard) {
+      const roster = ((await require('../../repos/people.repo').filterOptions().catch(() => null))?.people ?? []).map((p) => p.name).filter(Boolean);
+      const low = (x) => String(x ?? '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+      const said = (n) => low(n).length >= 3 && ` ${low(heard)} `.includes(` ${low(n)} `);
+      const theirs = said(names[0]) || said(String(names[0]).split(/\s+/)[0]);
+      const other = roster.filter((n) => fold(n) !== fold(names[0]) && said(n));
+      if (!theirs && other.length) {
+        return { summary: `THOSE IDS ARE ${names[0]}'s, but they asked about ${other.join(', ')}. NOTHING HAS BEEN SHOWN. The ids are wrong: search by NAME for ${other.join(', ')} and use the ids it gives. Never describe ${names[0]}.`, rows: [] };
+      }
+    }
+
     if (names.length > 1 && (!args.severalPeople || !expectedMatch)) {
       return {
         summary: `THOSE IDS ARE ${names.length} DIFFERENT PEOPLE: ${names.join(', ')}. `
@@ -3378,7 +3395,11 @@ const filterRows = {
      */
     if ([].concat(args.endWhen ?? []).includes('soon')) {
       const n = /\bnext\s+(\d+|one|two|three|four|five|six)\s+months?\b/i.exec(heardNoun)?.[1];
-      const asNumber = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 }[String(n).toLowerCase()] ?? Number(n);
+      // "the next 60 days", "the next 6 weeks": in months, rounded up (code
+      // check 2026-10-10: "next 60 days" was read as the default three)
+      const d = /\b(?:next|within|in)\s+(?:the\s+)?(\d+)\s+(days?|weeks?)\b/i.exec(heardNoun);
+      const fromDays = d ? Math.max(1, Math.ceil((Number(d[1]) * (/^w/i.test(d[2]) ? 7 : 1)) / 30)) : null;
+      const asNumber = fromDays ?? ({ one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 }[String(n).toLowerCase()] ?? Number(n));
       // eslint-disable-next-line no-param-reassign
       if (asNumber > 0) args = { ...args, endSoonMonths: asNumber };
     }

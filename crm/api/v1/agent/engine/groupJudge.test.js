@@ -95,3 +95,15 @@ test('HER "NEW" GUESS WITH NO GROUP OF OURS: "renamed" is the group her question
   assert.deepEqual(readGroupAnswers('1 no', q).pick.SAFFRON, { judged: true, renames: { SAFFRON: ['MANBAT'] } });
   assert.equal(readGroupAnswers('1 new', q).pick.SAFFRON, 'new');
 });
+
+test('"NOT NEW" IS NEVER "NEW": to a renamed guess it holds her guess; to a new guess it is her other reading', () => {
+  const j = { name: 'SUMMIT', kind: 'renamed', ours: ['MANBAT'] };
+  const qs = [{ kind: 'ai', name: 'SUMMIT', judged: 'renamed', like: 'MANBAT', text: 'SUMMIT: MANBAT renamed?', yes: decisionOf(j), no: otherOf(j) }];
+  const base = mergeDecisions(decisionOf({ name: 'HALCYON', kind: 'new', ours: [] }));
+  assert.deepEqual(readGroupAnswers("it's not a new group", qs, base).decided.renames, { SUMMIT: ['MANBAT'] });
+  const n = { name: 'HARBOUR', kind: 'new', ours: [] };
+  const qn = [{ kind: 'ai', name: 'HARBOUR', judged: 'new', text: "HARBOUR: I'd take it as a new group. Right?", yes: decisionOf(n), no: otherOf(n) }];
+  const out = readGroupAnswers('1 not new', qn, base);
+  assert.notDeepEqual(out.decided?.renames ?? {}, { HARBOUR: [] });
+  assert.ok(!(out.decided?.notRenamed ?? []).includes('HARBOUR'), 'not added as a new group');
+});

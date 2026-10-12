@@ -739,7 +739,11 @@ async function agentFirst(said, files, ctx) {
   const tail = t.split(/\b(?:actually|wait|oh|sorry|hold on|hang on)\b/i).pop().replace(/^[\s,.!—-]+/, '');
   const yesWords = /\b(?:y(?:es|eah|eh|ep|up|a)|ok(?:ay)?|sure|do it|go ahead|go on|crack on|save (?:it|them)|update it|put it back|confirm|i said yes|go for it|sounds good|that'?s (?:fine|right|correct))\b/i;
   const changeCues = /\d|\b(?:no|nope|nah|not|don'?t|cancel|stop|wait|hold|change|remove|delete|only|except|instead|but|undo|add|also|and)\b/i;
-  const agrees = (x) => x && x.split(/\s+/).length <= 14 && yesWords.test(x) && !changeCues.test(x.replace(/\b(?:i said yes|update it|put it back)\b/gi, ''));
+  // NOT A QUESTION: "ok what category is the coffee?" asks, it does not agree
+  // (it saved the waiting preview; code review 2026-10-10)
+  const asks = /\?|\b(?:what|which|how|why|when|who|where|whose|is it|are they|does|did|can you|could you)\b/i;
+  const agrees = (x) => x && x.split(/\s+/).length <= 14 && yesWords.test(x) && !asks.test(x)
+    && !changeCues.test(x.replace(/\b(?:i said yes|update it|put it back)\b/gi, ''));
   if (pending && !files.length && (agrees(t) || (tail !== t && agrees(tail)))) {
     return onReply({ kind: 'yes' }, ctx);
   }
@@ -3015,10 +3019,12 @@ async function undoOne(actionId, ctx, only) {
     /* eslint-disable no-await-in-loop */
     if (c.undone) continue;
     if (chosen && !chosen.has(c) && !(c.created && [...chosen].some((x) => x.id === c.from))) continue;
-    c.undone = true;
+    // MARKED UNDONE ONLY WHEN PUT BACK (or already gone): a line left alone
+    // because it changed since stays undoable (code review 2026-10-10: it was
+    // marked undone, so "undo only 2" said "already undone")
     if (action.kind === 'add') {
       const now = await expensesRepo.findById(c.id);
-      if (!now) continue;
+      if (!now) { c.undone = true; continue; }
       if (!same(now, c.after)) { skipped.push(c.after.description); continue; }
       // a REPLACED one goes back to what it was; a new one is taken back,
       // and its receipt file and fingerprint with it
@@ -3027,32 +3033,34 @@ async function undoOne(actionId, ctx, only) {
         await receipts.forget(now);
         await expensesRepo.remove(c.id);
       }
-      done.push(c.id);
+      done.push(c.id); c.undone = true;
     } else if (action.kind === 'edit' && c.created) {
       // a split's new expense: taken back, unless it changed since
       const now = await expensesRepo.findById(c.id);
-      if (!now) continue;
+      if (!now) { c.undone = true; continue; }
       if (!same(now, c.after)) { skipped.push(c.after.description); continue; }
       await expensesRepo.remove(c.id);
-      done.push(c.id);
+      done.push(c.id); c.undone = true;
     } else if (action.kind === 'edit' && c.removed) {
       const back = await expensesRepo.create(c.before);
       await receipts.reattach(c.id, back.id, c.receiptPath ?? null).catch(() => null);
-      done.push(back.id);
+      done.push(back.id); c.undone = true;
     } else if (action.kind === 'edit') {
       const now = await expensesRepo.findById(c.id);
       if (!now) { skipped.push(c.before.description); continue; }
       if (!same(now, c.after)) { skipped.push(c.before.description); continue; }
       await expensesRepo.update(c.id, c.before);
-      done.push(c.id);
+      done.push(c.id); c.undone = true;
     } else if (action.kind === 'remove') {
       const back = await expensesRepo.create(c.before);
       // its receipt comes back with it
       await receipts.reattach(c.id, back.id, c.receiptPath ?? null).catch(() => null);
-      done.push(back.id);
+      done.push(back.id); c.undone = true;
     }
     /* eslint-enable no-await-in-loop */
   }
+  // NOTHING PUT BACK: said so, and the action stays as it was
+  if (!done.length && skipped.length) return `Nothing put back: ${skipped.join(', ')} changed since, so I left ${skipped.length === 1 ? 'it' : 'them'} alone.`;
   // SOME LINES: the rest stay undoable; all of them, and the action is done
   const whole = action.changes.every((c) => c.undone);
   await pool.query(`UPDATE tb_expense_actions SET changes = $2${whole ? ', undone_at = now()' : ''} WHERE id = $1`, [action.id, JSON.stringify(action.changes)]);

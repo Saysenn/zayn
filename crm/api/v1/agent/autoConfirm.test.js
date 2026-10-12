@@ -44,3 +44,9 @@ test('THE PERSON\'S PAID SWITCH names every deal of theirs (PAY-010, 2026-10-10)
   const money = { perPerson: [{ person: 'Kiran Vale', allDeals: true, set: { monthlyAmount: 900 } }] };
   assert.equal(spelledOut('bulk_update_master_sheet', tool, money, 'make kiran vale 900'), false);
 });
+
+test('"BOTH" AFTER A CHANGE WAS ALREADY MADE still asks: it may land twice on the deal just changed', () => {
+  assert.equal(answeredAll('Done, INDIGO is now 4,600. His MILKMAN deal too, or both?', 'both'), false);
+  assert.equal(answeredAll('Updated INDIGO. Want MILKMAN as well, or both?', 'both'), false);
+  assert.equal(answeredAll('Zayn has deals in INDIGO and MILKMAN. Which group, or both?', 'both'), true);
+});

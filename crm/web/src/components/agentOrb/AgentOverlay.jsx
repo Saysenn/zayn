@@ -1768,7 +1768,7 @@ export default function AgentOverlay({ open, onClose }) {
   const convoBodyEl = (
           <div className="relative flex-1 min-h-0">
             {showAttachments && (
-              <div className="absolute inset-0 z-10 bg-diane-panel/95">
+              <div className="dm-files-wrap absolute inset-0 z-10 bg-diane-panel/95">
                 <AttachmentsPanel history={history} onOpenImage={setViewing} onClose={() => setShowAttachments(false)} />
               </div>
             )}

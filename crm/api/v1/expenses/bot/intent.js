@@ -8,8 +8,8 @@ const { ask } = require('./ai');
 // is, or cancellation, or modification". Code reads the common ones free
 // (reply.js). Anything else reaches this: ONE small call (the light model,
 // a strict choice) that sees only their message and a one line summary of
-// the preview, never the expenses themselves. So "sige", "tamam", "theek
-// hai", "send it off" or "hmm hold on" cost a fraction of a cent, and a
+// the preview, never the expenses themselves. So "send it off", "cheers,
+// that's the lot" or "hmm hold on" cost a fraction of a cent, and a
 // confirmation can no longer be taken for a change (live: "I like them,
 // save them" sent all 145 expenses to the reader and back as 6 pictures).
 
@@ -27,7 +27,7 @@ const SCHEMA = {
 
 const SYSTEM = [
   'An admin has a preview of expenses waiting for their answer. Classify their reply. Any language or slang.',
-  'confirm: save it as shown (yes, ok, fine, proceed, send it, sige, oo, tama, yalla, tamam, theek hai, haan, go for it, I like them).',
+  'confirm: save it as shown (yes, ok, fine, proceed, send it, go for it, I like them).',
   'cancel: drop the preview, save nothing (no, discard, forget it, don\'t save, not now, scrap it).',
   'change: they want something in it changed, or say what is wrong ("the taxi was 50", "edit 2", "wrong date on 3", "modify").',
   'save_ready: save only the ones that are ready and keep the rest. skip_copies: leave out the copies. skip_saved: leave out the ones already saved.',

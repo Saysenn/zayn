@@ -24,7 +24,7 @@ export default function ExpenseImage({ image, onOpen, compact = false }) {
         onClick={() => onOpen?.(image)}
         disabled={!url}
         title={image.caption ? `${image.caption} · click to open` : 'Open the picture'}
-        className="group block w-full min-h-0 overflow-hidden rounded-lg border border-diane-line/35 bg-diane-sunken/60 p-0 text-left transition-colors hover:border-diane-signal/60"
+        className="dm-pic dm-pic-tile group block w-full min-h-0 overflow-hidden rounded-lg border border-diane-line/35 bg-diane-sunken/60 p-0 text-left transition-colors hover:border-diane-signal/60"
       >
         {isError ? (
           <span className="flex aspect-[4/3] items-center justify-center px-2 text-center text-[10px] text-white/50">No longer available</span>
@@ -33,7 +33,7 @@ export default function ExpenseImage({ image, onOpen, compact = false }) {
         ) : (
           <span className="block aspect-[4/3] w-full animate-pulse bg-diane-line/10" />
         )}
-        <span className="block truncate px-2 py-1 text-[10px] text-white/50 group-hover:text-white/80">{image.caption || 'Picture'}</span>
+        <span className="dm-pic-cap block truncate px-2 py-1 text-[10px] text-white/50 group-hover:text-white/80">{image.caption || 'Picture'}</span>
       </button>
     );
   }
@@ -43,7 +43,7 @@ export default function ExpenseImage({ image, onOpen, compact = false }) {
       onClick={() => onOpen?.(image)}
       disabled={!url}
       title="Open the picture"
-      className="group block w-full max-w-[420px] min-h-0 overflow-hidden rounded-lg border border-diane-line/35 bg-diane-sunken/60 p-0 text-left hover:border-diane-signal/60"
+      className="dm-pic group block w-full max-w-[420px] min-h-0 overflow-hidden rounded-lg border border-diane-line/35 bg-diane-sunken/60 p-0 text-left hover:border-diane-signal/60"
     >
       {isError ? (
         <span className="block px-3 py-2 text-[11px] text-white/50">This picture is no longer available.</span>
@@ -52,7 +52,7 @@ export default function ExpenseImage({ image, onOpen, compact = false }) {
       ) : (
         <span className="block h-40 w-full animate-pulse bg-diane-line/10" />
       )}
-      <span className="flex items-center justify-between px-3 py-1.5 text-[10px] text-white/50 group-hover:text-white/80">
+      <span className="dm-pic-cap flex items-center justify-between px-3 py-1.5 text-[10px] text-white/50 group-hover:text-white/80">
         <span>{image.caption}</span>
         <span>Click to open</span>
       </span>

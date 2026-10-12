@@ -597,7 +597,17 @@ function doneReply(plan) {
 function readGroupAnswers(said, qs, base = null) {
   const text = String(said ?? '').toLowerCase().trim();
   const pick = {};
-  const named = (seg) => qs.find((q) => [q.name, q.from].filter(Boolean).some((n) => seg.includes(String(n).toLowerCase())));
+  // THE LONGEST NAME SAID wins: "harbour east" is HARBOUR EAST's answer, not HARBOUR's
+  const named = (seg) => qs
+    .map((q) => ({ q, len: Math.max(0, ...[q.name, q.from].filter(Boolean).map((n) => (seg.includes(String(n).toLowerCase()) ? String(n).length : 0))) }))
+    .filter((x) => x.len > 0).sort((a, b) => b.len - a.len)[0]?.q;
+  /**
+   * "NOT NEW" IS NOT "NEW" (code review 2026-10-10): "1 not new" to "I'd take
+   * it as a new group. Right?" added it as new, and "it's not a new group" to
+   * "MANBAT renamed?" made a second copy of MANBAT's deals.
+   */
+  const notNew = (seg) => /\b(?:not|isn'?t|aren'?t|never)\s+(?:a\s+|an?\s+)?new\b/.test(seg);
+  const saysNew = (seg) => /\bnew\b/.test(seg) && !notNew(seg);
   const verdict = (seg, q) => {
     // HER QUESTION: "leave it out" drops the group; "no" is her other reading.
     if (q.kind === 'ai') {
@@ -629,18 +639,20 @@ function readGroupAnswers(said, qs, base = null) {
         ? (q.groups ?? []).find((g) => String(g).toLowerCase() !== String(q.name).toLowerCase()
           && new RegExp(`(?:^|[^a-z0-9])${String(g).toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[^a-z0-9])`).test(String(q.text ?? '').toLowerCase()))
         : null;
-      if (asked && !/\bnew\b/.test(seg) && (saidKind === 'renamed' || /\b(?:no|nope|nah|wrong)\b/.test(seg))) return { judged: true, renames: { [q.name]: [asked] } };
-      if (saidKind && q.judged && q.judged !== saidKind && !/\bnew\b/.test(seg)) return 'no';
-      if (/\bnew\b/.test(seg)) return 'new';
+      if (asked && !saysNew(seg) && (saidKind === 'renamed' || notNew(seg) || /\b(?:no|nope|nah|wrong)\b/.test(seg))) return { judged: true, renames: { [q.name]: [asked] } };
+      if (saidKind && q.judged && q.judged !== saidKind && !saysNew(seg)) return 'no';
+      if (saysNew(seg)) return 'new';
+      if (notNew(seg)) return q.judged === 'new' ? 'no' : 'guess';
       if (/\b(?:no|nope|nah|not|wrong)\b/.test(seg)) return 'no';
       if (/\b(?:y|ya|yes|yep|yeah|yup|right|correct|ok|okay|sure|same|renamed?|merged?|split|add)\b/.test(seg)) return 'guess';
       return null;
     }
     // A SIBLING ("MILKMAN 2", next to MILKMAN): "no", "same", or our name
     // said back means it IS ours.
-    if (q.guess === 'sibling' && !/\bnew\b/.test(seg)
+    if (q.guess === 'sibling' && !saysNew(seg)
       && (/\b(?:no|nope|nah|same|typo|wrong|mistake)\b/.test(seg) || (q.like && new RegExp(`\\b(?:its|it's|is|=)\\s+${String(q.like).toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(seg)))) return 'alias';
-    if (/\bnew\b/.test(seg)) return 'new';
+    if (saysNew(seg)) return 'new';
+    if (notNew(seg)) return q.guess === 'sibling' ? 'alias' : (q.kind === 'rename' || q.guess === 'typo' ? 'guess' : null);
     if (/\b(?:no|nope|not|nah|skip|don'?t|dont|leave|drop|ignore|wrong)\b/.test(seg)) return q.kind === 'rename' || q.guess === 'typo' ? 'new' : 'drop';
     if (/\b(?:y|ya|yes|yep|yeah|yup|right|correct|rename\w*|typo|same|ok|okay|add|sure)\b/.test(seg)) return 'guess';
     return null;

@@ -30,7 +30,7 @@ const STYLE_ID = { nebula: 0, stars: 1, tide: 2 };
 const hex = (c) => new THREE.Color(c);
 
 export default function Scene3D({
-  colorFrom, colorTo, state = 'idle', levelRef = null, style = 'nebula', active = true, flareKey = 0, onOrbClick = null, anchorRef = null,
+  colorFrom, colorTo, state = 'idle', levelRef = null, style = 'nebula', active = true, flareKey = 0, onOrbClick = null, anchorRef = null, zoom = 1,
 }) {
   const hostRef = useRef(null);
   const live = useRef({ state, style, colorFrom, colorTo, flare: 0 });
@@ -40,6 +40,9 @@ export default function Scene3D({
   live.current.colorTo = colorTo;
   const activeRef = useRef(active);
   activeRef.current = active;
+  // FOCUS MODE: the camera moves in so she fills more of the room
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
   const clickRef = useRef(onOrbClick);
   clickRef.current = onOrbClick;
 
@@ -178,15 +181,41 @@ export default function Scene3D({
       if (a) camera.setViewOffset(w, h, -(a.x - 0.5) * w, -(a.y - 0.5) * h, w, h);
       else camera.clearViewOffset();
     };
+    let baseZ = 13.5;
+    /**
+     * HOW FAR BACK THE CAMERA STANDS, so she fits the space she is given
+     * (a phone gives her a short row, not the screen). Far enough that her
+     * rings fit; focus moves in, but never so close her sphere is cut.
+     * On a desktop this lands on the old 13.5.
+     */
+    const TAN = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+    const fitZ = () => {
+      const a = anchorRef?.current;
+      if (!a?.fh || !a?.fw) return baseZ / zoomRef.current;
+      const need = (R) => Math.max(R / (a.fh * TAN), R / (a.fw * TAN * camera.aspect));
+      const rings = Math.max(13.5, need(3.4));
+      return Math.max(rings / zoomRef.current, need(2.0));
+    };
+    /**
+     * HIDDEN IS NOT A SIZE (his report 2026-10-10: Portal, then Ask Diane, and
+     * no orb). Closed, the command center is display:none, the host measures
+     * 0, and it was shrunk to 1×1, which left the glow pass broken; nothing
+     * resized it back on opening. A zero box is skipped, and the loop checks
+     * the size again whenever it runs.
+     */
+    let sized = '';
     const resize = () => {
-      const w = host.clientWidth || 1;
-      const h = host.clientHeight || 1;
+      const w = host.clientWidth;
+      const h = host.clientHeight;
+      if (!w || !h) return;
+      sized = `${w}x${h}`;
       renderer.setSize(w, h, false);
       composer.setSize(w, h);
       bloom.setSize(w, h);
       camera.aspect = w / h;
       // a narrow screen pulls the camera back so she still fits
-      camera.position.z = w / h < 1 ? 19 : 13.5;
+      baseZ = w / h < 1 ? 19 : 13.5;
+      camera.position.z = fitZ();
       offset.key = '';
       camera.updateProjectionMatrix();
     };
@@ -196,8 +225,15 @@ export default function Scene3D({
 
     // ---- the mouse: parallax for the camera, and a click on her
     const mouse = { x: 0, y: 0, tx: 0, ty: 0 };
+    /**
+     * THE MOUSE ON THE PORTAL IS NOT HERS (his report 2026-10-10: back from
+     * the portal, no orb). Closed, the host measures 0 wide, the parallax
+     * divided by 0, and the camera went to NaN for good: every frame drew
+     * nothing. A hidden host is skipped, and a NaN never sticks.
+     */
     const onMove = (e) => {
       const r = host.getBoundingClientRect();
+      if (!r.width || !r.height) return;
       mouse.tx = ((e.clientX - r.left) / r.width) * 2 - 1;
       mouse.ty = ((e.clientY - r.top) / r.height) * 2 - 1;
     };
@@ -219,6 +255,7 @@ export default function Scene3D({
     const tick = () => {
       raf = requestAnimationFrame(tick);
       if (!activeRef.current || document.hidden) { clock.getDelta(); return; }
+      if (`${host.clientWidth}x${host.clientHeight}` !== sized) resize();
       const dt = Math.min(clock.getDelta(), 0.05) * (reduced ? 0.25 : 1);
       const t = (orbUniforms.uTime.value += dt);
       const L = live.current;
@@ -258,8 +295,10 @@ export default function Scene3D({
       // the camera drifts with the mouse: near things move more than far ones
       mouse.x += (mouse.tx - mouse.x) * Math.min(1, dt * 2.5);
       mouse.y += (mouse.ty - mouse.y) * Math.min(1, dt * 2.5);
+      if (!Number.isFinite(mouse.x) || !Number.isFinite(mouse.y)) Object.assign(mouse, { x: 0, y: 0, tx: 0, ty: 0 });
       camera.position.x = mouse.x * 1.1;
       camera.position.y = -mouse.y * 0.7;
+      camera.position.z += (fitZ() - camera.position.z) * Math.min(1, dt * 3);
       camera.lookAt(0, 0, 0);
       place();
 

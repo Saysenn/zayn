@@ -269,7 +269,9 @@ test('A YES IN THEIR OWN WORDS is a yes; "save the rest" saves the ready ones', 
 test('EVERYDAY CONFIRMS, CANCELS AND CHANGES are read in code, free', () => {
   const pending = { kind: 'add', items: [1, 2, 3].map((n) => ({ n, missing: [], doubts: [] })) };
   const kind = (q) => readReply(q, pending)?.kind;
-  for (const q of ['sure thing', 'ok go', 'fine', 'send it', 'proceed', 'that is correct', 'sige', 'oo', 'tama', 'tamam', 'yalla', '👌', '🙏']) assert.equal(kind(q), 'yes', q);
+  for (const q of ['sure thing', 'ok go', 'fine', 'send it', 'proceed', 'that is correct', '👌', '🙏']) assert.equal(kind(q), 'yes', q);
+  // UK English only (his call 2026-10-10): other languages' words are not read in code
+  for (const q of ['sige', 'oo', 'tama', 'yalla']) assert.notEqual(kind(q), 'yes', q);
   for (const q of ['dont save', 'discard', 'not now', 'nah forget it']) assert.equal(kind(q), 'no', q);
   for (const q of ['hold on', 'one sec', 'let me check']) assert.equal(kind(q), 'hold', q);
   for (const q of ['edit 2', 'fix the date of 3', 'change 1']) assert.equal(kind(q), 'modify', q);

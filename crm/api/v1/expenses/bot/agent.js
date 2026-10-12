@@ -158,8 +158,9 @@ const ANSWER = {
         measure: { type: 'string', enum: ['total', 'count', 'biggest', 'list'] },
         group_by: { type: 'string', enum: ['', 'category', 'spentBy', 'payee', 'day', 'currency'] },
         words: { type: 'string', description: 'ONLY words that filter what it was for or who was paid ("food", "careem", "gloria"); "" for none. Never "new", "total", "so far", a month or a date.' },
+        group: { type: 'string', description: 'In the CRM only: the one group asked about ("MANBAT"); "" for every group. Never a group in words.' },
       },
-      required: ['from', 'to', 'measure', 'group_by', 'words'],
+      required: ['from', 'to', 'measure', 'group_by', 'words', 'group'],
     },
   },
 };
@@ -316,15 +317,25 @@ async function run(name, args, { said, ctx, b, context, shown }) {
     if (args.spent_by) rows = rows.filter((r) => has(r.spentBy, args.spent_by));
     if (args.payee) rows = rows.filter((r) => has(r.payee, args.payee));
     if (args.words) rows = rows.filter((r) => args.words.toLowerCase().split(/\s+/).every((w) => has(`${r.description} ${r.payee}`, w)));
-    const aed = (r) => Number(r.aed ?? r.rawAmount);
-    if (args.min_amount != null) rows = rows.filter((r) => aed(r) >= args.min_amount);
-    if (args.max_amount != null) rows = rows.filter((r) => aed(r) <= args.max_amount);
-    const by = { amount_desc: (a, c) => aed(c) - aed(a), amount_asc: (a, c) => aed(a) - aed(c), date_desc: (a, c) => c.spentOn.localeCompare(a.spentOn), date_asc: (a, c) => a.spentOn.localeCompare(c.spentOn) }[args.sort];
+    /**
+     * IN AED, or UNKNOWN (code review 2026-10-10): a £150 with no saved rate
+     * was compared as AED 150, so "over 300 AED" missed it. With no rate its
+     * AED value is not known: kept in a filter (said as "no rate") rather
+     * than dropped, and sorted last.
+     */
+    const aed = (r) => (r.aed != null ? Number(r.aed) : (!r.currency || r.currency === 'AED' ? Number(r.rawAmount) : null));
+    const unknown = rows.filter((r) => aed(r) == null).length;
+    if (args.min_amount != null) rows = rows.filter((r) => aed(r) == null || aed(r) >= args.min_amount);
+    if (args.max_amount != null) rows = rows.filter((r) => aed(r) == null || aed(r) <= args.max_amount);
+    const num = (r, far) => aed(r) ?? far;
+    const by = { amount_desc: (a, c) => num(c, -Infinity) - num(a, -Infinity), amount_asc: (a, c) => num(a, Infinity) - num(c, Infinity), date_desc: (a, c) => c.spentOn.localeCompare(a.spentOn), date_asc: (a, c) => a.spentOn.localeCompare(c.spentOn) }[args.sort];
     if (by) rows.sort(by);
     rows = rows.slice(0, Math.min(args.limit || 60, 100));
     // what it found may be acted on
     for (const r of rows) context.known.set(r.id, r);
-    return rows.length ? `${rows.length} found:\n${rows.map(rowLine).join('\n')}` : 'None found.';
+    const note = unknown && (args.min_amount != null || args.max_amount != null || /^amount/.test(String(args.sort ?? '')))
+      ? `\n(${unknown} in another currency with no rate saved: its AED value is not known, so it is listed, not judged)` : '';
+    return rows.length ? `${rows.length} found:\n${rows.map(rowLine).join('\n')}${note}` : 'None found.';
   }
   if (name === 'act') {
     const KINDS = ['change', 'split', 'remove', 'drop', 'add'];
@@ -334,7 +345,9 @@ async function run(name, args, { said, ctx, b, context, shown }) {
      * "DELETE ANYTHING FROM 1ST OCT" IS THAT DAY (hard blind set 2026-10-10: it
      * was read as since 1 Oct, 8 to remove). A range only when they say so.
      */
-    const ranged = /\b(?:since|onwards|after|till|until|through|between|to\s+(?:the\s+)?\d|-\s*\d)\b/i.test(said);
+    // "to today", "to now", "to date", "to the end of …", "to 9th", "to October 9": all ranges
+    // (code review 2026-10-10: "from 1st Oct to today" became 1 Oct only)
+    const ranged = /\b(?:since|onwards|after|till|until|through|between|to\s+(?:the\s+)?(?:\d|today|now|date|yesterday|end|last|this|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)|-\s*\d)/i.test(said);
     if (/\bfrom\s+(?:the\s+)?\d{1,2}(?:st|nd|rd|th)?\b|\bfrom\s+\d{4}-\d{2}-\d{2}\b/i.test(said) && !ranged) {
       for (const o of ops) {
         if (o.filter?.from && (!o.filter.to || o.filter.to >= ctx.today)) o.filter = { ...o.filter, to: o.filter.from };
@@ -387,7 +400,18 @@ async function run(name, args, { said, ctx, b, context, shown }) {
     const iso = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(String(d ?? '')) ? d : '');
     const words = String(args.words ?? '').replace(new RegExp(`\\b${String(ctx.group).replace(/[^\w ]/g, '')}\\b`, 'gi'), ' ')
       .replace(/\b(?:new|total|so far|now|again|latest|updated|current|expenses?|spending|spent|this|month|week|year|my|our)\b/gi, ' ').replace(/\s+/g, ' ').trim();
-    const r = { kind: 'question', query: { from: iso(args.from), to: iso(args.to), group: '', groupBy: args.group_by ?? '', measure: args.measure ?? 'total', words } };
+    /**
+     * ONE GROUP, FROM THE CRM (code review 2026-10-10): "how much did MANBAT
+     * spend?" searched the descriptions for "manbat" or totalled every group.
+     * The group the model names, else the one group named in their message;
+     * a group's own number never leaves its group (find.answer).
+     */
+    const known = ctx.channel === 'diane' ? (ctx.groups ?? []) : [];
+    const named = (x) => known.filter((g) => new RegExp(`(?:^|[^a-z0-9])${g.toLowerCase().replace(/[^a-z0-9 ]/g, '')}(?:$|[^a-z0-9])`).test(String(x ?? '').toLowerCase()));
+    const group = known.find((g) => g.toLowerCase() === String(args.group ?? '').trim().toLowerCase())
+      ?? (named(said).length === 1 ? named(said)[0] : '');
+    const cleanWords = group ? words.replace(new RegExp(`\\b${group.replace(/[^\w ]/g, '')}\\b`, 'gi'), ' ').replace(/\s+/g, ' ').trim() : words;
+    const r = { kind: 'question', query: { from: iso(args.from), to: iso(args.to), group, groupBy: args.group_by ?? '', measure: args.measure ?? 'total', words: cleanWords } };
     const text = await b.questionReply(r, ctx, ctx.state.pending);
     shown.push(text);
     return SHOWN(text);
@@ -447,7 +471,10 @@ async function run(name, args, { said, ctx, b, context, shown }) {
      * A SAVE NEEDS THEIR AGREEMENT IN WORDS. A bare "2" under a one-line
      * preview was taken as a yes and saved (break test 2026-10-10).
      */
-    if (args.save && !/\b(?:y(?:es|eah|eh|ep|up|a)|ok(?:ay)?|sure|save|do it|go(?: ahead| on| for it)?|confirm\w*|correct|right|fine|crack on|sorted|proceed|approved?)\b|👍|✅/i.test(said)) {
+    // and never a refusal or a question: "not right", "don't save", "save what?"
+    // (code review 2026-10-10)
+    const refuses = /\b(?:not|no|nope|don'?t|do not|never|wrong|cancel|wait|hold)\b|\?/i.test(said);
+    if (args.save && (refuses || !/\b(?:y(?:es|eah|eh|ep|up|a)|ok(?:ay)?|sure|save|do it|go (?:ahead|on|for it)|confirm\w*|correct|right|fine|crack on|sorted|proceed|approved?)\b|👍|✅/i.test(said))) {
       return 'refused: they did not say yes. Ask in one short line what they meant.';
     }
     const text = await b.onReply({ kind: args.save ? 'yes' : 'no' }, ctx);

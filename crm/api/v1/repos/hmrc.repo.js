@@ -80,6 +80,16 @@ async function status() {
   return rows;
 }
 
+/** A full GOV.UK refresh finished: when, how many pages, how many changed. */
+async function recordRefresh({ pages = null, changed = null } = {}) {
+  await pool.query('INSERT INTO tb_hmrc_refreshes (pages, changed) VALUES ($1, $2)', [pages, changed]);
+}
+
+/** When the last full refresh finished, or null when none has. */
+async function lastRefresh() {
+  return (await pool.query('SELECT max(finished_at) AS at FROM tb_hmrc_refreshes')).rows[0]?.at ?? null;
+}
+
 // ---- what changed on GOV.UK ----
 async function recordChange({ sourceId, url, title, oldUpdatedOn, newUpdatedOn, summary }) {
   const { rows } = await pool.query(
@@ -106,5 +116,4 @@ async function recentChanges(limit = 20) {
 
 module.exports = {
   upsertSource, replaceChunks, allChunks, sourceByUrl, notes, updateNote, removeNote, status,
-  recordChange, untoldChanges, markTold, recentChanges,
-};
+  recordChange, untoldChanges, markTold, recentChanges, recordRefresh, lastRefresh };

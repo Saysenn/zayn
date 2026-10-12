@@ -45,3 +45,18 @@ test('"IN ALL GROUPS" IS EVERY GROUP, unless they say that group', () => {
 test('SEVERAL PEOPLE NAMED TOGETHER IS THEIR TOTAL, whatever the ask', () => {
   assert.deepEqual(toolCall(shape({ ask: 'details', person: 'Gloria', people: ['Gloria', 'Gloria difference'] }), names), { name: 'total_master_sheet', args: { people: ['Gloria', 'Gloria difference'] } });
 });
+
+test('CLONE CHECK 2026-10-10: an end date only when they speak of one; "ending" is not "ended"; "and X?" asks the same', () => {
+  const base = { sure: true, person: '', people: [], groups: [], company: '', rank: null, preset: '', month: '' };
+  const none = { paymentMethod: '', currency: '', paid: '', paymentReceived: [], status: '', amountMin: null, amountMax: null, endWhen: '', paymentStartWhen: '', appointmentWhen: '', dealStatus: '', roleLabel: '', missingPhone: false, missingBank: false, needsReview: false, paydayFlagged: false };
+  const names = { people: ['Nathan', 'Nicola'], groups: ['MANBAT', 'MILKMAN'], companies: [] };
+  const total = toolCall({ ...base, ask: 'total', groups: ['MANBAT'], filters: { ...none, status: 'active', endWhen: 'this-month' } }, { ...names, said: 'whats the total MANBAT payable this month?' });
+  assert.equal(total.args.endWhen, undefined, 'this month is the pay month, not an end date');
+  const ending = toolCall({ ...base, ask: 'list', filters: { ...none, status: 'ended', endWhen: 'soon' } }, { ...names, said: 'who has a deal ending in the next 60 days?' });
+  assert.deepEqual(ending.args.endWhen, ['soon']);
+  assert.equal(ending.args.status, undefined, 'ending is not ended');
+  const follow = toolCall({ ...base, ask: 'details', person: 'Nicola', filters: none }, { ...names, said: 'and nicola?', prev: 'how much is nathan owed this month?' });
+  assert.equal(follow.name, 'total_master_sheet');
+  const plain = toolCall({ ...base, ask: 'details', person: 'Nicola', filters: none }, { ...names, said: 'and nicola?', prev: 'show me nathan' });
+  assert.equal(plain.name, 'find_and_show_details', 'a follow up to a "show me" stays details');
+});

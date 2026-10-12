@@ -149,6 +149,13 @@ function paymentPeriodSql(alias = 'd') {
     -- Somebody said this month pays it. Migration 064, and the same branch
     -- in the same order as isOwedThisMonth.
     WHEN ${a}special_case_deal THEN '${PERIOD.ACTIVE}'
+    -- Month 3 of a week one appointment is paid in full (fullMonthThree in
+    -- owedThisMonth.helper): appointed on or before the month's first Friday,
+    -- and this row is for the month two after it.
+    WHEN ${a}assigned_on IS NOT NULL
+     AND extract(day from ${a}assigned_on) <= 1 + ((5 - extract(dow from date_trunc('month', ${a}assigned_on))::int + 7) % 7)
+     AND date_trunc('month', ${a}assigned_on) + interval '2 months' = date_trunc('month', ${a}preset_on)
+      THEN '${PERIOD.ACTIVE}'
     WHEN ${notStarted} THEN '${PERIOD.NOT_STARTED}'
     WHEN COALESCE((SELECT color_uses_end_date FROM tb_settings LIMIT 1), false)
      AND ${a}end_on IS NOT NULL AND ${a}end_on < ${monthStart} THEN '${PERIOD.ENDED}'

@@ -117,8 +117,13 @@ export async function getHistory(phone) {
   return rows.reverse().map((r) => JSON.parse(r));
 }
 
+/** Clears this phone's threads: the old per-phone one and every per-group one. */
 export async function clearConversation(phone) {
   await redis.del(stateKey(phone), historyKey(phone), pendingKey(phone));
+  for (const pattern of [stateKey(`${phone}|*`), historyKey(`${phone}|*`), pendingKey(`${phone}|*`)]) {
+    const keys = await redis.keys(pattern);
+    if (keys.length) await redis.del(...keys);
+  }
 }
 
 /**

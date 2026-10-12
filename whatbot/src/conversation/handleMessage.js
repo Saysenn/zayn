@@ -206,9 +206,11 @@ export async function handleMessage(input) {
         if (!(await employees.identify(phone, channelGroup).catch(() => null))) {
           return words(MODE_REPLIES.notForExpenses(channelGroup));
         }
-        // HANDED OVER, NEVER AN OPT-OUT: a word meant for the expense side
-        // must not stop every message to them
-        const answered = await answerAsEmployee({ ...input, handedOver: true });
+        // HANDED OVER, AND STOP / START STILL WORK: the STOP words are only
+        // stop, unsubscribe, quit, stopall now ("cancel" and "end" were the
+        // expense words that tripped it), so skipping them here only meant an
+        // admin could never opt out or back in (code review 2026-10-10)
+        const answered = await answerAsEmployee(input);
         return answered === NO_REPLY ? answered : { ...answered, text: `${answered.text}${MODE_REPLIES.handedOver}` };
       }
     }
@@ -222,8 +224,7 @@ async function answerAsEmployee(input) {
   const { phone, channelGroup, text } = input;
 
   // STOP first, before anything. it must never be treated as a question.
-  // (not for a message the expense side handed over: see above)
-  const intent = input.handedOver ? null : optOutIntent(text);
+  const intent = optOutIntent(text);
   switch (intent) {
     case "stop":
       await setOptedOut(phone, true);
@@ -433,8 +434,12 @@ async function answerAsEmployee(input) {
 
   // Read once, used twice: is this their first message, and did our last
   // reply end in a menu. Nothing writes history in between.
-  const history = await getHistory(phone);
-  const send = replier(phone, text, history);
+  // THE CONVERSATION IS PER NUMBER WE HOLD, not per phone (code review
+  // 2026-10-10): someone in two groups keeps two threads, and a menu or a
+  // figure offered on one group's number never answers on the other's
+  const convo = `${phone}|${channelGroup ?? ""}`;
+  const history = await getHistory(convo);
+  const send = replier(convo, text, history);
 
   // Everything answered in code, before the model. The ORDER matters and
   // lives in scriptedReply.js — read it there. This is just plumbing.
@@ -465,9 +470,9 @@ async function answerAsEmployee(input) {
 
   // "yes" or "2" means whatever the last menu offered. Turned back into a
   // real question before the model sees it.
-  const resolved = await resolveOffer(phone, text);
+  const resolved = await resolveOffer(convo, text);
   if ("declined" in resolved) {
-    await setState(phone, "clarifying");
+    await setState(convo, "clarifying");
     return words(CLARIFY_PROMPT);
   }
   const question = resolved.question;
@@ -484,16 +489,16 @@ async function answerAsEmployee(input) {
       ?? (await runAgent(ctx, question, history));
   } catch (err) {
     if (err instanceof LlmUnavailableError) {
-      await setState(phone, "idle");
+      await setState(convo, "idle");
       return words(err.message);
     }
     throw err;
   }
 
-  await appendTurn(phone, { role: "user", content: question });
-  await appendTurn(phone, { role: "assistant", content: reply.text });
+  await appendTurn(convo, { role: "user", content: question });
+  await appendTurn(convo, { role: "assistant", content: reply.text });
 
-  await setState(phone, "idle");
+  await setState(convo, "idle");
 
   // ASKED AGAIN, SENT AGAIN, his call 2026-10-08. Identical figures used to
   // get "Same as I've just sent you": but the turn above is remembered before
@@ -502,7 +507,7 @@ async function answerAsEmployee(input) {
 
   if (reply.offer && reply.offer.choices.length > 0) {
     // remember what each number will run, or the menu is decoration
-    await setPendingOffer(phone, reply.offer.choices);
+    await setPendingOffer(convo, reply.offer.choices);
     if (send.menuJustShown)
       return { text: reply.text, attachment: reply.attachment, ...extras(reply) };
     return {
@@ -519,7 +524,7 @@ async function answerAsEmployee(input) {
   // means that. Without this, "tell me now" reached the model as a fresh
   // question and it repeated itself.
   if (!reply.hadDisplay) {
-    await setPendingOffer(phone, [
+    await setPendingOffer(convo, [
       { label: "Show me what I am owed", ask: "show me my full breakdown" },
     ]);
   }

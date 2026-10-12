@@ -140,10 +140,15 @@ function firstNameIn(said, people) {
 
 // An amount asked about one person: "what's kiran getting", "what do we pay otto".
 const ASKS_AMOUNT = /\b(?:getting|owed?|owing|paid|pay|earn\w*|make|making|money|how much)\b/i;
+// An end date spoken of; a future one ("ending", "ends in", "due to end").
+const ENDING = /\b(?:end(?:s|ing|ed)?|finish\w*|expir\w*|leav\w*|wrap\w* up|contract (?:runs? out|over)|run(?:s|ning)? out)\b/i;
+const FUTURE_END = /\b(?:ending|ends|will end|end (?:in|soon|this|next|by|before)|due to end|coming up|upcoming|next \d+|within)\b/i;
+// A follow up that names only someone new: "and nicola?", "what about drew", "how about gloria?".
+const FOLLOW_UP = /^\s*(?:and|what about|how about|and what about|also|then|ok(?:ay)? and|same for)\b|^\s*[a-z][a-z' .-]{1,30}\?\s*$/i;
 // People, by word: "show all unpaid people", "everyone not paid".
 const ASKS_PEOPLE = /^\s*who\b|\b(?:people|persons|everyone|everybody|anyone|anybody)\b/i;
 
-function toolCall(shape, { people = [], groups = [], companies = [], said = '' } = {}) {
+function toolCall(shape, { people = [], groups = [], companies = [], said = '', prev = '' } = {}) {
   // ONE NAME IN "people" IS THE PERSON. Library 2026-10-08: "how much do we
   // pay otto" came back as people ["Otto Fenn"], person "", and the whole
   // sheet was totalled.
@@ -171,6 +176,14 @@ function toolCall(shape, { people = [], groups = [], companies = [], said = '' }
   if (ASKS_RECEIVED.test(said)) {
     f = { ...f, paid: '', paymentReceived: receivedAsked(said).people };
   }
+  /**
+   * AN END DATE ONLY WHEN THEY SPOKE OF ONE, and a deal ENDING is not one
+   * that ENDED (clone check 2026-10-10): "total MANBAT payable this month"
+   * was read as "ending this month" and came back as nothing owed, and
+   * "ending in the next 60 days" as payment period ended, "none".
+   */
+  if (f.endWhen && !ENDING.test(said)) f = { ...f, endWhen: '' };
+  if (f.status === 'ended' && FUTURE_END.test(said) && !/\b(?:ended|finished|already|past|over)\b/i.test(said)) f = { ...f, status: '' };
   const filters = {
     ...(f.paymentMethod ? { paymentMethod: [f.paymentMethod] } : {}),
     ...(f.currency ? { currency: [f.currency] } : {}),
@@ -205,6 +218,11 @@ function toolCall(shape, { people = [], groups = [], companies = [], said = '' }
   let read = shape.ask === 'people' && !aboutPay ? 'list' : shape.ask;
   // "WHAT'S KIRAN GETTING IN GBP" is an amount, not their deals in full.
   if (read === 'details' && person && ASKS_AMOUNT.test(said)) read = 'total';
+  /**
+   * "AND NICOLA?" ASKS WHAT WAS ASKED BEFORE (clone check 2026-10-10): after
+   * "how much is nathan owed?" it showed her deals, not what she is owed.
+   */
+  if ((read === 'details' || read === 'list') && person && FOLLOW_UP.test(said) && ASKS_AMOUNT.test(prev) && !ASKS_AMOUNT.test(said)) read = 'total';
   const ask = (read === 'list' || read === 'count') && !person && ASKS_PEOPLE.test(said)
     && (f.paid || f.paymentReceived?.length) && !f.paymentMethod && !f.currency ? 'people' : read;
   switch (ask) {

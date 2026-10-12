@@ -172,6 +172,14 @@ export const CRM_DOWN =
   "Sorry, I can't reach the CRM right now, so nothing was saved. Please send it again in a few minutes.";
 
 /**
+ * SLOW, NOT DOWN (code review 2026-10-10): the CRM may have saved and then
+ * run past the wait (drawing a big preview's pictures). "Nothing was saved"
+ * there made them send the receipts again, and the CRM saved them twice.
+ */
+export const CRM_SLOW =
+  "Sorry, the CRM took too long to answer, so I can't tell whether that went through. Type *show expenses* to check before sending it again.";
+
+/**
  * One message to the CRM's expense brain.
  * @returns {Promise<{ registered: boolean, reply?: string }>}
  */
@@ -223,8 +231,9 @@ export async function expenseTurn({ phone, group, text, attachments = [], messag
     }
     return parsed.data;
   } catch (err) {
-    logger.error({ err: err.message }, "expense turn: CRM unreachable");
-    return { registered: true, reply: CRM_DOWN };
+    const slow = err?.name === "TimeoutError" || err?.name === "AbortError";
+    logger.error({ err: err.message }, slow ? "expense turn: CRM too slow" : "expense turn: CRM unreachable");
+    return { registered: true, reply: slow ? CRM_SLOW : CRM_DOWN };
   } finally {
     // the temp copies have done their job
     await Promise.all(attachments.filter((a) => a.path).map((a) => rm(a.path, { force: true })));

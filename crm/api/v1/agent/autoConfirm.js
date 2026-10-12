@@ -144,7 +144,15 @@ const PER_PERSON_ONLY = new Set(['perPerson', 'confirmed', 'said', 'saidRecent',
  */
 const ALL_ANSWER = /^(?:(?:yes|yeah|yep|ok|okay)[,\s]+)?(?:both|all)(?:\s+(?:of\s+(?:them|their\s+deals)|groups?|deals?|pls|please))?[.!\s]*$/i;
 function answeredAll(asked, reply) {
-  return /\b(?:both|all)\b[^?]*\?\s*$/i.test(String(asked ?? '').trim()) && ALL_ANSWER.test(String(reply ?? '').trim());
+  /**
+   * ONLY WHEN NOTHING WAS WRITTEN YET (code review 2026-10-10): "Done,
+   * INDIGO is 4,600. His other deal too, or both?" → "both" spelled out
+   * every deal, INDIGO included, and it skipped the preview that stops +100
+   * landing on INDIGO twice. Her question after a change asks first.
+   */
+  const q = String(asked ?? '').trim();
+  if (/\b(?:done|updated|changed|i'?ve (?:set|added|made|put)|now (?:at|is|on)|is now|went from|→|->)\b|→|->/i.test(q)) return false;
+  return /\b(?:both|all)\b[^?]*\?\s*$/i.test(q) && ALL_ANSWER.test(String(reply ?? '').trim());
 }
 
 /**

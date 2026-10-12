@@ -182,6 +182,14 @@ async function hmrcTurn(history, send, { user = null } = {}) {
         out = more.length ? sourcesBlock(more).replace(/^\[(\d+)\]/gm, (m, n) => `[${Number(n) + from}]`) : 'Nothing new found.';
       } else if (call.function.name === 'cis_deduction') {
         out = JSON.stringify(cisDeduction(args));
+      } else if (call.function.name === 'remember_note' && !/\b(?:remember|note|save|keep|record|our (?:rule|way|policy)|y(?:es|eah|ep|up)|ok(?:ay)?|sure|please do|go ahead|do it)\b/i.test(asked)) {
+        /**
+         * ONLY WHEN THEY ASKED (code review 2026-10-10): a note is read first,
+         * above GOV.UK, so one saved from a passing remark (or from words in a
+         * fetched page) would steer every answer after it. Asking or a yes, in
+         * their own message, or no note.
+         */
+        out = 'refused: they did not ask to save it. Ask in one short line: "Want me to remember that?"';
       } else if (call.function.name === 'remember_note') {
         // eslint-disable-next-line no-await-in-loop
         const saved = await knowledge.index({ kind: 'note', title: cut(args.title, 120) || 'Our note', body: cut(args.text, 8000), topic: 'ours', addedBy: user ?? null });
@@ -221,7 +229,11 @@ async function hmrcTurn(history, send, { user = null } = {}) {
    */
   const untold = await repo.untoldChanges(5).catch(() => []);
   const worth = untold.filter((c) => !/^wording only/i.test(String(c.summary ?? ''))).slice(0, 3);
-  await repo.markTold(untold.map((c) => c.id)).catch(() => {});
+  // ONLY WHAT WAS SAID is marked told: the wording-only ones, and the three
+  // shown; a 4th or 5th real change waits for her next answer (code review
+  // 2026-10-10: they were marked told and never mentioned)
+  const said = new Set(worth.map((c) => c.id));
+  await repo.markTold(untold.filter((c) => said.has(c.id) || /^wording only/i.test(String(c.summary ?? ''))).map((c) => c.id)).catch(() => {});
   if (worth.length) {
     const day = (d) => (d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'recently');
     const lines = worth.map((c) => `• ${c.title} (updated ${day(c.new_updated_on ?? c.created_at)}): ${c.summary}`);

@@ -120,7 +120,7 @@ const messageWorker = new Worker(
     if (voice) {
       const heard = await heardFromVoice(voice);
       if (!heard.ok) {
-        await once(() => sendText(from, to, heard.reply));
+        await once(() => sendText(from, to, heard.reply), heard.reply);
         return;
       }
       question = heard.text;
@@ -136,7 +136,7 @@ const messageWorker = new Worker(
       batchSeq,
       unreadable,
       // the expense bot's "Got it, reading…" and "typing…" while it reads
-      notify: (t) => once(() => sendText(from, to, t)).catch((err) => logger.warn({ err }, "could not send the reading note")),
+      notify: (t) => once(() => sendText(from, to, t), t).catch((err) => logger.warn({ err }, "could not send the reading note")),
       typing: () => keepTyping(from, to),
       typingOnce: () => typingOnce(from, to),
     });
@@ -150,28 +150,28 @@ const messageWorker = new Worker(
       // a pay breakdown: its one line caption, then whatever menu followed it
       const caption = reply.imageCaption
         ?? (reply.caption ? [reply.caption, menuOf(reply.text)].filter(Boolean).join("\n\n") : reply.text);
-      await once(() => sendImage(from, to, { content: Buffer.from(reply.image.base64, "base64"), caption, mimetype: reply.image.mime }));
+      await once(() => sendImage(from, to, { content: Buffer.from(reply.image.base64, "base64"), caption, mimetype: reply.image.mime }), `image:${reply.image.base64.length}:${caption ?? ""}`);
       // a long report's further pages, in order
       for (const page of reply.moreImages ?? []) {
-        await once(() => sendImage(from, to, { content: Buffer.from(page.base64, "base64"), caption: "", mimetype: page.mime }));
+        await once(() => sendImage(from, to, { content: Buffer.from(page.base64, "base64"), caption: "", mimetype: page.mime }), `image:${page.base64.length}`);
       }
       // AN EXPENSE PREVIEW: the pictures first, THEN the notes, "Please
       // check" and what to reply, as their own message
-      if (reply.imageCaption && reply.body?.trim()) await once(() => sendText(from, to, reply.body));
+      if (reply.imageCaption && reply.body?.trim()) await once(() => sendText(from, to, reply.body), reply.body);
     } else {
-      await once(() => sendText(from, to, reply.text));
+      await once(() => sendText(from, to, reply.text), reply.text);
     }
     // a second or third bubble (the expense bot's rates), in order
-    for (const t of reply.more ?? []) await once(() => sendText(from, to, t));
+    for (const t of reply.more ?? []) await once(() => sendText(from, to, t), t);
 
     // THE RECEIPT THEY ASKED FOR, after the line that names it: a photo as a
     // picture, a PDF or a sheet as a file. Only ever on their request.
     if (reply.receipt) {
       const content = Buffer.from(reply.receipt.base64, "base64");
       if (/^image\//.test(reply.receipt.mime)) {
-        await once(() => sendImage(from, to, { content, caption: "", mimetype: reply.receipt.mime }));
+        await once(() => sendImage(from, to, { content, caption: "", mimetype: reply.receipt.mime }), `receipt:${content.length}`);
       } else {
-        await once(() => sendDocument(from, to, { content, fileName: reply.receipt.filename ?? "receipt", mimetype: reply.receipt.mime, caption: "" }));
+        await once(() => sendDocument(from, to, { content, fileName: reply.receipt.filename ?? "receipt", mimetype: reply.receipt.mime, caption: "" }), `receipt:${reply.receipt.filename}:${content.length}`);
       }
     }
 
@@ -187,7 +187,7 @@ const messageWorker = new Worker(
           "attachment dropped — documents are off",
         );
       } else {
-        await once(() => sendDocument(from, to, reply.attachment));
+        await once(() => sendDocument(from, to, reply.attachment), `doc:${reply.attachment?.fileName}:${reply.attachment?.content?.length}`);
       }
     }
 
