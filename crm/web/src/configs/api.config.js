@@ -200,6 +200,14 @@ export const apiService = {
     updateNote: (id, fields) => api.patch(`${apiPath}/hmrc/notes/${id}`, fields),
     removeNote: (id) => api.delete(`${apiPath}/hmrc/notes/${id}`),
     refresh: () => api.post(`${apiPath}/hmrc/refresh`, {}),
+    // OUR PLAYBOOK, read first in lawyer mode (migration 082)
+    playbook: () => api.get(`${apiPath}/hmrc/playbook`),
+    addPlaybook: (body) => api.post(`${apiPath}/hmrc/playbook`, body),
+    updatePlaybook: (id, fields) => api.patch(`${apiPath}/hmrc/playbook/${id}`, fields),
+    removePlaybook: (id) => api.delete(`${apiPath}/hmrc/playbook/${id}`),
+    playbookHistory: () => api.get(`${apiPath}/hmrc/playbook/history`),
+    undoPlaybook: (changeId) => api.post(`${apiPath}/hmrc/playbook/undo/${changeId}`, {}),
+    playbookExportUrl: () => `${apiPath}/hmrc/playbook/export`,
   },
   expenseAdmins: {
     list: () => api.get(`${apiPath}/expense-admins`),
@@ -392,7 +400,7 @@ export const apiService = {
     speechStatus: () => api.get(`${apiPath}/master-sheet/speech/status`),
     // Whether Diane can think at all. See hooks/useAiStatus.js.
     aiStatus: () => api.get(`${apiPath}/master-sheet/ai/status`),
-    speech: (text) => api.postForBlob(`${apiPath}/master-sheet/speech`, { text }),
+    speech: (text, persona = null) => api.postForBlob(`${apiPath}/master-sheet/speech`, { text, ...(persona ? { persona } : {}) }),
     // Voice INPUT — a recorded clip in, the words out. Runs on the same
     // key/base URL as the chat model (Groq serves /audio/transcriptions,
     // unlike /audio/speech above, which is why this needs no extra key).

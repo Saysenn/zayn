@@ -137,6 +137,16 @@ const env = {
    * amount is how somebody mishears a number, so money slows down and
    * levels out no matter how lively the rest is.
    */
+  /**
+   * LAWYER MODE'S VOICE (his call 2026-10-12: "a strong woman", coral picked
+   * from four samples). A senior barrister: composed and authoritative, never
+   * the sweet default. Used only while the HMRC & CIS (lawyer) context is on.
+   */
+  openaiTtsLawyerVoice: process.env.OPENAI_TTS_LAWYER_VOICE || 'coral',
+  openaiTtsLawyerInstructions: process.env.OPENAI_TTS_LAWYER_INSTRUCTIONS
+    || 'A strong, senior British woman: a top barrister. Confident, composed and authoritative; mid to low pitch; '
+      + 'measured pace with deliberate pauses; crisp diction; warm but no-nonsense. Never sweet, never flirty, never rushed. '
+      + 'Figures, dates and percentages said slowly and clearly.',
   openaiTtsInstructions: process.env.OPENAI_TTS_INSTRUCTIONS
     || 'You are Diane: a sweet, warm, flirty young woman with the bright excitable energy '
       + 'of an anime heroine. Youthful and high in pitch, soft and feminine, never mature, '

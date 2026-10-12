@@ -177,6 +177,7 @@ const ambient = {
 
     this.nodes = { out, hum, humFilter, airFilter, airGain, lfo, voices, air };
     this.apply();
+    this.setMood(this.mood);
     this.scheduleChime();
   },
   scheduleChime() {
@@ -184,7 +185,7 @@ const ambient = {
     this.chimeTimer = setTimeout(() => {
       const c = audio();
       if (c && this.nodes) {
-        const f = PENTA[Math.floor(Math.random() * PENTA.length)];
+        const f = PENTA[Math.floor(Math.random() * PENTA.length)] * (this.mood === 'bright' ? 2 : 1);
         const t = c.currentTime;
         const o = c.createOscillator();
         const g = c.createGain();
@@ -201,6 +202,18 @@ const ambient = {
     }, 4500 + Math.random() * 6500 * (1.2 - this.energy));
   },
   setEnergy(e) { this.energy = e; this.apply(); },
+  /**
+   * LAWYER MODE'S BRIGHTER CHORD (his call 2026-10-12): the hum's voices move
+   * up a fourth and the chimes an octave, gliding there over two seconds.
+   */
+  mood: 'calm',
+  setMood(m) {
+    this.mood = m === 'bright' ? 'bright' : 'calm';
+    const n = this.nodes;
+    if (!n || !ctx) return;
+    const up = this.mood === 'bright' ? 4 / 3 : 1;
+    n.voices.forEach((o, i) => o.frequency.setTargetAtTime([65.4, 65.4, 98.0, 130.8][i] * up, ctx.currentTime, 0.8));
+  },
   apply() {
     const n = this.nodes;
     if (!n || !ctx) return;

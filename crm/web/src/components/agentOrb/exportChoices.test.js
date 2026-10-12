@@ -34,11 +34,14 @@ const TRACKER = read('SessionTracker.jsx');
 
 test('THE LIVE EXPORT FLOATS OVER THE ORB', () => {
   assert.match(OVERLAY, /import ExportSession from '\.\/forms\/ExportSession'/);
+  // the card is one shared piece (exportCardEl, for V1 and V2) drawn on the stage
+  const card = OVERLAY.slice(OVERLAY.indexOf('const exportCardEl'), OVERLAY.indexOf('const convoToolsEl'));
   const stage = OVERLAY.slice(OVERLAY.indexOf('<section'), OVERLAY.indexOf('</section>'));
-  assert.match(stage, /<ExportSession/);
-  assert.match(stage, /overlay/);
-  assert.match(stage, /onSay=\{sendMessage\}/);
-  assert.match(stage, /openCard && !openCard\.paused/);
+  assert.match(stage, /\{exportCardEl\}/);
+  assert.match(card, /<ExportSession/);
+  assert.match(card, /overlay/);
+  assert.match(card, /onSay=\{sendMessage\}/);
+  assert.match(card, /openCard && !openCard\.paused/);
 });
 
 test('a PAUSED session offers no choices, only the way back', () => {
@@ -76,10 +79,12 @@ test('A SUCCESSFUL SAVE REMOVES THE FINISHED EXPORT CARD', () => {
 test('THE TRACKER IS IN THE HEADER, which cannot scroll', () => {
   // From the drawer's own title down to the scrolling area under it. The
   // point of the test is that the tracker is ABOVE that boundary.
+  // the header's tools are one shared piece (convoToolsEl), drawn right under
+  // the drawer's title; the scrolling area is another (convoBodyEl), after it
   const title = OVERLAY.indexOf('<PanelLabel>Conversation</PanelLabel>');
-  const scroller = OVERLAY.indexOf('ref={drawerScrollRef}', title);
-  assert.ok(title > 0 && scroller > title, 'the drawer header could not be found');
-  const header = OVERLAY.slice(title, scroller);
+  assert.ok(title > 0 && OVERLAY.indexOf('{convoToolsEl}', title) > title && OVERLAY.indexOf('{convoBodyEl}', title) > OVERLAY.indexOf('{convoToolsEl}', title), 'the drawer header could not be found');
+  const header = OVERLAY.slice(OVERLAY.indexOf('const convoToolsEl'), OVERLAY.indexOf('const convoBodyEl'));
+  assert.doesNotMatch(header, /ref=\{drawerScrollRef\}/, 'the tracker is inside the scrolling area');
   assert.match(header, /<SessionTracker/, 'the tracker is not in the drawer header');
   assert.match(header, /stages=\{cardStages\}/);
   assert.match(header, /paused=\{Boolean\(openCard\.paused\)\}/);
@@ -391,7 +396,10 @@ test('A REPLY IS SHOWN WHOLE. Nothing is hidden behind a click', () => {
   assert.doesNotMatch(messages, /LONG_REPLY_LINES/, 'the cap is gone, not just unused');
   assert.doesNotMatch(messages, /Show all/, 'and so is the control');
   assert.doesNotMatch(messages, /Show less/);
-  assert.doesNotMatch(messages, /useState/, 'the bubble holds no open state');
+  // THE BUBBLE holds no open state. Its SOURCES do (his call 2026-10-10:
+  // links hidden behind "N sources" until clicked), which is not the reply.
+  const bubble = messages.slice(messages.indexOf('function Bubble'), messages.indexOf('function Bubble') + 600);
+  assert.doesNotMatch(bubble, /useState/, 'the bubble holds no open state');
   // It still links `#47` to the row, which is the only thing it ever did
   // besides hiding text.
   assert.match(messages, /function Bubble[\s\S]{0,120}return linkify\(text, onOpenDeal\);/);

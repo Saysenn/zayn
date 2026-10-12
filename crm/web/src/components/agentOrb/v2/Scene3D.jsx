@@ -30,7 +30,7 @@ const STYLE_ID = { nebula: 0, stars: 1, tide: 2 };
 const hex = (c) => new THREE.Color(c);
 
 export default function Scene3D({
-  colorFrom, colorTo, state = 'idle', levelRef = null, style = 'nebula', active = true, flareKey = 0, onOrbClick = null, anchorRef = null, zoom = 1,
+  colorFrom, colorTo, state = 'idle', levelRef = null, style = 'nebula', active = true, flareKey = 0, onOrbClick = null, anchorRef = null, zoom = 1, lively = false,
 }) {
   const hostRef = useRef(null);
   const live = useRef({ state, style, colorFrom, colorTo, flare: 0 });
@@ -43,6 +43,9 @@ export default function Scene3D({
   // FOCUS MODE: the camera moves in so she fills more of the room
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
+  // LAWYER MODE (his call 2026-10-12): livelier, and a dial ring of its own
+  const livelyRef = useRef(lively);
+  livelyRef.current = lively;
   const clickRef = useRef(onOrbClick);
   clickRef.current = onOrbClick;
 
@@ -122,6 +125,24 @@ export default function Scene3D({
         rings.push({ mesh, holder, speed: s.speed, mat });
       }
     });
+
+    /**
+     * THE DIAL: a slow outer ring of fine ticks, only in lawyer mode. It
+     * fades in and out (uDial), and turns against the others.
+     */
+    const dial = { value: 0 };
+    const dialHolder = new THREE.Group();
+    dialHolder.rotation.set(1.35, 0.0, 0.0);
+    const dialMat = new THREE.ShaderMaterial({
+      vertexShader: RING_VERTEX, fragmentShader: RING_FRAGMENT, transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: orbUniforms.uTime, uColor: { value: hex('#ffffff') }, uSegs: { value: 240 }, uDash: { value: 0.18 }, uEnergy: dial, uFlare: orbUniforms.uFlare, uRadius: { value: 4.25 },
+        uWave: { value: 0 }, uPhase: { value: 0 }, uK: { value: 3 }, uStrand: { value: 0 },
+      },
+    });
+    const dialMesh = new THREE.Mesh(new THREE.RingGeometry(4.25 - 0.012, 4.25 + 0.012, 512, 1), dialMat);
+    dialHolder.add(dialMesh);
+    scene.add(dialHolder);
 
     // ---- stars and dust, at three depths
     const layers = [];
@@ -247,6 +268,8 @@ export default function Scene3D({
     window.addEventListener('pointermove', onMove, { passive: true });
     host.addEventListener('click', onClick);
 
+    const cA = hex(colorFrom); const cB = hex(colorTo); const tA = new THREE.Color(); const tB = new THREE.Color();
+
     // ---- the loop
     const clock = new THREE.Clock();
     let raf = 0;
@@ -260,7 +283,13 @@ export default function Scene3D({
       const t = (orbUniforms.uTime.value += dt);
       const L = live.current;
       // ease toward her state; her voice level drives the pulse
-      energy += ((STATE_ENERGY[L.state] ?? 0.25) - energy) * Math.min(1, dt * 3);
+      // lawyer mode never idles low: a livelier floor, and the dial comes in
+      const floor = livelyRef.current ? 0.5 : 0;
+      energy += (Math.max(STATE_ENERGY[L.state] ?? 0.25, floor) - energy) * Math.min(1, dt * 3);
+      dial.value += ((livelyRef.current ? 0.9 : 0) - dial.value) * Math.min(1, dt * 1.5);
+      dialMesh.visible = dial.value > 0.02;
+      dialMesh.rotation.z -= dt * 0.04;
+      dialMat.uniforms.uColor.value.copy(cA).multiplyScalar(dial.value);
       const lvl = Math.max(0, levelRef?.current ?? 0);
       orbUniforms.uEnergy.value = energy;
       orbUniforms.uLevel.value += (lvl - orbUniforms.uLevel.value) * Math.min(1, dt * 12);
@@ -271,9 +300,12 @@ export default function Scene3D({
       orbUniforms.uError.value += ((L.state === 'error' ? 1 : 0) - orbUniforms.uError.value) * Math.min(1, dt * 4);
       orbUniforms.uStyle.value = STYLE_ID[L.style] ?? 0;
       wave.value += ((STYLE_ID[L.style] === 2 ? 1 : 0) - wave.value) * Math.min(1, dt * 1.8);
-      orbUniforms.uColorA.value.set(L.colorFrom);
-      orbUniforms.uColorB.value.set(L.colorTo);
-      halo.material.uniforms.uColor.value.set(L.colorTo);
+      // the colours EASE to a new pair (lawyer mode's white fades in, not snaps)
+      tA.set(L.colorFrom); tB.set(L.colorTo);
+      cA.lerp(tA, Math.min(1, dt * 2.5)); cB.lerp(tB, Math.min(1, dt * 2.5));
+      orbUniforms.uColorA.value.copy(cA);
+      orbUniforms.uColorB.value.copy(cB);
+      halo.material.uniforms.uColor.value.copy(cB);
 
       // the orb turns slowly; faster while she thinks
       orb.rotation.y += dt * (0.08 + energy * 0.25);
@@ -285,10 +317,10 @@ export default function Scene3D({
 
       for (const r of rings) {
         r.mesh.rotation.z += dt * r.speed * (0.6 + energy * 1.6);
-        r.mat.uniforms.uColor.value.set(L.colorFrom);
+        r.mat.uniforms.uColor.value.copy(cA);
       }
       for (const l of layers) {
-        if (l.orbit) { l.holder.rotation.y += dt * 0.05 * (0.5 + energy); l.mat.uniforms.uColor.value.set(L.colorFrom); }
+        if (l.orbit) { l.holder.rotation.y += dt * 0.05 * (0.5 + energy); l.mat.uniforms.uColor.value.copy(cA); }
         else l.holder.rotation.z += dt * 0.004;
       }
 

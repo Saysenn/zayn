@@ -17,6 +17,9 @@ const Scene3D = lazy(() => import('./Scene3D'));
 // orbiting rings, the stars), and the panels floating in front of it at
 // different depths, tilting toward the mouse. Colours are the theme's.
 
+// V2'S OWN NAMES for the modes (V1 keeps its own): HMRC & CIS is Lawyer here
+const LABELS = { hmrc: 'Lawyer' };
+
 const STYLES = [
   { key: 'nebula', label: 'Nebula' },
   { key: 'tide', label: 'Tide' },
@@ -91,6 +94,7 @@ export default function CommandCenterV2({
   autoChip, convoTools, convoBody, buildProgress, pausedPill, composer, exportCard, overlays,
 }) {
   const palette = useDianePalette();
+  const lawyer = context === 'hmrc'; // lawyer mode: the HMRC & CIS context
   const rootRef = useRef(null);
   // where the orb sits: the middle of the free space above the dock (0..1)
   const orbSpaceRef = useRef(null);
@@ -100,6 +104,22 @@ export default function CommandCenterV2({
   // FOCUS MODE (his call 2026-10-10): the left side hides, she grows
   const [focus, setFocusState] = useState(() => read('diane.focus', '0') === '1');
   const setFocus = (on) => { setFocusState(on); try { localStorage.setItem('diane.focus', on ? '1' : '0'); } catch { /* this tab only */ } };
+  /**
+   * LAWYER MODE OPENS IN FOCUS (his call 2026-10-12): the side panel folds
+   * away and she comes forward as it switches on; leaving it puts focus back
+   * the way it was. Not saved as his choice: only "Focus" itself is.
+   */
+  const focusBefore = useRef(null);
+  useEffect(() => {
+    if (lawyer) {
+      focusBefore.current = focus;
+      setFocusState(true);
+    } else if (focusBefore.current !== null) {
+      setFocusState(focusBefore.current);
+      focusBefore.current = null;
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lawyer]);
   const pickStyle = (s) => { setOrbStyle(s); try { localStorage.setItem('diane.orbStyle', s); } catch { /* this tab only */ } };
 
   /**
@@ -155,6 +175,8 @@ export default function CommandCenterV2({
   }, [open]);
   useEffect(() => { if (open && !muted) sfx.ambient.start(); }, [muted, open]);
   // her state moves the ambience: the hum lifts, the turning quickens
+  // a brighter chord in lawyer mode
+  useEffect(() => { sfx.ambient.setMood(lawyer ? 'bright' : 'calm'); }, [lawyer]);
   useEffect(() => {
     sfx.ambient.setEnergy({ idle: 0.2, connecting: 0.45, listening: 0.5, thinking: 0.9, speaking: 0.7, error: 0.3, disabled: 0.05 }[orbState] ?? 0.2);
   }, [orbState]);
@@ -185,14 +207,22 @@ export default function CommandCenterV2({
     if (b && !b.disabled && !(e.relatedTarget && b.contains(e.relatedTarget))) sfx.play('hover');
   };
 
+  /**
+   * LAWYER MODE IS WHITE (his call 2026-10-12): while the HMRC & CIS context
+   * is on, V2's accent is white and silver, whatever the theme; the theme's
+   * colours come back on leaving it. The scene eases between the two.
+   */
+  const tone = lawyer
+    ? { signal: '#f4f8fc', accent: '#aab8ca', hot: '#ffffff', dim: '#9aa6b6' }
+    : { signal: palette.signal, accent: palette.accent, hot: palette.hot ?? '#ffffff', dim: palette.dim };
   const vars = {
-    '--sig': palette.signal, '--acc': palette.accent, '--hot': palette.hot ?? '#ffffff', '--dim': palette.dim, '--void': palette.void,
+    '--sig': tone.signal, '--acc': tone.accent, '--hot': tone.hot, '--dim': tone.dim, '--void': palette.void,
   };
 
   return (
     <div
       ref={rootRef}
-      className={`cc2 fixed inset-0 z-30 ${open ? 'block' : 'hidden'} is-${orbState ?? 'idle'} ${focus ? 'is-focus' : ''}`}
+      className={`cc2 fixed inset-0 z-30 ${open ? 'block' : 'hidden'} is-${orbState ?? 'idle'} ${lawyer ? 'is-lawyer' : ''} ${focus ? 'is-focus' : ''}`}
       style={vars}
       role="dialog"
       aria-modal="true"
@@ -204,8 +234,9 @@ export default function CommandCenterV2({
       <div className="absolute inset-0">
         <Suspense fallback={<div className="absolute inset-0 bg-black" />}>
           <Scene3D
-            colorFrom={palette.signal}
-            colorTo={palette.accent}
+            colorFrom={tone.signal}
+            colorTo={tone.accent}
+            lively={lawyer}
             state={orbState}
             levelRef={orbLevelRef}
             style={orbStyle}
@@ -250,7 +281,8 @@ export default function CommandCenterV2({
                   title={c.soon ? `${c.label}: coming soon` : `Focus on ${c.label}`}
                 >
                   <span className="cc2-mode-glyph" />
-                  <span className="cc2-mode-label">{c.label}</span>
+                  <span className="cc2-mode-label">{LABELS[c.key] ?? c.label}</span>
+                  {on && c.key === 'hmrc' && <span className="cc2-mode-badge">Lawyer</span>}
                   {c.soon && <span className="cc2-mode-soon">soon</span>}
                 </button>
               );

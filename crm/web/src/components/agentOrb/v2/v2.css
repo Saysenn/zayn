@@ -585,3 +585,31 @@
 .cc2 .dm-pic-tile .dm-pic-cap { letter-spacing: 0.04em; text-transform: none; font-size: 10px !important; } /* the date fits */
 .cc2 .dm-files-list ul.grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
 .cc2 .dm-pic-tile .dm-pic-cap { white-space: normal; overflow: visible; text-overflow: clip; }
+
+/* ***************************************************
+ * LAWYER MODE (his call 2026-10-12: "more lively and smart", in white)
+ * ***************************************************
+ * The accent is white and silver (CommandCenterV2 sets --sig/--acc); the
+ * labels speak like counsel, the mode carries a badge, and her working line
+ * says what she reads first. The orb is livelier and has a dial (Scene3D).
+ */
+.cc2.is-lawyer .dm-her::before { content: '◆  DIANE  //  COUNSEL'; }
+.cc2.is-lawyer .agent-scroll > .dm-her:last-child::before { content: '◆  DIANE  //  COUNSEL  ·  LIVE'; }
+.cc2.is-lawyer .dm-live::before, .cc2.is-lawyer .dm-working::before { content: '◆  REVIEWING  //  OUR PLAYBOOK  ·  THE LAW' !important; }
+.cc2.is-lawyer .cc2-composer::before { content: '◆  BRIEF  //  INPUT'; }
+.cc2.is-lawyer .cc2-composer.is-thinking::before { content: '◆  BRIEF  //  REVIEWING'; }
+.cc2.is-lawyer .cc2-composer.is-listening::before { content: '◆  BRIEF  //  LISTENING'; }
+.cc2.is-lawyer .cc2-left .cc2-modes::before { content: '◆  MODE  //  COUNSEL'; }
+.cc2-mode-badge {
+  margin-left: auto; padding: 2px 7px; font-size: 8px; font-weight: 700; letter-spacing: 0.24em; text-transform: uppercase;
+  color: #05080c; background: linear-gradient(90deg, #ffffff, #c9d4e2);
+  box-shadow: 0 0 14px rgba(255, 255, 255, 0.55);
+  clip-path: polygon(0 0, calc(100% - 5px) 0, 100% 5px, 100% 100%, 5px 100%, 0 calc(100% - 5px));
+  animation: cc2-badge 2.4s ease-in-out infinite;
+}
+@keyframes cc2-badge { 50% { box-shadow: 0 0 22px rgba(255, 255, 255, 0.85); } }
+/* white reads bright: the glow is a touch softer so text stays crisp */
+.cc2.is-lawyer .dm-her, .cc2.is-lawyer .cc2-composer, .cc2.is-lawyer .cc2-left .cc2-modes, .cc2.is-lawyer .cc2-left .cc2-controls { filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.14)); }
+.cc2.is-lawyer .cc2-orb-tag { border-color: rgba(255, 255, 255, 0.35); }
+.cc2 { transition: background-color 600ms ease; }
+@media (prefers-reduced-motion: reduce) { .cc2-mode-badge { animation: none; } }

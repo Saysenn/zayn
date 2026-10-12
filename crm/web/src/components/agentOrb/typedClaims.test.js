@@ -9,5 +9,6 @@ test('the final typed claims travel with the assistant history entry', () => {
   // the destructure. This pinned the whole line, so widening it to take the
   // turn's `offer` read as breaking it. Repinned 2026-09-29.
   assert.match(source, /const \{[^}]*\bclaims = \[\][^}]*\} = await/);
-  assert.match(source, /\{ role: 'assistant', content: reply, claims \}/);
+  // and the entry carries them (with its evidence and sources beside, 2026-10-10)
+  assert.match(source, /\{ role: 'assistant', content: reply, claims[,\s}]/);
 });

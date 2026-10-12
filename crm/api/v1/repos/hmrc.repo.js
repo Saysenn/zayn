@@ -44,7 +44,7 @@ async function replaceChunks(sourceId, chunks) {
 /** Every active chunk with its source, for the in-memory search. */
 async function allChunks() {
   const { rows } = await pool.query(
-    `SELECT c.id, c.text, c.embedding, s.id AS source_id, s.kind, s.url, s.title, s.updated_on
+    `SELECT c.id, c.text, c.embedding, s.id AS source_id, s.kind, s.url, s.title, s.topic, CASE WHEN s.kind = 'playbook' THEN s.fetched_at::date ELSE s.updated_on END AS updated_on
        FROM tb_hmrc_chunks c JOIN tb_hmrc_sources s ON s.id = c.source_id
       WHERE s.active`,
   );
@@ -90,6 +90,59 @@ async function lastRefresh() {
   return (await pool.query('SELECT max(finished_at) AS at FROM tb_hmrc_refreshes')).rows[0]?.at ?? null;
 }
 
+// ---- our playbook (migration 082): how this business does things ----
+const PLAYBOOK_COLS = 'id, topic AS section, title, body, added_by, created_at, fetched_at AS updated_at';
+
+/** Every live playbook entry, by section then title. */
+async function playbook() {
+  return (await pool.query(`SELECT ${PLAYBOOK_COLS} FROM tb_hmrc_sources WHERE kind = 'playbook' AND active ORDER BY lower(topic), lower(title)`)).rows;
+}
+
+/** One entry, live or not (an undo reads a removed one back). */
+async function playbookEntry(id) {
+  return (await pool.query(`SELECT ${PLAYBOOK_COLS}, active FROM tb_hmrc_sources WHERE id = $1 AND kind = 'playbook'`, [id])).rows[0] ?? null;
+}
+
+/** A changed entry's words; the caller indexes it again. */
+async function updatePlaybookEntry(id, { section = null, title = null, body = null }) {
+  const { rows } = await pool.query(
+    `UPDATE tb_hmrc_sources SET topic = COALESCE($2, topic), title = COALESCE($3, title), body = COALESCE($4, body), fetched_at = now()
+      WHERE id = $1 AND kind = 'playbook' RETURNING *`,
+    [id, section, title, body],
+  );
+  return rows[0] ?? null;
+}
+
+/** Taken out (kept, so an undo can bring it back), or put back. */
+async function setPlaybookActive(id, active) {
+  return (await pool.query("UPDATE tb_hmrc_sources SET active = $2, fetched_at = now() WHERE id = $1 AND kind = 'playbook'", [id, active])).rowCount > 0;
+}
+
+/** Every change: who, when, what it was before and after. */
+async function recordPlaybookChange({ sourceId, action, before = null, after = null, by = null }) {
+  return (await pool.query(
+    'INSERT INTO tb_playbook_history (source_id, action, before, after, by_user) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+    [sourceId, action, before, after, by],
+  )).rows[0];
+}
+
+/** The changes, newest first. */
+async function playbookHistory(limit = 50) {
+  return (await pool.query(
+    `SELECT h.*, s.title, s.topic AS section FROM tb_playbook_history h LEFT JOIN tb_hmrc_sources s ON s.id = h.source_id
+      ORDER BY h.at DESC LIMIT $1`,
+    [limit],
+  )).rows;
+}
+
+async function playbookChange(id) {
+  return (await pool.query('SELECT * FROM tb_playbook_history WHERE id = $1', [id])).rows[0] ?? null;
+}
+
+async function markPlaybookUndone(id) {
+  await pool.query('UPDATE tb_playbook_history SET undone_at = now() WHERE id = $1', [id]);
+}
+
 // ---- what changed on GOV.UK ----
 async function recordChange({ sourceId, url, title, oldUpdatedOn, newUpdatedOn, summary }) {
   const { rows } = await pool.query(
@@ -116,4 +169,6 @@ async function recentChanges(limit = 20) {
 
 module.exports = {
   upsertSource, replaceChunks, allChunks, sourceByUrl, notes, updateNote, removeNote, status,
-  recordChange, untoldChanges, markTold, recentChanges, recordRefresh, lastRefresh };
+  recordChange, untoldChanges, markTold, recentChanges, recordRefresh, lastRefresh,
+  playbook, playbookEntry, updatePlaybookEntry, setPlaybookActive, recordPlaybookChange, playbookHistory, playbookChange, markPlaybookUndone,
+};

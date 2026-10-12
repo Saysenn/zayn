@@ -50,7 +50,10 @@ test('sessionStorage, so it dies with the tab', () => {
   // Same reasoning as the CRM's sticky filters. localStorage would leave
   // a half-built export waiting weeks later.
   assert.ok(code.includes('sessionStorage.getItem'), 'it is not reading storage');
-  assert.ok(!code.includes('localStorage'), 'it outlives the tab');
+  // THE EXPORT'S OWN HELPERS: the file also keeps the ↑ input history and the
+  // V1/V2 choice in localStorage on purpose, which is not the export
+  const helpers = (code.match(/function (openExportFromStorage|rememberExport|forgetExport)[\s\S]*?\n\}/g) ?? []).join('\n');
+  assert.ok(helpers && !helpers.includes('localStorage'), 'it outlives the tab');
 });
 
 test('EVERY READ AND WRITE IS GUARDED', () => {

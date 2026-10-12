@@ -51,7 +51,8 @@ test('the exchange rate answer is spoken in full', () => {
     '1 USD = 3.6725 AED, fixed peg.',
     'Current cached rate, published Thu, 03 Sep 2026 00:02:31 +0000.',
   ].join('\n');
-  assert.equal(speakableReply(answer), answer);
+  // in full, with its date said the way a person says it (his call 2026-10-10)
+  assert.equal(speakableReply(answer), answer.replace('03 Sep 2026', '3 September 2026'));
 });
 
 test('a one line answer is itself', () => {

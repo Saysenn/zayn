@@ -235,7 +235,8 @@ async function find(question, { k = 8 } = {}) {
   let qn = 0;
   for (const x of q) qn += x * x;
   qn = Math.sqrt(qn) || 1;
-  const scored = all.map((c) => {
+  // the playbook is read on its own and FIRST (findPlaybook), never in this mix
+  const scored = all.filter((c) => c.kind !== 'playbook').map((c) => {
     let dot = 0;
     for (let i = 0; i < q.length; i += 1) dot += q[i] * c.v[i];
     const score = dot / (qn * c.norm) + (c.kind === 'note' ? 0.05 : 0);
@@ -268,6 +269,35 @@ async function find(question, { k = 8 } = {}) {
     take(c);
   }
   out.sort((a, b) => b.score - a.score);
+  return out.map(({ v, norm, embedding, ...rest }) => rest);
+}
+
+/**
+ * OUR PLAYBOOK'S PASSAGES FOR THIS QUESTION (his call 2026-10-12: read our
+ * own ways first, before anything else). Searched apart from GOV.UK so
+ * nothing outranks it; the closest passages, at most 3 from one entry.
+ */
+async function findPlaybook(question, { k = 6 } = {}) {
+  const all = (await loaded()).filter((c) => c.kind === 'playbook');
+  if (!all.length) return [];
+  const [q] = await embed([question]);
+  let qn = 0;
+  for (const x of q) qn += x * x;
+  qn = Math.sqrt(qn) || 1;
+  const scored = all.map((c) => {
+    let dot = 0;
+    for (let i = 0; i < q.length; i += 1) dot += q[i] * c.v[i];
+    return { ...c, score: dot / (qn * c.norm) };
+  }).sort((a, b) => b.score - a.score);
+  const per = new Map();
+  const out = [];
+  for (const c of scored) {
+    if (out.length >= k) break;
+    const n = per.get(c.source_id) ?? 0;
+    if (n >= 3) continue;
+    per.set(c.source_id, n + 1);
+    out.push(c);
+  }
   return out.map(({ v, norm, embedding, ...rest }) => rest);
 }
 
@@ -314,4 +344,4 @@ function startAutoRefresh() {
   return t;
 }
 
-module.exports = { refresh, runRefresh, refreshState, startAutoRefresh, freshen, takeUpdate, summarise, index, reindex, find, forget, chunksOf, embed, GUIDES, MANUALS };
+module.exports = { refresh, runRefresh, refreshState, startAutoRefresh, freshen, takeUpdate, summarise, index, reindex, find, findPlaybook, forget, chunksOf, embed, GUIDES, MANUALS };

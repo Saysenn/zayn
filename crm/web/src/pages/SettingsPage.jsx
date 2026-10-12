@@ -12,6 +12,7 @@ import ConversionRates from '../components/settings/ConversionRates';
 import ThemePicker from '../components/settings/ThemePicker';
 import ExpenseAdmins from '../components/settings/ExpenseAdmins';
 import HmrcKnowledge from '../components/settings/HmrcKnowledge';
+import OurPlaybook from '../components/settings/OurPlaybook';
 import ExpenseStyle from '../components/settings/ExpenseStyle';
 import Button, { FileButton, LinkButton } from '../components/buttons/Button';
 import Toggle from '../components/forms/Toggle';
@@ -568,6 +569,15 @@ export default function SettingsPage() {
                   off="She asks first, every time"
                 />
               )}
+            </Card>
+          )}
+
+          {section === 'diane' && (
+            <Card
+              title="Our playbook"
+              description="How this business does things: our processes, internal ways and how things work here. Diane reads it FIRST on every answer in lawyer mode (HMRC & CIS), before GOV.UK. Saved here, or through Diane, who always asks first. Kept in the CRM's own database."
+            >
+              <OurPlaybook />
             </Card>
           )}
 

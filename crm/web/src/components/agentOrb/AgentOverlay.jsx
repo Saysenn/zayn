@@ -5,6 +5,7 @@ import { useVoiceInput } from './useVoiceInput';
 import { useConversationLog } from './useConversationLog';
 import { useSpeechSynthesis } from './useSpeechSynthesis';
 import { useOpenaiSpeech } from './useOpenaiSpeech';
+import { setSpeechPersona } from './speechPersona';
 import { useFollowScroll } from './useFollowScroll';
 import { apiService } from '../../configs/api.config';
 import { saveBlob } from '../../helpers/api.helper';
@@ -218,7 +219,7 @@ function workingPhrase() {
  * something sensible rather than nothing.
  */
 const TOOL_PHRASES = {
-  hmrc_search: 'Checking HMRC guidance…',
+  hmrc_search: 'Reading our playbook, then the law…',
   find_and_show_details: 'Looking them up…',
   filter_master_sheet: 'Narrowing the sheet…',
   export_sheet: 'Setting up your sheet…',
@@ -458,6 +459,8 @@ export default function AgentOverlay({ open, onClose }) {
   // is just picking which object's `speak`/`speaking`/`level` to use,
   // never a conditional hook call.
   const openaiSpeech = useOpenaiSpeech();
+  // LAWYER MODE SPEAKS IN ITS OWN VOICE (coral, a senior barrister); every other mode in hers
+  useEffect(() => { setSpeechPersona(context === 'hmrc' ? 'lawyer' : null); }, [context]);
   const browserSpeech = useSpeechSynthesis();
   const tts = openaiSpeech.available ? openaiSpeech : browserSpeech;
   // Record -> transcribe server-side -> send as a message. Same interface
@@ -1471,7 +1474,8 @@ export default function AgentOverlay({ open, onClose }) {
       // 2026-10-07), each held on the server by id and read together by the
       // expense brain when the message goes: one preview for all of them.
       const forExpenses = context === 'expenses';
-      const route = forExpenses ? 'expenses/agent/attach' : 'master-sheet/agent/attach';
+      // LAWYER MODE reads a document for our playbook, PDFs too (his call 2026-10-12)
+      const route = forExpenses ? 'expenses/agent/attach' : context === 'hmrc' ? 'hmrc/playbook/read' : 'master-sheet/agent/attach';
       const upload = async (file) => {
         const body = new FormData();
         body.append('file', file);
@@ -1892,14 +1896,15 @@ export default function AgentOverlay({ open, onClose }) {
               }
               after={
                 <>
-                  {/* NO PAPERCLIP IN HMRC & CIS: it answers questions, it reads no files (yet) */}
-                  {context !== 'hmrc' && (<>
+                  {/* LAWYER MODE TAKES A DOCUMENT, to read or to save to our playbook (2026-10-12) */}
+                  {(<>
                   <input
                     ref={fileRef}
                     type="file"
                     accept={context === 'expenses'
                       ? 'image/*,.pdf,.xlsx,.csv,.txt,.tsv,.json,.docx,.pptx'
-                      : '.xlsx,.csv,.txt,.tsv,.json,.docx,.pptx'}
+                      : context === 'hmrc' ? '.pdf,.docx,.pptx,.txt,.md,.csv,.tsv,.json'
+                        : '.xlsx,.csv,.txt,.tsv,.json,.docx,.pptx'}
                     className="hidden"
                     multiple={context === 'expenses'}
                     onChange={(e) => attachFile(context === 'expenses' ? e.target.files : e.target.files?.[0])}
@@ -1909,10 +1914,11 @@ export default function AgentOverlay({ open, onClose }) {
                     onClick={() => fileRef.current?.click()}
                     disabled={isSending || attaching || (Boolean(attached) && !(context === 'expenses' && (attached.files?.length ?? 0) < 20))}
                     className="dm-round shrink-0 w-11 h-11 rounded-full flex items-center justify-center border min-h-0 p-0 transition-colors disabled:opacity-30 border-diane-line/60 bg-transparent text-diane-signal hover:border-diane-signal"
-                    aria-label={context === 'expenses' ? 'Attach a receipt or file for Diane' : 'Attach a sheet for Diane to check'}
+                    aria-label={context === 'expenses' ? 'Attach a receipt or file for Diane' : context === 'hmrc' ? 'Attach a document for Diane to read or save to our playbook' : 'Attach a sheet for Diane to check'}
                     title={context === 'expenses'
                       ? 'Attach a receipt photo, PDF or sheet of expenses'
-                      : 'Attach a sheet (.xlsx, .csv, .txt) to check against the CRM'}
+                      : context === 'hmrc' ? 'Attach a PDF, Word or text document: Diane reads it, and can save it to our playbook'
+                        : 'Attach a sheet (.xlsx, .csv, .txt) to check against the CRM'}
                   >
                     <PaperclipIcon width={17} height={17} />
                   </button>

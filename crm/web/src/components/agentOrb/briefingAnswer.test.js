@@ -171,7 +171,8 @@ test('HER GREETING IS MADE ON THE LOADING SCREEN, and used, not asked for again'
   // Waited for, never past the cap: a slow voice must not hold the way in.
   assert.match(boot, /Promise\.race\(\[audio, new Promise\(\(resolve\) => \{ setTimeout\(resolve, GREETING_WAIT_MS\); \}\)\]\)/);
   const speech = readFileSync(new URL('./useOpenaiSpeech.js', import.meta.url), 'utf8');
-  assert.match(speech, /takePrimed\(parts\[i\]\) \?\? apiService\.masterSheet\.speech\(parts\[i\]\)/);
+  // the primed greeting first, else asked for in the voice of the mode (lawyer mode's own, 2026-10-12)
+  assert.match(speech, /takePrimed\(parts\[i\]\) \?\? apiService\.masterSheet\.speech\(parts\[i\], speechPersona\(\)\)/);
   const layout = readFileSync(new URL('../layout/Layout.jsx', import.meta.url), 'utf8');
   assert.match(layout, /greeting=\{briefing\.greeting\}/);
 });

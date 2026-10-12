@@ -1497,11 +1497,12 @@ router.get('/master-sheet/speech/status', (req, res) => {
 // hand the response straight to an <audio> element via a blob URL.
 router.post('/master-sheet/speech', async (req, res, next) => {
   try {
-    const { text } = req.body || {};
+    const { text, persona } = req.body || {};
     if (typeof text !== 'string' || !text.trim()) {
       return next(new AppError(400, 'text is required'));
     }
-    const audio = await synthesizeSpeech(text);
+    // lawyer mode speaks in its own voice (coral); anything else is her usual one
+    const audio = await synthesizeSpeech(text, { persona: persona === 'lawyer' ? 'lawyer' : null });
     res.setHeader('Content-Type', 'audio/mpeg');
     res.send(audio);
   } catch (err) {

@@ -38,7 +38,8 @@ const MAX_CHARS = 4096;
  * Text -> an mp3 Buffer. Throws AppError-shaped errors are the caller's
  * job to translate (route stays thin) — this just does the one call.
  */
-async function synthesizeSpeech(text) {
+/** @param {{ persona?: 'lawyer' | null }} [opts] the lawyer's own voice in lawyer mode */
+async function synthesizeSpeech(text, { persona = null } = {}) {
   const openai = getClient();
   if (!openai) {
     const err = new Error(
@@ -67,11 +68,11 @@ async function synthesizeSpeech(text) {
   }
   const response = await openai.audio.speech.create({
     model: env.openaiTtsModel,
-    voice: env.openaiTtsVoice,
+    voice: persona === 'lawyer' ? env.openaiTtsLawyerVoice : env.openaiTtsVoice,
     input: trimmed,
     // Ignored by tts-1, honoured by gpt-4o-mini-tts. Sent unconditionally
     // so switching the model back is an env change and not a code one.
-    instructions: env.openaiTtsInstructions,
+    instructions: persona === 'lawyer' ? env.openaiTtsLawyerInstructions : env.openaiTtsInstructions,
     response_format: 'mp3',
   });
 

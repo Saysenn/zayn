@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { apiService } from '../../configs/api.config';
 import { chunkForSpeech, TTS_CHUNK_CHARS, TTS_FIRST_CHARS } from './speechChunks';
 import { takePrimed } from './speechCache';
+import { speechPersona } from './speechPersona';
 
 // A fetch that failed, kept apart from "not asked for yet" (null) and from
 // a real blob. Swallowing it as null would make a dead request look like
@@ -125,7 +126,7 @@ export function useOpenaiSpeech() {
     const fetchPart = (i) => {
       if (i >= parts.length) return null;
       // A part made ahead (her greeting, on the loading screen) is used, not asked for again.
-      if (!pending[i]) pending[i] = (takePrimed(parts[i]) ?? apiService.masterSheet.speech(parts[i])).catch(() => FAILED);
+      if (!pending[i]) pending[i] = (takePrimed(parts[i]) ?? apiService.masterSheet.speech(parts[i], speechPersona())).catch(() => FAILED);
       return pending[i];
     };
     // IMMEDIATELY, not when its turn comes. If a line is already playing,
