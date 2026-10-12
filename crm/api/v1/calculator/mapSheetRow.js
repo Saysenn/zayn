@@ -414,7 +414,7 @@ function mapSheetRow(rawRow, fills) {
   // It is a guess, not a rule: his own August sends resolved the same
   // phrase two ways, MILKMAN at appointment + 90 and INDIGO at the whole
   // month, 1,613 apart on two rows. So the figure stands and the words go
-  // with it. See docs/state.md.
+  // with it.
   const paymentStartNote = startWords === 'prose' ? tidyText(r.paymentStartOn) : null;
 
   // Computed, never read off the sheet — see computePayable.js. The

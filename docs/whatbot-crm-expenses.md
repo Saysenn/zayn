@@ -1,269 +1,125 @@
 # WhatBot ↔ CRM: payday check and expenses
 
-Written 2026-10-06. Nothing here is built yet except where it says so. The
-expenses page itself is in `expense.md` and `state.md`; this file is about
-WhatBot feeding it, and the month end payday check.
+How WhatBot talks to the CRM, the month end payday check, and expenses sent
+by WhatsApp. The Expenses page itself: `expense.md`.
 
----
+## WhatBot basics
 
-## What exists today
-
-### WhatBot
-
-- Code lives in `whatbot/` in this repo. There is an older standalone copy at
-  `../whatbot`; the in-repo one is newer (it has `sync:crm`).
-- Stack: Baileys (linked WhatsApp accounts, not the Cloud API), Express,
-  BullMQ/Redis, and the `openai` SDK pointed at Groq or Gemini. Two processes:
-  `server.js`, and `worker.js` which holds the WhatsApp socket.
+- Code in `whatbot/`. Baileys (linked WhatsApp accounts), Express,
+  BullMQ/Redis, `openai` SDK. Two processes: `src/server.js` and
+  `src/worker.js` (holds the WhatsApp socket).
 - **Bot → CRM**: `whatbot/src/system/crmClient.js`, header `x-api-key` =
-  `CRM_AGENT_API_KEY`, which must equal the CRM's `AGENT_API_KEY`
-  (`crm/api/configs/env.js:80`). Routes, all in `crm/api/v1/agent.js`:
-  `GET /api/v1/agent/master-sheet`, `POST /agent/concerns`,
-  `POST /agent/messages`, `POST /agent/logs`, `PATCH /agent/payment-status`.
-  The CRM also exposes `/handlers/:personId`, `/companies/:name` and
-  `/sync/master-sheet`.
-- **CRM → bot**: `crm/api/v1/messages.js:80-105` posts to
-  `${WHATBOT_WEBHOOK_URL}/webhook/admin-reply` with `x-webhook-key`, received
-  at `whatbot/src/http/adminReplyApp.js:38` and sent through Baileys.
-- AI: `agent/askModel.js:79` (tool calling, read-only payroll questions),
-  `LLM_MODE=mock` for keyword routing, Whisper voice notes behind
-  `FEATURE_VOICE`, regex parsing in `conversation/*`, evals in `agent/evals`.
+  `CRM_AGENT_API_KEY`, which must equal the CRM's `AGENT_API_KEY`. Routes in
+  `crm/api/v1/agent.js` (`/api/v1/agent/...`): `GET /master-sheet`,
+  `POST /concerns`, `POST /messages`, `POST /logs`, `PATCH /payment-status`,
+  `GET /handlers/:personId`, `GET /companies/:name`,
+  `POST /sync/master-sheet`.
+- **CRM → bot**: `crm/api/v1/messages.js` posts to
+  `${WHATBOT_WEBHOOK_URL}/webhook/admin-reply` (`x-webhook-key`), received
+  in `whatbot/src/http/adminReplyApp.js`.
+- **Who can message it**: `employee/access.js` (`identify`) needs the sender
+  in the roster synced from the CRM with an active assignment; anyone else
+  gets `UNKNOWN_SENDER`. `WHATSAPP_NUMBERS` maps the bot's own numbers to
+  groups (`config/numbers.js`); it is not an allow-list.
+- **Redis** (local): one container, data on disk:
 
-### Payday check: built, end to end
+  ```bash
+  docker run -d --name whatbot-redis --restart unless-stopped -p 6390:6379 -v whatbot-redis-data:/data redis:7-alpine redis-server --appendonly yes
+  ```
 
-- `whatbot/src/payday/*`, run with `npm run payday` on `PAYDAY_SCHEDULE`.
-  **`PAYDAY_DRY_RUN=true` by default.**
-- Asks each person "Did you receive your <month> pay for your <group>
-  companies?" with 1 yes, 2 no, 3 only part, 4 stop
-  (`paydayMessages.js:35`).
-- Replies are parsed in `conversation/handleMessage.js:55` (`paydayAnswer`):
-  digits, yes/no and partial amounts, scoped to the group the reply came in.
-- Outcomes are `confirmed`, `partial`, `not_received`, and `no_response`
-  after `PAYDAY_RESPONSE_DAYS`. They go through `crmOutbox.js`, which retries.
-- CRM side, `agent.js:79-120`: writes `payment_outcome`, `payment_note` and
-  `payment_replied_at` (migration 016), shown as the **Payment received**
-  column (Paid / Unpaid / Awaiting per deal; Paid / Unpaid / Portion /
-  Awaiting per person on the People pages). **`confirmed` sets
-  `override_paid = true` and `not_received` sets it false** (`agent.js`
-  `PAID_BY_OUTCOME`). `partial`, `sent` and `no_response` leave paid alone.
-- **Flagged for admin review** (2026-10-08): `partial`, and a real answer
-  changed to a different one, set `needs_review` with a reason starting
-  "payday" (`shared/paydayFlag.helper.js`). Only setting the deal's Payment
-  received to Paid or Unpaid clears it; a sheet upload and "Save and mark it
-  sorted" keep it.
-- The CRM can block every one of these writes with the Settings flag
-  `whatbot_writes_enabled` (migration 028).
+  Then `REDIS_URL=redis://127.0.0.1:6390` in `whatbot/.env`.
+- Link another group's number: add it to `WHATSAPP_NUMBERS`;
+  `WHATSAPP_LINK_WITH=code` prints a code to type on the phone.
 
-**So the payday check needs testing, not building.**
+## Payday check
 
-#### Testing the payday check (status 2026-10-06: not run yet)
+- `whatbot/src/payday/*`, run with `npm run payday`, scheduled by
+  `PAYDAY_SCHEDULE`. **`PAYDAY_DRY_RUN=true` by default** (logs who would be
+  asked, sends nothing).
+- Asks "Did you receive your <month> pay for your <group> companies?":
+  1 yes, 2 no, 3 only part, 4 stop. Replies are read by `paydayAnswer` in
+  `conversation/handleMessage.js`, scoped to the group's number.
+- Outcomes: `confirmed`, `partial`, `not_received`, and `no_response` after
+  `PAYDAY_RESPONSE_DAYS`. Sent through `crmOutbox.js` (retries).
+- CRM side (`PATCH /payment-status`, `PAID_BY_OUTCOME`): writes
+  `payment_outcome`, `payment_note`, `payment_replied_at`, shown as
+  **Payment received**. `confirmed` sets `override_paid = true`,
+  `not_received` sets it false; others leave Paid alone.
+- `partial`, or an answer changed to a different one, sets `needs_review`
+  ("payday…", `shared/paydayFlag.helper.js`). Only setting Payment received
+  to Paid or Unpaid clears it.
+- Settings flag `whatbot_writes_enabled` blocks all of these writes.
 
-- **Its tests cannot run yet**: WhatBot's packages are not installed
-  (`whatbot/node_modules` is missing), so `npm test` (vitest) fails with
-  "Cannot find package 'vitest'". The tests are `src/payday/payday.test.js`,
-  `schedule.test.js` and `crmOutbox.test.js`. First step: `npm install` in
-  `whatbot/`.
-- **Dry run** (`PAYDAY_DRY_RUN=true`, the default): works out who would be
-  asked and logs it; **no messages are sent**. It still needs WhatBot's Redis
-  and its link to the CRM: `CRM_API_URL` pointing at the CRM under test (the
-  local clone runs on `http://localhost:3010`) and `CRM_AGENT_API_KEY` equal
-  to that CRM's `AGENT_API_KEY`.
-- **Real send** needs `PAYDAY_DRY_RUN=false`, which unlocks the **whole
-  roster**. Always pair it with `--only <number>` (`runPaydayCheck.js:66`):
-  only that number is messaged, and a number with no match messages nobody.
-  `--limit 1` alone is NOT safe; it picks whoever sorts first.
-- **Never run a real send without `--only`.**
+**Testing it**
 
-The order to prove it:
+- Tests: `npm test` in `whatbot/` (vitest): `src/payday/payday.test.js`,
+  `schedule.test.js`, `crmOutbox.test.js`.
+- Dry run needs WhatBot's Redis, `CRM_API_URL` pointing at the CRM under
+  test, and a matching `CRM_AGENT_API_KEY`.
+- A real send needs `PAYDAY_DRY_RUN=false`, which unlocks the whole roster.
+  **Always add `--only <number>`** (a number with no match messages nobody).
+  `--limit 1` alone is not safe: it picks whoever sorts first.
 
-| Option | What | Messages sent |
-|---|---|---|
-| A | `npm install` in `whatbot/`, run the payday tests, then a dry run against the clone | none |
-| B | A, then one real send with `--only <the admin's own number>`; reply 1, 2 or 3 on the phone and check Paid (`override_paid`), Payment received (`payment_outcome`) and, for 3, the review flag on that person's deals in the clone | one, to the admin |
-| C | Leave it for later | none |
+## Expenses through WhatBot and Diane
 
-Not yet chosen. B needs the admin's own number.
+One brain in the CRM; WhatBot only receives, forwards and relays.
 
-### Expenses
+| Piece              | Where                                                                   |
+| ------------------ | ----------------------------------------------------------------------- |
+| Expense brain      | `crm/api/v1/expenses/bot/` (`brain.js` runs a turn)                     |
+| WhatBot routes     | `crm/api/v1/expenseBot.js`, mounted at `/api/v1/agent/expenses`         |
+| Diane's context    | same brain, `crm/api/v1/expenseBot.js` (`dianeTurn`)                    |
+| Registered admins  | Settings → Whatbot → Expense admins                                     |
+| Tables             | migration `072_expense_bot.sql` (incl. `tb_expense_actions`)            |
+| WhatBot side       | `whatbot/src/expenses/` (`expenses.js`, `mode.js`, `batch.js`)          |
+| Rates to AED       | `crm/api/v1/expenses/bot/rates.js`                                      |
+| Preview picture    | `crm/api/v1/expenses/bot/card.js`, `whatbot/src/whatsapp/sendImage.js`  |
+| Terminal tester    | `npm run chat:expenses -- +447700900001 MANBAT` (in `whatbot/`)         |
 
-- `tb_expenses` (migration 055): `id`, `spent_on`, `description`, `payee`,
-  `currency` (uppercase, 2-8 chars), `raw_amount`, `exchange_rate` (AED per
-  unit, nullable), `aed_amount` (generated), `group_name`, `spent_by` (free
-  text), `sync_key` (not unique), `archived_at`, `created_at`, `updated_at`.
-- `tb_group_receipts` (migration 012, renamed in 023): `group_name`,
-  `period`, `currency`, `amount`, `received_at`, `note`, unique on
-  (group, period, currency). Read and written by `repos/groupReceipts.repo.js`.
-- Routes, `crm/api/v1/expenses.js`: `GET /expenses`, `/options`,
-  `/export/options`, `/download`, `POST /import/preview` and
-  `/import/commit`, `POST /expenses` (:231, requires `spentOn`,
-  `description`, `currency`, `rawAmount`, :50), `PATCH /:id`, `DELETE /:id`,
-  `POST /bulk-update`, `POST /bulk-delete`.
-- Writable fields (`repos/expenses.repo.js:29`): `spentOn`, `description`,
-  `payee`, `currency`, `rawAmount`, `exchangeRate`, `groupName`, `spentBy`.
-- Page: `crm/web/src/pages/ExpensesPage.jsx`, nav `/expenses`.
-- **WhatBot has no connection to expenses at all.**
+**Switches** (`crm/api/.env` unless noted)
 
-### Who may message the bot
+- `EXPENSE_AGENT=on`: the gpt-4.1 tool-loop agent (`bot/agent.js`). Off uses
+  the older reader, which is kept.
+- `EXPENSE_PLANNER` (on unless `off`).
+- `OPENEXCHANGERATES_APP_ID`: hourly rates; open.er-api.com is the free
+  backup; otherwise the admin is asked.
+- `FEATURE_EXPENSE_IMAGES` (WhatBot): previews as a picture card; false sends
+  text.
 
-- There is no admin allow-list. `employee/access.js:27` (`identify`) looks
-  the sender up in the roster synced from the CRM and needs an active
-  assignment; anyone else gets `UNKNOWN_SENDER`.
-- `WHATSAPP_NUMBERS` maps the bot's OWN numbers to groups
-  (`config/numbers.js`); it is not a list of allowed senders.
-- Gates in order: opt-out, rate limit, identity (`handleMessage.js:89-120`).
-  There is no admin number concept.
+**Rules**
 
----
+1. A group's number takes expenses only from admins registered on it; the
+   expense's group is the number it was sent to. Anyone else gets nothing
+   from the expense side (no download, no model call).
+2. Required: date, description, amount, currency, group, spent by, paid to.
+   Currency defaults to AED; spent by defaults to the sender.
+3. Nothing is saved before "yes". Change, remove and undo preview first.
+4. Replies are built by code from templates (WhatsApp *bold*/_italic_), never
+   by the model, ending **yes · modify · cancel**.
+5. Their own rate wins ("1 gbp to aed is 4.85", "same as last time").
+6. Files sent together are collected after 6 seconds of quiet, up to 20, and
+   answered once (photos read six per model call).
+7. Names match ones already used ("me" is the sender).
+8. Admin modes: *expense* (default) or *payments* (WhatBot's normal agent),
+   remembered per admin per number (`whatbot/src/expenses/mode.js`). A photo
+   or file always goes to expenses.
 
-## What we want
+**Flow**
 
-1. **Payday check**: at month end, WhatBot asks and each deal's Payment
-   received (and, for a clear yes or no, its Paid tick) follows the answer;
-   a portion or a changed answer is flagged for an admin. (Exists; needs
-   proving.)
-2. **Expenses through WhatBot**: a registered admin sends plain text, a photo
-   of a receipt, an Excel or any document. It is read accurately, cleaned,
-   and sent back as a numbered list for confirmation, with extra bubbles for
-   what is missing or doubtful ("3 expenses have no group: which group?").
-   They fix it by replying; on "yes" it is saved to the expenses page.
-   **Only registered numbers can save expenses, or message the bot for it at
-   all; everyone else is refused.**
+1. Guard: registered on this number? Runs before WhatBot's opt-out words.
+2. Code first: "yes", "cancel", "skip 2", "2 is 150", "undo", plain new
+   expenses ("taxi 45 paid to Careem").
+3. Router (gpt-4.1-mini) for the rest; reading (gpt-4.1) for text, photos,
+   PDFs; spreadsheets mapped from a sample, then every row read by code.
+4. Code checks every expense: missing fields (asked together), future or
+   over two months old, large amount, already saved, duplicates.
+5. Save is verified by reading back; every action goes to
+   `tb_expense_actions` so "undo" is exact.
 
----
+**Safety**: "yes" saves only if that preview was the last thing shown; a
+change is refused if the expense moved since; unsaved previews expire after
+6 hours; a redelivered WhatsApp message never saves twice; an unreachable
+CRM always says nothing was saved.
 
-## Recommendation: the brain in the CRM, WhatBot as the messenger
-
-Build the expense reading and checking **in the CRM**, then connect WhatBot
-to it.
-
-- One brain serves WhatBot now and Diane's Expenses context later, the same
-  way the master sheet engine serves both her and the file checks.
-- It reuses what Diane already has: `agent/engine/intake.js` (any file into
-  tables), `layout.js` (the AI says what each column means), code reading
-  every row, the plan card, one confirm and one undo.
-- WhatBot stays thin: receive, forward to the CRM, relay the replies as
-  bubbles, send the "yes" back.
-
-### The pattern
-
-The same family as Diane's engine:
-
-- **Structured extraction**: a photo is read by a model that sees images; a
-  file is mapped by the AI from a few rows and then read row by row by code.
-- **Validation and flagging**: code checks every expense, every column:
-  missing group, person, date, amount or currency, a doubtful read, or a
-  likely duplicate of an expense already saved.
-- **Slot filling**: only the missing pieces are asked for, all at once, and a
-  reply like "1 and 3 are MANBAT, spent by Gloria" fills them.
-- **Human in the loop**: nothing is saved until they confirm.
-
----
-
-## Built 2026-10-07: expenses through WhatBot
-
-Tested on the clone, through WhatBot's own `handleMessage` from the terminal.
-
-| Piece                 | Where                                          |
-| --------------------- | ---------------------------------------------- |
-| Expense brain         | `crm/api/v1/expenses/bot/` (brain.js runs a turn) |
-| WhatBot routes        | `crm/api/v1/expenseBot.js`, `/api/v1/agent/expenses/*` |
-| Registered numbers    | Settings → Whatbot → Expense admins            |
-| Tables                | migration `072_expense_bot.sql`                |
-| WhatBot side          | `whatbot/src/expenses/` (expenses, mode, batch) |
-| Rates to AED          | `crm/api/v1/expenses/bot/rates.js`             |
-| Preview picture       | `crm/api/v1/expenses/bot/card.js`, `whatbot/src/whatsapp/sendImage.js` |
-| Diane's Expenses context | the same brain, `crm/api/v1/expenseBot.js` (`dianeTurn`) |
-| Terminal tester       | `npm run chat:expenses -- +447700900001 MANBAT` (in `whatbot/`) |
-
-**Decisions (his, 2026-10-07):**
-
-1. Each group's WhatBot number takes expenses only from the admins registered
-   on it in Settings. The group of an expense is the number it was sent to.
-   Anyone else gets nothing from the expense side: nothing downloaded, nothing
-   read, no model called. Their text still gets WhatBot's old replies.
-2. Every field is required: date, description, amount, currency, group,
-   spent by, paid to. Currency defaults to **AED**. Spent by defaults to the
-   admin who sent it, shown in the preview so it can be changed.
-3. Nothing is saved before "yes". Change, remove and undo all preview first.
-4. Replies use WhatsApp's own formatting (*bold*, _italic_), written by code
-   from templates, never by the model: one field per line, `====` separators,
-   amounts with two decimals, full dates, a bold total, and one reply line,
-   **yes · modify · cancel** ("modify" asks what to change, in their words).
-5. **Previews and "saved" notes go as a picture** (a clean note-card, drawn by
-   code) with a short caption carrying the summary, what needs an answer and
-   the reply line. Accepted: it lands in the phone's gallery. Switch:
-   `FEATURE_EXPENSE_IMAGES` (false = the same preview as text).
-6. **Rates to AED** for any other currency, saved on the expense: hourly from
-   Open Exchange Rates (`OPENEXCHANGERATES_APP_ID`), the free daily
-   open.er-api.com as backup, else asked ("1 GBP to AED is?"). Shown in the
-   preview and in a second bubble; their own rate wins ("1 gbp to aed is
-   4.85", "gbp 4.85 and euro 4.2", "4.85 for pounds", "same as last time").
-7. **A batch is one reply:** photos or files sent together are collected (6
-   seconds of quiet after the last), read together (up to 20, photos six per
-   model call) and answered once.
-8. Names are matched to ones already used ("sara" is Sara K, "Amazon.ae" is
-   Amazon, "me" is the admin). A tab named after a group is that group.
-9. **For pay questions** WhatBot knows a person only by the number on the
-   master sheet. Numbers are cleaned on the way in (spaces, 07…, 00…);
-   anything that is not a number ("Handled internally") recognises nobody.
-
-**Two modes for a registered admin (his call, 2026-10-07):** typing
-*expense* sends everything to the CRM expense brain; typing *payments* sends
-everything to WhatBot's own agent, as for any employee. Remembered per admin
-per group number; expense mode by default. A photo or file always goes to
-expenses (switching and saying so). In expense mode, a message the router
-says is not about expenses ("how much am I getting paid?") is answered by the
-normal agent once, with a hint to type *payments*. Code:
-`whatbot/src/expenses/mode.js`.
-
-**How a message flows (the same formula as Diane):**
-
-1. The guard (registered on this group's number?), before anything else,
-   including WhatBot's opt-out words: to an admin "cancel" means cancel.
-2. Code first: "yes", "cancel", "skip 2", "only 1 and 3", "2 is 150",
-   "3 is 5 Oct", "2 paid to Careem", "all today", "3 is fine", "undo", "hi".
-   A plain new expense ("taxi 45 paid to Careem") skips the router too.
-3. The router (gpt-4.1-mini, strict schema): add, edit, remove, question,
-   undo, answer to the open preview, chat. 28/30 on labelled messages, and
-   both misses still end correctly.
-4. Reading (gpt-4.1): text, receipt photos, PDFs; a spreadsheet's columns
-   are mapped from a sample and code reads every row (totals rows skipped).
-5. Code checks every expense: missing fields (asked, all at once), a date in
-   the future or over two months old, a large amount, looks already saved,
-   twice in one batch, same payee on the same day with another amount.
-6. Save is verified by reading the rows back; every action is logged in
-   `tb_expense_actions` so "undo" puts it back exactly.
-
-**Diane's Expenses context** (command center) uses the same brain for every
-group: the group and the spender are read from the message or asked; previews
-are cards; the paperclip takes several photos and files at once (one preview);
-"go to expenses" / "back to the master sheet" switches by words.
-
-**Safety:** a "yes" saves only if the preview was the last thing shown; a
-change or removal is refused if the expense changed since it was shown; an
-unsaved preview expires after 6 hours; a WhatsApp redelivery (same message
-id) never saves twice; an unreachable CRM always says nothing was saved.
-
-**Before it goes live:**
-
-1. Register the real admins in Settings → Whatbot → Expense admins.
-2. ~~Run migration 072 on the live database~~ (done 2026-10-07).
-3. WhatBot's Redis, on whichever PC runs it (fixed locally 2026-10-07): one
-   container that keeps its data on disk and starts with Docker, then
-   `REDIS_URL=redis://127.0.0.1:6390` in WhatBot's `.env`:
-   `docker run -d --name whatbot-redis --restart unless-stopped -p 6390:6379 -v whatbot-redis-data:/data redis:7-alpine redis-server --appendonly yes`
-   (`CRM_AGENT_API_KEY` and the empty `OPENAI_BASE_URL` are fixed too.)
-4. The CRM's `TIMEZONE` is `America/Los_Angeles`, so "today" for a receipt
-   is the US date. Dubai is up to 12 hours ahead.
-5. Real WhatsApp: a .pptx was received and read on MILKMAN's number; batches,
-   the picture and the rates bubble are tested through the terminal path only.
-6. Only MILKMAN's number is linked; the other groups need their numbers in
-   `WHATSAPP_NUMBERS` (linking: `WHATSAPP_LINK_WITH=code` prints a code to type
-   on the phone).
-
-## Open questions
-
-1. ~~Registered numbers~~: Settings page. 2. ~~Default currency~~: AED.
-3. ~~Required fields~~: all of them.
-4. Payday testing: option A, B or C (see "Testing the payday check"). For B,
-   which number is the admin's own?
+**Known**: the CRM's `TIMEZONE` is `America/Los_Angeles`, so "today" is the
+US date (Dubai is up to 12 hours ahead).

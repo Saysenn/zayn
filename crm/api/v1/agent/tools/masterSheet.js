@@ -1881,7 +1881,7 @@ const ROW_FIELDS = {
   // `status` IS GONE FROM HERE, 2026-09-09. It used to be settable, and a
   // stored value won over the formula on every read, so a row could show
   // Ended beside a green payment start cell with its amount still in the
-  // month's total. See NOT_SETTABLE below and docs/state.md.
+  // month's total. See NOT_SETTABLE below.
   notes: { type: 'string' },
   bankDetails: { type: 'string' },
   accountNumber: { type: 'string', description: "Text, not a number — often 'Will never be bank'" },

@@ -88,7 +88,7 @@ test('prose falls back to the column own formula, appointment plus 90', async ()
  * nothing. Verified in docs/boss/references/indigo 1 august.xlsx.
  *
  * So the computed figure is unchanged and the row is FLAGGED, with his
- * own words kept, for a human to settle. See docs/state.md.
+ * own words kept, for a human to settle.
  */
 test('prose is flagged for a human, and his words are kept', async () => {
   const row = await upload('AUGUST END FULL', utc(2026, 5, 5));

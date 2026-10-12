@@ -1,76 +1,40 @@
 # Features
 
-Intended to be built. Numbers are stable identifiers cited elsewhere
-(`closure.md`, `deployment.md`, `sec-audit.md`, migration 049): never
-renumber. Delete an entry when it ships. The full designs these entries
-came from are in this file's git history (before 2026-10-06).
+Planned work. Numbers are stable (cited elsewhere): never renumber. Delete
+an entry when it ships.
 
-0. **Expenses: keep 3 months, back up and clear the rest.** A FIXED rule,
-   no setting: the current month and the 2 before (in October: August,
-   September, October), rolling each month. Applies to the expense rows AND
-   their receipt files (receipts already follow it: `expenses/bot/receipts.js`).
-   Older months are backed up (snapshot, figures not recipes) and then
-   cleared, snapshot first and clear only if it succeeded, like
-   `masterSheet/closeMonth.js`. His call 2026-10-07: no 6 or 12 months for
-   expenses.
-   **The master sheet is a different rule:** its 3, 6 or 12 months of kept
-   history is chosen in Settings. Its dashboard always shows 2 past months,
-   the current month and the next (recall and forecast), moving with the
-   current month.
-3. **Electron .exe on one always-on PC.** Load `http://localhost:3000`,
-   never `file://`. A `Secure` cookie is refused over plain http to a LAN
-   address: pick same-PC, a self-signed cert, or dropping `secure`. Decide
-   the business timezone (`TIMEZONE`).
+0. **Expenses keep 3 months.** Fixed rule, no setting: the current month and
+   the 2 before, rolling. Older rows are snapshotted, then cleared only if
+   the snapshot succeeded (like `masterSheet/closeMonth.js`). Receipts already
+   follow it (`expenses/bot/receipts.js`). The master sheet differs: 3, 6 or
+   12 months of history, chosen in Settings.
+3. **Electron .exe on one always-on PC.** Load `http://localhost:3000`, never
+   `file://`. A `Secure` cookie is refused over plain http on a LAN address:
+   same PC, a self-signed cert, or drop `secure`. Decide `TIMEZONE`.
 4. **Multi-user with roles.** One permissions file
-   (`v1/shared/permissions.js`), every route checks it, the web only asks.
-   Blockers: one global session id, one account row with no role, no
-   `changed_by` on the change log.
-7. **Debts.** Undecided which: arrears (we owe a handler), clawback (a
-   handler owes us) or third party. Nothing records a debt today.
-8. **Diane modes: lawyer and HMRC.** A context she switches into on her
-   own when asked about HMRC, tax, employment law or company processes,
-   and back out after. Its own prompt and knowledge, read-only on CRM data,
-   and it says plainly it is guidance, not legal or tax advice.
-9. **Diane's Debts context.** Shown greyed out as "coming soon" in the
-   command center selector; waits on 7. (Expenses opened 2026-10-07.)
-10. **Diane's wake and sleep words.** She always listens, but only answers
-    once woken. A greeting ("hi", "hello", "hey Diane", "good morning")
-    wakes her: she glows and works as normal. She goes back to sleep after
-    5 minutes idle, or on a sleep word ("deactivate", "close", "stop", "bye",
-    "that's all"). Asleep, she hears but never answers. Stops her
-    answering room talk that was not meant for her.
-    **Woken by mistake** (people greeting each other, "hey bro"): when what
-    follows is clearly not for her, or someone says "not you", she says a
-    short sorry ("Sorry, I thought you meant me") and goes back to sleep.
-    **Any wording, not a fixed list:** she understands every kind of
-    greeting and goodbye ("yo", "morning", "you there?", "salam", "ok we're
-    done", "go to sleep", "thanks that's all"), in any accent or language
-    the room uses. Read by meaning, the router way, not word matching.
-    **Hands free, never forced:** no pressing space to talk. Typing a request
-    and the space key / deactivate button still work as now.
-11. **Diane switches context by voice or text.** Say the context's name
-    ("expenses", "debts", "master sheet", "go to expenses", "switch to
-    debts") and she switches, no clicking: the selector moves and she says
-    which one she is on. Any wording, read by meaning like her wake words
-    (10). A context still "coming soon" gets a plain "not ready yet".
+   (`v1/shared/permissions.js`) every route checks. Blockers: one global
+   session id, one account row with no role, no `changed_by` on the change
+   log.
+7. **Debts.** Undecided: arrears, clawback or third party. Nothing records a
+   debt today.
+8. **Lawyer and HMRC mode.** Built as the `hmrc` context (`agent/hmrc/`).
+   Open: she switches into it on her own when asked, and back out after.
+9. **Diane's Debts context.** Greyed "coming soon" in the selector; waits on 7.
+10. **Wake and sleep words.** She listens always but answers only once woken
+    by any greeting; sleeps after 5 minutes idle or on any goodbye. Read by
+    meaning, not a word list. Woken by mistake: a short sorry, back to sleep.
+    Typing and the space key / deactivate button still work.
+11. **Switch context by voice or text** ("go to expenses"): the selector
+    moves and she says which one. A "coming soon" context gets "not ready yet".
 12. **HSBC mode.**
-13. **Live exchange rates for the master sheet and its exports.** The
-    expense bot already gets hourly rates from Open Exchange Rates
-    (`OPENEXCHANGERATES_APP_ID`, `crm/api/v1/expenses/bot/rates.js`). Use the
-    same source for the master sheet's USD and currency totals and the
-    exported files' totals, instead of rates saved by hand in Settings. The
-    current month uses the live rate (shown with its time); a CLOSED month
-    keeps the rate frozen into its snapshot, so old totals never move. A
-    rate saved by hand in Settings still wins (an agreed rate). The free
-    open.er-api.com stays the backup when the key or the service is down.
-14. **A nightly cleanup runner, inside the CRM.** One scheduled job, run in
-    the app itself (not on a developer's Mac), that does every clear-out:
-    expense rows and receipts past the 3 month window (item 0), held
-    receipt files from previews nobody answered, Diane's pictures past 30
-    days. Each part is safe to run twice, logs what it cleared, and writes
-    nothing when there is nothing to clear. Receipts already have their own
-    6-hourly keeper (`startReceiptsKeeper`); it moves into this runner.
-15. **Voice notes on the expense bot.** A WhatsApp voice note is turned into
-    text, then read exactly like a typed message (same previews, same yes).
-    On hold (his call 2026-10-08): speech to text is still too slow and too
-    costly per message to be worth it. Revisit when that improves.
+13. **Live exchange rates for the master sheet and exports.** Same source as
+    the expense bot (`OPENEXCHANGERATES_APP_ID`,
+    `crm/api/v1/expenses/bot/rates.js`). Current month uses the live rate
+    with its time; a closed month keeps its snapshot rate; a rate saved in
+    Settings wins; open.er-api.com is the fallback.
+14. **Nightly cleanup runner inside the CRM.** One job for every clear-out:
+    expenses past item 0's window, unanswered held receipts, Diane's pictures
+    past 30 days. Idempotent, logs what it cleared. Absorbs
+    `startReceiptsKeeper`.
+15. **Voice notes on the expense bot.** On hold: speech to text is too slow
+    and costly per message.
