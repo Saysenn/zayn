@@ -371,6 +371,15 @@ async function rename(ckey, newName) {
       [from, to],
     );
 
+    // THE LIQUIDATION TRACKER follows the company to its new key (migration
+    // 084). Left alone when the new name is already tracked: two rows for one
+    // company is for a person to merge, not a guess here.
+    await client.query(
+      `UPDATE tb_liquidations SET company_key = $2, updated_at = now()
+        WHERE company_key = $1 AND NOT EXISTS (SELECT 1 FROM tb_liquidations WHERE company_key = $2)`,
+      [from, companyKey(to)],
+    );
+
     await client.query('COMMIT');
     return { renamed: to, dealsUpdated: updated.rowCount };
   } catch (err) {

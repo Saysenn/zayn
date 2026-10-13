@@ -27,7 +27,7 @@ test('THE MASTER SHEET IS A PAGE INSIDE PAYMENTS, not a sibling of it', () => {
   const payments = NAV_GROUPS.find((g) => g.key === 'payments');
   assert.deepEqual(
     payments.items.map((i) => i.to),
-    ['/master-sheet', '/people', '/companies', '/review', '/archive'],
+    ['/master-sheet', '/people', '/companies', '/liquidations', '/review', '/archive'],
   );
 });
 

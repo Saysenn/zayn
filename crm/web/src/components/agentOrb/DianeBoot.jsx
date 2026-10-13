@@ -282,6 +282,10 @@ export default function DianeBoot({ onDone }) {
     // duration really varies. Preloading it here is half the point of this
     // screen existing, so the first Ask Diane opens instantly instead of
     // waiting on the chunk.
+    // V2's briefing draws the command center's 3D room instead: fetch it now
+    // too, so it is there the moment the briefing opens. A failure is the
+    // briefing's own Suspense, never a stuck bar.
+    try { if (localStorage.getItem('diane.ui') === 'v2') import('./v2/Scene3D').catch(() => {}); } catch { /* no storage: V1 */ }
     import('./ParticleOrb').then(
       () => {
         complete('engine');

@@ -14,10 +14,18 @@ import { useOrbSlot } from './particlesOrb/useOrbSlot';
 import { useSocketEvent } from '../../hooks/useSocket';
 import { apiService } from '../../configs/api.config';
 import { formatMoney } from '../../helpers/formatMoney';
+import './v2/briefingV2.css';
 
 // THE PARTICLES ORB, the command center's, his call 2026-09-28. It replaced
 // the shader orb here. The loading screen keeps its particle field.
 const ParticlesOrb = lazy(() => import('./particlesOrb/ParticlesOrb'));
+// V2: the command center's 3D room instead, on its FAST setting (his call 2026-10-13).
+const Scene3D = lazy(() => import('./v2/Scene3D'));
+// The briefing's camera stands a little closer than the command center's.
+const V2_ZOOM = 1.15;
+// How far the card stack tilts toward the mouse, in degrees.
+const V2_TILT_DEG = 4;
+const V2_STYLES = ['nebula', 'tide'];
 // Its share of the screen's shorter side, so the words sit inside the sphere.
 const ORB_FILL = 0.95;
 
@@ -111,7 +119,8 @@ function Line({ text, to, active, done, pending = false, onOpen }) {
       <span aria-hidden="true" style={{ opacity: 0 }}>{text.slice(shown)}</span>
     </>
   );
-  const look = 'block w-full px-0 py-1 text-center text-[13px] leading-relaxed transition-[color,text-shadow] duration-700 sm:text-sm';
+  // whitespace-normal: every button in the app is nowrap (index.css), and a spoken line ran off a phone's card.
+  const look = 'briefing-line block w-full whitespace-normal px-0 py-1 text-center text-[13px] leading-relaxed transition-[color,text-shadow] duration-700 sm:text-sm';
   const colour = {
     // WHITE: these are the words she is actually saying.
     color: done ? palette.settled : palette.speech,
@@ -293,8 +302,20 @@ function Brackets({ colour }) {
  * browser without a mic had no way to pick. One button per topic on screen,
  * the first one primary (it is what "yes" picks), and Later to leave.
  */
-function AskChoices({ keys, onPick }) {
+function AskChoices({ keys, onPick, v2 = false }) {
   const { tint, signal, hot, dim, speech } = useDianePalette();
+  if (v2) {
+    return (
+      <div className="mt-4 flex flex-wrap justify-center gap-2" role="group" aria-label="Which one first?">
+        {keys.map((key, i) => (
+          <button key={key} type="button" onClick={() => onPick(BRIEFING_GOES_TO[key])} className={`bv2-chip ${i === 0 ? 'is-primary' : ''}`}>
+            {TOPIC_LABEL[key] ?? key}
+          </button>
+        ))}
+        <button type="button" onClick={() => onPick(null)} className="bv2-chip is-quiet">Later</button>
+      </div>
+    );
+  }
   const base = 'min-h-0 px-3 py-1.5 text-[10px] uppercase tracking-[0.25em] transition-colors outline-none focus-visible:ring-1 focus-visible:ring-offset-0';
   return (
     <div className="mt-4 flex flex-wrap justify-center gap-2" role="group" aria-label="Which one first?">
@@ -395,6 +416,10 @@ function BriefingScreen({ items: initialItems, greeting: madeAhead, onDone }) {
   const tts = useOpenaiSpeech();
   const [leaving, setLeaving] = useState(false);
   const [asking, setAsking] = useState(false);
+  // THE V2 LOOK when V2 is his pick in the command center (AgentOverlay). V1 stays as it was.
+  const [v2] = useState(() => { try { return localStorage.getItem('diane.ui') === 'v2'; } catch { return false; } });
+  // his orb style from the command center
+  const [orbStyle] = useState(() => { try { const v = localStorage.getItem('diane.orbStyle'); return V2_STYLES.includes(v) ? v : 'nebula'; } catch { return 'nebula'; } });
   // The loading screen's pick when it made the audio ahead; otherwise picked now.
   const [greeting] = useState(() => madeAhead ?? nextGreeting());
   // LIVE: reconciled against the sheet while she talks. See reconcile().
@@ -445,9 +470,17 @@ function BriefingScreen({ items: initialItems, greeting: madeAhead, onDone }) {
     return true;
   }, []);
 
-  const say = useCallback((text) => (tts.available
-    ? tts.speak(text)
-    : new Promise((resolve) => { setTimeout(resolve, text.length * TYPE_MS_PER_CHAR + SILENT_PAUSE_MS); })), [tts]);
+  // WITH NO VOICE THE PARTS STILL TAKE TURNS. Each one queued its own timer at
+  // once, so the short closing question finished first, opened the answer
+  // window and closed the screen mid card. 2026-10-13. Reset on a skip.
+  const silentRef = useRef(Promise.resolve());
+  const say = useCallback((text) => {
+    if (tts.available) return tts.speak(text);
+    silentRef.current = silentRef.current.then(() => new Promise((resolve) => {
+      setTimeout(resolve, text.length * TYPE_MS_PER_CHAR + SILENT_PAUSE_MS);
+    }));
+    return silentRef.current;
+  }, [tts]);
 
   /** Queues parts up to `upto`, each one advancing the screen as it finishes. */
   const queueUpTo = useRef(null);
@@ -481,6 +514,7 @@ function BriefingScreen({ items: initialItems, greeting: madeAhead, onDone }) {
     if (asking || leaving) return;
     genRef.current += 1;
     tts.cancel();
+    silentRef.current = Promise.resolve();
     let target = segmentsRef.current.findIndex((s, i) => i > spoken && (s.kind === 'head' || s.kind === 'ask' || s.kind === 'closing'));
     while (target === -1 && expand()) {
       target = segmentsRef.current.findIndex((s, i) => i > spoken && (s.kind === 'head' || s.kind === 'ask' || s.kind === 'closing'));
@@ -565,6 +599,34 @@ function BriefingScreen({ items: initialItems, greeting: madeAhead, onDone }) {
   orbLevelRef.current = tts.speaking ? tts.level : listening ? voice.level : -1;
   const orbState = tts.speaking ? ORB_STATE.speaking : listening ? ORB_STATE.listening : ORB_STATE.idle;
 
+  // V2: THE ORB FLARES as each card lands (a topic, the closing, the question).
+  const cardsReached = useMemo(
+    () => segments.filter((s, i) => i <= spoken && s.kind !== 'read').length,
+    [segments, spoken],
+  );
+
+  // V2: THE CARDS TILT TOWARD THE MOUSE. Straight onto the element, once a
+  // frame at most: through state it would re-render the page on every move.
+  const tiltRef = useRef(null);
+  useEffect(() => {
+    if (!v2) return undefined;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return undefined;
+    let frame = 0;
+    let x = 0;
+    let y = 0;
+    const onMove = (e) => {
+      x = (e.clientX / window.innerWidth) * 2 - 1;
+      y = (e.clientY / window.innerHeight) * 2 - 1;
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        if (tiltRef.current) tiltRef.current.style.transform = `rotateX(${(-y * V2_TILT_DEG).toFixed(2)}deg) rotateY(${(x * V2_TILT_DEG).toFixed(2)}deg)`;
+      });
+    };
+    window.addEventListener('pointermove', onMove, { passive: true });
+    return () => { window.removeEventListener('pointermove', onMove); cancelAnimationFrame(frame); };
+  }, [v2]);
+
   // THE STACK IS MEMOISED: her voice level re-renders this page ~60 times a second,
   // and every card and breakdown re-rendering with it was the lag. 2026-09-28.
   const stack = useMemo(() => {
@@ -638,7 +700,7 @@ function BriefingScreen({ items: initialItems, greeting: madeAhead, onDone }) {
         return (
           <>
             {lines}
-            <AskChoices keys={topics} onPick={open} />
+            <AskChoices keys={topics} onPick={open} v2={v2} />
           </>
         );
       }
@@ -675,6 +737,30 @@ function BriefingScreen({ items: initialItems, greeting: madeAhead, onDone }) {
               zIndex: STACK_DEPTH - depth,
             }}
           >
+            {v2 && depth === 0 && <span className="bv2-glow" aria-hidden="true" />}
+            {v2 ? (
+              <div className={`bv2-panel ${depth === 0 ? 'is-front' : ''}`} style={{ maxHeight: CARD_MAX_H }}>
+                {depth === 0 && (
+                  <span
+                    className="hud-scan pointer-events-none absolute inset-0"
+                    style={{ background: `linear-gradient(180deg, transparent 0%, ${tint(0.07, palette.signal)} 50%, transparent 100%)` }}
+                  />
+                )}
+                <div className="bv2-head">
+                  <span className="bv2-head-text">
+                    {`◆  DIANE  //  ${first.kind === 'head' ? `BRIEFING  ·  ${label}` : label}`}
+                    {depth === 0 && card.parts.some(({ index: i }) => i === spoken) && <span className="bv2-live">{'  //  LIVE'}</span>}
+                  </span>
+                  {reads.length > 0 && (
+                    <span className="bv2-ticks" aria-hidden="true">
+                      {reads.map((i) => <span key={i} className={`bv2-tick ${i <= spoken ? 'is-done' : ''} ${i === spoken ? 'animate-pulse' : ''}`} />)}
+                    </span>
+                  )}
+                </div>
+                <div className="briefing-card-in flex min-h-0 flex-col">{cardBody(card)}</div>
+              </div>
+            ) : (
+            <>
             {/* The frame is the fill showing 1px around the panel: a clipped border with cut corners. */}
             <div style={{ clipPath: HUD_CHAMFER, background: edge, padding: 1 }}>
               <div
@@ -706,6 +792,8 @@ function BriefingScreen({ items: initialItems, greeting: madeAhead, onDone }) {
               </div>
             </div>
             <Brackets colour={depth === 0 ? palette.hot : tint(0.35, palette.signal)} />
+            </>
+            )}
             {/* A card behind is a way back: clicking it brings it forward. */}
             {depth > 0 && (
               <button
@@ -721,7 +809,7 @@ function BriefingScreen({ items: initialItems, greeting: madeAhead, onDone }) {
     </div>
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segments, spoken, items, focus, palette]);
+  }, [segments, spoken, items, focus, palette, v2]);
 
   // NOTHING TO SAY, NOTHING TO SHOW. The caller already checks.
   if (!initialItems?.length) return null;
@@ -729,13 +817,35 @@ function BriefingScreen({ items: initialItems, greeting: madeAhead, onDone }) {
 
   return (
     <div
-      className="fixed inset-0 z-[70] transition-opacity duration-500"
-      style={{ background: palette.void, opacity: leaving ? 0 : 1 }}
+      className={`fixed inset-0 z-[70] transition-opacity duration-500 ${v2 ? 'bv2' : ''}`}
+      style={{
+        background: palette.void,
+        opacity: leaving ? 0 : 1,
+        ...(v2 && { '--sig': palette.signal, '--acc': palette.accent, '--hot': palette.hot, '--dim': palette.dim }),
+      }}
     >
-      <DianeEnvironment />
+      {/* V2: ONE 3D scene, the whole room, and nothing else drawn behind. */}
+      {v2 && (
+        <div className="pointer-events-none absolute inset-0">
+          <Suspense fallback={null}>
+            <Scene3D
+              quality="fast"
+              colorFrom={palette.signal}
+              colorTo={palette.accent}
+              state={orbState}
+              levelRef={orbLevelRef}
+              style={orbStyle}
+              flareKey={cardsReached}
+              zoom={V2_ZOOM}
+            />
+          </Suspense>
+        </div>
+      )}
+      {!v2 && <DianeEnvironment />}
 
       {/* Behind the words, centred on the screen. Sized to a sphere, not the
           viewport: a full screen of particles is what made this scene slow. */}
+      {!v2 && (
       <div ref={orbSlotRef} className="pointer-events-none absolute inset-0">
         {orbSize > 0 && (
           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
@@ -754,16 +864,29 @@ function BriefingScreen({ items: initialItems, greeting: madeAhead, onDone }) {
           </div>
         )}
       </div>
+      )}
 
       {/* THE HUD READOUTS, top corners: who is talking, and when. */}
-      <div className="pointer-events-none absolute left-[4vw] top-[4vh] text-[10px] uppercase tracking-[0.3em]" style={{ fontFamily: HUD_FONT, color: tint(0.85, palette.signal) }}>
-        <div>D.I.A.N.E</div>
-        <div className="mt-1" style={{ color: tint(0.55, palette.dim) }}>{`Daily briefing  //  ${orbState}`}</div>
-      </div>
+      {v2 ? (
+        <div className="bv2-brand pointer-events-none absolute left-[4vw] top-[4vh]">
+          <span className="bv2-brand-name">DIANE</span>
+          <span className="bv2-brand-sub">{`Daily briefing  //  ${orbState}`}</span>
+        </div>
+      ) : (
+        <div className="pointer-events-none absolute left-[4vw] top-[4vh] text-[10px] uppercase tracking-[0.3em]" style={{ fontFamily: HUD_FONT, color: tint(0.85, palette.signal) }}>
+          <div>D.I.A.N.E</div>
+          <div className="mt-1" style={{ color: tint(0.55, palette.dim) }}>{`Daily briefing  //  ${orbState}`}</div>
+        </div>
+      )}
       <HudClock />
 
-      <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-4">
-        {stack}
+      <div
+        className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-4"
+        style={v2 ? { perspective: 1400 } : undefined}
+      >
+        {v2 ? (
+          <div ref={tiltRef} className="bv2-tilt flex w-full justify-center">{stack}</div>
+        ) : stack}
 
         {/* A STATE, not an instruction: the words she is listening for. */}
         <span
@@ -775,12 +898,16 @@ function BriefingScreen({ items: initialItems, greeting: madeAhead, onDone }) {
       </div>
 
       {/* BACK, NEXT and SKIP, bottom right. Quiet: they are the way past, not the way in. */}
-      <div className="absolute bottom-[4vh] right-[4vw] flex gap-1">
+      <div className={`absolute bottom-[4vh] right-[4vw] flex ${v2 ? 'gap-2' : 'gap-1'}`}>
         {[
           { label: 'Back', run: () => back.current(), hidden: (focus ?? cardCountRef.current - 1) <= 0 },
           { label: 'Next', run: () => forward.current(), hidden: asking && focus === null },
           { label: 'Skip', run: () => leave.current(null) },
-        ].filter((c) => !c.hidden).map((control) => (
+        ].filter((c) => !c.hidden).map((control) => (v2 ? (
+          <button key={control.label} type="button" onClick={control.run} className={`bv2-chip ${control.label === 'Skip' ? 'is-quiet' : ''}`}>
+            {control.label}
+          </button>
+        ) : (
           <button
             key={control.label}
             type="button"
@@ -792,7 +919,7 @@ function BriefingScreen({ items: initialItems, greeting: madeAhead, onDone }) {
           >
             {`[ ${control.label} ]`}
           </button>
-        ))}
+        )))}
       </div>
     </div>
   );

@@ -22,9 +22,10 @@ import { LINK_FILTER } from '../../configs/linkFilters.js';
  * then does nothing when you click it.
  */
 
-test('THE NINE KEYS, and a new one is a deliberate change on BOTH sides', () => {
+// The tenth, liquidationDeadlines, is the tracker's (his call 2026-10-13).
+test('THE TEN KEYS, and a new one is a deliberate change on BOTH sides', () => {
   assert.deepEqual(Object.keys(BRIEFING_GOES_TO).sort(), [
-    'concerns', 'liquidating', 'needsReview', 'pastYear', 'payableOver', 'payday', 'reviewMonthly', 'specialCase', 'unpaid',
+    'concerns', 'liquidating', 'liquidationDeadlines', 'needsReview', 'pastYear', 'payableOver', 'payday', 'reviewMonthly', 'specialCase', 'unpaid',
   ]);
 });
 
@@ -222,7 +223,7 @@ test('THE WELCOME PAGE IS THE JARVIS HUD, whatever the theme', () => {
 test('THE QUESTION CAN BE ANSWERED WITHOUT A MIC', () => {
   const src = readFileSync(new URL('./DianeBriefing.jsx', import.meta.url), 'utf8');
   assert.match(src, /label: 'Skip'/);
-  assert.match(src, /<AskChoices keys=\{topics\} onPick=\{open\} \/>/, 'a button per topic on the ask card');
+  assert.match(src, /<AskChoices keys=\{topics\} onPick=\{open\} v2=\{v2\} \/>/, 'a button per topic on the ask card');
   assert.match(src, />\s*Later\s*</);
   // A denied microphone loses the question, never the way out.
   assert.match(src, /ANSWER_WINDOW_MS/, 'it must not wait forever');
@@ -513,7 +514,7 @@ test('AND THE STACK SITS OUT HER VOICE LEVEL: memoised on what it shows', () => 
   // The level re-renders the page ~60 times a second; the cards must not follow.
   const src = readFileSync(new URL('./DianeBriefing.jsx', import.meta.url), 'utf8');
   assert.match(src, /const stack = useMemo\(\(\) => \{/);
-  assert.match(src, /\}, \[segments, spoken, items, focus, palette\]\);/);
+  assert.match(src, /\}, \[segments, spoken, items, focus, palette, v2\]\);/);
 });
 
 // "No need to display the totals also on the cards", his call 2026-09-28.

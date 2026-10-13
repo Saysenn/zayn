@@ -55,6 +55,8 @@ export const BRIEFING_GOES_TO = Object.freeze({
   // the sheet opens as it is; see docs/todo.md.
   specialCase: '/master-sheet',
   payableOver: '/master-sheet',
+  // The tracker, most urgent first (his top priority, 2026-10-13).
+  liquidationDeadlines: '/liquidations',
 });
 
 // The words on screen while the mic is open. Shown, never instructed: the
@@ -205,6 +207,14 @@ export function cardEntries(item) {
       return { id: r.id, name, count: r.flags, said: `${name}, ${r.flags} ${r.flags === 1 ? 'flag' : 'flags'}` };
     });
   }
+  if (item.key === 'liquidationDeadlines') {
+    // "Acme, passed 2 days ago" / "Acme, due in 3 days": the company and how near.
+    return rows.map((r) => {
+      const when = r.days < 0 ? `passed ${-r.days} ${r.days === -1 ? 'day' : 'days'} ago`
+        : r.days === 0 ? 'due today' : `due in ${r.days} ${r.days === 1 ? 'day' : 'days'}`;
+      return { id: r.id, name: r.company, count: r.days < 0 ? 'passed' : r.days === 0 ? 'today' : `${r.days}d`, said: `${r.company}, ${when}` };
+    });
+  }
   if (DETAIL_KEYS.includes(item.key)) {
     return rows.map((r) => {
       const at = r.company ? ` at ${r.company}` : r.deals > 1 ? `, ${r.deals} deals` : '';
@@ -265,6 +275,7 @@ export const TOPIC_LABEL = Object.freeze({
   needsReview: 'Needs a check',
   specialCase: 'Special case on',
   payableOver: 'Payable over monthly',
+  liquidationDeadlines: 'Liquidation deadlines',
 });
 export const HUD_LABEL = Object.freeze({
   greet: 'Incoming briefing',
@@ -283,6 +294,7 @@ export const TOPIC_WORDS = Object.freeze({
   needsReview: ['import', 'check', 'checks'],
   specialCase: ['special'],
   payableOver: ['payable', 'over', 'more', 'exceed'],
+  liquidationDeadlines: ['deadline', 'deadlines', 'tracker'],
 });
 
 /** The topic they named, among the ones on screen, or null. */

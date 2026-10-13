@@ -6,6 +6,7 @@ import Layout from './components/layout/Layout';
 import PeoplePage from './pages/PeoplePage';
 import PersonDetailPage from './pages/PersonDetailPage';
 import CompaniesPage from './pages/CompaniesPage';
+import LiquidationsPage from './pages/LiquidationsPage';
 import CompanyDetailPage from './pages/CompanyDetailPage';
 import ExportPrintPage from './pages/ExportPrintPage';
 import ExpensesPage from './pages/ExpensesPage';
@@ -44,6 +45,7 @@ export default function App() {
         <Route path="people/:personId" element={<PersonDetailPage />} />
         <Route path="companies" element={<CompaniesPage />} />
         <Route path="companies/:key" element={<CompanyDetailPage />} />
+        <Route path="liquidations" element={<LiquidationsPage />} />
         <Route path="expenses" element={<ExpensesPage />} />
         <Route path="flagged" element={<FlaggedPage />} />
         <Route path="chat" element={<ChatPage />} />

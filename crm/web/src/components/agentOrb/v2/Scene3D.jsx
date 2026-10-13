@@ -29,8 +29,45 @@ const STYLE_ID = { nebula: 0, stars: 1, tide: 2 };
 
 const hex = (c) => new THREE.Color(c);
 
+/**
+ * THE FAST SETTING, for the welcome briefing (his call 2026-10-13: "super
+ * fast even in low GPUs"). The command center keeps `full`, untouched.
+ *
+ * Built light: 16 steps and 3 noise layers per orb pixel (not 40 and 5), no
+ * MSAA, a coarser sphere, fewer stars, one strand per ring outside Tide.
+ * Then it WATCHES ITSELF: below 45 fps it steps down a level, and on a
+ * slow machine it ends up a still picture rather than a stutter. A known
+ * weak GPU starts low. Never above 60 fps. `data-level` on the host says
+ * where it settled.
+ */
+const FAST_LEVELS = [
+  { pr: 1, bloom: true, minMs: 15 },
+  { pr: 0.75, bloom: false, minMs: 15 },
+  { pr: 0.6, bloom: false, minMs: 32 },
+  { pr: 0.6, bloom: false, still: true },
+];
+const SLOW_MS = 1000 / 45;
+const SLOWER_MS = 1000 / 24;
+// No graphics card at all (drawn by the CPU): the still picture from the start.
+const NO_GPU = /swiftshader|llvmpipe|software|basic render/i;
+const WEAK_GPU = /mali-4|mali-t[67]|adreno \(tm\) [2-5]\d\d|powervr|intel\(r\) hd graphics( [2-5]\d{3})?(?!\s*\d)/i;
+
+/** Where the fast setting starts: low for a weak GPU or a small machine. */
+function startLevel(renderer) {
+  try {
+    const gl = renderer.getContext();
+    const info = gl.getExtension('WEBGL_debug_renderer_info');
+    const name = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+    if (NO_GPU.test(name)) return 3;
+    if (WEAK_GPU.test(name)) return 2;
+  } catch { /* unknown: judged by its frame rate */ }
+  if ((navigator.deviceMemory && navigator.deviceMemory <= 4) || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4)) return 1;
+  return 0;
+}
+
 export default function Scene3D({
   colorFrom, colorTo, state = 'idle', levelRef = null, style = 'nebula', active = true, flareKey = 0, onOrbClick = null, anchorRef = null, zoom = 1, lively = false,
+  quality = 'full',
 }) {
   const hostRef = useRef(null);
   const live = useRef({ state, style, colorFrom, colorTo, flare: 0 });
@@ -56,9 +93,13 @@ export default function Scene3D({
     const host = hostRef.current;
     if (!host) return undefined;
     const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const FAST = quality === 'fast';
+    const dpr = window.devicePixelRatio || 1;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.6));
+    const renderer = new THREE.WebGLRenderer({ antialias: !FAST, alpha: false, powerPreference: 'high-performance' });
+    renderer.setPixelRatio(FAST ? Math.min(dpr, 1) : Math.min(dpr, 1.6));
+    // reduced motion: one still picture
+    let level = FAST ? (reduced ? 3 : startLevel(renderer)) : 0;
     renderer.setClearColor(0x000000, 1);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     host.appendChild(renderer.domElement);
@@ -78,8 +119,11 @@ export default function Scene3D({
       uCenter: { value: new THREE.Vector3() }, uRadius: { value: 1.75 },
     };
     const orb = new THREE.Mesh(
-      new THREE.SphereGeometry(1.75, 96, 96),
-      new THREE.ShaderMaterial({ vertexShader: ORB_VERTEX, fragmentShader: ORB_FRAGMENT, uniforms: orbUniforms, transparent: true, depthWrite: true }),
+      new THREE.SphereGeometry(1.75, FAST ? 48 : 96, FAST ? 48 : 96),
+      new THREE.ShaderMaterial({
+        vertexShader: ORB_VERTEX, fragmentShader: ORB_FRAGMENT, uniforms: orbUniforms, transparent: true, depthWrite: true,
+        ...(FAST && { defines: { STEPS: 16, OCTAVES: 3 } }),
+      }),
     );
     scene.add(orb);
 
@@ -111,7 +155,9 @@ export default function Scene3D({
       const holder = new THREE.Group();
       holder.rotation.set(...s.tilt);
       scene.add(holder);
-      for (let strand = 0; strand < 3; strand += 1) {
+      // the extra strands only show in Tide: the fast setting leaves them out elsewhere
+      const strands = FAST && STYLE_ID[style] !== 2 ? 1 : 3;
+      for (let strand = 0; strand < strands; strand += 1) {
         const geo = new THREE.RingGeometry(s.r - s.w, s.r + s.w, 384, 1);
         const mat = new THREE.ShaderMaterial({
           vertexShader: RING_VERTEX, fragmentShader: RING_FRAGMENT, transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
@@ -151,7 +197,8 @@ export default function Scene3D({
       { n: 600, spread: 30, z: [-25, -8], size: 1.8 },
       { n: 260, spread: 7, z: [-4, 4], size: 2.6, orbit: true },
     ];
-    for (const L of STAR_LAYERS) {
+    for (const spec of STAR_LAYERS) {
+      const L = FAST ? { ...spec, n: Math.round(spec.n * 0.4) } : spec;
       const pos = new Float32Array(L.n * 3);
       const seed = new Float32Array(L.n);
       for (let i = 0; i < L.n; i += 1) {
@@ -179,7 +226,7 @@ export default function Scene3D({
       if (L.orbit) holder.rotation.x = 0.35;
       holder.add(pts);
       scene.add(holder);
-      layers.push({ holder, mat, orbit: Boolean(L.orbit) });
+      layers.push({ holder, mat, orbit: Boolean(L.orbit), size: L.size });
     }
 
     // ---- bloom
@@ -232,7 +279,8 @@ export default function Scene3D({
       sized = `${w}x${h}`;
       renderer.setSize(w, h, false);
       composer.setSize(w, h);
-      bloom.setSize(w, h);
+      // the fast setting's glow is worked out at half size: soft anyway
+      bloom.setSize(FAST ? Math.ceil(w / 2) : w, FAST ? Math.ceil(h / 2) : h);
       camera.aspect = w / h;
       // a narrow screen pulls the camera back so she still fits
       baseZ = w / h < 1 ? 19 : 13.5;
@@ -240,6 +288,19 @@ export default function Scene3D({
       offset.key = '';
       camera.updateProjectionMatrix();
     };
+    /** A fast level: its sharpness (and the stars with it), then a fresh size. */
+    const applyLevel = () => {
+      if (!FAST) return;
+      const pr = Math.min(dpr, 1) * FAST_LEVELS[level].pr;
+      renderer.setPixelRatio(pr);
+      composer.setPixelRatio(pr);
+      for (const l of layers) l.mat.uniforms.uSize.value = l.size * pr;
+      host.dataset.level = String(level);
+      sized = '';
+      drawnStill = false;
+    };
+    let drawnStill = false;
+    applyLevel();
     const ro = new ResizeObserver(resize);
     ro.observe(host);
     resize();
@@ -275,9 +336,33 @@ export default function Scene3D({
     let raf = 0;
     let energy = 0.25;
     let ripple = 0;
-    const tick = () => {
+    // the fast setting's own clock: when it last drew, and how its frames are going
+    let lastDraw = 0;
+    // JUDGED BY TIME, not a frame count: a slow machine draws few frames, and
+    // waiting for 80 of them kept it stuttering for seconds.
+    const watch = { frames: 0, since: 0, start: 0, settled: false };
+    const judge = (now) => {
+      if (watch.settled || level >= FAST_LEVELS.length - 1) return;
+      if (!watch.start) watch.start = now;
+      // past the first frames' shader compile
+      if (now - watch.start < 300) return;
+      if (!watch.since) { watch.since = now; watch.frames = 0; return; }
+      watch.frames += 1;
+      if (now - watch.since < 1000 || watch.frames < 5) return;
+      const avg = (now - watch.since) / watch.frames;
+      const target = FAST_LEVELS[level].minMs > 20 ? SLOWER_MS : SLOW_MS;
+      if (avg > target) { level += 1; applyLevel(); Object.assign(watch, { frames: 0, since: 0, start: 0 }); } else watch.settled = true;
+    };
+    const tick = (now = performance.now()) => {
       raf = requestAnimationFrame(tick);
       if (!activeRef.current || document.hidden) { clock.getDelta(); return; }
+      if (FAST) {
+        const L0 = FAST_LEVELS[level];
+        if (L0.still && drawnStill && `${host.clientWidth}x${host.clientHeight}` === sized) return;
+        if (!L0.still && now - lastDraw < L0.minMs) return;
+        lastDraw = now;
+        judge(now);
+      }
       if (`${host.clientWidth}x${host.clientHeight}` !== sized) resize();
       const dt = Math.min(clock.getDelta(), 0.05) * (reduced ? 0.25 : 1);
       const t = (orbUniforms.uTime.value += dt);
@@ -335,7 +420,9 @@ export default function Scene3D({
       place();
 
       bloom.strength = 0.5 + energy * 0.3 + L.flare * 0.6 + orbUniforms.uLevel.value * 0.3;
-      composer.render();
+      if (FAST && !FAST_LEVELS[level].bloom) renderer.render(scene, camera);
+      else composer.render();
+      if (FAST && FAST_LEVELS[level].still) drawnStill = true;
     };
     tick();
 

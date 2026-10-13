@@ -25,6 +25,13 @@ export const ORB_FRAGMENT = /* glsl */`
   varying vec3 vNormal;
   uniform float uTime, uEnergy, uLevel, uFlare, uRipple, uStyle, uError, uRadius;
   uniform vec3 uColorA, uColorB, uCenter;
+  // The fast setting (the briefing) passes fewer through ShaderMaterial defines.
+  #ifndef STEPS
+  #define STEPS 40
+  #endif
+  #ifndef OCTAVES
+  #define OCTAVES 5
+  #endif
 
   float hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
   float noise(vec3 x) {
@@ -32,7 +39,7 @@ export const ORB_FRAGMENT = /* glsl */`
     return mix(mix(mix(hash(i), hash(i + vec3(1,0,0)), f.x), mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
                mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x), mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
   }
-  float fbm(vec3 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { v += a * noise(p); p = p * 2.03 + 3.1; a *= 0.5; } return v; }
+  float fbm(vec3 p) { float v = 0.0, a = 0.5; for (int i = 0; i < OCTAVES; i++) { v += a * noise(p); p = p * 2.03 + 3.1; a *= 0.5; } return v; }
   mat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
 
   // what the volume holds at p (p in the unit ball), as light and colour mix
@@ -86,7 +93,6 @@ export const ORB_FRAGMENT = /* glsl */`
     float t = uTime;
     vec3 acc = vec3(0.0);
     float alpha = 0.0;
-    const int STEPS = 40;
     float step = len / float(STEPS);
     for (int i = 0; i < STEPS; i++) {
       vec3 pw = vWorld + rd * (step * (float(i) + 0.5));

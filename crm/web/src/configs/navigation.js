@@ -55,6 +55,10 @@ export const NAV_GROUPS = [
       { to: '/master-sheet', label: 'Master sheet', icon: 'MasterSheetIcon' },
       { to: '/people', label: 'People', icon: 'UsersIcon' },
       { to: '/companies', label: 'Companies', icon: 'BuildingIcon' },
+      // THE LIQUIDATION TRACKER, his top priority 2026-10-13: companies
+      // being wound down, their deadlines and who owns each. Beside
+      // Companies because every row IS a company.
+      { to: '/liquidations', label: 'Liquidations', icon: 'HourglassIcon' },
       // ===============================
       // * THE ONE PAGE THAT ASKS RATHER THAN SHOWS
       // ===============================

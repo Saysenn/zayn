@@ -3,7 +3,8 @@ const concernsRepo = require('../repos/concerns.repo');
 const settingsRepo = require('../repos/settings.repo');
 const { dueThisMonth, reviewReason, REVIEW_REASON } = require('./reviewQueue.helper');
 const { countsTowardTotal } = require('./owedThisMonth.helper');
-const { currentMonth } = require('./presetMonth.helper');
+const { currentMonth, currentDay } = require('./presetMonth.helper');
+const liquidationsRepo = require('../repos/liquidations.repo');
 const { ratedRows } = require('./ratedRows.helper');
 const { PAYDAY_REASON } = require('./paydayFlag.helper');
 
@@ -45,6 +46,8 @@ const PAYDAY_ALL = new RegExp(PAYDAY_REASON.source, 'gi');
 
 // Every flagged person, not a page of them. His call 2026-09-28.
 const CONCERNS_LIMIT = 500;
+// The tracker's deadlines she names: passed, or due within this many days.
+const DEADLINE_DAYS = 7;
 
 const plural = (n, one, many) => (n === 1 ? one : many);
 
@@ -54,6 +57,12 @@ const plural = (n, one, many) => (n === 1 ? one : many);
 // WHY (his call 2026-09-21): winding down, past a year and ticked need different answers.
 const SAY = {
   liquidating: (n) => `${n} ${plural(n, 'deal is on a company', 'deals are on companies')} winding down.`,
+  // THE TRACKER'S DEADLINES (his call 2026-10-13): passed or due in the next 7 days.
+  liquidationDeadlines: (n, passed = 0) => {
+    if (passed === n) return `${n} liquidation ${plural(n, 'deadline has', 'deadlines have')} passed.`;
+    if (!passed) return `${n} liquidation ${plural(n, 'deadline is', 'deadlines are')} due this week.`;
+    return `${n} liquidation deadlines are due or passed: ${passed} already passed.`;
+  },
   pastYear: (n) => `${n} ${plural(n, 'deal is', 'deals are')} past a year.`,
   // THIS month, his words 2026-09-28: the tick asks for it now, not forever.
   reviewMonthly: (n) => `${n} ${plural(n, 'deal is', 'deals are')} marked for review this month.`,
@@ -140,6 +149,20 @@ function dealRow(row, amountField) {
   };
 }
 
+/** One tracked company with a deadline. Days left: negative once passed. */
+function deadlineRow(row, today) {
+  const deadline = String(row.deadline instanceof Date ? row.deadline.toISOString() : row.deadline).slice(0, 10);
+  const days = Math.round((Date.parse(deadline) - Date.parse(today)) / 86_400_000);
+  return {
+    id: `liq-${row.id}`,
+    company: row.company_name,
+    deadline,
+    days,
+    passed: days < 0,
+    stage: row.stage,
+  };
+}
+
 /** One flagged person. Stable id, so a refetch can tell new from sorted. */
 function concernRow(row) {
   return {
@@ -160,10 +183,11 @@ async function briefing(period = currentMonth()) {
   const settings = await settingsRepo.get();
   const useEndDate = Boolean(settings?.color_uses_end_date);
 
-  const [due, concerns, rows] = await Promise.all([
+  const [due, concerns, rows, deadlines] = await Promise.all([
     dueThisMonth(period, { answered: false }),
     concernsRepo.listGrouped({ status: 'open', limit: CONCERNS_LIMIT, offset: 0 }),
     rowsRepo.findAllRows(),
+    liquidationsRepo.dueSoon(DEADLINE_DAYS),
   ]);
 
   // An untouched override is NULL, a real third state, and the resolved
@@ -190,6 +214,10 @@ async function briefing(period = currentMonth()) {
   // SPLIT BY WHY, ranked: winding down is the biggest thing that can be
   // happening, his own tick the most specific, a date the ordinary case.
   const by = (reason) => due.filter((row) => reviewReason(row) === reason);
+  // THE TRACKER FIRST: a deadline is a date somebody outside is holding us to.
+  const today = currentDay();
+  const deadlineRows = deadlines.map((r) => deadlineRow(r, today));
+  add('liquidationDeadlines', deadlineRows, deadlineRows.length, deadlineRows.filter((r) => r.passed).length);
   add('liquidating', by(REVIEW_REASON.LIQUIDATION).map((r) => dealRow(r, 'monthly_amount')));
   add('pastYear', by(REVIEW_REASON.PAST_END).map((r) => dealRow(r, 'monthly_amount')));
   add('reviewMonthly', by(REVIEW_REASON.REVIEW).map((r) => dealRow(r, 'monthly_amount')));

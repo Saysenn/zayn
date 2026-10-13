@@ -1,0 +1,92 @@
+/* ***************************************************
+ * THE WELCOME BRIEFING IN THE V2 LOOK (his call 2026-10-13: "make it feel
+ * like Diane V2"). Only when V2 is his pick (localStorage diane.ui); V1's
+ * briefing is untouched. Everything here is scoped under `.bv2`.
+ *
+ * The card is her transmission box from v2.css: cut corners, an edge of
+ * light running signal into accent, glass with scanlines, a HUD header with
+ * a live mark, the same monospace. The buttons are V2's cut corner chips.
+ * *************************************************** */
+.bv2 { --mono: ui-monospace, 'SF Mono', Menlo, monospace; }
+
+/* THE CARD: the edge is the panel's own gradient showing 1px around the glass */
+.bv2 .bv2-panel {
+  --cut: 16px;
+  position: relative; isolation: isolate; display: flex; flex-direction: column; overflow: hidden;
+  padding: 12px 22px 18px;
+  font-family: var(--mono); color: #e8f4ff;
+  clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut)));
+  background: linear-gradient(135deg, var(--sig), color-mix(in srgb, var(--sig) 25%, transparent) 30%, transparent 55%, color-mix(in srgb, var(--acc) 50%, transparent));
+}
+/* a card further back is a quieter edge */
+.bv2 .bv2-panel:not(.is-front) { background: linear-gradient(135deg, color-mix(in srgb, var(--sig) 45%, transparent), transparent 45%, color-mix(in srgb, var(--acc) 25%, transparent)); }
+/* the glass inside the edge. Solid enough that the card behind never ghosts through */
+.bv2 .bv2-panel::after {
+  content: ''; position: absolute; inset: 1px; z-index: -1;
+  clip-path: polygon(0 0, calc(100% - var(--cut) + 0.5px) 0, 100% calc(var(--cut) - 0.5px), 100% 100%, calc(var(--cut) - 0.5px) 100%, 0 calc(100% - var(--cut) + 0.5px));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--sig) 55%, transparent), transparent 40%) top left / 100% 1px no-repeat,
+    linear-gradient(180deg, transparent 0 33px, color-mix(in srgb, var(--sig) 18%, transparent) 33px 34px, transparent 34px),
+    repeating-linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0 1px, transparent 1px 4px),
+    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--sig) 16%, transparent), transparent 55%),
+    #030a10;
+}
+
+/* THE HUD HEADER: who, which card, and a live mark while she reads it */
+.bv2 .bv2-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-shrink: 0;
+  height: 22px; margin-bottom: 12px;
+  font-size: 8.5px; font-weight: 700; letter-spacing: 0.3em; text-transform: uppercase; white-space: nowrap;
+  color: var(--sig); text-shadow: 0 0 8px var(--sig);
+}
+.bv2 .bv2-head-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.bv2 .bv2-live { animation: bv2-blink 1.6s steps(2) infinite; }
+@keyframes bv2-blink { 50% { opacity: 0.45; } }
+/* a long card has many marks: they never crowd out the header */
+.bv2 .bv2-ticks { display: flex; gap: 3px; flex-shrink: 1; min-width: 0; max-width: 35%; overflow: hidden; }
+.bv2 .bv2-tick { width: 14px; height: 3px; background: color-mix(in srgb, var(--sig) 20%, transparent); clip-path: polygon(2px 0, 100% 0, calc(100% - 2px) 100%, 0 100%); }
+.bv2 .bv2-tick.is-done { background: var(--sig); box-shadow: 0 0 8px var(--sig); }
+
+/* HER WORDS: the V2 reply's monospace, a size smaller */
+.bv2 .bv2-panel .briefing-line { font-size: 12px; line-height: 1.65; letter-spacing: 0.01em; }
+.bv2 .bv2-panel [data-read] { font-size: 11.5px; }
+
+/* THE BUTTONS: V2's chips, cut corners, the first one filled */
+.bv2 .bv2-chip {
+  min-height: 0; height: 30px; padding: 0 14px; border: 1px solid color-mix(in srgb, var(--sig) 30%, transparent); border-radius: 0;
+  font-family: var(--mono); font-size: 9.5px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.78); background: rgba(255, 255, 255, 0.04);
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+  transition: color 160ms ease, background 160ms ease, border-color 160ms ease;
+}
+.bv2 .bv2-chip:hover { color: #fff; border-color: var(--sig); background: color-mix(in srgb, var(--sig) 16%, transparent); }
+.bv2 .bv2-chip:focus-visible { outline: 1px solid var(--sig); outline-offset: 2px; }
+.bv2 .bv2-chip.is-primary { color: #04070d; border-color: transparent; background: linear-gradient(90deg, var(--sig), var(--acc)); }
+.bv2 .bv2-chip.is-primary:hover { color: #04070d; filter: brightness(1.12); }
+.bv2 .bv2-chip.is-quiet { border-color: transparent; background: transparent; color: color-mix(in srgb, var(--dim) 90%, white); }
+.bv2 .bv2-chip.is-quiet:hover { color: #fff; border-color: color-mix(in srgb, var(--sig) 30%, transparent); }
+
+/* THE MARK, top left: V2's DIANE, nothing else beside it */
+.bv2 .bv2-brand { display: flex; flex-direction: column; line-height: 1; font-family: var(--mono); }
+.bv2 .bv2-brand-name {
+  font-size: 0.95rem; font-weight: 800; letter-spacing: 0.3em;
+  background: linear-gradient(90deg, var(--hot), var(--sig) 45%, var(--acc)); -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 14px color-mix(in srgb, var(--sig) 55%, transparent));
+}
+.bv2 .bv2-brand-sub { margin-top: 4px; font-size: 0.45rem; letter-spacing: 0.32em; text-transform: uppercase; color: color-mix(in srgb, var(--dim) 90%, white); }
+
+@media (prefers-reduced-motion: reduce) {
+  .bv2 .bv2-live { animation: none; }
+}
+
+/* THE ROOM IS 3D (his call 2026-10-13): the stack tilts toward the mouse.
+   Transform only, eased by the compositor, so nothing repaints. */
+.bv2 .bv2-tilt { transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1); will-change: transform; }
+/* the orb's light on the front card: a static gradient, no blur or filter */
+.bv2 .bv2-glow {
+  position: absolute; inset: -48px -64px; z-index: -1; pointer-events: none;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--sig) 16%, transparent), transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .bv2 .bv2-tilt { transition: none; }
+}

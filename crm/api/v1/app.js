@@ -26,6 +26,7 @@ const { router: expensesRouter } = require('./expenses');
 const { router: monthlyReviewRouter } = require('./monthlyReview');
 const { router: deadPeopleRouter } = require('./deadPeople');
 const briefingRouter = require('./briefing');
+const liquidationsRouter = require('./liquidations');
 const { router: scheduledActionsRouter } = require('./scheduledActions');
 const { requireSession } = require('./middlewares/requireSession');
 const { requireApiKey } = require('./middlewares/requireApiKey');
@@ -102,6 +103,7 @@ app.use('/api/v1', expensesRouter);
 app.use('/api/v1', monthlyReviewRouter);
 app.use('/api/v1', deadPeopleRouter);
 app.use('/api/v1', briefingRouter);
+app.use('/api/v1', liquidationsRouter);
 app.use('/api/v1', scheduledActionsRouter);
 app.use('/api/v1/people', peopleRouter);
 

@@ -215,6 +215,22 @@ export const apiService = {
     update: (id, fields) => api.patch(`${apiPath}/expense-admins/${id}`, fields),
     remove: (id) => api.delete(`${apiPath}/expense-admins/${id}`),
   },
+  // The liquidation tracker (migration 084).
+  liquidations: {
+    list: () => api.get(`${apiPath}/liquidations`),
+    get: (id) => api.get(`${apiPath}/liquidations/${id}`),
+    add: (body) => api.post(`${apiPath}/liquidations`, body),
+    update: (id, fields) => api.patch(`${apiPath}/liquidations/${id}`, fields),
+    addComm: (id, body) => api.post(`${apiPath}/liquidations/${id}/comms`, body),
+    addDoc: (id, file, onProgress) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      return api.upload(`${apiPath}/liquidations/${id}/docs`, formData, onProgress);
+    },
+    // Resolves { blob, filename }.
+    downloadDoc: (id, docId) => api.download(`${apiPath}/liquidations/${id}/docs/${docId}`),
+    removeDoc: (id, docId) => api.delete(`${apiPath}/liquidations/${id}/docs/${docId}`),
+  },
   whatbotNumbers: {
     list: () => api.get(`${apiPath}/whatbot-numbers`),
     add: (body) => api.post(`${apiPath}/whatbot-numbers`, body),
