@@ -68,9 +68,9 @@ import { NUMBER_INPUT, nonNegative } from '../../helpers/numberInput';
  * back 1.36 (the round trip 065 fixed cannot return); the units per dollar
  * the converters divide by is worked out from it on the server.
  *
- * A RATE SET HERE ALWAYS WINS. Anything not set converts at TODAY'S RATE,
- * pulled once a day from Open Exchange Rates; the pull never touches a row
- * set here. The row says which one it is running on.
+ * THE NEWER ONE WINS (his call, same day): a pull, daily or "Pull now",
+ * replaces a rate typed here before it; a rate typed after the pull is used
+ * until the next. The row says which it is running on, and shows that rate.
  */
 
 // Only a currency whose rate has a story needs a note. Each reads in the
@@ -86,7 +86,7 @@ const NOTES = {
 // SHORT, his call 2026-10-13: the box already says the rate.
 const ROW_SOURCE = {
   saved: 'Manual',
-  daily: 'Auto, today',
+  daily: 'Auto',
   fallback: 'Built in',
 };
 
@@ -129,9 +129,11 @@ const shownFor = (saved) => {
   return saved.perUsd > 0 ? String(Number((1 / saved.perUsd).toFixed(6))) : '';
 };
 
-function RateRow({ code, saved, pulled, source, onSave, saving, checked, onToggle }) {
+function RateRow({ code, saved, pulled, pulledAt, source, onSave, saving, checked, onToggle }) {
   const [value, setValue] = useState('');
-  const shown = shownFor(saved);
+  // The rate in use: today's pull when it replaced the hand set one.
+  const auto = source === 'daily' && pulled;
+  const shown = auto ? readable(pulled) : shownFor(saved);
   // Re-seeded when the saved rate changes underneath, so a save elsewhere
   // does not leave a stale number in the box.
   useEffect(() => { setValue(shown); }, [shown]);
@@ -169,9 +171,9 @@ function RateRow({ code, saved, pulled, source, onSave, saving, checked, onToggl
 
       <p className={`${NOTE} flex items-center gap-1.5`}>
         <span>
-          {saved
-            ? `${ROW_SOURCE.saved} · ${new Date(saved.updatedAt).toLocaleDateString('en-GB')}`
-            : (ROW_SOURCE[source] ?? 'No rate')}
+          {auto && `${ROW_SOURCE.daily} · ${pulledAt ? new Date(pulledAt).toLocaleDateString('en-GB') : 'today'}`}
+          {!auto && saved && `${ROW_SOURCE.saved} · ${new Date(saved.updatedAt).toLocaleDateString('en-GB')}`}
+          {!auto && !saved && (ROW_SOURCE[source] ?? 'No rate')}
         </span>
         <CellInfo
           label={`About the ${code} rate`}
@@ -179,7 +181,8 @@ function RateRow({ code, saved, pulled, source, onSave, saving, checked, onToggl
             NOTES[code] ?? `What one ${code} is worth in US dollars, as xe.com shows it.`,
             ...(valid ? [`**1 USD = ${readable(1 / typed)} ${code}**.`] : []),
             ...(saved?.updatedBy ? [`Set by ${saved.updatedBy}.`] : []),
-            ...(saved && pulled ? [`Today's auto rate: **1 ${code} = ${readable(pulled)} USD**. Clear yours to use it.`] : []),
+            ...(auto && saved ? [`Replaced your manual **${shownFor(saved)}**. Save a rate to use yours until the next pull.`] : []),
+            ...(!auto && saved && pulled ? [`Today's auto rate: **1 ${code} = ${readable(pulled)} USD**. The next pull replaces yours.`] : []),
           ]}
         />
       </p>
@@ -305,8 +308,8 @@ export default function ConversionRates() {
     <div>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-md bg-accent-tint px-2.5 py-1.5 text-xs text-accent-strong">
         <span>
-          Manual rates win. The rest are auto
-          {data?.pulledAt ? `, ${FEED[data.pulledFrom] ?? data.pulledFrom}, ${when(data.pulledAt)}.` : ': none pulled yet.'}
+          A pull replaces manual rates. A rate saved after it is used until the next pull.
+          {data?.pulledAt ? ` Last pull: ${FEED[data.pulledFrom] ?? data.pulledFrom}, ${when(data.pulledAt)}.` : ' None pulled yet.'}
         </span>
         <Button variant="secondary" size="sm" disabled={pulling} onClick={pullNow}>
           {pulling ? 'Pulling…' : 'Pull now'}
@@ -323,6 +326,7 @@ export default function ConversionRates() {
           code={code}
           saved={saved.get(code)}
           pulled={pulled[code]}
+          pulledAt={data?.pulledAt}
           source={sources[code]}
           saving={busy}
           checked={sel.has(code)}

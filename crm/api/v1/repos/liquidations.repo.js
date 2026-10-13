@@ -8,7 +8,12 @@ const CKEY = `lower(regexp_replace(btrim(company), '\\s+', ' ', 'g'))`;
 // ***************************************************
 //
 // One row per company being wound down. Only this file touches its four
-// tables. The company itself (name, groups, people, pay status, settlement)
+// tables.
+//
+// THE PAGE FOLLOWS THE COMPANY STATUS (his call 2026-10-13, migration 086):
+// a company is on it because tb_companies.status is liquidation, and
+// leaves when it is not. Its row here (stage, notes, documents, log) is
+// kept when it leaves, so it is all there again if it comes back. The company itself (name, groups, people, pay status, settlement)
 // is READ from the deals and tb_companies, never copied in: a copy would be
 // a second answer to "who is the director" that drifts.
 
@@ -52,13 +57,27 @@ const LIST_SQL = `
      ) m) AS last_comm,
     (SELECT COUNT(*)::int FROM tb_liquidation_docs WHERE liquidation_id = l.id AND removed_at IS NULL) AS doc_count
   FROM tb_liquidations l
-  LEFT JOIN tb_companies c ON lower(c.name) = l.company_key`;
+  LEFT JOIN tb_companies c ON lower(regexp_replace(btrim(c.name), '\\s+', ' ', 'g')) = l.company_key`;
+
+// Only the companies whose status is liquidation now.
+const IN_LIQUIDATION = "c.status = 'liquidation'";
+
+/** A row for every company in liquidation that has none yet. Stage unset. */
+async function syncFromCompanies() {
+  await pool.query(
+    `INSERT INTO tb_liquidations (company_key)
+     SELECT lower(regexp_replace(btrim(name), '\\s+', ' ', 'g')) FROM tb_companies
+      WHERE status = 'liquidation' AND btrim(name) <> ''
+     ON CONFLICT (company_key) DO NOTHING`,
+  );
+}
 
 // Most urgent first: a passed deadline, then the nearest, then none.
 const ORDER = 'ORDER BY l.deadline ASC NULLS LAST, company_name';
 
 async function list() {
-  const { rows } = await pool.query(`${LIST_SQL} ${ORDER}`);
+  await syncFromCompanies();
+  const { rows } = await pool.query(`${LIST_SQL} WHERE ${IN_LIQUIDATION} ${ORDER}`);
   return rows;
 }
 
@@ -75,30 +94,6 @@ async function details(id) {
     pool.query('SELECT id, file_name, mime, size_bytes, by_user, uploaded_at FROM tb_liquidation_docs WHERE liquidation_id = $1 AND removed_at IS NULL ORDER BY uploaded_at DESC, id DESC', [id]),
   ]);
   return { comms: comms.rows, history: history.rows, docs: docs.rows };
-}
-
-/** A company onto the tracker. Its first stage is history too. Null when it is already on. */
-async function add(key, stage, byUser) {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const { rows } = await client.query(
-      'INSERT INTO tb_liquidations (company_key, stage) VALUES ($1, $2) ON CONFLICT (company_key) DO NOTHING RETURNING id',
-      [companyKey(key), stage],
-    );
-    if (!rows[0]) { await client.query('ROLLBACK'); return null; }
-    await client.query(
-      'INSERT INTO tb_liquidation_history (liquidation_id, from_stage, to_stage, by_user) VALUES ($1, NULL, $2, $3)',
-      [rows[0].id, stage, byUser],
-    );
-    await client.query('COMMIT');
-    return rows[0].id;
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
-  }
 }
 
 // The fields the page edits, and their columns.
@@ -134,7 +129,7 @@ async function update(id, fields, byUser) {
     if (sets.length) {
       await client.query(`UPDATE tb_liquidations SET ${sets.join(', ')}, updated_at = now() WHERE id = $1`, params);
     }
-    const stageChanged = fields.stage !== undefined && fields.stage !== was.stage;
+    const stageChanged = fields.stage !== undefined && (fields.stage ?? null) !== (was.stage ?? null);
     if (stageChanged) {
       await client.query(
         'INSERT INTO tb_liquidation_history (liquidation_id, from_stage, to_stage, by_user) VALUES ($1, $2, $3, $4)',
@@ -196,7 +191,7 @@ async function owners() {
 async function dueSoon(days = 7) {
   const { rows } = await pool.query(
     `${LIST_SQL}
-     WHERE l.deadline IS NOT NULL AND l.stage <> 'dissolved' AND l.deadline <= current_date + $1::int
+     WHERE ${IN_LIQUIDATION} AND l.deadline IS NOT NULL AND l.stage IS DISTINCT FROM 'dissolved' AND l.deadline <= current_date + $1::int
      ${ORDER}`,
     [days],
   );
@@ -204,5 +199,5 @@ async function dueSoon(days = 7) {
 }
 
 module.exports = {
-  STAGE, STAGES, companyKey, list, findById, details, add, update, addComm, addDoc, findDoc, removeDoc, owners, dueSoon,
+  STAGE, STAGES, companyKey, list, findById, details, syncFromCompanies, update, addComm, addDoc, findDoc, removeDoc, owners, dueSoon,
 };

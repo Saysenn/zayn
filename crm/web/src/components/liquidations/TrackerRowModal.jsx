@@ -11,7 +11,6 @@ import Select from '../forms/Select';
 import Toggle from '../forms/Toggle';
 import { Skeleton } from '../display/Skeleton';
 import { formatMoney } from '../../helpers/formatMoney';
-import { COMPANY_STATUS_OPTIONS } from '../../configs/companyStatus';
 import { LIQ_STAGES, stageOf, deadlineTone, shortDate, todayIso } from '../../configs/liquidationStages';
 
 /**
@@ -22,9 +21,8 @@ import { LIQ_STAGES, stageOf, deadlineTone, shortDate, todayIso } from '../../co
  * behind. The log and the documents save as they are added: each is its
  * own act, dated, and never edited after.
  *
- * Choosing a stage says what it does to pay BEFORE it is saved: own or HMRC
- * liquidation puts the company into liquidation, dissolving is finished on
- * the company page, where the deals that stop are picked.
+ * The stage is the step the liquidation is at; it never moves the company
+ * status (his call 2026-10-13). That is set on the company page.
  */
 const KEY = ['liquidations'];
 const INPUT = 'min-h-9 rounded border border-border-strong bg-surface px-2.5 text-sm outline-none focus:outline focus:outline-2 focus:outline-accent-strong focus:outline-offset-1';
@@ -33,7 +31,7 @@ const AREA = `${BOX} py-2 leading-relaxed`;
 
 const FIELDS = ['stage', 'instructions', 'deadline', 'nextAction', 'owner', 'blamed', 'liquidator', 'note'];
 const fromRow = (r) => ({
-  stage: r.stage,
+  stage: r.stage ?? '',
   instructions: r.instructions ?? '',
   deadline: r.deadline ?? '',
   nextAction: r.next_action ?? '',
@@ -78,13 +76,7 @@ export default function TrackerRowModal({ id, owners, onClose }) {
   const set = (field) => (value) => setDraft((d) => ({ ...d, [field]: value }));
 
   const save = useReportingMutation((fields) => apiService.liquidations.update(id, fields), {
-    describe: () => 'Tracker row', verb: 'saved', invalidates: [KEY, detailKey],
-    detail: (v, res) => {
-      if (res?.pay === 'liquidation') return 'The company is now in liquidation: set its reduced amounts on the company page.';
-      if (res?.pay === 'active') return 'The company is out of liquidation and back to active.';
-      if (res?.dissolveOnCompanyPage) return 'Now dissolve it on the company page, where you pick which deals stop.';
-      return undefined;
-    },
+    describe: () => row?.company_name ?? 'Liquidation', verb: 'saved', invalidates: [KEY, detailKey],
   });
   function submit(e) {
     e.preventDefault();
@@ -105,8 +97,8 @@ export default function TrackerRowModal({ id, owners, onClose }) {
           <form onSubmit={submit} className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Status">
-                <Select size="form" value={draft.stage} onChange={(v) => set('stage')(v || 'active')} options={LIQ_STAGES.map((s) => ({ value: s.value, label: s.label }))} />
-                {draft.stage !== saved.stage && <span className="block text-xs text-warning">{stageOf(draft.stage).pay}</span>}
+                <Select size="form" value={draft.stage} onChange={(v) => set('stage')(v || '')} placeholder="Not set"
+                  options={[{ value: '', label: 'Not set' }, ...LIQ_STAGES.map((s) => ({ value: s.value, label: s.label }))]} />
               </Field>
               <Field label="Deadline">
                 <input type="date" className={BOX} value={draft.deadline} onChange={(e) => set('deadline')(e.target.value)} />
@@ -155,7 +147,6 @@ function Summary({ row }) {
     ['Director', row.director],
     ['Mid', row.mid],
     ['Group', (row.groups ?? []).join(', ')],
-    ['Pay status', COMPANY_STATUS_OPTIONS.find((o) => o.value === row.pay_status)?.label ?? row.pay_status],
     ['Settlement', row.settlement != null ? `${formatMoney(row.settlement, row.currency)} · ${formatMoney(row.allocated ?? 0, row.currency)} allocated` : null],
     ['Deadline', row.deadline ? `${shortDate(row.deadline)}${tone === 'passed' ? ' · passed' : tone === 'soon' ? ' · due soon' : ''}` : null],
   ];
@@ -280,12 +271,13 @@ function Docs({ id, docs, detailKey }) {
 function History({ history }) {
   return (
     <Section title="Status history" count={history.length}>
+      {history.length === 0 && <p className="text-sm text-text-muted">No changes yet.</p>}
       <ul className="space-y-1.5 text-sm">
         {history.map((h) => (
           <li key={h.id} className="flex flex-wrap items-center gap-2">
-            {h.from_stage
-              ? <><span className={stageOf(h.from_stage).badge}>{stageOf(h.from_stage).label}</span><span className="text-text-faint">→</span></>
-              : <span className="text-text-muted">Added as</span>}
+            {/* From "Not set" too: a company starts with no stage. */}
+            <span className={stageOf(h.from_stage).badge}>{stageOf(h.from_stage).label}</span>
+            <span className="text-text-faint">→</span>
             <span className={stageOf(h.to_stage).badge}>{stageOf(h.to_stage).label}</span>
             <span className="text-xs tabular-nums text-text-muted">{when(h.changed_at)}{h.by_user ? ` · ${h.by_user}` : ''}</span>
           </li>

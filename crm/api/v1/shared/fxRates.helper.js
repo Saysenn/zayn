@@ -99,12 +99,13 @@ function backfill(feed, manual) {
 // * THE ORDER, PER CURRENCY (his call 2026-10-13)
 // ***************************************************
 //
-//   1. A RATE SET BY HAND in Settings. Always wins: the pull never touches
-//      it, and a live feed no longer outranks it (it used to, which made a
-//      typed rate a standby the boss could not rely on).
-//   2. TODAY'S PULLED RATE, fetched once a day into tb_fx_rates_daily from
-//      Open Exchange Rates (OPENEXCHANGERATES_APP_ID), or open.er-api
-//      (FX_RATES_URL) when that is unset or down.
+//   1. THE NEWER OF a rate set by hand and today's pulled rate (his call,
+//      changed the same day): a pull, daily or "Pull now", replaces a rate
+//      typed before it; a rate typed after the pull is used until the next
+//      one. Neither is deleted, so the hand set one is still on record.
+//      The pull comes into tb_fx_rates_daily from Open Exchange Rates
+//      (OPENEXCHANGERATES_APP_ID), or open.er-api (FX_RATES_URL).
+//   2. A hand set rate for a currency the pull does not quote.
 //   3. The built in three (GBP, the AED peg, USD), and nothing else.
 //
 // Read from the database, memoised for a minute so a page of conversions
@@ -117,13 +118,21 @@ const CHECK_MS = 60 * 60 * 1000;
 
 let memo = null; // { at, value }
 
-/** What converts each currency, and where each rate came from. */
-function combine(manual, day) {
+/**
+ * What converts each currency, and where each rate came from.
+ * `manualAt` is when each hand set rate was saved: it wins only when saved
+ * after the pull. Without a time it counts as older.
+ */
+function combine(manual, day, manualAt = {}) {
   const base = fallback(day ? undefined : 'no daily rates pulled yet');
-  const perUsd = { ...base.perUsd, ...(day?.perUsd ?? {}), ...manual };
+  const pulledAt = day?.fetchedAt ? new Date(day.fetchedAt).getTime() : -Infinity;
+  const handWins = (code) => code in manual
+    && (!(day?.perUsd && code in day.perUsd) || new Date(manualAt[code] ?? 0).getTime() > pulledAt);
+  const perUsd = { ...base.perUsd, ...(day?.perUsd ?? {}) };
+  for (const code of Object.keys(manual)) if (handWins(code)) perUsd[code] = manual[code];
   const sources = {};
   for (const code of Object.keys(perUsd)) {
-    sources[code] = code in manual ? 'saved' : (day?.perUsd && code in day.perUsd ? 'daily' : 'fallback');
+    sources[code] = handWins(code) ? 'saved' : (day?.perUsd && code in day.perUsd ? 'daily' : 'fallback');
   }
   // `source` is the GBP rate's, the one the export prints beside its
   // figure. A pulled rate is today's, so it reads as live.
@@ -152,11 +161,14 @@ async function usdPerGbp() {
   if (memo && Date.now() - memo.at < MEMO_MS) return memo.value;
   // eslint-disable-next-line global-require
   const repo = require('../repos/fxRates.repo');
-  const [manual, day] = await Promise.all([
-    repo.perUsd().catch(() => ({})),
+  const [saved, day] = await Promise.all([
+    repo.all().catch(() => []),
     repo.daily().catch(() => null),
   ]);
-  const value = combine(manual, day);
+  const manual = {};
+  const manualAt = {};
+  for (const r of saved) if (r.perUsd > 0) { manual[r.code] = r.perUsd; manualAt[r.code] = r.updatedAt; }
+  const value = combine(manual, day, manualAt);
   memo = { at: Date.now(), value };
   return value;
 }

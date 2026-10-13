@@ -23,6 +23,24 @@
 - A Download Word button exports it as `.docx`.
 - A template saved as ours ("this is our standard contract") goes into the playbook and is reused.
 
+### D. The Liquidations page (agreed 2026-10-13)
+
+- The page lists every company whose status is Liquidation (`/liquidations`, migrations 084 and 086). Diane can
+  already put a company into liquidation (`update_company`), which puts it on the page.
+- She should be able to do on it what an admin can, by asking:
+  1. **Read:** list them, filtered by stage, group or owner; one company's full row (director, mid, stage,
+     instructions, deadline, next action, owner, blamed, liquidator, note, docs, settlement); its contact log and
+     stage history; "what deadlines are due this week".
+  2. **Update:** any of those fields ("set Acme to HMRC liq", "deadline 30 Nov", "owner is admin", "blamed yes").
+     The stage never changes the company status; she says so if asked.
+  3. **Log contact:** add a dated line to the communication log ("log: liquidator emailed for bank statements").
+  4. **Documents:** list them and send one back on request; save a file attached in chat to a company's docs.
+     Removing a document asks first, and moves it aside rather than deleting it.
+  5. **Add and remove:** never on the page itself. A company comes on by setting its status to Liquidation and
+     leaves when it is set back; she does that through `update_company`, which already asks.
+- Every write asks first, like her other writes, and lands in the page's stage history with who asked.
+- Tested with the Diane suite on `crm_suite` only when the owner says to run it (paid runs).
+
 ## This file
 
 The handover between the CRM and Diane, the CRM's assistant. The CRM changes faster than her tools, so every CRM

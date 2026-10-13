@@ -11,20 +11,24 @@
  * done TO us; our own liquidation amber; a strike off waiting is the accent;
  * dissolved grey, it is over; active green.
  *
- * `pay` is what choosing it does to the company's pay status, said on the
- * screen before it is saved, so the stage never moves money silently.
+ * A STAGE NEVER MOVES THE COMPANY STATUS (his call 2026-10-13): the page
+ * lists a company because its status is liquidation; the stage is the
+ * step its liquidation is at, and starts unset.
  */
 export const LIQ_STAGES = Object.freeze([
-  { value: 'own_liq', label: 'Own liq', badge: 'badge badge-liquidation', pay: 'Puts the company into liquidation. Set its reduced amounts on the company page.' },
-  { value: 'hmrc_liq', label: 'HMRC liq', badge: 'badge badge-open', pay: 'Puts the company into liquidation. Set its reduced amounts on the company page.' },
-  { value: 'strike_off', label: 'Strike off', badge: 'badge badge-settle_late', pay: 'Pay stays as it is.' },
-  { value: 'strike_off_rejected', label: 'Strike off rejected', badge: 'badge badge-settle_overdue', pay: 'Pay stays as it is.' },
-  { value: 'dissolved', label: 'Dissolved', badge: 'badge badge-dissolved', pay: 'Dissolve it on the company page too, where you pick which deals stop.' },
-  { value: 'active', label: 'Active', badge: 'badge badge-active', pay: 'Takes the company out of liquidation, if it is in it.' },
+  { value: 'own_liq', label: 'Own liq', badge: 'badge badge-liquidation' },
+  { value: 'hmrc_liq', label: 'HMRC liq', badge: 'badge badge-open' },
+  { value: 'strike_off', label: 'Strike off', badge: 'badge badge-settle_late' },
+  { value: 'strike_off_rejected', label: 'Strike off rejected', badge: 'badge badge-settle_overdue' },
+  { value: 'dissolved', label: 'Dissolved', badge: 'badge badge-dissolved' },
+  { value: 'active', label: 'Active', badge: 'badge badge-active' },
 ]);
 
+// A company that has just gone into liquidation: nobody has said which kind yet.
+export const NOT_SET = Object.freeze({ value: '', label: 'Not set', badge: 'badge badge-closed' });
+
 const BY_VALUE = new Map(LIQ_STAGES.map((s) => [s.value, s]));
-export const stageOf = (value) => BY_VALUE.get(value) ?? LIQ_STAGES.at(-1);
+export const stageOf = (value) => BY_VALUE.get(value) ?? NOT_SET;
 
 // A deadline this close is amber; a passed one red.
 export const DEADLINE_SOON_DAYS = 7;

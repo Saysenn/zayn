@@ -69,5 +69,10 @@ test('SAVE COMPARES TEXT, so an untouched row never lights up', () => {
 test('A ROW NOT SET BY HAND STILL SAYS WHAT IT CONVERTS AT', () => {
   // Today's pulled rate is the hint in the box and the line beside it.
   assert.match(SRC, /placeholder=\{pulled \? readable\(pulled\) : 'Value'\}/);
-  assert.match(SRC, /daily: 'Auto, today'/);
+  assert.match(SRC, /daily: 'Auto'/);
+});
+
+test('A PULL REPLACES A MANUAL RATE: the row shows the pulled one', () => {
+  assert.match(SRC, /const auto = source === 'daily' && pulled/);
+  assert.match(SRC, /const shown = auto \? readable\(pulled\) : shownFor\(saved\)/);
 });
