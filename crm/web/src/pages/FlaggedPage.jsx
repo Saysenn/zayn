@@ -21,7 +21,8 @@ import { EmptyState, ErrorState } from '../components/display/StateBlocks';
 import ViewToggle from '../components/layout/ViewToggle';
 import { CardSkeleton, Skeleton, TableSkeleton } from '../components/display/Skeleton';
 import RecordCard, { CardList, ClampedText } from '../components/display/RecordCard';
-import { ChatIcon, CheckCircleIcon, FlagIcon, HourglassIcon, SearchIcon } from '../components/icons';
+import { ChatIcon, CheckCircleIcon, FlagIcon, HourglassIcon, SearchIcon, TrashIcon } from '../components/icons';
+import ConfirmDialog from '../components/modals/ConfirmDialog';
 
 const STATUSES = ['open', 'in_progress', 'resolved'];
 // Sentence case, the way every status reads: "In progress", not "in progress".
@@ -269,6 +270,33 @@ export default function FlaggedPage() {
     sel.clear();
   };
 
+  /**
+   * DELETE, his call 2026-10-13: every flag the ticked people have, for good,
+   * after a confirm. Gone from the list at once; back if the server refuses.
+   */
+  const [deleting, setDeleting] = useState(null);
+  const bulkDelete = () => {
+    const keys = deleting;
+    const n = keys.length;
+    const people = `${n} ${n === 1 ? "person's" : "people's"} flags`;
+    const ticked = new Set(keys);
+    run({
+      call: () => apiService.concerns.bulkDelete(keys.map(fromKey)),
+      invalidates: [['concerns']],
+      optimistic: (qc) => patchQueries(qc, [['concerns']], (data) => {
+        if (!Array.isArray(data?.concerns)) return data;
+        const concerns = data.concerns.filter((c) => !ticked.has(rowKey(c)));
+        const gone = data.concerns.length - concerns.length;
+        return { ...data, concerns, total: typeof data.total === 'number' ? Math.max(0, data.total - gone) : data.total };
+      }),
+      icon: 'trash',
+      toast: { message: `${people} deleted` },
+      failure: `Couldn't delete ${people}`,
+    });
+    sel.clear();
+    setDeleting(null);
+  };
+
   const thisMonthActive =
     filterByDate && from === toDateInput(firstOfThisMonth()) && to === toDateInput(new Date());
 
@@ -462,12 +490,28 @@ export default function FlaggedPage() {
 
       <BulkBar count={sel.count} onClear={sel.clear}>
         <BulkAction icon={HourglassIcon} onClick={() => bulkStatus('in_progress', 'marked in progress')}>
-          Mark in progress
+          In progress
         </BulkAction>
         <BulkAction icon={CheckCircleIcon} onClick={() => bulkStatus('resolved', 'resolved')}>
           Resolve
         </BulkAction>
+        <BulkAction icon={TrashIcon} variant="danger" onClick={() => setDeleting(sel.ids)}>
+          Delete
+        </BulkAction>
       </BulkBar>
+
+      {deleting && (
+        <ConfirmDialog
+          title={deleting.length === 1 ? "Delete this person's flags?" : `Delete ${deleting.length} people's flags?`}
+          subject={deleting.length <= 3
+            ? (rows ?? []).filter((r) => deleting.includes(rowKey(r))).map((r) => `${displayName(r)} (${r.group_name})`).join(', ')
+            : `${deleting.length} people`}
+          detail="Every flag they have is deleted, resolved ones included. This can't be undone. Use Resolve to keep a record."
+          confirmLabel="Delete"
+          onCancel={() => setDeleting(null)}
+          onConfirm={bulkDelete}
+        />
+      )}
     </div>
   );
 }

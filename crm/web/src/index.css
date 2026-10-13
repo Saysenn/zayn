@@ -379,6 +379,10 @@
   }
   .bulk-bar-actions::-webkit-scrollbar { display: none; }
   .bulk-bar-actions > * { flex-shrink: 0; }
+  /* A phone fits three actions without a swipe: a little less side padding. 2026-10-13. */
+  @media (max-width: 639px) {
+    .bulk-bar-actions > button { padding-left: 0.5rem; padding-right: 0.5rem; }
+  }
   .bulk-menu {
     @apply fixed z-[61] min-w-[11rem] max-h-[min(20rem,60vh)] overflow-y-auto rounded-lg border border-border bg-surface py-1.5 shadow-lg;
     transform-origin: bottom left;

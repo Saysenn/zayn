@@ -62,6 +62,8 @@ export const apiService = {
     updateStatus: (id, status) => api.patch(`${apiPath}/concerns/${id}`, { status }),
     // people: [{ group, personId }]. A Flagged row is a person.
     bulkStatus: (people, status) => api.post(`${apiPath}/concerns/bulk-status`, { people, status }),
+    // Every flag of these people, for good. Resolve keeps a record; this does not.
+    bulkDelete: (people) => api.post(`${apiPath}/concerns/bulk-delete`, { people }),
   },
   expenses: {
     list: (params = {}) => api.get(`${apiPath}/expenses${toQueryString(params)}`),

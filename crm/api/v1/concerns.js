@@ -64,4 +64,20 @@ router.post('/concerns/bulk-status', async (req, res, next) => {
   }
 });
 
+// DELETE on the same bar: every flag of the ticked people, for good. The page
+// confirms first; Resolve is the way to keep a record.
+router.post('/concerns/bulk-delete', async (req, res, next) => {
+  try {
+    const list = (Array.isArray(req.body?.people) ? req.body.people : [])
+      .filter((p) => p && typeof p.group === 'string' && typeof p.personId === 'string');
+    if (!list.length) return res.json({ deleted: 0 });
+    const rows = await concernsRepo.deleteForPeople(list);
+    // concern:updated is what every list, count and person modal refreshes on.
+    for (const concern of rows) broadcast(concern.group_name, 'concern:updated', { ...concern, deleted: true });
+    res.json({ deleted: rows.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = { router };

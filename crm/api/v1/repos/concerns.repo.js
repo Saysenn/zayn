@@ -140,4 +140,23 @@ function updateStatusForPeople(people, status) {
     .then((result) => result.rows);
 }
 
-module.exports = { create, updateStatus, updateStatusForPeople, listGrouped, listForPerson, listOpenPairs };
+/**
+ * DELETES every flag the given people have (the Flagged bulk bar, his call
+ * 2026-10-13). Permanent: Resolve is the one that keeps a record.
+ * Returns the deleted rows' group and person, for the broadcast.
+ */
+function deleteForPeople(people) {
+  const groups = people.map((p) => p.group);
+  const ids = people.map((p) => p.personId);
+  return pool
+    .query(
+      `DELETE FROM tb_concerns c
+         USING unnest($1::text[], $2::text[]) AS w(group_name, person_id)
+        WHERE c.group_name = w.group_name AND c.person_id = w.person_id
+        RETURNING c.id, c.group_name, c.person_id`,
+      [groups, ids],
+    )
+    .then((result) => result.rows);
+}
+
+module.exports = { create, updateStatus, updateStatusForPeople, deleteForPeople, listGrouped, listForPerson, listOpenPairs };
