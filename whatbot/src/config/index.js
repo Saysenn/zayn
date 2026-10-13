@@ -9,6 +9,8 @@ export {
   fromJid,
   groupForNumber,
   numberForGroup,
+  setNumbers,
+  linkWithFor,
 } from "./numbers.js";
 export { openaiConfig } from "./openai.js";
 export { sheetsConfig } from "./sheets.js";

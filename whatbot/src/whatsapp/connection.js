@@ -1,3 +1,4 @@
+import { mkdir, rename } from "node:fs/promises";
 import { join } from "node:path";
 import makeWASocket, {
   Browsers,
@@ -9,11 +10,12 @@ import {
   allGroups,
   features,
   fromJid,
+  linkWithFor,
   numberForGroup,
   numbersConfig,
 } from "../config/index.js";
 import { logger } from "../system/logger.js";
-import { publishStatus } from "./status.js";
+import { forgetStatus, publishStatus } from "./status.js";
 import { downloadVoiceNote, isVoiceNote, voiceSeconds } from "./voiceNote.js";
 import { isExpenseAdmin, mediaOf, readable, saveMedia } from "../expenses/expenses.js";
 
@@ -34,6 +36,30 @@ const pairingAsked = new Set();
  */
 
 const connections = new Map();
+
+/** groups switched off or removed in the CRM: never reconnected until started again */
+const stopped = new Set();
+
+/** sockets logged out by a relink: their last writes are not this group's link */
+const discarded = new WeakSet();
+
+/** the handler startConnections was given, for numbers added while running */
+let handler;
+
+/**
+ * HOW EACH NUMBER IS DOING, for Settings → Whatbot (whatsapp/registry.js).
+ * group → { state: connected | waiting | offline | logged_out, qr?, code? }
+ */
+const linkState = new Map();
+let onLinkChange = () => {};
+
+function setLink(groupId, next) {
+  linkState.set(groupId, next);
+  onLinkChange();
+}
+
+export const linkStates = () => linkState;
+export const whenLinkChanges = (fn) => { onLinkChange = fn; };
 
 let statusHeartbeat;
 
@@ -101,7 +127,7 @@ async function connect(groupId, onMessage, attempt = 0) {
     // naming it makes it obvious which entry is the bot.
     // LINKING BY CODE needs a real system name: WhatsApp answered "couldn't
     // link device" to the custom one (2026-10-07). A QR takes either.
-    browser: numbersConfig.linkWith === "code" ? Browsers.macOS("Chrome") : ["whatbot", "Chrome", "1.0.0"],
+    browser: linkWithFor(groupId) === "code" ? Browsers.macOS("Chrome") : ["whatbot", "Chrome", "1.0.0"],
     // don't show as online. we answer every message anyway, and a number that's
     // online 24/7 doesn't look like a person.
     markOnlineOnConnect: false,
@@ -109,13 +135,20 @@ async function connect(groupId, onMessage, attempt = 0) {
 
   connections.set(groupId, { socket, ready: false });
 
-  socket.ev.on("creds.update", saveCreds);
+  // A socket being relinked must not write into the fresh link's folder.
+  socket.ev.on("creds.update", () => {
+    if (!discarded.has(socket)) void saveCreds();
+  });
 
   socket.ev.on("connection.update", (update) => {
     const { qr, connection, lastDisconnect } = update;
 
+    // A socket set aside (switched off, removed, relinked): its events are
+    // the old one's, never this group's now.
+    if (connections.get(groupId)?.socket !== socket) return;
+
     // ---- first run, or the link expired ----
-    if (qr && numbersConfig.linkWith === "code") {
+    if (qr && linkWithFor(groupId) === "code") {
       /**
        * A CODE INSTEAD OF A QR, asked for once per start. A QR drawn in a
        * terminal often will not scan (a dark theme inverts it, a small
@@ -130,6 +163,7 @@ async function connect(groupId, onMessage, attempt = 0) {
             const shown = String(code).replace(/^(.{4})(.{4})$/, "$1-$2");
             logger.warn({ groupId, number: ourNumber, code: shown }, "type this code on the group phone");
             process.stdout.write(`\n  ${groupId} (${ourNumber}): on that phone open WhatsApp → Linked devices → Link a device →\n  Link with phone number instead, and type:  ${shown}\n\n`);
+            setLink(groupId, { state: "waiting", code: shown });
           })
           .catch((err) => logger.error({ err: err.message, groupId }, "could not get a linking code"));
       }
@@ -140,12 +174,14 @@ async function connect(groupId, onMessage, attempt = 0) {
         "scan this QR with the group phone",
       );
       qrcode.generate(qr, { small: true });
+      setLink(groupId, { state: "waiting", qr });
     }
 
     // ---- we're live ----
     if (connection === "open") {
       connections.set(groupId, { socket, ready: true });
       void publishStatus(groupId, true);
+      setLink(groupId, { state: "connected" });
       logger.info({ groupId, number: ourNumber }, "whatsapp connected");
     }
 
@@ -156,6 +192,7 @@ async function connect(groupId, onMessage, attempt = 0) {
       const err = lastDisconnect?.error;
 
       if (!shouldReconnect(err)) {
+        setLink(groupId, { state: "logged_out" });
         logger.error(
           { groupId, number: ourNumber },
           "logged out — delete this group's auth folder and scan the QR again",
@@ -165,12 +202,15 @@ async function connect(groupId, onMessage, attempt = 0) {
 
       // disconnects are normal, not an emergency: WhatsApp drops idle sockets,
       // and the laptop sleeping or changing wifi drops all five at once
+      // still waiting for a scan stays "waiting": the QR is about to change
+      if (linkState.get(groupId)?.state !== "waiting") setLink(groupId, { state: "offline" });
       const wait = Math.min(1000 * 2 ** attempt, MAX_BACKOFF_MS);
       logger.warn(
         { groupId, err, retryInMs: wait },
         "whatsapp disconnected, reconnecting",
       );
       setTimeout(() => {
+        if (stopped.has(groupId) || connections.get(groupId)?.socket !== socket) return;
         void connect(groupId, onMessage, attempt + 1).catch((e) =>
           logger.error({ groupId, err: e }, "reconnect failed"),
         );
@@ -302,6 +342,7 @@ async function connect(groupId, onMessage, attempt = 0) {
  * because the fifth phone was flat.
  */
 export async function startConnections(onMessage) {
+  handler = onMessage;
   await Promise.all(
     allGroups().map((groupId) =>
       connect(groupId, onMessage).catch((err) =>
@@ -318,6 +359,69 @@ export async function startConnections(onMessage) {
       void publishStatus(groupId, ready);
   }, 60_000);
   statusHeartbeat.unref();
+}
+
+/**
+ * A NUMBER ADDED OR SWITCHED ON in the CRM while running. Its saved link is
+ * used if it has one; otherwise a QR (or code) for Settings → Whatbot.
+ */
+export async function connectGroup(groupId) {
+  stopped.delete(groupId);
+  if (connections.has(groupId) || !handler) return;
+  pairingAsked.delete(groupId);
+  setLink(groupId, { state: "offline" });
+  await connect(groupId, handler).catch((err) =>
+    logger.error({ groupId, err }, "failed to open whatsapp connection"),
+  );
+}
+
+/**
+ * SWITCHED OFF OR REMOVED in the CRM. Ends the socket WITHOUT logging out,
+ * so its saved link (auth_info/<group>/) still works if it comes back.
+ */
+export async function disconnectGroup(groupId) {
+  stopped.add(groupId);
+  const conn = connections.get(groupId);
+  connections.delete(groupId);
+  linkState.delete(groupId);
+  onLinkChange();
+  await forgetStatus(groupId);
+  try {
+    conn?.socket.end(undefined);
+  } catch (err) {
+    logger.warn({ groupId, err }, "error closing whatsapp connection");
+  }
+}
+
+/**
+ * RELINK (Settings → Whatbot, or a new number for the group): log out, set
+ * the old link aside in auth_info/_old/ (moved, never deleted), start fresh.
+ */
+export async function relinkGroup(groupId) {
+  const conn = connections.get(groupId);
+  stopped.add(groupId);
+  connections.delete(groupId);
+  if (conn) {
+    discarded.add(conn.socket);
+    try {
+      await conn.socket.logout();
+    } catch {
+      // already logged out on the phone, or never linked: nothing to undo
+    }
+    try {
+      conn.socket.end(undefined);
+    } catch {
+      // closed already
+    }
+  }
+  const from = join(numbersConfig.authDir, groupId);
+  const aside = join(numbersConfig.authDir, "_old");
+  await mkdir(aside, { recursive: true });
+  await rename(from, join(aside, `${groupId}-${Date.now()}`)).catch((err) => {
+    if (err.code !== "ENOENT") throw err;
+  });
+  logger.warn({ groupId }, "relinking: old link set aside, a fresh QR follows");
+  await connectGroup(groupId);
 }
 
 /** the socket to send from. undefined until that group has finished connecting. */

@@ -35,6 +35,7 @@ import { keepTyping, typingOnce } from "./whatsapp/typing.js";
 /** The numbered menu at the end of a reply ("What next? 1. ... 2. ..."), if it has one. */
 const menuOf = (text) => /\n\n((?:Want more|What next|Anything else)[^\n]*\n[\s\S]*)$/.exec(String(text ?? ""))?.[1] ?? "";
 import { startConnections, closeConnections } from "./whatsapp/connection.js";
+import { loadNumbers, startNumberSync, stopNumberSync } from "./whatsapp/registry.js";
 import { receiveMessage } from "./whatsapp/receiveMessage.js";
 import { buildAdminReplyApp } from "./http/adminReplyApp.js";
 import { logger, installProcessErrorHandlers } from "./system/logger.js";
@@ -378,7 +379,12 @@ await pullMasterSheet().catch((err) =>
 // Open the 5 connections. First run prints a QR per number — scan from that
 // group's phone (WhatsApp > Settings > Linked devices). After that it is
 // silent, and the session lives in auth_info/<group>/.
+//
+// WHICH NUMBERS: the CRM's list (Settings → Whatbot), else the last one it
+// gave, else .env's. Then kept in step every 10 seconds, no restart needed.
+await loadNumbers();
 await startConnections(receiveMessage);
+startNumberSync();
 
 // The CRM chatbox's only way in — needs the sockets just opened above,
 // which is the entire reason this listens here and not in server.js.
@@ -397,6 +403,7 @@ logger.info(
 for (const signal of ["SIGTERM", "SIGINT"]) {
   process.on(signal, () => {
     logger.info({ signal }, "shutting down worker");
+    stopNumberSync();
     void Promise.all([
       messageWorker.close(),
       paydayWorker.close(),

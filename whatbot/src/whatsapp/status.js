@@ -46,3 +46,12 @@ export async function readStatus() {
     return {};
   }
 }
+
+/** a number switched off or removed: no longer one of ours to report on */
+export async function forgetStatus(groupId) {
+  try {
+    await withRedisTimeout(redis.hdel(KEY, groupId));
+  } catch (err) {
+    logger.debug({ err, groupId }, "could not clear whatsapp status");
+  }
+}

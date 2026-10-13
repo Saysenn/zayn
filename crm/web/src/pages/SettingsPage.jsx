@@ -11,6 +11,7 @@ import PaymentStartRules from '../components/settings/PaymentStartRules';
 import ConversionRates from '../components/settings/ConversionRates';
 import ThemePicker from '../components/settings/ThemePicker';
 import ExpenseAdmins from '../components/settings/ExpenseAdmins';
+import WhatbotNumbers from '../components/settings/WhatbotNumbers';
 import HmrcKnowledge from '../components/settings/HmrcKnowledge';
 import OurPlaybook from '../components/settings/OurPlaybook';
 import ExpenseStyle from '../components/settings/ExpenseStyle';
@@ -96,10 +97,30 @@ const SECTIONS = [
   // GLOBAL RATES, its own subject. Not a master sheet tab: these apply to
   // a payment rail, not to the sheet.
   { key: 'rates', label: 'Global rates', icon: ReceiptIcon },
-  { key: 'whatbot', label: 'Whatbot', icon: ChatIcon },
+  // TABS, his call 2026-10-12: the section had grown to six cards.
+  {
+    key: 'whatbot',
+    label: 'Whatbot',
+    icon: ChatIcon,
+    tabs: [
+      { key: 'numbers', label: 'Number Registration' },
+      { key: 'payments', label: 'Payments' },
+      { key: 'expenses', label: 'Expenses' },
+      { key: 'image-templates', label: 'Image Templates' },
+    ],
+  },
   // HER OWN SECTION: the sign-in briefing and auto mode sat under Whatbot,
   // where nobody looking for Diane would find them. 2026-09-29.
-  { key: 'diane', label: 'Diane', icon: SparkleIcon },
+  {
+    key: 'diane',
+    label: 'Diane',
+    icon: SparkleIcon,
+    tabs: [
+      { key: 'general', label: 'General' },
+      { key: 'playbook', label: 'Our playbook' },
+      { key: 'lawyer', label: 'Lawyer knowledge' },
+    ],
+  },
   // The theme: every page, the login and Diane's screens. Saved in this browser.
   { key: 'appearance', label: 'Appearance', icon: PaletteIcon },
   { key: 'developer', label: 'Developer', icon: ToolsIcon },
@@ -449,7 +470,7 @@ export default function SettingsPage() {
             </Card>
           )}
 
-          {section === 'whatbot' && (
+          {section === 'whatbot' && tab === 'payments' && (
             <Card
               title="Payday writes"
               description="Lets whatbot record a payday answer onto a row. That is the only thing it can write. Turn it off and those writes stop at once. Whatbot still reads the master sheet and still answers questions."
@@ -469,7 +490,16 @@ export default function SettingsPage() {
             </Card>
           )}
 
-          {section === 'whatbot' && (
+          {section === 'whatbot' && tab === 'numbers' && (
+            <Card
+              title="WhatBot numbers"
+              description="Each group's WhatBot number. Add one and WhatBot connects it within seconds; Link shows the QR to scan on that group's phone. Off disconnects it but keeps the link. If the CRM is down, WhatBot keeps running on the numbers it already has."
+            >
+              <WhatbotNumbers />
+            </Card>
+          )}
+
+          {section === 'whatbot' && tab === 'expenses' && (
             <Card
               title="Expense admins"
               description="Who may send expenses to WhatBot, and on which group's number. Only these numbers can save, change or remove expenses, and only for that group: anyone else is ignored. The bot shows what it read and saves nothing until they reply yes."
@@ -478,7 +508,7 @@ export default function SettingsPage() {
             </Card>
           )}
 
-          {section === 'whatbot' && (
+          {section === 'whatbot' && tab === 'expenses' && (
             <Card
               title="People see their own expenses"
               description="Lets anyone on the master sheet ask WhatBot for their own expenses: only what they spent, only this month, only on that group's number, as a picture with the list. Never someone else's and never a receipt. An expense shows only when its Spent by is linked to them. Turn it off and WhatBot stops at once (within a minute) and never mentions it. Admins can always see their group's expenses."
@@ -498,7 +528,7 @@ export default function SettingsPage() {
             </Card>
           )}
 
-          {section === 'whatbot' && (
+          {section === 'whatbot' && tab === 'expenses' && (
             <Card
               title="Expenses check"
               description="On payday, right after someone answers their payday check, WhatBot asks about their expenses on their own: how many, how much, and were they refunded. A yes settles exactly the ones it listed, and settled expenses are locked. A no, a partial, or a sorry-that-was-a-mistake goes to the Flagged page as Expense refund. Anyone still not refunded by the 1st is flagged too, every week until it is sorted. Nothing is ever settled on its own."
@@ -518,7 +548,7 @@ export default function SettingsPage() {
             </Card>
           )}
 
-          {section === 'whatbot' && (
+          {section === 'whatbot' && tab === 'image-templates' && (
             <Card
               title="Picture style"
               description="How long results look as a picture: expense previews and reports on WhatsApp and in Diane's chat, and her sheet checks, plans and deal lists. Only results of 4 or more rows get one. Anything that needs checking is tinted on its own cell, and the caption still says what needs an answer."
@@ -532,7 +562,7 @@ export default function SettingsPage() {
             </Card>
           )}
 
-          {section === 'diane' && (
+          {section === 'diane' && tab === 'general' && (
             <Card
               title="Diane's briefing at sign-in"
               description="She says what needs doing when you sign in: the review queue, anything unpaid this month, open concerns and rows the last import flagged. She says nothing at all when there is nothing in any of them, and every line she says is a link to the data."
@@ -552,7 +582,7 @@ export default function SettingsPage() {
             </Card>
           )}
 
-          {section === 'diane' && (
+          {section === 'diane' && tab === 'general' && (
             <Card
               title="Let Diane act without asking"
               description="She shows a change and waits for a yes before making it. With this on she makes it straight away, for ONE named deal or ONE person, and tells you what she did. Every change is still in History and still undoable, field by field. She will always ask before anything that deletes, stops, closes or reaches more than the row you named, whatever this says."
@@ -572,7 +602,7 @@ export default function SettingsPage() {
             </Card>
           )}
 
-          {section === 'diane' && (
+          {section === 'diane' && tab === 'playbook' && (
             <Card
               title="Our playbook"
               description="How this business does things: our processes, internal ways and how things work here. Diane reads it FIRST on every answer in lawyer mode (HMRC & CIS), before GOV.UK. Saved here, or through Diane, who always asks first. Kept in the CRM's own database."
@@ -581,7 +611,7 @@ export default function SettingsPage() {
             </Card>
           )}
 
-          {section === 'diane' && (
+          {section === 'diane' && tab === 'lawyer' && (
             <Card
               title="HMRC & CIS knowledge"
               description="What Diane answers from in HMRC & CIS mode: GOV.UK guidance and HMRC's own manuals (CIS, PAYE, National Insurance, employment status, the construction VAT reverse charge, penalties), and our own notes, which she reads first. Every answer names its sources."

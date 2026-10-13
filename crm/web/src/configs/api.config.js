@@ -215,6 +215,14 @@ export const apiService = {
     update: (id, fields) => api.patch(`${apiPath}/expense-admins/${id}`, fields),
     remove: (id) => api.delete(`${apiPath}/expense-admins/${id}`),
   },
+  whatbotNumbers: {
+    list: () => api.get(`${apiPath}/whatbot-numbers`),
+    add: (body) => api.post(`${apiPath}/whatbot-numbers`, body),
+    update: (id, fields) => api.patch(`${apiPath}/whatbot-numbers/${id}`, fields),
+    relink: (id) => api.post(`${apiPath}/whatbot-numbers/${id}/relink`),
+    link: (id) => api.get(`${apiPath}/whatbot-numbers/${id}/link`),
+    remove: (id) => api.delete(`${apiPath}/whatbot-numbers/${id}`),
+  },
   settings: {
     get: () => api.get(`${apiPath}/settings`),
     // Every location the DEALS carry, with whether each is classed local.

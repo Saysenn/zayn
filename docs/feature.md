@@ -3,6 +3,30 @@
 Planned work. Numbers are stable (cited elsewhere): never renumber. Delete
 an entry when it ships.
 
+16. **TOP PRIORITY. Liquidation tracker page.** One page, one row per
+    company being wound down (or watched).
+    - Columns: company, director, mid, group, status, current instructions,
+      deadline, next action, owner, supporting docs, blamed?, liquidator,
+      last comm, note.
+    - Statuses: own liq, HMRC liq, strike off, strike off rejected,
+      dissolved, active.
+    - Open: how these statuses map onto the company status the CRM already
+      has (`active | liquidation | dissolved | closed`, which drives pay and
+      the liquidation panel). They should stay one status, not become two.
+    - Suggested add-ons, not agreed yet:
+      - director and mid filled in from the company's deals, not typed
+        again;
+      - deadline turns amber when it is near and red when it has passed;
+        sort by deadline;
+      - filters by status, group and owner;
+      - a status change history (what it was, when it changed, who changed
+        it);
+      - the settlement and allocated total from the liquidation panel, with
+        a link to the company;
+      - last comm as a dated log, not one overwritten cell;
+      - export to xlsx;
+      - Diane's briefing names deadlines due this week.
+
 0. **Expenses keep 3 months.** Fixed rule, no setting: the current month and
    the 2 before, rolling. Older rows are snapshotted, then cleared only if
    the snapshot succeeded (like `masterSheet/closeMonth.js`). Receipts already

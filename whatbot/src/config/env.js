@@ -5,9 +5,11 @@ import { z } from "zod";
  * Turns "milkman:+447700900123,sprite:+447700900124" into a lookup map.
  * Whichever of our numbers a message came in on decides the group.
  */
+// Optional since 2026-10-12: the numbers can live in the CRM instead
+// (Settings → Whatbot). Empty = no .env numbers.
 const NumberMap = z
   .string()
-  .min(1)
+  .default("")
   .transform((raw, ctx) => {
     const map = new Map();
     for (const pair of raw

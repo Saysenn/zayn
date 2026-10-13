@@ -2,6 +2,7 @@ import { Router } from "express";
 import { pingRedis } from "../system/redis.js";
 import { allGroups } from "../config/index.js";
 import { readStatus } from "../whatsapp/status.js";
+import { refreshFromCache } from "../whatsapp/numberCache.js";
 
 export const healthRouter = Router();
 
@@ -34,6 +35,8 @@ healthRouter.get("/ready", async (_req, res) => {
     return;
   }
 
+  // the numbers the worker runs now, which the CRM can change while running
+  await refreshFromCache();
   const reported = await readStatus();
   // missing = the worker hasn't checked in lately = down, not "unknown"
   const whatsapp = Object.fromEntries(

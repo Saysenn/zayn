@@ -14,6 +14,7 @@ const { router: messagesRouter } = require('./messages');
 const { router: peopleRouter } = require('./people');
 const { router: settingsRouter } = require('./settings');
 const expenseBot = require('./expenseBot');
+const whatbotNumbers = require('./whatbotNumbers');
 const { router: agentContextRouter } = require('./agentContext');
 const { router: hmrcRouter } = require('./hmrc');
 const { router: conversationsRouter } = require('./conversations');
@@ -79,6 +80,8 @@ app.use(cookieParser);
 app.use(health);
 
 app.use('/api/v1/auth', authRouter);
+// WhatBot's number list and link status (migration 083), its key only
+app.use('/api/v1/agent/whatbot-numbers', requireApiKey, whatbotNumbers.agent);
 // whatbot only, gated by its own shared key — never the admin session cookie
 app.use('/api/v1/agent', requireApiKey, agentRouter);
 app.use('/api/v1', requireSession);
@@ -87,6 +90,7 @@ app.use('/api/v1', concernsRouter);
 app.use('/api/v1', messagesRouter);
 app.use('/api/v1', settingsRouter);
 app.use('/api/v1', expenseBot.admin);
+app.use('/api/v1', whatbotNumbers.admin);
 app.use('/api/v1', agentContextRouter);
 app.use('/api/v1', hmrcRouter);
 app.use('/api/v1', conversationsRouter);

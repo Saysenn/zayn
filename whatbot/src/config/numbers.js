@@ -9,8 +9,15 @@ import { env } from "./env.js";
  * Whichever number a message came in on tells us which group it belongs to.
  */
 export const numbersConfig = {
-  /** E.164 -> groupId */
-  numberToGroup: env.WHATSAPP_NUMBERS,
+  /**
+   * E.164 -> groupId. Starts as .env's; whatsapp/registry.js replaces it with
+   * the CRM's list (Settings → Whatbot) while running. The SAME Map object
+   * throughout, so everything holding it sees the change.
+   */
+  numberToGroup: new Map(env.WHATSAPP_NUMBERS),
+
+  /** the .env list as written, the fallback when the CRM never answered */
+  fromEnv: env.WHATSAPP_NUMBERS,
 
   /** where the login sessions live. this folder IS the link — back it up. */
   authDir: env.WHATSAPP_AUTH_DIR,
@@ -19,13 +26,33 @@ export const numbersConfig = {
   linkWith: env.WHATSAPP_LINK_WITH,
 };
 
-/** the same map the other way round. built once, never changes while running. */
+/** the same map the other way round, kept in step by setNumbers() */
 const groupToNumber = new Map(
   [...numbersConfig.numberToGroup].map(([number, groupId]) => [
     groupId,
     number,
   ]),
 );
+
+/** per group: `qr` or `code`, from the CRM. Unset = .env's WHATSAPP_LINK_WITH. */
+const linkWithByGroup = new Map();
+
+/**
+ * THE NUMBERS NOW: [{ group, phone, linkWith? }]. Replaces both maps in place.
+ */
+export function setNumbers(entries) {
+  numbersConfig.numberToGroup.clear();
+  groupToNumber.clear();
+  linkWithByGroup.clear();
+  for (const { group, phone, linkWith } of entries) {
+    numbersConfig.numberToGroup.set(phone, group);
+    groupToNumber.set(group, phone);
+    if (linkWith) linkWithByGroup.set(group, linkWith);
+  }
+}
+
+export const linkWithFor = (groupId) =>
+  linkWithByGroup.get(groupId) ?? numbersConfig.linkWith;
 
 export const allGroups = () => [...groupToNumber.keys()];
 
