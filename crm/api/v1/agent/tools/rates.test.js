@@ -565,7 +565,8 @@ test('SIX DECIMALS, never 1.36', async () => {
 test('it says WHERE the rate came from, and when', async () => {
   const out = await loadFx(LIVE).handler();
   assert.equal(out.live, true);
-  assert.match(out.summary, /It is live/);
+  // Pulled once a day since 2026-10-13, so it says so.
+  assert.match(out.summary, /It is today's pulled rate/);
   assert.match(out.summary, /published Fri, 29 Aug 2026/);
 });
 
@@ -593,7 +594,7 @@ test('a follow-up can request only the currencies used in the conversion', async
 
   assert.match(out.reply, /^Here are the current exchange rates:/);
   assert.match(out.reply, /1 GBP = 1\.362553 USD/);
-  assert.match(out.reply, /1 USD = 3\.6725 AED/);
+  assert.match(out.reply, /1 AED = 0\.272294 USD, fixed peg/);
   assert.doesNotMatch(out.reply, /EUR/);
   assert.equal(out.computedReply, true);
 });

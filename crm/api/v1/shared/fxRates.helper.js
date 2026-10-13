@@ -26,8 +26,8 @@ const env = require('../../configs/env');
  *   that constant is still the last resort. But a peg is a decision
  *   somebody made and can unmake, and the admin asked to own it.
  *
- * ORDER: live feed, then cache, then saved rates, then the hardcoded
- * three. A saved rate never beats a live one.
+ * ORDER (changed 2026-10-13, see THE ORDER, PER CURRENCY below): a rate
+ * set by hand, then today's pulled rate, then the hardcoded three.
  *
  * Cached for the day because the source itself is daily: the response
  * carries time_next_update_utc, roughly 24 hours out. Polling faster than
@@ -46,9 +46,6 @@ const FALLBACK_USD_PER_GBP = 1.362553;
 // carries and were reported unconvertible anyway. Still bounded, and the
 // result is cached for six hours, so this is paid four times a day.
 const TIMEOUT_MS = 6000;
-const CACHE_MS = 6 * 60 * 60 * 1000;
-
-let cache = null; // { usdPerGbp, perUsd, source, fetchedAt, asOf }
 
 /**
  * WHAT THE FALLBACK CAN AND CANNOT DO.
@@ -71,34 +68,6 @@ function fallback(reason) {
 
 /**
  * ===============================
- * * THE RATES AN ADMIN SET, BETWEEN THE FEED AND THE FALLBACK
- * ===============================
- *
- * The hardcoded fallback carries GBP, USD and AED and nothing else, on the
- * deliberate principle that a EUR number invented from memory has no
- * provenance. That principle stands. A rate an ADMIN typed and can see in
- * Settings is not invented from memory: it has an author and a date, which
- * is exactly the provenance the fallback lacks.
- *
- * So the order is feed, then saved, then named as unconvertible. A saved
- * rate never overrides a live one: the feed is the better answer whenever
- * it answers.
- *
- * FAILURE IS THE FALLBACK, NEVER A THROW. A payout file must not refuse to
- * generate because a settings table is unreachable.
- */
-/** The saved rates as units per dollar, or `{}` if we cannot read them. */
-async function manualRates() {
-  try {
-    // eslint-disable-next-line global-require
-    return await require('../repos/fxRates.repo').perUsd();
-  } catch {
-    return {};
-  }
-}
-
-/**
- * ===============================
  * * A SAVED RATE FILLS A GAP THE FEED LEFT
  * ===============================
  *
@@ -109,6 +78,9 @@ async function manualRates() {
  *
  * A LIVE RATE STILL ALWAYS WINS. This only fills a code the feed did not
  * return, or returned as something unusable. It never overwrites one.
+ *
+ * SUPERSEDED 2026-10-13 by combine() below, where a hand set rate wins.
+ * Kept, with its tests, for the old order's record; nothing calls it.
  */
 function backfill(feed, manual) {
   const out = { ...feed };
@@ -123,91 +95,153 @@ function backfill(feed, manual) {
   return { perUsd: out, backfilled: filled };
 }
 
-async function saved(reason) {
-  const base = fallback(reason);
-  try {
-    // eslint-disable-next-line global-require
-    const repo = require('../repos/fxRates.repo');
-    const manual = await repo.perUsd();
-    if (Object.keys(manual).length === 0) return base;
-    // Saved rates WIN over the fallback's three, because the admin set
-    // them on purpose and the fallback is a guess with a date on it.
-    const perUsd = { ...base.perUsd, ...manual };
-    return {
-      ...base,
-      perUsd,
-      // GBP travels separately as well, so the one the converter reaches
-      // for first cannot disagree with the one in the table.
-      usdPerGbp: perUsd.GBP > 0 ? 1 / perUsd.GBP : base.usdPerGbp,
-      source: 'saved',
-      reason,
-    };
-  } catch {
-    return base;
+// ***************************************************
+// * THE ORDER, PER CURRENCY (his call 2026-10-13)
+// ***************************************************
+//
+//   1. A RATE SET BY HAND in Settings. Always wins: the pull never touches
+//      it, and a live feed no longer outranks it (it used to, which made a
+//      typed rate a standby the boss could not rely on).
+//   2. TODAY'S PULLED RATE, fetched once a day into tb_fx_rates_daily from
+//      Open Exchange Rates (OPENEXCHANGERATES_APP_ID), or open.er-api
+//      (FX_RATES_URL) when that is unset or down.
+//   3. The built in three (GBP, the AED peg, USD), and nothing else.
+//
+// Read from the database, memoised for a minute so a page of conversions
+// is one read, not one per row.
+const MEMO_MS = 60 * 1000;
+// How old the day's pull may get before it is fetched again.
+const DAILY_MS = 23 * 60 * 60 * 1000;
+// How often the server checks whether today's pull is due.
+const CHECK_MS = 60 * 60 * 1000;
+
+let memo = null; // { at, value }
+
+/** What converts each currency, and where each rate came from. */
+function combine(manual, day) {
+  const base = fallback(day ? undefined : 'no daily rates pulled yet');
+  const perUsd = { ...base.perUsd, ...(day?.perUsd ?? {}), ...manual };
+  const sources = {};
+  for (const code of Object.keys(perUsd)) {
+    sources[code] = code in manual ? 'saved' : (day?.perUsd && code in day.perUsd ? 'daily' : 'fallback');
   }
+  // `source` is the GBP rate's, the one the export prints beside its
+  // figure. A pulled rate is today's, so it reads as live.
+  const source = sources.GBP === 'daily' ? 'live' : sources.GBP;
+  return {
+    usdPerGbp: perUsd.GBP > 0 ? 1 / perUsd.GBP : base.usdPerGbp,
+    perUsd,
+    sources,
+    // Kept for old readers: codes running on a hand set rate while a pulled one exists.
+    backfilled: Object.keys(manual).filter((c) => day?.perUsd && c in day.perUsd),
+    source,
+    asOf: day ? (day.asOf ?? day.fetchedAt)?.toISOString?.() ?? String(day.asOf ?? day.fetchedAt) : null,
+    pulledAt: day?.fetchedAt ?? null,
+    pulledFrom: day?.source ?? null,
+    ...(day ? {} : { reason: base.reason }),
+  };
 }
 
 /**
- * The current USD per GBP, and where it came from.
+ * The rates every conversion uses, and where each came from.
  *
- * @returns {Promise<{usdPerGbp:number, source:'live'|'cache'|'fallback', asOf:string|null, reason?:string}>}
- *   Never rejects. `source` is what the export prints beside the figure.
+ * @returns {Promise<{usdPerGbp:number, perUsd:object, sources:object, source:'saved'|'live'|'fallback', asOf:string|null, reason?:string}>}
+ *   Never rejects: an unreadable table is the built in three.
  */
 async function usdPerGbp() {
-  if (cache && Date.now() - cache.fetchedAt < CACHE_MS) {
-    return {
-      usdPerGbp: cache.usdPerGbp,
-      perUsd: cache.perUsd,
-      backfilled: cache.backfilled ?? [],
-      source: 'cache',
-      asOf: cache.asOf,
-    };
-  }
-  if (!env.fxRatesUrl) return saved('FX_RATES_URL is not set');
+  if (memo && Date.now() - memo.at < MEMO_MS) return memo.value;
+  // eslint-disable-next-line global-require
+  const repo = require('../repos/fxRates.repo');
+  const [manual, day] = await Promise.all([
+    repo.perUsd().catch(() => ({})),
+    repo.daily().catch(() => null),
+  ]);
+  const value = combine(manual, day);
+  memo = { at: Date.now(), value };
+  return value;
+}
 
-  try {
-    // AbortSignal.timeout rather than a manual race: it actually cancels
-    // the socket, where a race leaves the request running and the process
-    // holding it open.
-    const res = await fetch(env.fxRatesUrl, { signal: AbortSignal.timeout(TIMEOUT_MS) });
-    if (!res.ok) return saved(`rates endpoint returned ${res.status}`);
+// ***************************************************
+// * THE DAILY PULL
+// ***************************************************
 
-    const body = await res.json();
-    // USD base, so GBP comes back as pounds per dollar and has to be
-    // inverted. Guarded rather than assumed: a shape change upstream
-    // should degrade to the fallback, not divide by undefined.
-    const gbpPerUsd = Number(body?.rates?.GBP);
-    if (!Number.isFinite(gbpPerUsd) || gbpPerUsd <= 0) {
-      return saved('no usable GBP rate in the response');
+async function fromOpenExchangeRates() {
+  const key = process.env.OPENEXCHANGERATES_APP_ID;
+  if (!key) return null;
+  const res = await fetch(`https://openexchangerates.org/api/latest.json?app_id=${encodeURIComponent(key)}`, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+  if (!res.ok) throw new Error(`openexchangerates returned ${res.status}`);
+  const body = await res.json();
+  if (!(Number(body?.rates?.GBP) > 0)) throw new Error('openexchangerates sent no usable GBP rate');
+  return { rates: body.rates, source: 'openexchangerates', asOf: body.timestamp ? new Date(body.timestamp * 1000) : null };
+}
+
+async function fromOpenErApi() {
+  if (!env.fxRatesUrl) return null;
+  const res = await fetch(env.fxRatesUrl, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+  if (!res.ok) throw new Error(`rates endpoint returned ${res.status}`);
+  const body = await res.json();
+  if (!(Number(body?.rates?.GBP) > 0)) throw new Error('no usable GBP rate in the response');
+  const asOf = body?.time_last_update_utc ? new Date(body.time_last_update_utc) : null;
+  return { rates: body.rates, source: 'open.er-api', asOf: Number.isNaN(asOf?.getTime()) ? null : asOf };
+}
+
+let pulling = null;
+
+/**
+ * Fetches today's rates into tb_fx_rates_daily, unless they are under a
+ * day old (or `force`). Never touches a rate set by hand. Never throws.
+ * @returns {Promise<{pulled:boolean, source?:string, codes?:number, reason?:string}>}
+ */
+function pullDaily({ force = false } = {}) {
+  if (pulling) return pulling;
+  pulling = (async () => {
+    // eslint-disable-next-line global-require
+    const repo = require('../repos/fxRates.repo');
+    // eslint-disable-next-line global-require
+    const logger = require('../../configs/logger');
+    try {
+      const day = await repo.daily().catch(() => null);
+      if (!force && day && Date.now() - new Date(day.fetchedAt).getTime() < DAILY_MS) {
+        return { pulled: false, reason: 'today\'s rates are already in' };
+      }
+      for (const source of [fromOpenExchangeRates, fromOpenErApi]) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const got = await source();
+          if (!got) continue;
+          // eslint-disable-next-line no-await-in-loop
+          const codes = await repo.saveDaily(got.rates, { source: got.source, asOf: got.asOf });
+          memo = null;
+          logger.info({ source: got.source, codes }, 'fx: today\'s rates pulled');
+          return { pulled: true, source: got.source, codes };
+        } catch (err) {
+          logger.warn({ err: err.message, source: source.name }, 'fx: a rate source failed, trying the next');
+        }
+      }
+      logger.warn('fx: no rate source answered; hand set rates and the last pull stay in use');
+      return { pulled: false, reason: 'no rate source answered' };
+    } catch (err) {
+      logger.warn({ err: err.message }, 'fx: daily pull failed');
+      return { pulled: false, reason: err.message };
+    } finally {
+      pulling = null;
     }
+  })();
+  return pulling;
+}
 
-    const rate = 1 / gbpPerUsd;
-    // THE WHOLE TABLE, not just GBP. The sheet carries EURO as well, and a
-    // converter that knows three currencies by name leaves every other one
-    // blank forever. About 160 come back in the same response that was
-    // already being fetched, so this costs nothing. Anything it still does
-    // not quote is filled from the rates an admin set.
-    const { perUsd, backfilled } = backfill(body.rates, await manualRates());
-    cache = {
-      usdPerGbp: rate,
-      perUsd,
-      backfilled,
-      source: 'live',
-      fetchedAt: Date.now(),
-      asOf: body?.time_last_update_utc ?? null,
-    };
-    return {
-      usdPerGbp: rate, perUsd, backfilled, source: 'live', asOf: cache.asOf,
-    };
-  } catch (err) {
-    // Offline, DNS, timeout, bad JSON. All the same from here: no rate.
-    return saved(err.name === 'TimeoutError' ? 'rates endpoint timed out' : err.message);
-  }
+let timer = null;
+/** At boot, then hourly: pulls when the day's rates are a day old. */
+function startDailyPull() {
+  if (timer) return;
+  void pullDaily();
+  timer = setInterval(() => { void pullDaily(); }, CHECK_MS);
+  timer.unref?.();
 }
 
 /** Testing only, so one case cannot leak its rate into the next. */
 function resetCache() {
-  cache = null;
+  memo = null;
 }
 
 /**
@@ -229,9 +263,11 @@ async function warmUp() {
   // eslint-disable-next-line global-require
   const logger = require('../../configs/logger');
   try {
+    startDailyPull();
+    await pulling;
     const rates = await usdPerGbp();
     const codes = Object.keys(rates.perUsd ?? {}).length;
-    if (rates.source === 'live' || rates.source === 'cache') {
+    if (rates.pulledAt) {
       logger.info({
         ms: Date.now() - started, source: rates.source, codes, backfilled: rates.backfilled ?? [],
       }, 'fx: rates ready');
@@ -248,5 +284,5 @@ async function warmUp() {
 }
 
 module.exports = {
-  usdPerGbp, resetCache, warmUp, backfill, FALLBACK_USD_PER_GBP,
+  usdPerGbp, resetCache, warmUp, backfill, combine, pullDaily, startDailyPull, FALLBACK_USD_PER_GBP,
 };

@@ -246,7 +246,10 @@ export const apiService = {
     locations: () => api.get(`${apiPath}/settings/locations`),
     // The rates we set ourselves, and which source is actually in use.
     rates: () => api.get(`${apiPath}/settings/rates`),
-    setRate: (code, perUsd) => api.put(`${apiPath}/settings/rates/${encodeURIComponent(code)}`, { perUsd }),
+    // What ONE of the currency is worth in USD, the way xe.com prints it.
+    setRate: (code, usdPerUnit) => api.put(`${apiPath}/settings/rates/${encodeURIComponent(code)}`, { usdPerUnit }),
+    // Today's rates fetched now rather than at the next daily check.
+    pullRates: () => api.post(`${apiPath}/settings/rates/pull`),
     clearRate: (code) => api.delete(`${apiPath}/settings/rates/${encodeURIComponent(code)}`),
     update: (fields) => api.patch(`${apiPath}/settings`, fields),
     burnMonth: (confirm) => api.post(`${apiPath}/settings/burn-month`, { confirm }),

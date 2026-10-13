@@ -110,12 +110,13 @@ export function useFxRates() {
 export function useSetFxRate() {
   return useOptimisticUpdate({
     queryKey: RATES_KEY,
-    mutationFn: ({ code, perUsd }) => apiService.settings.setRate(code, perUsd),
-    applyToCache: (old, { code, perUsd }) => {
+    // USD FOR ONE OF THE CURRENCY, as typed (1.36 for GBP). Migration 085.
+    mutationFn: ({ code, usdPerUnit }) => apiService.settings.setRate(code, usdPerUnit),
+    applyToCache: (old, { code, usdPerUnit }) => {
       const rates = old?.rates ?? [];
       // Painted with the moment it happened, because the row prints
       // "Saved <date>" and a blank one would read as never saved.
-      const next = { code, perUsd, updatedAt: new Date().toISOString(), updatedBy: null };
+      const next = { code, usdPerUnit: Number(usdPerUnit), perUsd: 1 / Number(usdPerUnit), updatedAt: new Date().toISOString(), updatedBy: null };
       const known = rates.some((rate) => rate.code === code);
       return {
         ...old,

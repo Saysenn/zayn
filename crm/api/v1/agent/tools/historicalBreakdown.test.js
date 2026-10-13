@@ -135,7 +135,7 @@ test('the report keeps auditable FX precision and names the AED peg when used', 
     ...built,
   });
   assert.match(text, /1 GBP = 1\.348492 USD/);
-  assert.match(text, /1 USD = 3\.6725 AED, fixed peg/);
+  assert.match(text, /1 AED = 0\.272294 USD, fixed peg/);
 });
 
 test('an unavailable currency rate is never displayed as USD zero', () => {

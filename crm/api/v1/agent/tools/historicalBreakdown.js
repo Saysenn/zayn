@@ -297,10 +297,11 @@ function recordParts(record) {
     const rateSource = fx.source ? `, ${fx.source}` : '';
     const currencies = new Set(breakdown.grand.map((item) => codeFor(item.currency)));
     const used = [`1 GBP = ${rate(fx.usdPerGbp)} USD`];
-    if (currencies.has('AED')) used.push(`1 USD = ${rate(AED_PER_USD)} AED, fixed peg`);
+    // One of the currency in dollars, the way xe.com prints it (2026-10-13).
+    if (currencies.has('AED')) used.push(`1 AED = ${rate(1 / AED_PER_USD)} USD, fixed peg`);
     for (const currency of [...currencies].filter((item) => !['GBP', 'USD', 'AED'].includes(item)).sort()) {
       const perUsd = Number(fx.perUsd?.[currency]);
-      if (perUsd > 0) used.push(`1 USD = ${rate(perUsd)} ${currency}`);
+      if (perUsd > 0) used.push(`1 ${currency} = ${rate(1 / perUsd)} USD`);
     }
     notes.push(`FX: ${used.join('; ')}${rateSource}${fx.asOf ? `, ${fx.asOf}` : ''}.`);
   }

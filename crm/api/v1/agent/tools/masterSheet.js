@@ -8911,7 +8911,7 @@ const fxTool = {
       const asOf = savedFx.asOf ? `, published ${savedFx.asOf}` : '';
       const savedReply = `The rate saved with ${monthName(month)}:\n`
         + `1 GBP = ${savedRate.toFixed(6)} USD.\n`
-        + `1 USD = ${AED_PER_USD} AED, fixed peg.\n`
+        + `1 AED = ${(1 / AED_PER_USD).toFixed(6)} USD, fixed peg (${AED_PER_USD} AED to the dollar).\n`
         + `Source: ${savedFx.source ?? 'unknown'}${asOf}.`;
       return {
         summary: `${monthName(month)} was converted at ${savedRate.toFixed(6)} USD per GBP, the `
@@ -8934,10 +8934,12 @@ const fxTool = {
     // A FALLBACK IS NOT A RATE, it is a constant standing in for one, and
     // saying so is the whole reason `source` travels.
     const provenance = live
-      ? `It is ${fx.source === 'cache' ? 'the current cached rate' : 'live'}`
+      ? `It is ${fx.source === 'cache' ? 'the current cached rate' : 'today\'s pulled rate'}`
         + `${fx.asOf ? `, published ${fx.asOf}` : ''}.`
-      : `It is NOT live: ${fx.source}. Say that out loud, because a stale rate and a live one `
-        + 'look identical in a figure.';
+      : fx.source === 'saved'
+        ? 'It is the rate an admin set by hand in Settings, which every total uses ahead of the daily pull.'
+        : `It is NOT live: ${fx.reason ?? fx.source}. Say that out loud, because a stale rate and a live one `
+          + 'look identical in a figure.';
 
     const priorSource = String(args.priorAnswer ?? '').split(/(?:Combined )?In USD:/i)[0];
     /**
@@ -8980,22 +8982,27 @@ const fxTool = {
     const savedAed = Number(perUsd.AED);
     const aedPerUsd = Number.isFinite(savedAed) && savedAed > 0 ? savedAed : AED_PER_USD;
     const rateLines = [];
+    // EVERY LINE READS THE WAY XE.COM PRINTS IT, one of the currency in
+    // dollars, the way the boss reads it (his call 2026-10-13).
     for (const currency of wanted) {
       if (currency === 'GBP') rateLines.push(`1 GBP = ${rate.toFixed(6)} USD.`);
       else if (currency === 'AED') {
         rateLines.push(aedPerUsd === AED_PER_USD
-          ? `1 USD = ${AED_PER_USD} AED, fixed peg.`
-          : `1 USD = ${aedPerUsd.toLocaleString('en-GB', { maximumFractionDigits: 6 })} AED, saved rate.`);
+          ? `1 AED = ${(1 / AED_PER_USD).toFixed(6)} USD, fixed peg (${AED_PER_USD} AED to the dollar).`
+          : `1 AED = ${(1 / aedPerUsd).toFixed(6)} USD, saved rate.`);
       } else {
         const per = Number(perUsd[currency]);
         rateLines.push(Number.isFinite(per) && per > 0
-          ? `1 USD = ${per.toLocaleString('en-GB', { maximumFractionDigits: 6 })} ${currency}.`
+          ? `1 ${currency} = ${(1 / per).toFixed(6)} USD.`
           : `${currency}: no exchange rate available.`);
       }
     }
+    // A rate set by hand is not a stale one: it is the one he chose.
     const sourceLine = live
-      ? `${fx.source === 'cache' ? 'Current cached rate' : 'Current live rate'}${fx.asOf ? `, published ${fx.asOf}` : ''}.`
-      : `Fallback rate, not live: ${fx.source}.`;
+      ? `${fx.source === 'cache' ? 'Current cached rate' : "Today's rate"}${fx.asOf ? `, published ${fx.asOf}` : ''}.`
+      : fx.source === 'saved'
+        ? 'Rate set by hand in Settings.'
+        : `Fallback rate, not live: ${fx.reason ?? fx.source}.`;
     /**
      * THE PAIR THEY ASKED FOR, answered. "what's the aed to gbp rate" got
      * the two USD rates and left the division to them. 2026-09-30. Worked

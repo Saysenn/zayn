@@ -2,6 +2,7 @@ const { Router } = require('express');
 const settingsRepo = require('./repos/settings.repo');
 const expenseChecks = require('./repos/expenseChecks.repo');
 const fxRatesRepo = require('./repos/fxRates.repo');
+const { sessionUser } = require('./shared/session.helper');
 const fxRates = require('./shared/fxRates.helper');
 const { AED_PER_USD, codeFor } = require('./shared/toUsd.helper');
 const {
@@ -368,11 +369,24 @@ router.get('/settings/rates', async (req, res, next) => {
     // a new sheet gets a box on its own, with no edit here.
     const inUseOnSheet = [...new Set((options.currencies ?? []).map(codeFor).filter(Boolean))]
       .filter((code) => code !== 'USD').sort();
+    // TODAY'S PULLED RATE for each currency the screen shows, as USD for one
+    // unit (xe.com's way), so a row with nothing set by hand still says
+    // what it converts at. Migration 085.
+    const day = await fxRatesRepo.daily().catch(() => null);
+    const pulled = {};
+    for (const code of new Set([...inUseOnSheet, ...saved.map((r) => r.code)])) {
+      const per = Number(day?.perUsd?.[code]);
+      if (per > 0) pulled[code] = 1 / per;
+    }
     res.json({
       rates: saved,
       inUse: live.source,
-      // Which currencies are running on a SAVED rate even though a live
-      // feed answered, because the feed does not quote them.
+      // Per currency: 'saved' (by hand), 'daily' (today's pull) or 'fallback'.
+      sources: Object.fromEntries([...new Set([...inUseOnSheet, ...saved.map((r) => r.code)])]
+        .map((code) => [code, live.sources?.[code] ?? null])),
+      pulled,
+      pulledAt: live.pulledAt ?? null,
+      pulledFrom: live.pulledFrom ?? null,
       backfilled: live.backfilled ?? [],
       reason: live.reason ?? null,
       asOf: live.asOf ?? null,
@@ -389,18 +403,18 @@ router.get('/settings/rates', async (req, res, next) => {
 /**
  * One currency at a time. A rate is one fact and each is its own decision.
  *
- * UNITS PER DOLLAR, the way the screen takes it, the way a rate site prints
- * it and the way `toUsd` divides by it. Migration 065: it was stored
- * inverted, and a typed 3.75 came home as 3.74999995.
+ * USD FOR ONE OF THE CURRENCY, the way xe.com prints it: 1.36 for GBP (his
+ * call 2026-10-13, migration 085). Stored exactly as typed; the units per
+ * dollar every converter divides by is worked out from it.
  */
 router.put('/settings/rates/:code', async (req, res, next) => {
   try {
-    const { perUsd } = req.body || {};
-    const value = Number(perUsd);
-    if (!Number.isFinite(value) || value <= 0) {
-      return res.status(400).json({ error: 'perUsd must be a number greater than zero' });
+    const { usdPerUnit } = req.body || {};
+    const value = Number(usdPerUnit);
+    if (usdPerUnit === undefined || !Number.isFinite(value) || value <= 0) {
+      return res.status(400).json({ error: 'usdPerUnit must be a number greater than zero: what one of the currency is worth in US dollars, like 1.36 for GBP.' });
     }
-    const saved = await fxRatesRepo.set(req.params.code, value, req.admin?.username ?? null);
+    const saved = await fxRatesRepo.set(req.params.code, String(usdPerUnit).trim(), sessionUser(req) ?? req.admin?.username ?? null);
     // A rate the converter has already cached is a rate nobody just set.
     fxRates.resetCache();
     return res.json(saved);
@@ -409,6 +423,16 @@ router.put('/settings/rates/:code', async (req, res, next) => {
       return res.status(400).json({ error: err.message });
     }
     return next(err);
+  }
+});
+
+/** Today's rates fetched now, not at the next daily check. Never touches a hand set rate. */
+router.post('/settings/rates/pull', async (req, res, next) => {
+  try {
+    const out = await fxRates.pullDaily({ force: true });
+    res.status(out.pulled ? 200 : 502).json(out.pulled ? out : { ...out, error: `Couldn't fetch today's rates: ${out.reason}` });
+  } catch (err) {
+    next(err);
   }
 });
 
