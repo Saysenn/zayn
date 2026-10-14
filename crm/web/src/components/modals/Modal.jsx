@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import Button from '../buttons/Button';
 import { CloseIcon } from '../icons';
 
@@ -17,6 +17,8 @@ const WIDTHS = {
   default: 'sm:max-w-md',
   wide: 'sm:max-w-3xl',
   table: 'sm:max-w-6xl',
+  // THE WHOLE WINDOW, for a document read at full size (his call 2026-10-13).
+  full: 'sm:max-w-none sm:h-[calc(100vh-2rem)]',
 };
 
 // `tone` is the same reasoning applied to colour. Diane's command center is
@@ -43,7 +45,25 @@ const TONES = {
     // Same slim bar, her green. See `.diane-scroll` in index.css.
     scroll: 'scroll-slim diane-scroll',
   },
+  // THE COMMAND CENTER'S OWN (his call 2026-10-13: "every card should feel
+  // like Diane V2"). Cut corners, an edge of light, scan lines and her HUD
+  // header, from v2.css, in the colours of the command center open now.
+  v2: {
+    panel: 'v2-modal',
+    head: 'v2-modal-head',
+    title: 'v2-modal-title',
+    close: 'v2-modal-close border-0 bg-transparent',
+    scroll: 'scroll-slim diane-scroll',
+  },
 };
+
+/** The open command center's two colours, so a dialog drawn outside it still wears them. */
+function v2Colours() {
+  const cc = typeof document !== 'undefined' ? document.querySelector('.cc2') : null;
+  if (!cc) return undefined;
+  const css = getComputedStyle(cc);
+  return Object.fromEntries(['--sig', '--acc', '--hot', '--dim'].map((k) => [k, css.getPropertyValue(k).trim()]).filter(([, v]) => v));
+}
 
 /**
  * `title` may be a node, so a caller can put an icon beside the words.
@@ -51,6 +71,11 @@ const TONES = {
  * the dialog announces itself as that. `ariaLabel` is the plain string for
  * anything that passes a node, and a string title needs neither.
  */
+// The dialogs open now, oldest first: Escape closes only the newest.
+const OPEN = [];
+/** Whether any dialog is open now: Diane's own Escape steps aside for one. */
+export const dialogOpen = () => OPEN.length > 0;
+
 export default function Modal({
   title, ariaLabel, onClose, wide = false, size, tone = 'crm', centered = false, children,
 }) {
@@ -60,11 +85,32 @@ export default function Modal({
   const skin = TONES[tone] ?? TONES.crm;
   const label = ariaLabel ?? (typeof title === 'string' ? title : undefined);
 
+  // ESCAPE CLOSES THE TOP ONE ONLY (2026-10-13): a document opened from a
+  // Liquidations row closed the row underneath it too, as every open dialog
+  // heard the same key. Each dialog takes its place on a stack while open.
+  // Its place is taken once, on opening: a re-render must not move it to the top.
+  const me = useRef(null);
+  if (!me.current) me.current = Symbol('modal');
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
-    const onKey = (e) => e.key === 'Escape' && onClose();
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+    const id = me.current;
+    OPEN.push(id);
+    // CAPTURED, AND MARKED HANDLED: heard before any other Escape on the page,
+    // so Diane behind it never closes with it, whatever order the two were
+    // added in (browser check 2026-10-13: the order changed as she re-rendered).
+    const onKey = (e) => {
+      if (e.key !== 'Escape' || OPEN[OPEN.length - 1] !== id) return;
+      e.preventDefault();
+      closeRef.current?.();
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => {
+      document.removeEventListener('keydown', onKey, true);
+      const at = OPEN.lastIndexOf(id);
+      if (at >= 0) OPEN.splice(at, 1);
+    };
+  }, []);
 
   // INTO <body>, not where the dialog was opened. Rendered in place, any
   // ancestor with a transform, a filter or a backdrop blur (the sticky
@@ -88,6 +134,7 @@ export default function Modal({
       // forehead.
       // `centered` keeps a short notice in the middle on a phone too, never a sheet.
       className={`fixed inset-0 z-50 flex justify-center bg-black/40 backdrop-blur-sm ${centered ? 'items-center p-4' : 'items-end sm:items-center sm:p-4'}`}
+      style={tone === 'v2' ? v2Colours() : undefined}
       onClick={onClose}
     >
       <div

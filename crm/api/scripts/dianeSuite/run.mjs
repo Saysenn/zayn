@@ -26,7 +26,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 // SUITE_SET=eval runs the held-out questions in evalCases.mjs instead: wording
 // no rule was written for, so a change is judged on what she was never taught.
-const SETS = { eval: './evalCases.mjs', eval2: './evalCases2.mjs', eval3: './evalCases3.mjs', eval4: './evalCases4.mjs', eval5: './evalCases5.mjs', eval6: './evalCases6.mjs', wander: './wanderCases.mjs', bulk: './bulkCases.mjs', messy: './messyCases.mjs', library: './library/index.mjs' };
+const SETS = { eval: './evalCases.mjs', eval2: './evalCases2.mjs', eval3: './evalCases3.mjs', eval4: './evalCases4.mjs', eval5: './evalCases5.mjs', eval6: './evalCases6.mjs', wander: './wanderCases.mjs', bulk: './bulkCases.mjs', messy: './messyCases.mjs', library: './library/index.mjs', liq: './liqCases.mjs', docs: './docCases.mjs', night: './nightCases.mjs' };
 const { READS, WRITES, PENDING, extraSeed } = await import(SETS[process.env.SUITE_SET] ?? './cases.mjs');
 import { seed } from './seed.mjs';
 import {
@@ -149,10 +149,11 @@ export async function api(method, p, body) {
   let json; try { json = JSON.parse(text); } catch { json = text; }
   return { status: r.status, body: json };
 }
-async function turn(history) {
+// A case may talk to another context (`context: 'hmrc'` is lawyer mode, 2026-10-13).
+async function turn(history, context = 'master-sheet') {
   const r = await fetch(`${BASE}/master-sheet/agent`, {
     method: 'POST', headers: { 'content-type': 'application/json', cookie },
-    body: JSON.stringify({ history, context: 'master-sheet' }),
+    body: JSON.stringify({ history, context }),
   });
   if (!r.ok) throw new Error(`agent ${r.status}`);
   return (await r.text()).split('\n\n').filter((b) => b.startsWith('data: ')).map((b) => JSON.parse(b.slice(6)));
@@ -203,10 +204,13 @@ async function runTurns(c, db) {
         continue;
       }
     }
-    history.push({ role: 'user', content: step.say });
+    // A STEP MAY CARRY A FILE, as the chat's paperclip sends it (2026-10-13).
+    const attachment = typeof step.attachment === 'function' ? step.attachment() : step.attachment;
+    history.push({ role: 'user', content: step.say, ...(attachment ? { attachment } : {}) });
     const turnStarted = Date.now();
-    const events = await turn(history);
+    const events = await turn(history, c.context);
     const turnMs = Date.now() - turnStarted;
+    const failsAtTurn = fails.length;
     const stats = events.find((e) => e.type === 'stats')?.stats ?? null;
     const failsBefore = fails.length;
     const tools = events.filter((e) => e.type === 'tool' && e.name).map((e) => e.name);
@@ -241,6 +245,11 @@ async function runTurns(c, db) {
     if (x.reply && !x.reply.test(reply)) fail('answer', `${where}: reply ${x.reply} not in "${reply.slice(0, 160)}"`);
     if (x.noReply && x.noReply.test(reply)) fail('answer', `${where}: reply must not match ${x.noReply}: "${reply.slice(0, 160)}"`);
     if (x.noDraw && drawn.length) fail('answer', `${where}: expected nothing drawn, got ${drawn.length} panel(s)`);
+    // FILES SHE HANDED BACK (a chip each), checked by name.
+    if (x.files) {
+      const shown = events.filter((e) => e.type === 'file').map((e) => e.file?.name ?? '');
+      if (!shown.some((n) => x.files.test(n))) fail('answer', `${where}: expected a file ${x.files}, got [${shown}]`);
+    }
     if (x.rows) {
       const list = drawn.find((e) => e.type === 'list')?.list;
       const listRows = list ? [...(list.rows ?? []), ...(list.sections ?? []).flatMap((s) => s.rows)] : [];
@@ -257,6 +266,16 @@ async function runTurns(c, db) {
     if (x.db) {
       const bad = await x.db(db);
       if (bad) fail('db', `${where}: db ${bad}`);
+    }
+    // THE CONVERSATION, word for word, for a report (SUITE_TRANSCRIPT=file.jsonl, 2026-10-13).
+    if (process.env.SUITE_TRANSCRIPT) {
+      fs.appendFileSync(process.env.SUITE_TRANSCRIPT, `${JSON.stringify({
+        set: SET, case: c.name, context: c.context ?? 'master-sheet', say: step.say, attachment: attachment?.files?.map((f) => f.filename) ?? (attachment?.filename ? [attachment.filename] : []),
+        reply, tools: calledNames, files: events.filter((e) => e.type === 'file').map((e) => e.file?.name),
+        ok: fails.length === failsAtTurn, fails: fails.slice(failsAtTurn), ms: turnMs,
+        tokens: stats ? { input: stats.inputTokens ?? null, cached: stats.cachedTokens ?? null, output: stats.outputTokens ?? null } : null,
+        rounds: stats?.rounds ?? null, retries: stats?.retries ?? [],
+      })}\n`);
     }
     const unsupported = stats ? unsupportedFigures(reply, called) : [];
     turns.push({

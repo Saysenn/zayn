@@ -38,9 +38,17 @@ const MONTH_NUM = ['', 'January', 'February', 'March', 'April', 'May', 'June', '
  * "2026-10-09" is "9 October 2026". Only what she SAYS; the screen keeps
  * the short form.
  */
+const WEEKDAYS = {
+  mon: 'Monday', tue: 'Tuesday', tues: 'Tuesday', wed: 'Wednesday', thu: 'Thursday', thur: 'Thursday', thurs: 'Thursday',
+  fri: 'Friday', sat: 'Saturday', sun: 'Sunday',
+};
+
 export function speakDates(text) {
   const day = (d) => String(Number(d));
   return String(text ?? '')
+    // "Sun, 18 Oct" → "Sunday 18 Oct" (his call 2026-10-13: "Sun" was read as
+    // the word). Only a short day BEFORE A DATE, so "the sun" stays as it is.
+    .replace(/\b(mon|tues?|wed|thu(?:rs?)?|fri|sat|sun)\.?,?\s+(?=\d)/gi, (m, w) => `${WEEKDAYS[w.toLowerCase()]} `)
     // 2026-10-09 → 9 October 2026
     .replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, (m, y, mo, d) => (MONTH_NUM[Number(mo)] ? `${day(d)} ${MONTH_NUM[Number(mo)]} ${y}` : m))
     // 01 Oct (2026) → 1 October (2026)

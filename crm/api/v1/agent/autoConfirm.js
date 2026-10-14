@@ -46,6 +46,9 @@ const MAY_SKIP = Object.freeze([
   'update_master_sheet_row',
   // One person's own profile. Same shape, same log.
   'update_person',
+  // One company's row on the Liquidations page: logged in its history, one
+  // undo. Several companies, or `where`, still ask (runAgent reachesMany).
+  'update_liquidation',
 ]);
 
 /**

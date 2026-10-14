@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Button from '../buttons/Button';
 import { ChevronIcon, CloseIcon } from '../icons';
+import { useDianeOpen } from '../agentOrb/DianeContext';
 
 // ***************************************************
 // * The bulk bar: what you can do to the ticked rows
@@ -24,7 +25,11 @@ import { ChevronIcon, CloseIcon } from '../icons';
 // it. `count` only decides whether the bar is up.
 export default function BulkBar({ count, onClear, children }) {
   const ref = useRef(null);
-  const open = count > 0;
+  // HIDDEN WHILE DIANE IS OPEN (his report 2026-10-13): the bar sat on top
+  // of her composer. The ticks are kept; it comes back when she closes, and
+  // Escape inside her window no longer throws the selection away.
+  const dianeOpen = useDianeOpen();
+  const open = count > 0 && !dianeOpen;
 
   useLayoutEffect(() => {
     const root = document.documentElement;

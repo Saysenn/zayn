@@ -17,6 +17,10 @@ const KEEPS = /^\s*keep\b/i;
 const RATE_ASK = /\d+(?:\.\d+)?\s*%[^.?!]*\b(?:add[\s-]?ons?|fees?|rates?)\b|\b(?:add[\s-]?ons?|fees?|rates?)\b[^.?!]*\d+(?:\.\d+)?\s*%/i;
 
 // Asking them to agree to something. "Which one?" is not this.
+// A CHANGE ON THE LIQUIDATIONS OR FLAGGED PAGE, or a rate, said as a statement:
+// "log for Pinecrest: liquidator emailed" got "shall I save that?" with nothing
+// waiting, and the yes saved nothing. 2026-10-13.
+const PAGE_CHANGE = /\b(?:log|note|deadline|liquidator|owner|next action|instructions?|blamed|stage|hmrc liq|own liq|strike[\s-]?off|flags?|rates?)\b/i;
 const ASKS_YES = /\b(?:shall|should|can|may) I\b[^?]*\?|\b(?:would you like|do you want|want) me to\b[^?]*\?|\b(?:go ahead|proceed|confirm(?: this| that| these| it)?)\s*\?/i;
 
 /**
@@ -29,7 +33,7 @@ function unbackedAsk(reply, { said, pending, applied }) {
   // A question they asked may end on an offer; only an instruction needs its pending.
   const text = String(said ?? '');
   const rateChange = RATE_ASK.test(text) && !asksRateCheck(text);
-  if (!isSetInstruction(said) && !KEEPS.test(text) && !rateChange) return false;
+  if (!isSetInstruction(said) && !KEEPS.test(text) && !rateChange && !PAGE_CHANGE.test(text)) return false;
   return ASKS_YES.test(String(reply ?? ''));
 }
 

@@ -341,6 +341,13 @@ export const ExpandIcon = (props) => (
   </svg>
 );
 
+// Four corner marks pointing INWARD: leave full screen, ExpandIcon's opposite.
+export const ShrinkIcon = (props) => (
+  <svg {...BASE} aria-hidden="true" {...props}>
+    <path d="M3 8h5V3M21 8h-5V3M3 16h5v5M21 16h-5v5" />
+  </svg>
+);
+
 // ---- rich text toolbar ----------------------------------------------
 // Drawn as letterforms rather than as abstract marks, the way every text
 // editor does it — a "B" is unambiguous in a way a generic glyph isn't.

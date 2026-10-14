@@ -104,6 +104,14 @@ export function DianeProvider({ children }) {
   );
 }
 
+/**
+ * Whether her window is open, and false outside the provider rather than a
+ * throw: the bulk bar reads it, and it must never be what breaks a page.
+ */
+export function useDianeOpen() {
+  return Boolean(useContext(DianeCtx)?.open);
+}
+
 export function useDiane() {
   const ctx = useContext(DianeCtx);
   if (!ctx) throw new Error('useDiane must be used inside DianeProvider');

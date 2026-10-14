@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiService } from '../configs/api.config';
 import { useSocketEvent } from '../hooks/useSocket';
@@ -7,7 +7,13 @@ import PageHeader, { Toolbar, SearchInput } from '../components/layout/PageHeade
 import Select from '../components/forms/Select';
 import { EmptyState, ErrorState } from '../components/display/StateBlocks';
 import { TableSkeleton } from '../components/display/Skeleton';
-import { HourglassIcon, SearchIcon } from '../components/icons';
+import { DownloadIcon, HourglassIcon, SearchIcon } from '../components/icons';
+import Button from '../components/buttons/Button';
+import { saveBlob } from '../helpers/api.helper';
+import { useReportingMutation } from '../hooks/useReportingMutation';
+import LiquidationsExportModal from '../components/export/LiquidationsExportModal';
+import EditableCell from '../components/forms/EditableCell';
+import { useOptimisticUpdate } from '../hooks/useOptimisticUpdate';
 import TrackerRowModal from '../components/liquidations/TrackerRowModal';
 import { formatMoney } from '../helpers/formatMoney';
 import { LIQ_STAGES, stageOf, deadlineTone, shortDate } from '../configs/liquidationStages';
@@ -38,6 +44,9 @@ const DEADLINE_CLASS = {
   soon: 'font-semibold text-warning',
 };
 const DEADLINE_LABEL = { passed: 'Passed', soon: 'Due soon' };
+// What a cell offers. "Not set" is the select's own blank.
+const STAGE_OPTIONS = LIQ_STAGES.map((s) => ({ value: s.value, label: s.label }));
+const BLAMED_OPTIONS = [{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes' }];
 
 /** Long text in a cell: one line, cut, the whole of it on hover. */
 function Clip({ children, width = 'max-w-[14rem]' }) {
@@ -46,10 +55,34 @@ function Clip({ children, width = 'max-w-[14rem]' }) {
 }
 
 export default function LiquidationsPage() {
-  const { data, isLoading, error } = useQuery({ queryKey: LIQ_KEY, queryFn: () => apiService.liquidations.list() });
+  // ALWAYS fetched on open: a company put into liquidation elsewhere is on it at once.
+  const { data, isLoading, error } = useQuery({ queryKey: LIQ_KEY, queryFn: () => apiService.liquidations.list(), refetchOnMount: 'always' });
   // Another tab, Diane, or the company page moving its pay status.
   const queryClient = useQueryClient();
-  const refresh = () => queryClient.invalidateQueries({ queryKey: LIQ_KEY });
+  // HELD WHILE A CELL IS OPEN, as the master sheet does: a refetch mid-edit
+  // would put the old value back under the one being typed.
+  const editingCells = useRef(0);
+  const refresh = () => { if (!editingCells.current) queryClient.invalidateQueries({ queryKey: LIQ_KEY }); };
+  const onEditingChange = (on) => { editingCells.current = Math.max(0, editingCells.current + (on ? 1 : -1)); };
+
+  /**
+   * CLICK A CELL, CHANGE IT (his call 2026-10-13, the master sheet's way):
+   * shown at once, saved behind it, put back with a message if refused.
+   * The page's list and the open panel share the key, so both move.
+   */
+  const cellEdit = useOptimisticUpdate({
+    queryKey: LIQ_KEY,
+    mutationFn: ({ id, fields }) => apiService.liquidations.update(id, fields),
+    applyToCache: (old, { id, column, value }) => {
+      if (Array.isArray(old?.rows)) return { ...old, rows: old.rows.map((r) => (r.id === id ? { ...r, [column]: value } : r)) };
+      if (old?.row?.id === id) return { ...old, row: { ...old.row, [column]: value } };
+      return old;
+    },
+    describe: ({ company, label }) => `${company}'s ${label}`,
+  });
+  const saveCell = (r, field, column, label, value) => cellEdit.mutate({
+    id: r.id, fields: { [field]: value }, column, value, company: r.company_name, label,
+  });
   useSocketEvent('liquidations:changed', refresh);
   useSocketEvent('companies:changed', refresh);
 
@@ -71,6 +104,18 @@ export default function LiquidationsPage() {
   const soon = rows.filter((r) => deadlineTone(r.deadline, r.stage) === 'soon').length;
   const filtersOn = Boolean(filters.stage || filters.group || filters.owner);
 
+  // THE ROWS ON SCREEN as an Excel file, filters and search applied.
+  // THE EXPORT: columns, companies and colour picked in its modal, as on Expenses.
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportOptions = useQuery({
+    queryKey: ['liquidation-export-options'], queryFn: () => apiService.liquidations.exportOptions(), enabled: exportOpen, staleTime: 60_000,
+  });
+  const exporter = useReportingMutation(async ({ ids, columns, palette }) => {
+    const { blob, filename } = await apiService.liquidations.download(ids, { columns, palette });
+    await saveBlob(blob, filename || 'liquidations.xlsx');
+  }, { describe: ({ ids }) => `${ids.length} ${ids.length === 1 ? 'company' : 'companies'}`, verb: 'exported' });
+  const exporting = exporter.isPending;
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -80,6 +125,12 @@ export default function LiquidationsPage() {
           passed ? `${passed} past deadline` : null,
           soon ? `${soon} due within a week` : null,
         ].filter(Boolean).join(' · ')}
+        actions={(
+          <Button variant="quiet" disabled={isLoading || rows.length === 0} onClick={() => setExportOpen(true)}>
+            <DownloadIcon width={15} height={15} />
+            Export
+          </Button>
+        )}
       />
 
       <Toolbar
@@ -159,23 +210,36 @@ export default function LiquidationsPage() {
                   <td className="td"><Clip width="max-w-[10rem]">{r.director}</Clip></td>
                   <td className="td"><Clip width="max-w-[10rem]">{r.mid}</Clip></td>
                   <td className="td">{(r.groups ?? []).join(', ') || <span className="text-text-faint">—</span>}</td>
-                  <td className="td"><span className={stage.badge}>{stage.label}</span></td>
-                  <td className="td"><Clip>{r.instructions}</Clip></td>
-                  <td className="td">
-                    <span className={`tabular-nums ${DEADLINE_CLASS[tone] ?? (r.deadline ? '' : 'text-text-faint')}`}>{shortDate(r.deadline)}</span>
-                    {tone && <span className={`ml-2 text-xs ${DEADLINE_CLASS[tone]}`}>{DEADLINE_LABEL[tone]}</span>}
-                  </td>
-                  <td className="td"><Clip>{r.next_action}</Clip></td>
-                  <td className="td">{r.owner || <span className="text-text-faint">—</span>}</td>
+                  <EditableCell type="select" options={STAGE_OPTIONS} value={r.stage ?? ''} onEditingChange={onEditingChange}
+                    display={<span className={stage.badge}>{stage.label}</span>}
+                    onSave={(v) => saveCell(r, 'stage', 'stage', 'stage', v || null)} />
+                  <EditableCell className="max-w-[16rem]" value={r.instructions ?? ''} onEditingChange={onEditingChange}
+                    onSave={(v) => saveCell(r, 'instructions', 'instructions', 'instructions', v ?? '')} />
+                  <EditableCell type="date" value={r.deadline} onEditingChange={onEditingChange}
+                    display={(
+                      <span className="whitespace-nowrap">
+                        <span className={`tabular-nums ${DEADLINE_CLASS[tone] ?? (r.deadline ? '' : 'text-text-faint')}`}>{shortDate(r.deadline)}</span>
+                        {tone && <span className={`ml-2 text-xs ${DEADLINE_CLASS[tone]}`}>{DEADLINE_LABEL[tone]}</span>}
+                      </span>
+                    )}
+                    onSave={(v) => saveCell(r, 'deadline', 'deadline', 'deadline', v || null)} />
+                  <EditableCell className="max-w-[16rem]" value={r.next_action ?? ''} onEditingChange={onEditingChange}
+                    onSave={(v) => saveCell(r, 'nextAction', 'next_action', 'next action', v ?? '')} />
+                  <EditableCell type="select" options={owners} value={r.owner ?? ''} onEditingChange={onEditingChange}
+                    onSave={(v) => saveCell(r, 'owner', 'owner', 'owner', v || null)} />
                   <td className="td tabular-nums">{r.doc_count ? `${r.doc_count} ${r.doc_count === 1 ? 'file' : 'files'}` : <span className="text-text-faint">—</span>}</td>
-                  <td className="td">{r.blamed ? <span className="badge badge-open">Yes</span> : <span className="text-text-muted">No</span>}</td>
-                  <td className="td"><Clip width="max-w-[10rem]">{r.liquidator}</Clip></td>
+                  <EditableCell type="select" clearable={false} options={BLAMED_OPTIONS} value={r.blamed ? 'yes' : 'no'} onEditingChange={onEditingChange}
+                    display={r.blamed ? <span className="badge badge-open">Yes</span> : <span className="text-text-muted">No</span>}
+                    onSave={(v) => saveCell(r, 'blamed', 'blamed', 'blamed', v === 'yes')} />
+                  <EditableCell className="max-w-[12rem]" value={r.liquidator ?? ''} onEditingChange={onEditingChange}
+                    onSave={(v) => saveCell(r, 'liquidator', 'liquidator', 'liquidator', v ?? '')} />
                   <td className="td">
                     {r.last_comm
                       ? <Clip><span className="tabular-nums text-text-muted">{shortDate(r.last_comm.said_on)}</span> · {r.last_comm.body}</Clip>
                       : <span className="text-text-faint">—</span>}
                   </td>
-                  <td className="td"><Clip>{r.note}</Clip></td>
+                  <EditableCell className="max-w-[16rem]" value={r.note ?? ''} onEditingChange={onEditingChange}
+                    onSave={(v) => saveCell(r, 'note', 'note', 'note', v ?? '')} />
                   <td className="td text-right tabular-nums">
                     {r.settlement != null
                       ? <span title="Settlement · allocated to the live deals a month">{formatMoney(r.settlement, r.currency)} <span className="text-text-muted">· {formatMoney(r.allocated ?? 0, r.currency)}</span></span>
@@ -187,6 +251,21 @@ export default function LiquidationsPage() {
           </tbody>
         </table>
       </div>
+
+      {exportOpen && (
+        <LiquidationsExportModal
+          options={exportOptions.data}
+          loading={exportOptions.isLoading}
+          busy={exporting}
+          shownCount={shown.length}
+          totalCount={rows.length}
+          onClose={() => setExportOpen(false)}
+          onExport={({ columns, palette, onlyShown }) => exporter.mutate(
+            { ids: (onlyShown ? shown : rows).map((r) => r.id), columns, palette },
+            { onSuccess: () => setExportOpen(false) },
+          )}
+        />
+      )}
 
       {openId && <TrackerRowModal id={openId} owners={owners} onClose={() => setOpenId(null)} />}
     </div>

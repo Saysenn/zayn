@@ -91,7 +91,9 @@ async function details(id) {
   const [comms, history, docs] = await Promise.all([
     pool.query('SELECT id, said_on, body, by_user, created_at FROM tb_liquidation_comms WHERE liquidation_id = $1 ORDER BY said_on DESC, id DESC', [id]),
     pool.query('SELECT id, from_stage, to_stage, by_user, changed_at FROM tb_liquidation_history WHERE liquidation_id = $1 ORDER BY changed_at DESC, id DESC', [id]),
-    pool.query('SELECT id, file_name, mime, size_bytes, by_user, uploaded_at FROM tb_liquidation_docs WHERE liquidation_id = $1 AND removed_at IS NULL ORDER BY uploaded_at DESC, id DESC', [id]),
+    pool.query(`SELECT id, file_name, mime, size_bytes, by_user, uploaded_at, read_status, read_how, read_error,
+                       COALESCE(length(text), 0) AS text_chars
+                  FROM tb_liquidation_docs WHERE liquidation_id = $1 AND removed_at IS NULL ORDER BY uploaded_at DESC, id DESC`, [id]),
   ]);
   return { comms: comms.rows, history: history.rows, docs: docs.rows };
 }
@@ -156,10 +158,17 @@ async function addComm(id, { saidOn, body }, byUser) {
   return rows[0];
 }
 
+/** Takes contact lines back out (Diane's undo of lines she added). */
+async function removeComms(ids) {
+  if (!ids?.length) return 0;
+  const { rowCount } = await pool.query('DELETE FROM tb_liquidation_comms WHERE id = ANY($1::int[])', [ids]);
+  return rowCount;
+}
+
 async function addDoc(id, { fileName, storedPath, mime, size }, byUser) {
   const { rows } = await pool.query(
     `INSERT INTO tb_liquidation_docs (liquidation_id, file_name, stored_path, mime, size_bytes, by_user)
-     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, file_name, mime, size_bytes, by_user, uploaded_at`,
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, file_name, mime, size_bytes, by_user, uploaded_at, read_status`,
     [id, fileName, storedPath, mime, size, byUser],
   );
   return rows[0];
@@ -176,6 +185,91 @@ async function findDoc(id, docId) {
 /** Marks a doc removed and records where its file was moved to. */
 async function removeDoc(docId, movedTo) {
   await pool.query('UPDATE tb_liquidation_docs SET removed_at = now(), stored_path = $2 WHERE id = $1', [docId, movedTo]);
+}
+
+// ===============================
+// * READING THE DOCUMENTS (migration 088)
+// ===============================
+
+/** Where a document's reading stands, and its text once read. */
+async function setRead(docId, { status, how = null, error = null, text = null }) {
+  await pool.query(
+    `UPDATE tb_liquidation_docs SET read_status = $2, read_how = $3, read_error = $4,
+            text = COALESCE($5, text), read_at = CASE WHEN $2 IN ('read', 'unreadable') THEN now() ELSE read_at END
+      WHERE id = $1`,
+    [docId, status, how, error, text],
+  );
+}
+
+/** A document's passages and their embeddings, replaced whole. */
+async function saveChunks(docId, chunks) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM tb_liquidation_doc_chunks WHERE doc_id = $1', [docId]);
+    for (const [n, c] of chunks.entries()) {
+      // eslint-disable-next-line no-await-in-loop
+      await client.query('INSERT INTO tb_liquidation_doc_chunks (doc_id, n, text, embedding) VALUES ($1, $2, $3, $4)', [docId, n, c.text, c.embedding]);
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** Every passage of every document still on a row, with whose it is. */
+async function allChunks() {
+  const { rows } = await pool.query(
+    `SELECT k.id, k.doc_id, k.n, k.text, k.embedding, d.file_name, d.liquidation_id, l.company_key,
+            COALESCE(c.name, l.company_key) AS company_name
+       FROM tb_liquidation_doc_chunks k
+       JOIN tb_liquidation_docs d ON d.id = k.doc_id AND d.removed_at IS NULL
+       JOIN tb_liquidations l ON l.id = d.liquidation_id
+       LEFT JOIN tb_companies c ON lower(regexp_replace(btrim(c.name), '\\s+', ' ', 'g')) = l.company_key`,
+  );
+  return rows;
+}
+
+/** Changes whenever a document is added, read, renamed or removed: the search cache's key. */
+async function docsVersion() {
+  const { rows } = await pool.query(
+    `SELECT count(*) FILTER (WHERE removed_at IS NULL) AS n, max(id) AS top, max(removed_at) AS gone, max(read_at) AS read,
+            md5(string_agg(file_name, '|' ORDER BY id) FILTER (WHERE removed_at IS NULL)) AS names
+       FROM tb_liquidation_docs`,
+  );
+  return JSON.stringify(rows[0]);
+}
+
+/** One document whole: its row, its text, and whose it is. */
+async function docWithText(docId) {
+  const { rows } = await pool.query(
+    `SELECT d.*, l.company_key FROM tb_liquidation_docs d JOIN tb_liquidations l ON l.id = d.liquidation_id
+      WHERE d.id = $1 AND d.removed_at IS NULL`,
+    [docId],
+  );
+  return rows[0] ?? null;
+}
+
+/** Documents left waiting or half read (a restart mid read). */
+async function unread() {
+  const { rows } = await pool.query("SELECT id FROM tb_liquidation_docs WHERE removed_at IS NULL AND read_status IN ('waiting', 'reading') ORDER BY id");
+  return rows.map((r) => r.id);
+}
+
+async function renameDoc(id, docId, fileName) {
+  const { rows } = await pool.query(
+    'UPDATE tb_liquidation_docs SET file_name = $3 WHERE id = $2 AND liquidation_id = $1 AND removed_at IS NULL RETURNING id, file_name',
+    [id, docId, fileName],
+  );
+  return rows[0] ?? null;
+}
+
+/** A removed document put back (Diane's undo): its file is moved back by the caller. */
+async function restoreDoc(docId, storedPath) {
+  await pool.query('UPDATE tb_liquidation_docs SET removed_at = NULL, stored_path = $2 WHERE id = $1', [docId, storedPath]);
 }
 
 /** Usernames an owner can be. */
@@ -199,5 +293,6 @@ async function dueSoon(days = 7) {
 }
 
 module.exports = {
-  STAGE, STAGES, companyKey, list, findById, details, syncFromCompanies, update, addComm, addDoc, findDoc, removeDoc, owners, dueSoon,
+  STAGE, STAGES, companyKey, list, findById, details, syncFromCompanies, update, addComm, removeComms, addDoc, findDoc, removeDoc, owners, dueSoon,
+  setRead, saveChunks, allChunks, docWithText, unread, renameDoc, restoreDoc, docsVersion,
 };

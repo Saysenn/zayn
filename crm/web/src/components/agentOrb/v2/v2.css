@@ -613,3 +613,43 @@
 .cc2.is-lawyer .cc2-orb-tag { border-color: rgba(255, 255, 255, 0.35); }
 .cc2 { transition: background-color 600ms ease; }
 @media (prefers-reduced-motion: reduce) { .cc2-mode-badge { animation: none; } }
+
+
+/* =====================================================================
+   A DIALOG OPENED FROM THE COMMAND CENTER (his call 2026-10-13: "every
+   card should feel like Diane V2"). Drawn into <body>, outside .cc2, so
+   these are not scoped under it; Modal copies --sig / --acc onto the
+   backdrop. Her answer card's frame, at dialog size.
+   ===================================================================== */
+.v2-modal {
+  --cut: 18px;
+  position: relative; isolation: isolate;
+  border: 0 !important; border-radius: 0 !important; box-shadow: none !important;
+  clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut)));
+  background: linear-gradient(135deg, var(--sig, #5eead4), color-mix(in srgb, var(--sig, #5eead4) 25%, transparent) 30%, transparent 55%, color-mix(in srgb, var(--acc, #22d3ee) 50%, transparent)) !important;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  color: #e8f4ff;
+}
+.v2-modal::after {
+  content: ''; position: absolute; inset: 1px; z-index: -1;
+  clip-path: polygon(0 0, calc(100% - var(--cut) + 0.5px) 0, 100% calc(var(--cut) - 0.5px), 100% 100%, calc(var(--cut) - 0.5px) 100%, 0 calc(100% - var(--cut) + 0.5px));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--sig, #5eead4) 55%, transparent), transparent 40%) top left / 100% 1px no-repeat,
+    repeating-linear-gradient(180deg, rgba(255,255,255,0.02) 0 1px, transparent 1px 4px),
+    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--sig, #5eead4) 14%, transparent), transparent 55%),
+    rgba(3, 8, 12, 0.95);
+}
+.v2-modal-head { border-bottom: 1px solid color-mix(in srgb, var(--sig, #5eead4) 18%, transparent); }
+.v2-modal-title {
+  font-size: 11px !important; font-weight: 600 !important; letter-spacing: 0.24em; text-transform: uppercase;
+  color: var(--sig, #5eead4) !important; text-shadow: 0 0 8px var(--sig, #5eead4);
+}
+.v2-modal-title::before { content: '\25C6\00a0\00a0'; }
+.v2-modal-close { color: var(--sig, #5eead4) !important; opacity: 0.75; }
+.v2-modal-close:hover { opacity: 1; filter: drop-shadow(0 0 6px var(--sig, #5eead4)); }
+/* its controls: cut corners, never rounded */
+.v2-cut {
+  border-radius: 0 !important;
+  clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 7px 100%, 0 calc(100% - 7px));
+}
+.v2-glow:hover:not(:disabled), .v2-glow[aria-current='true'] { box-shadow: 0 0 14px -2px var(--sig, #5eead4); }

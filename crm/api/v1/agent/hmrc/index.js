@@ -5,6 +5,8 @@ const repo = require('../../repos/hmrc.repo');
 const { cisDeduction } = require('./cisCalc');
 const logger = require('../../../configs/logger');
 const { currentDay } = require('../../shared/presetMonth.helper');
+const liquidationsRepo = require('../../repos/liquidations.repo');
+const docIndex = require('../../shared/liquidationDocIndex');
 
 // ***************************************************
 // * DIANE, HMRC & CIS MODE
@@ -77,9 +79,42 @@ const SYSTEM = (today) => [
   '  determinations, dodging verification or deductions, or misleading HMRC. If asked, say in one line that you will not',
   '  help with that part and why it matters to THEM, then give the compliant route.',
   '- For a high-stakes or unusual case, say once, briefly, that an accountant or HMRC should confirm it.',
+  '',
+  'OUR COMPANIES IN LIQUIDATION (read only, his call 2026-10-13)',
+  '- OUR LIQUIDATIONS below lists every company of ours in liquidation: stage, deadline, liquidator, next action, last',
+  '  contact and its documents. COMPANY DOCUMENT sources are passages from those documents (letters, petitions, notices,',
+  '  statements). Use them to guide them: what a letter asks for, what is due when, what happens next, what the law says',
+  '  about it. Name the document a fact came from, and mark it with its source number like any other.',
+  '- To find more in their documents use search_company_documents; to read one whole, read_company_document.',
+  '- You CANNOT change anything here: no stage, deadline, note, document or status. If they ask, say it is done in',
+  '  master sheet mode or on the Liquidations page, in one line.',
 ].join('\n');
 
 const TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'search_company_documents',
+      description: 'Search the documents of our companies in liquidation (letters, petitions, notices, statements) by meaning. Read only.',
+      parameters: {
+        type: 'object', additionalProperties: false,
+        properties: { query: { type: 'string' }, company: { type: 'string', description: 'One company, if they named one.' } },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_company_document',
+      description: 'Read one of a company\'s documents in full, or list its documents when no file is named. Read only.',
+      parameters: {
+        type: 'object', additionalProperties: false,
+        properties: { company: { type: 'string' }, file: { type: 'string', description: 'Its name or part of it.' } },
+        required: ['company'],
+      },
+    },
+  },
   {
     type: 'function',
     function: {
@@ -157,7 +192,50 @@ const TOOLS = [
 
 const cut = (t, n) => String(t ?? '').slice(0, n);
 
-const LABEL = { playbook: 'OUR PLAYBOOK', note: 'OUR NOTE', govuk: 'GOV.UK' };
+const LABEL = { playbook: 'OUR PLAYBOOK', note: 'OUR NOTE', govuk: 'GOV.UK', doc: 'COMPANY DOCUMENT' };
+
+/**
+ * OUR LIQUIDATIONS, short: one line a company, so she always knows them.
+ * Read only. Empty when there are none (or the tables are not there yet).
+ */
+async function liquidationsOutline() {
+  try {
+    const rows = await liquidationsRepo.list();
+    if (!rows.length) return '';
+    const lines = [];
+    for (const r of rows.slice(0, 40)) {
+      // eslint-disable-next-line no-await-in-loop
+      const { docs } = await liquidationsRepo.details(r.id);
+      lines.push([
+        r.company_name,
+        r.stage ? r.stage.replace(/_/g, ' ') : 'stage not set',
+        r.deadline ? `deadline ${String(r.deadline).slice(0, 10)}` : null,
+        r.liquidator ? `liquidator ${r.liquidator}` : null,
+        r.next_action ? `next: ${cut(r.next_action, 120)}` : null,
+        r.instructions ? `instructions: ${cut(r.instructions, 160)}` : null,
+        r.last_comm ? `last contact ${String(r.last_comm.said_on).slice(0, 10)}: ${cut(r.last_comm.body, 160)}` : null,
+        docs.length ? `documents: ${docs.map((d) => d.file_name).join(', ')}` : 'no documents',
+      ].filter(Boolean).join(' · '));
+    }
+    return lines.join('\n');
+  } catch {
+    return '';
+  }
+}
+
+/** Their documents' passages that answer this, as sources. Only good matches. */
+async function documentSources(query, { company = null, limit = 6 } = {}) {
+  try {
+    const keys = company ? [String(company).trim().replace(/\s+/g, ' ').toLowerCase()] : null;
+    const hits = await docIndex.search(query, { companyKeys: keys, limit: limit * 2 });
+    const best = hits[0]?.score ?? 0;
+    return hits.filter((h) => h.score >= 0.3 && h.score >= best - 0.15).slice(0, limit).map((h) => ({
+      id: `doc-${h.id}`, kind: 'doc', title: `${h.company_name}: ${h.file_name}`, text: h.text, url: null, updated_on: null,
+    }));
+  } catch {
+    return [];
+  }
+}
 function sourcesBlock(found) {
   return found.map((c, i) => `[${i + 1}] ${LABEL[c.kind] ?? 'GOV.UK'}${c.kind === 'playbook' && c.topic ? ` · ${c.topic}` : ''} · ${c.title}${c.updated_on ? ` · updated ${String(c.updated_on).slice(0, 10)}` : ''}\n${cut(c.text, 2200)}`).join('\n\n');
 }
@@ -267,6 +345,25 @@ async function hmrcTurn(history, send, { user = null } = {}) {
     return { reply: `Do you mean take back ${what} "${last.title ?? last.after?.title ?? 'that entry'}"?`, claims: [] };
   }
 
+  /**
+   * LAWYER MODE READS OUR LIQUIDATIONS, IT NEVER CHANGES THEM (his call
+   * 2026-10-13). Asked to remove, rename, save or set something on a company
+   * in liquidation or its documents, she offered to (suite run 1): said here
+   * in code instead, the same way every time.
+   */
+  if (!/\bplaybook|process|policy|procedure|rule\b/i.test(asked)
+    && /^(?:(?:please|pls|can you|could you|ok(?:ay)?|now)[\s,]+)*(?:remove|delete|rename|save|upload|attach|set|change|update|move|put|mark|log|add|clear)\b/i.test(asked)) {
+    const names = (await liquidationsRepo.list().catch(() => [])).map((r) => r.company_name.toLowerCase());
+    const about = /\b(?:liquidat\w*|documents?|docs?|files?|letters?|petition|stage|deadline|liquidator|notes?)\b/i.test(asked)
+      || names.some((n) => n.length > 2 && asked.toLowerCase().includes(n));
+    if (about) {
+      return {
+        reply: 'In lawyer mode I only read our liquidations and their documents, I can\'t change them. Switch to Master sheet mode and ask me there, or do it on the Liquidations page.',
+        claims: [],
+      };
+    }
+  }
+
   send({ type: 'tool', name: 'hmrc_search' });
 
   // the question in its context: a follow up ("and if they're not verified?") carries the one before
@@ -276,9 +373,11 @@ async function hmrcTurn(history, send, { user = null } = {}) {
    * OUR PLAYBOOK FIRST (his call 2026-10-12): its closest passages lead the
    * sources, before notes and GOV.UK, and she always knows what it holds.
    */
-  const [ours, outline] = await Promise.all([
+  const [ours, outline, liqOutline, docs] = await Promise.all([
     knowledge.findPlaybook(query, { k: 6 }).catch(() => []),
     playbook.outline().catch(() => ''),
+    liquidationsOutline(),
+    documentSources(query),
   ]);
   let found = await knowledge.find(query, { k: 8 });
   /**
@@ -294,9 +393,10 @@ async function hmrcTurn(history, send, { user = null } = {}) {
       logger.info({ changed }, 'diane hmrc: pages changed on GOV.UK, answered from the new text');
     }
   }
-  found = [...ours, ...found];
+  // THEIR OWN DOCUMENTS after the playbook, before GOV.UK: they are the case.
+  found = [...ours, ...docs, ...found];
   const doc = lastAttachment(history.slice(-1));
-  if (!found.length && !doc) {
+  if (!found.length && !doc && !liqOutline) {
     return { reply: 'My lawyer-mode knowledge is empty, so I have nothing reliable to answer from yet. Load it in Settings → Diane (or run `node scripts/hmrcIngest.js`), or save our own processes to our playbook.' };
   }
 
@@ -304,7 +404,7 @@ async function hmrcTurn(history, send, { user = null } = {}) {
     .filter((m) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && !/^\[/.test(m.content))
     .map((m) => ({ role: m.role, content: cut(String(m.content).replace(/\n+\**\s*(?:sources|references)\s*:?\**\s*\n[\s\S]*$/i, ''), 2500) }));
   const messages = [
-    { role: 'system', content: `${SYSTEM(currentDay())}\n\nWHAT OUR PLAYBOOK HOLDS (#id section: title)\n${outline || '(nothing saved yet)'}${amend ? `\n\nYOUR PROPOSAL THAT WAITED (they answered it with a change; propose it again with their change made${amend.id ? `, entry #${amend.id}` : ''}):\nsection: ${amend.entry?.section ?? ''}\ntitle: ${amend.entry?.title ?? amend.title ?? ''}\ntext: ${cut(amend.entry?.body ?? '', 6000)}` : ''}` },
+    { role: 'system', content: `${SYSTEM(currentDay())}\n\nOUR LIQUIDATIONS\n${liqOutline || '(no company of ours is in liquidation)'}\n\nWHAT OUR PLAYBOOK HOLDS (#id section: title)\n${outline || '(nothing saved yet)'}${amend ? `\n\nYOUR PROPOSAL THAT WAITED (they answered it with a change; propose it again with their change made${amend.id ? `, entry #${amend.id}` : ''}):\nsection: ${amend.entry?.section ?? ''}\ntitle: ${amend.entry?.title ?? amend.title ?? ''}\ntext: ${cut(amend.entry?.body ?? '', 6000)}` : ''}` },
     ...talk,
     { role: 'user', content: `SOURCES\n${sourcesBlock(found)}${doc ? `\n\nTHE DOCUMENT THEY SENT (${doc.filename})\n${cut(doc.text, 20000)}` : ''}\n\nTHEIR LATEST MESSAGE (answer this one only; anything answered before stays answered)\n${cut(asked, 4000)}` },
   ];
@@ -359,6 +459,16 @@ async function hmrcTurn(history, send, { user = null } = {}) {
         const from = found.length;
         found = [...found, ...more];
         out = more.length ? sourcesBlock(more).replace(/^\[(\d+)\]/gm, (m, n) => `[${Number(n) + from}]`) : 'Nothing new found.';
+      } else if (call.function.name === 'search_company_documents') {
+        send({ type: 'tool', name: 'hmrc_search' });
+        // eslint-disable-next-line no-await-in-loop
+        const more = (await documentSources(String(args.query ?? asked), { company: args.company, limit: 6 })).filter((c) => !found.some((f) => f.id === c.id));
+        const from = found.length;
+        found = [...found, ...more];
+        out = more.length ? sourcesBlock(more).replace(/^\[(\d+)\]/gm, (m, n) => `[${Number(n) + from}]`) : 'Nothing in their documents matches that.';
+      } else if (call.function.name === 'read_company_document') {
+        // eslint-disable-next-line no-await-in-loop
+        out = await readCompanyDocument(args);
       } else if (call.function.name === 'cis_deduction') {
         out = JSON.stringify(cisDeduction(args));
       } else if (call.function.name === 'save_to_playbook') {
@@ -458,6 +568,26 @@ async function hmrcTurn(history, send, { user = null } = {}) {
   }
   logger.info({ ms: Date.now() - t0, tokensIn: usage.in, tokensOut: usage.out, sources: found.length, cited: cited.length }, 'diane hmrc: answered');
   return { reply, sources, claims: [] };
+}
+
+/** One company's documents listed, or one read whole. Read only. */
+async function readCompanyDocument({ company, file = '' } = {}) {
+  const key = String(company ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const rows = await liquidationsRepo.list().catch(() => []);
+  const row = rows.find((r) => r.company_key === key || r.company_name.toLowerCase() === key)
+    ?? rows.find((r) => r.company_key.includes(key) || key.includes(r.company_key));
+  if (!row) return `No company called "${company}" is in liquidation. Ours are: ${rows.map((r) => r.company_name).join(', ') || 'none'}.`;
+  const { docs } = await liquidationsRepo.details(row.id);
+  if (!docs.length) return `${row.company_name} has no documents.`;
+  const want = String(file ?? '').trim().toLowerCase();
+  const hits = want ? docs.filter((d) => d.file_name.toLowerCase().includes(want)) : [];
+  if (!want || hits.length !== 1) {
+    return `${row.company_name}'s documents: ${docs.map((d) => `${d.file_name} (${d.read_status === 'read' ? 'readable' : d.read_status})`).join('; ')}.`
+      + (want ? ` ${hits.length ? 'More than one' : 'None'} matches "${file}": ask which.` : '');
+  }
+  const full = await liquidationsRepo.docWithText(hits[0].id);
+  if (!full?.text) return `${hits[0].file_name} has no readable text (${full?.read_error ?? full?.read_status ?? 'not read'}).`;
+  return `${row.company_name}: ${hits[0].file_name}\n${cut(full.text, 20000)}`;
 }
 
 module.exports = { hmrcTurn, SYSTEM };

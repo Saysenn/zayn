@@ -265,10 +265,11 @@ test('AND A STOPPED ROW IS NOT WAITING FOR A CHECK', async () => {
  * components/agentOrb/briefingAnswer.test.js, which pins that every one of
  * these has a route.
  */
-test('THE NINE KEYS, and a new one is a deliberate change on BOTH sides', () => {
+// The tenth, liquidationDeadlines, is the Liquidations page's (his call 2026-10-13).
+test('THE TEN KEYS, and a new one is a deliberate change on BOTH sides', () => {
   const { SAY } = require('./briefing.helper');
   assert.deepEqual(Object.keys(SAY).sort(), [
-    'concerns', 'liquidating', 'needsReview', 'pastYear', 'payableOver', 'payday', 'reviewMonthly', 'specialCase', 'unpaid',
+    'concerns', 'liquidating', 'liquidationDeadlines', 'needsReview', 'pastYear', 'payableOver', 'payday', 'reviewMonthly', 'specialCase', 'unpaid',
   ]);
 });
 

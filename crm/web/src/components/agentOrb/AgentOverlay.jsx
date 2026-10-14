@@ -23,6 +23,7 @@ import Messages from './Messages';
 import ImageViewer from './ImageViewer';
 import AttachmentsPanel, { attachmentsOf } from './AttachmentsPanel';
 import DealModal from './forms/DealModal';
+import { dialogOpen } from '../modals/Modal';
 import ScrollMore from './ScrollMore';
 import RichInput from './RichInput';
 import AutoModeChip from './AutoModeChip';
@@ -627,7 +628,9 @@ export default function AgentOverlay({ open, onClose }) {
   // behind it. 2026-09-30. The pop-up closes itself; she stays.
   useEffect(() => {
     if (!open || confirmingReset || openDeal || viewing) return;
-    const onKey = (e) => e.key === 'Escape' && onClose();
+    // ANY DIALOG ON TOP takes it too: a document opened from her file chip
+    // closed with her (browser check 2026-10-13).
+    const onKey = (e) => e.key === 'Escape' && !e.defaultPrevented && !dialogOpen() && onClose();
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [open, onClose, confirmingReset, openDeal, viewing]);
@@ -1172,6 +1175,20 @@ export default function AgentOverlay({ open, onClose }) {
            * the picture is kept in the CRM, so it opens again from
            * Attachments.
            */
+          // SEVERAL FILES IN ONE TURN ARE ONE BLOCK of chips (his call
+          // 2026-10-13): five files were five framed rows filling the panel.
+          if (event.type === 'file' && event.file?.url) {
+            setHistory((h) => {
+              const last = h[h.length - 1];
+              if (last?.role === 'assistant' && last.files) {
+                return [...h.slice(0, -1), {
+                  ...last, content: `${last.content} [file: ${event.file.name}]`, files: [...last.files, event.file],
+                }];
+              }
+              return [...h, { role: 'assistant', content: `[file: ${event.file.name}]`, file: event.file, files: [event.file] }];
+            });
+          }
+
           if (event.type === 'image' && event.image?.id) {
             setHistory((h) => [...h, { role: 'assistant', content: `[picture: ${event.image.caption}]`, image: event.image }]);
           }
@@ -1374,9 +1391,13 @@ export default function AgentOverlay({ open, onClose }) {
     const names = file.files ? file.files.map((f) => f.filename).join(', ') : file.filename;
     const said = `📎 ${names}${input.trim() ? `\n${input.trim()}` : ''}`;
     return sendMessage(said, history, {
-      attachment: file.fileId
-        ? { filename: file.filename, fileId: file.fileId, files: file.files?.map(({ filename, fileId }) => ({ filename, fileId })) }
-        : { filename: file.filename, text: file.text, tables: file.tables },
+      // The files by id (saved as they came), and a sheet's text and tables
+      // when one was among them (the sheet check reads those).
+      attachment: {
+        filename: file.filename,
+        ...(file.fileId ? { fileId: file.fileId, files: file.files?.map(({ filename, fileId }) => ({ filename, fileId })) } : {}),
+        ...(file.text || file.tables?.length ? { text: file.text, tables: file.tables } : {}),
+      },
     });
   }
 
@@ -1484,7 +1505,30 @@ export default function AgentOverlay({ open, onClose }) {
         if (!res.ok) throw new Error(data.error || data.message || `I couldn't open ${file.name}. Is it an Excel, CSV or text file?`);
         return data;
       };
-      if (forExpenses) {
+      // MASTER SHEET MODE takes several files of any kind too (his call 2026-10-13):
+      // each kept by id, to be saved onto a company; a sheet among them is also
+      // read for the sheet check, as before.
+      const forDocs = !forExpenses && context !== 'hmrc';
+      if (forDocs) {
+        const already = attached?.files ?? [];
+        const room = Math.max(0, 20 - already.length);
+        const got = [];
+        let sheet = attached?.tables?.length || attached?.text ? { text: attached.text, tables: attached.tables, lines: attached.lines } : null;
+        for (const file of list.slice(0, room)) {
+          // eslint-disable-next-line no-await-in-loop
+          const data = await upload(file);
+          got.push({ filename: data.filename, fileId: data.fileId, kind: /^image\//.test(data.mime) ? 'picture' : /pdf/.test(data.mime) ? 'PDF' : 'file' });
+          if (!sheet && (data.tables?.length || data.text)) sheet = { text: data.text ?? '', tables: data.tables ?? [], lines: data.lines };
+        }
+        const files = [...already, ...got];
+        setAttached({
+          files,
+          fileId: files[0].fileId,
+          filename: files.length === 1 ? files[0].filename : `${files.length} files`,
+          kind: files.length === 1 ? files[0].kind : [...new Set(files.map((f) => f.kind))].join(', '),
+          ...(sheet ?? {}),
+        });
+      } else if (forExpenses) {
         const already = attached?.files ?? [];
         const room = Math.max(0, 20 - already.length);
         const got = [];
@@ -1904,21 +1948,21 @@ export default function AgentOverlay({ open, onClose }) {
                     accept={context === 'expenses'
                       ? 'image/*,.pdf,.xlsx,.csv,.txt,.tsv,.json,.docx,.pptx'
                       : context === 'hmrc' ? '.pdf,.docx,.pptx,.txt,.md,.csv,.tsv,.json'
-                        : '.xlsx,.csv,.txt,.tsv,.json,.docx,.pptx'}
+                        : undefined}
                     className="hidden"
-                    multiple={context === 'expenses'}
-                    onChange={(e) => attachFile(context === 'expenses' ? e.target.files : e.target.files?.[0])}
+                    multiple={context !== 'hmrc'}
+                    onChange={(e) => attachFile(context !== 'hmrc' ? e.target.files : e.target.files?.[0])}
                   />
                   <button
                     type="button"
                     onClick={() => fileRef.current?.click()}
-                    disabled={isSending || attaching || (Boolean(attached) && !(context === 'expenses' && (attached.files?.length ?? 0) < 20))}
+                    disabled={isSending || attaching || (Boolean(attached) && !(context !== 'hmrc' && (attached.files?.length ?? 0) < 20))}
                     className="dm-round shrink-0 w-11 h-11 rounded-full flex items-center justify-center border min-h-0 p-0 transition-colors disabled:opacity-30 border-diane-line/60 bg-transparent text-diane-signal hover:border-diane-signal"
-                    aria-label={context === 'expenses' ? 'Attach a receipt or file for Diane' : context === 'hmrc' ? 'Attach a document for Diane to read or save to our playbook' : 'Attach a sheet for Diane to check'}
+                    aria-label={context === 'expenses' ? 'Attach a receipt or file for Diane' : context === 'hmrc' ? 'Attach a document for Diane to read or save to our playbook' : 'Attach files: a sheet to check, or documents to save onto a company'}
                     title={context === 'expenses'
                       ? 'Attach a receipt photo, PDF or sheet of expenses'
                       : context === 'hmrc' ? 'Attach a PDF, Word or text document: Diane reads it, and can save it to our playbook'
-                        : 'Attach a sheet (.xlsx, .csv, .txt) to check against the CRM'}
+                        : 'Attach a sheet to check against the CRM, or any documents (PDF, Word, pictures…) to save onto a company in liquidation'}
                   >
                     <PaperclipIcon width={17} height={17} />
                   </button>

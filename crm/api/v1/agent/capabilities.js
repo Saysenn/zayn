@@ -89,12 +89,22 @@ const AREAS = Object.freeze([
     tools: ['list_people', 'show_person', 'update_person'],
   },
   {
-    label: 'concerns anybody has raised',
-    tools: ['list_concerns'],
+    label: 'the flags people raised (the Flagged page): list them, and mark them in progress, resolve, '
+      + 'reopen or delete them for one person or many, with undo',
+    tools: ['list_concerns', 'update_flags'],
   },
   {
-    label: 'the conversion rates, and what a month was converted at',
-    tools: ['check_rates', 'exchange_rate'],
+    // His call 2026-10-13: the page is every company whose status is liquidation.
+    label: 'the Liquidations page: who is in liquidation and at what stage, deadlines due or passed, one '
+      + 'company in full; change stage, deadline, owner, instructions, next action, liquidator, note or '
+      + 'blamed on one or many, log a contact; its documents: list, open, save files attached here, rename, '
+      + 'remove one or many, and answer from what they say; and undo',
+    tools: ['list_liquidations', 'update_liquidation', 'liquidation_document', 'search_company_documents', 'read_company_document'],
+  },
+  {
+    label: 'the conversion rates: read them and what a month was converted at, set or clear a manual '
+      + 'rate (1 GBP = x USD), pull today\'s rates, and undo',
+    tools: ['check_rates', 'exchange_rate', 'set_exchange_rate'],
   },
   {
     label: 'what was said in an earlier conversation: find it, show one in full, and delete old ones',

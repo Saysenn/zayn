@@ -460,6 +460,7 @@ const cancelParked = {
     properties: {
       match: { type: 'string', description: 'Their words for which one: a person, a company or the change.' },
       id: { type: 'number', description: 'The parked id, when already known from list_parked_work.' },
+      ids: { type: 'array', items: { type: 'number' }, description: 'Several parked ids, from list_parked_work.' },
       confirmed: { type: 'boolean' },
     },
   },
@@ -468,7 +469,10 @@ const cancelParked = {
     if (parked.length === 0) return { summary: 'Nothing is parked, so there is nothing to call off. Say so.' };
     const words = String(args.match ?? args.said ?? '').toLowerCase()
       .split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !/^(?:the|one|cancel|scrap|that|this|don|dont|for|and|actually|parked|scheduled|change|bump)$/.test(w));
-    let picked = args.id != null
+    // Several by id, when she has them from list_parked_work.
+    const ids = Array.isArray(args.ids) ? args.ids.map(Number) : null;
+    let picked = ids ? parked.filter((p) => ids.includes(Number(p.id)))
+      : args.id != null
       ? parked.filter((p) => Number(p.id) === Number(args.id))
       : parked.filter((p) => words.length > 0 && words.some((w) => String(p.said ?? '').toLowerCase().includes(w)));
     const listing = parked.map((p) => `#${p.id} ${monthLabel(p.due_month)}: ${p.said}`).join('\n');
@@ -492,7 +496,10 @@ const cancelParked = {
      * the matches, those are the ones. gpt-4.1 core suite, 2026-10-06.
      */
     if (picked.length > 1) {
-      const heard = String(args.said ?? '').toLowerCase();
+      // THEIR LAST TWO MESSAGES, not the last alone: on the yes the last is
+      // "yes", and "the mara one" before it is what narrowed it. Without it
+      // two entries in BAKER matched and the yes asked which (suite 2026-10-13).
+      const heard = `${args.said ?? ''} ${args.saidRecent ?? ''}`.toLowerCase();
       const people = [...new Set(picked.map(personOf))]
         .filter((who) => who && heard.split(/[^a-z0-9']+/).some((w) => w.length >= 3 && who.split(/\s+/).includes(w.replace(/'s$/, ''))));
       if (people.length === 1) picked = picked.filter((p) => personOf(p) === people[0]);

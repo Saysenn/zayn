@@ -4,7 +4,11 @@ const turnStats = require('./turnStats');
 // The deals behind a figure, for "where did that come from?" (agent/evidence.js).
 const evidence = require('./evidence');
 const logger = turnStats.watch(require('../../configs/logger'));
-const { resolveContext, openingTools, HELD_UNTIL_NEEDED } = require('./contexts');
+const {
+  resolveContext, openingTools, HELD_UNTIL_NEEDED, HELD_FOR_TOPIC, topicIn,
+} = require('./contexts');
+// Held either way: until asked for (bulk, destructive) or until its topic comes up.
+const isHeld = (name) => HELD_UNTIL_NEEDED.includes(name) || HELD_FOR_TOPIC.includes(name);
 // The admin agreed, so the pending call is re-issued as confirmed. Only
 // ever for a change the previous answer already described.
 const {
@@ -133,6 +137,9 @@ const VAGUE_EDIT = /^\s*(?:(?:hey|hi|ok|okay|diane|pls|please|can you|could you)
 const LATER_MONTH = /\b(?:next month|from (?:next|the \d|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*|starting|beginning|as of|come (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)|in (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*|for the next \d+ months|schedul\w*|park\w*|end of (?:this|the) month)\b/i;
 
 // What another tool owns: a rate, their own details, or ending and undoing.
+// THE FLAGGED PAGE, THE LIQUIDATIONS PAGE: a person or company named there is
+// not a deal edit. "Resolve Otto's flags" was routed to Otto's deal. 2026-10-13.
+const PAGE_TOOL = /\bflags?\b|\bflagged\b|\bliquidat\w*|\bliq\b|\bliquidators?\b|\bdeadlines?\b|\bhmrc\b|\bstrike[\s-]?off\b|\bstage\b/i;
 const OWN_TOOL = /%|\bpercent|\bfees?\b|\badd[\s-]?ons?\b|\brates?\b|post\s*code|\bdoor\b|\bbank\b|\baccount\b|sort\s*code|\bphone\b|postals?\b|\b(?:stop|end|terminate|delete|remove|resume|restart|reopen|undo|revert|roll\s*back|answer|review|rename|close|archive)\b/i;
 
 /**
@@ -239,8 +246,48 @@ function theyAre(said, history, roster, pending) {
   return named.length ? `${said} (them = ${named.join(', ')})` : said;
 }
 
+// ===============================
+// * THE THREE PAGES, ROUTED IN CODE (2026-10-13)
+// ===============================
+// A plain change on the Liquidations page, the Flagged page or the rates
+// goes straight to its tool: left to her, "log for Pinecrest: ..." and "set
+// gbp to 1.36" were previewed in prose with nothing behind them, and the
+// yes saved nothing. A message reaching TWO of the pages is not routed: she
+// plans that one whole, which is what the cross-page messy case needs.
+const ASKING = /\?\s*$|^\s*(?:(?:hi|hey|ok|so|diane)[\s,]+)*(?:what|whats|what's|which|who|whos|who's|how|is|are|do|does|did|any|anything|when|whens|when's|where|why|show|list|pull up|tell me|give me|can you show)\b/i;
+const PAGE_ROUTES = {
+  update_flags: (s) => !ASKING.test(s) && /\bflags?\b|\bflagged\b/i.test(s)
+    && /\b(?:resolv\w*|in progress|re-?open\w*|delete|remove|clear|close)\b/i.test(s),
+  set_exchange_rate: (s) => !ASKING.test(s) && (
+    (/\b(?:gbp|eur|euros?|aed|php|pounds?|dirhams?)\b/i.test(s) && /\d+(?:\.\d+)?/.test(s)
+      && !/\b(?:monthly|payable|fee|add[\s-]?on|deal|paid|owed|days?)\b/i.test(s))
+    || /\b(?:pull|fetch|refresh)\b[^.]*\brates?\b|\bclear\b[^.]*\brates?\b/i.test(s)),
+  update_liquidation: (s) => !ASKING.test(s) && !/\badd\b[^.]*\bliquidations? page\b|\bstatus\b/i.test(s)
+    && /\b(?:deadlines?|liquidators?|next action|stage|hmrc liq|own liq|strike[\s-]?off|liquidation note|log (?:for|that|a call)|every company in liquidation|all (?:the )?liquidations)\b/i.test(s),
+  list_liquidations: (s) => ASKING.test(s) && /\b(?:in liquidation|liquidations?|winding up|liquidation deadlines?)\b/i.test(s)
+    && !/\bstatus\b/i.test(s),
+  liquidation_document: (s) => /\b(?:send|give|show|open|get|download|zip|rename|remove|delete|pull up|bring up|view)\b[^.]*\b(?:letters?|documents?|docs?|pdfs?|files?|petitions?|notices?|statements?|orders?|notes)\b/i.test(s)
+    || /^\s*(?:what|which|any|list|show)\b[^.]*\b(?:documents?|docs|files)\b[^.]*\b(?:have|has|got|on|for)\b/i.test(s)
+    || /^\s*(?:list|show)\b[^.]*\b(?:documents?|docs|files)\s*[?.!]*\s*$/i.test(s)
+    || /\bsave\b[^.]*\b(?:these|this|them|the files?|attachments?|it)\b[^.]*\b(?:to|onto|under|for)\b/i.test(s),
+  search_company_documents: (s) => ASKING.test(s) && /\b(?:letters?|documents?|docs?|petition|notice|statements?|says?|ask(?:s|ing)? for|according to|creditors?(?: list)?|records)\b/i.test(s)
+    && !/\b(?:send|open|pull up|bring up)\b|^\s*(?:what|which|any|list|show)\b[^.]*\b(?:documents?|docs|files)\b[^.]*\b(?:have|has|got)\b|^\s*(?:list|show)\b[^.]*\b(?:documents?|docs|files)\s*[?.!]*\s*$/i.test(s),
+};
+/** The one page tool this message is for, or null (none, or more than one page). */
+function pageRoute(said) {
+  const text = String(said ?? '');
+  const hits = Object.entries(PAGE_ROUTES).filter(([, test]) => test(text)).map(([tool]) => tool);
+  const pages = new Set(hits.map((t) => (/liquidation|company_doc/.test(t) ? 'liq' : t)));
+  // On the Liquidations page, a document act or a question about one is more
+  // specific than "a change there" or "a list there".
+  const order = ['liquidation_document', 'search_company_documents', 'update_liquidation', 'list_liquidations'];
+  if (pages.size === 1 && pages.has('liq')) return order.find((t) => hits.includes(t)) ?? hits[0];
+  return pages.size === 1 ? hits[0] : null;
+}
+
 const FORCED_ROUTES = [
   [RESUME_ASK, 'resume_deal'],
+  ...Object.keys(PAGE_ROUTES).map((tool) => [{ test: (said) => pageRoute(said) === tool }, tool]),
   // "JUNO PARK IS DONE WITH US, STOP HER DEAL" is a stop, said in so many
   // words: one run in three it went to the monthly review and nothing
   // stopped. An explicit stop or end of a DEAL is stop_deal. 2026-10-04.
@@ -373,7 +420,8 @@ const READ_TOOLS = new Set([
   'check_rates', 'exchange_rate', 'recent_master_sheet_changes', 'list_stopped_deals',
   'list_dead_people', 'dead_person_details', 'list_monthly_review', 'list_companies',
   'active_companies', 'list_parked_work', 'recall_past_conversations', 'show_past_conversation',
-  'say', 'state_claims', 'list_people', 'show_person',
+  'say', 'state_claims', 'list_people', 'show_person', 'list_liquidations',
+  'search_company_documents', 'read_company_document',
 ]);
 const MORE_TOOLS = Object.freeze({
   type: 'function',
@@ -429,7 +477,9 @@ const CALLED_OFF_ADD = /^\s*(?:no|nah|nope|cancel|stop|scrap|forget|never ?mind|
 const ORDINAL_IN_SENTENCE = /\bthe\s+(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|last)\s+(?:one|person|deal|row|guy|lady)\b/i;
 
 // "undo that", "revert it", "take that back": the whole message asks for the undo.
-const UNDO_ASKED = /^\s*(?:ok\s+|please\s+|can you\s+)?(?:undo|revert|reverse|take (?:that|it) back|put (?:that|it) back)\b(?!.*\b(?:and|then)\b)/i;
+// "OOPS, UNDO PLEASE" too: a lead in is not a new subject (overnight held-out
+// run 2026-10-13: no tool was called and she said the file was back).
+const UNDO_ASKED = /^\s*(?:(?:ok|okay|oops|sorry|actually|ah|oh|hmm|damn|wait|no)\b[\s,!.]*)*(?:please\s+|can you\s+)?(?:undo|revert|reverse|take (?:that|it) back|put (?:that|it) back)\b(?!.*\b(?:and|then)\b)/i;
 // "undo that" re-sent the last CHANGE twice and then claimed the fee was
 // "already 3%". An undo has one door. 2026-09-30.
 FORCED_ROUTES.unshift([UNDO_ASKED, 'undo_master_sheet_change']);
@@ -1865,6 +1915,14 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
     // name: a follow up like "double check" must not drop the conversion
     // they asked for one line earlier. See `recentSaid`.
     args.saidRecent = recentSaid(history);
+    // THE FILES ATTACHED IN THIS CHAT, by id (the newest message's first), for
+    // "save these to Quarry Lane": the files themselves, never what she read.
+    if (name === 'liquidation_document') {
+      const seen = new Set();
+      args.chatFiles = [...history].reverse().filter((m) => m.role === 'user' && m.attachment).slice(0, 4)
+        .flatMap((m) => (m.attachment.files?.length ? m.attachment.files : (m.attachment.fileId ? [{ filename: m.attachment.filename, fileId: m.attachment.fileId }] : [])))
+        .filter((f) => f?.fileId && !seen.has(f.fileId) && seen.add(f.fileId));
+    }
     // A PLAN STEP IS NOT READ AGAINST THEIR WORDS AGAIN: it was read once,
     // checked, shown and agreed. Clone 2026-10-06: "add 100 to zayn indigo,
     // set paddy days to 31" had its second step refused as "an overwrite,
@@ -2103,7 +2161,9 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
      * answer back; a new answer is a second change on top of the first.
      */
     if (tool.writes && UNDO_ASKED.test(String(args.said ?? ''))
-      && !['undo_master_sheet_change', 'resume_deal'].includes(name)) {
+      && !['undo_master_sheet_change', 'resume_deal'].includes(name)
+      // The Liquidations page, flags and rates undo with their own tool (undo: true).
+      && !((args.undo === true || args.action === 'undo') && HELD_FOR_TOPIC.includes(name))) {
       return {
         summary: 'NOTHING WAS CHANGED. They asked to UNDO the last change. That is '
           + 'undo_master_sheet_change, which puts the logged change back exactly. Call it. Never '
@@ -2215,6 +2275,11 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
      * Auto mode is for a change to the one deal they named.
      */
     let reachesMany = false;
+    // THE LIQUIDATIONS PAGE: one company named is the one record; several, or
+    // every company matching `where`, is a bulk change and always shows first.
+    if (name === 'update_liquidation' && (args.where || args.undo || (Array.isArray(args.items) ? args.items.length : 0) !== 1)) {
+      reachesMany = true;
+    }
     if (name === 'update_person' && ['addonPercent', 'feePercent', 'addonPercentDelta', 'feePercentDelta'].some((k) => args[k] != null)) {
       const who = [args.person, ...(Array.isArray(args.people) ? args.people : [])].filter(Boolean);
       try {
@@ -2270,6 +2335,31 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
     if (sameChange && turn?.writtenChanges?.has(sameChange)) {
       logger.warn({ tool: name }, 'diane: the same change twice in one turn, the second not written');
       return { summary: 'ALREADY DONE in this turn, and NOT done again. Say once what was changed.' };
+    }
+    /**
+     * A BULK CHANGE CANNOT PARK, so a later month is never written by it now
+     * (2026-10-13, Ines Calder at 4200 "from next month", applied at once).
+     * The one deal change parks it with `when`. A plan step was read already.
+     */
+    /**
+     * A QUESTION ABOUT A COMPANY'S DOCUMENTS IS ANSWERED FROM THEM. "how much
+     * will begbies cost us for quarry lane" found the fee (6,500) in the
+     * engagement letter, then a pay total said "say exactly this" and the
+     * answer was what Quarry Lane is owed (overnight held-out run 2026-10-13).
+     */
+    if (turn?.docQuestion && ['total_master_sheet', 'breakdown_master_sheet', 'filter_master_sheet', 'audit_master_sheet'].includes(name)) {
+      return {
+        summary: 'NOT CALLED. They asked about a company\'s documents, not the master sheet: answer from the passages '
+          + 'search_company_documents gave, naming the document. If those do not answer it, say so.',
+      };
+    }
+    if (name === 'bulk_update_master_sheet' && !turn?.planRun && !turn?.applyingHeld
+      && require('./scheduled/parkable').LATER_TIMING.test(String(args.said ?? ''))) {
+      return {
+        summary: 'NOTHING HAS BEEN CHANGED. They said a LATER MONTH, and a bulk change cannot be scheduled: it would '
+          + 'change their deals NOW. Call update_master_sheet_row on each deal (or update_person for a person\'s add on or '
+          + 'fee) with `when` set to that month, which parks it for then.',
+      };
     }
     let { result, wrote } = await watchWrites(() => tool.handler(args));
 
@@ -2715,7 +2805,9 @@ async function runAgentTurn(history, contextName, onEvent) {
    * told a held tool does not exist: her capability block is built from
    * ALL of them, and calling one is answered with "it is there now".
    */
-  const openingAITools = toOpenAITools(openingTools(offered));
+  // THE TOPIC'S TOOLS only when the talk is about it. See contexts.js HELD_FOR_TOPIC.
+  const onTopic = topicIn(`${recentSaid(history)} ${lastAssistantAnswer(history) ?? ''}`);
+  const openingAITools = toOpenAITools(openingTools(offered).filter((t) => onTopic || !HELD_FOR_TOPIC.includes(t.name)));
   let roundTools = openingAITools;
   let widened = false;
   /**
@@ -3052,7 +3144,15 @@ async function runAgentTurn(history, contextName, onEvent) {
   const aNamesDifference = /\b[a-z]+\s+differ\w*\b/i.test(asked) && !/\b(?:any|the|a|what|see|find|check)\s+differ/i.test(asked);
   const asksCheck = checkWord && atTheFile && !aNamesDifference;
   const recheck = Boolean(earlierFile && asksCheck);
-  const fileNow = attachment ?? (recheck ? earlierFile : null);
+  /**
+   * A SHEET IS A FILE WITH ROWS OR TEXT IN IT. A PDF or a scan attached to be
+   * SAVED onto a company has neither, and "save this to Pinecrest" ran the
+   * sheet check on it ("Checked 0 rows", 2026-10-13). And files they say to
+   * save somewhere are saved, never checked, whatever is in them.
+   */
+  const sheetIn = (f) => Boolean(f && (f.text || f.tables?.length));
+  const savingFiles = pageRoute(asked) === 'liquidation_document';
+  const fileNow = savingFiles ? null : (sheetIn(attachment) ? attachment : (recheck && sheetIn(earlierFile) ? earlierFile : null));
   const sheetGiven = Boolean(fileNow) || (!pending && looksLikeSheet(asked));
 
   /**
@@ -3153,7 +3253,18 @@ async function runAgentTurn(history, contextName, onEvent) {
    * recovered, or not (suite 2026-10-10, 2 runs in 4).
    */
   const addsAList = listed && /^\s*(?:pls\s+|please\s+)?add\b/i.test(String(asked)) && String(asked).split(/[;\n]/).filter((x) => x.trim()).length >= 2;
-  const toEngine = (routed
+  /**
+   * NOT THE SHEET'S ENGINE FOR THE LIQUIDATIONS PAGE: "move quarry lane to
+   * own liq, make the next action chase begbies, and add a note" went to the
+   * plan engine, which looked for deals called "begbies" and "quarry lane"
+   * and asked about them twice (efficiency run 2026-10-14). The page's own
+   * tool takes several fields in one preview.
+   */
+  const pageAsk = pageRoute(asked);
+  const liqTurn = context.tools.some((t) => t.name === 'liquidation_document')
+    && ((pageAsk && /liquidation|company_doc/.test(pageAsk))
+      || Boolean(await require('./tools/liquidations').liquidationRoute(asked).catch(() => null)));
+  const toEngine = !liqTurn && (routed
     ? (routed.sure && ((routed.kind === 'multi_step' && severalInWords) || (routed.kind === 'bulk_edit' && listed))) || addsAList
     : looksMultiStep(asked) || addsAList) || (endsADeal && !pending);
   /**
@@ -3259,9 +3370,13 @@ async function runAgentTurn(history, contextName, onEvent) {
   // before the parked list's route was ever looked at. Suite 2026-10-08.
   const READ_ROUTER_TOOLS = new Set(['filter_master_sheet', 'total_master_sheet', 'find_and_show_details', 'show_person', 'list_people', 'show_sheet_preset']);
   const ownedElsewhere = FORCED_ROUTES.some(([test, tool]) => !READ_ROUTER_TOOLS.has(tool) && test.test(asked, history));
+  // AND THE LIQUIDATIONS PAGE BY NAME: "how much is begbies charging quarry
+  // lane" was read as a pay total (overnight suite 2026-10-13).
+  const liqOwned = context.tools.some((t) => t.name === 'liquidation_document')
+    && Boolean(await require('./tools/liquidations').liquidationRoute(asked).catch(() => null));
   const codeRouted = STOPPED_ASK.test(asked) || COMPANIES_IN_ASK.test(asked) || BREAKDOWN_ASK.test(asked)
     || COMPANIES_LIST_ASK.test(asked) || STATUS_ASK.test(asked) || SECOND_ASK.test(asked) || RESUME_ASK.test(asked)
-    || ownedElsewhere;
+    || ownedElsewhere || liqOwned;
   // "WHO IS ON ABC" with ABC Ltd and ABC Limited: asked back in code, naming
   // both, before anything reads it as some other thing. See companyFragment.
   if (!pending && !sheetGiven && !fileNow && context.tools.some((t) => t.name === 'filter_master_sheet')) {
@@ -3512,7 +3627,13 @@ async function runAgentTurn(history, contextName, onEvent) {
    * a turned off tool is one she is told not to call, so nothing routed the
    * ask to its refusal. 2026-10-03.
    */
+  // A LETTER OR A DOCUMENT is a liquidation document, not a sheet export (2026-10-13).
   if (heldCalls.length === 0 && explicitExportRequest(lastSaid(history))
+    && !/\b(?:letters?|documents?|docs?|pdf|attachments?)\b/i.test(lastSaid(history))
+    // "download pinecrests files" is a company's documents (overnight suite 2026-10-13).
+    && pageRoute(lastSaid(history)) !== 'liquidation_document'
+    && (!context.tools.some((t) => t.name === 'liquidation_document')
+      || await require('./tools/liquidations').liquidationRoute(lastSaid(history)).catch(() => null) !== 'liquidation_document')
     && context.tools.some((t) => t.name === 'export_sheet' && t.disabledTool)) {
     return { reply: DISABLED.export_sheet, changedRowIds: [], context: context.key, claims: [] };
   }
@@ -3524,7 +3645,50 @@ async function runAgentTurn(history, contextName, onEvent) {
    */
   const routeSaid = String(lastSaid(history))
     .replace(/^\s*(?:(?:hi|hey|hello|hiya|yo|morning|good (?:morning|afternoon|evening)|ok(?:ay)?|so|right|diane|babe|darling|quick (?:one|q(?:uestion)?)|question|sorry|pls|please)\b[\s,.!:;-]*)+(?=\S)/i, '');
-  const forcedTool = (FORCED_ROUTES
+  // A DOCUMENT NAMED with a document verb: the document tool (see namesADocument).
+  const docNamed = context.tools.some((t) => t.name === 'liquidation_document')
+    && await require('./tools/liquidations').namesADocument(lastSaid(history)).catch(() => false);
+  // WHAT IS ON THE LIQUIDATIONS PAGE, by name (see liquidationRoute).
+  const lastUser = [...history].reverse().find((m) => m.role === 'user');
+  const liqRouted = context.tools.some((t) => t.name === 'liquidation_document')
+    ? await require('./tools/liquidations').liquidationRoute(routeSaid, {
+      // Files kept from the chat, not a sheet read as text (that is the sheet check's).
+      hasFiles: Boolean(lastUser?.attachment?.fileId || lastUser?.attachment?.files?.length)
+        && !(lastUser?.attachment?.tables?.length && !lastUser?.attachment?.files?.length),
+    }).catch(() => null)
+    : null;
+  if (liqRouted === 'search_company_documents') turnState.docQuestion = true;
+  /**
+   * A SURE LIQUIDATIONS READ IS ANSWERED IN CODE (see liquidationPlan):
+   * the tool's own reply, its file chips, and no model round. Anything it
+   * cannot answer outright (which file? nothing there?) goes on to her as
+   * before, which costs one extra read and nothing else.
+   */
+  if (!pending && !sheetGiven && !fileNow && heldCalls.length === 0 && context.tools.some((t) => t.name === 'liquidation_document')) {
+    const plan = await require('./tools/liquidations').liquidationPlan(routeSaid, {
+      hasFiles: Boolean(lastUser?.attachment?.fileId || lastUser?.attachment?.files?.length),
+    }).catch(() => null);
+    // Nothing to do (already so): said in code, nothing called.
+    if (plan?.reply && !plan.tool) return { reply: plan.reply, changedRowIds: [], context: context.key, claims: [] };
+    if (plan && context.tools.some((t) => t.name === plan.tool)) {
+      turnState.model = 'code';
+      const result = await invokeTool(context.tools, plan.tool, JSON.stringify(plan.args), history, onEvent, turnState);
+      // A WRITE CODE MADE: its own sentence, once the tool says it landed.
+      if (plan.reply && !result?.pending && !/NOTHING|No company|not /i.test(String(result?.summary ?? ''))) {
+        logger.info({ tool: plan.tool }, 'diane: liquidations change made in code');
+        return { reply: plan.reply, changedRowIds: [], context: context.key, claims: [] };
+      }
+      if (result?.reply && result.computedReply) {
+        if (result.file?.url) onEvent?.({ type: 'file', file: result.file });
+        for (const f of result.files ?? []) if (f?.url) onEvent?.({ type: 'file', file: f });
+        logger.info({ tool: plan.tool }, 'diane: liquidations read answered in code');
+        return { reply: result.reply, changedRowIds: [], context: context.key, claims: [] };
+      }
+    }
+  }
+  const forcedTool = (docNamed ? 'liquidation_document' : null)
+    ?? (liqRouted && context.tools.some((t) => t.name === liqRouted) ? liqRouted : null)
+    ?? (FORCED_ROUTES
     .find(([asked, tool]) => (asked.test(lastSaid(history), history) || (routeSaid !== lastSaid(history) && asked.test(routeSaid, history)))
       && context.tools.some((t) => t.name === tool))?.[1] ?? null)
     ?? (BARE_YES.test(lastSaid(history)) && RESUME_OFFERED.test(lastAssistantAnswer(history))
@@ -3586,7 +3750,7 @@ async function runAgentTurn(history, contextName, onEvent) {
    */
   let severalExisting = false;
   if (!forcedTool && heldCalls.length === 0 && isSetInstruction(lastSaid(history))
-    && !LATER_MONTH.test(lastSaid(history))
+    && !LATER_MONTH.test(lastSaid(history)) && !PAGE_TOOL.test(lastSaid(history))
     && !/\b(?:new|another|second|extra|create|open)\b|\badd(?:ing)?\s+(?:a\s+|an\s+)?(?:\w+\s+)?deal\b/i.test(lastSaid(history))
     && context.tools.some((t) => t.name === 'bulk_update_master_sheet')) {
     const everyone = (await require('../repos/people.repo').filterOptions().catch(() => null))?.people ?? [];
@@ -3614,7 +3778,7 @@ async function runAgentTurn(history, contextName, onEvent) {
    */
   let oneExisting = false;
   if (!forcedTool && !severalExisting && heldCalls.length === 0 && isSetInstruction(asked)
-    && !LATER_MONTH.test(asked) && !everyDealSaid(asked) && !OWN_TOOL.test(asked)
+    && !LATER_MONTH.test(asked) && !everyDealSaid(asked) && !OWN_TOOL.test(asked) && !PAGE_TOOL.test(asked)
     && !/\b(?:new|another|second|extra|create|open)\b|\badd(?:ing)?\s+(?:a\s+|an\s+)?(?:\w+\s+)?deal\b/i.test(asked)
     && context.tools.some((t) => t.name === 'update_master_sheet_row')) {
     const everyone = (await require('../repos/people.repo').filterOptions().catch(() => null))?.people ?? [];
@@ -5084,7 +5248,7 @@ async function runAgentTurn(history, contextName, onEvent) {
      */
     if (!widened) {
       const wanted = calls
-        .filter((c) => c.type === 'function' && HELD_UNTIL_NEEDED.includes(c.function?.name))
+        .filter((c) => c.type === 'function' && isHeld(c.function?.name))
         .map((c) => c.function.name);
       /**
        * THE ROUTED TOOL RUNS, it is not announced. Live 2026-10-03: "actually
@@ -5105,7 +5269,7 @@ async function runAgentTurn(history, contextName, onEvent) {
           messages.push({
             role: 'tool',
             tool_call_id: call.id,
-            content: HELD_UNTIL_NEEDED.includes(call.function?.name)
+            content: isHeld(call.function?.name)
               ? `${call.function.name} IS AVAILABLE NOW. Nothing was done and nothing was `
                 + 'refused: it reaches many rows or ends something, so it is handed over only '
                 + 'once you ask for it. Call it again with the same arguments.'
@@ -5163,7 +5327,7 @@ async function runAgentTurn(history, contextName, onEvent) {
       // A RESULT THAT SENDS HER TO A HELD TOOL hands it over. "Use
       // bulk_update_master_sheet with people" with that tool not in the
       // list read to her as "cannot", and she said so. 2026-09-29.
-      if (!widened && HELD_UNTIL_NEEDED.some((h) => String(content ?? '').includes(h))) {
+      if (!widened && [...HELD_UNTIL_NEEDED, ...HELD_FOR_TOPIC].some((h) => String(content ?? '').includes(h))) {
         widened = true;
         roundTools = openAITools;
       }
@@ -5256,6 +5420,10 @@ async function runAgentTurn(history, contextName, onEvent) {
       if (result.exportSession) {
         onEvent?.({ type: 'export-session', session: result.exportSession });
       }
+
+      // A FILE SHE HANDS BACK (a liquidation document): a chip in the chat to open it.
+      if (result.file?.url) onEvent?.({ type: 'file', file: result.file });
+      for (const f of result.files ?? []) if (f?.url) onEvent?.({ type: 'file', file: f });
 
       // PAUSE AND CANCEL carry no draft: one keeps what is already on
       // screen and the other removes it, so resending the panel would be

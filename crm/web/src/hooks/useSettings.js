@@ -1,4 +1,5 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSocketEvent } from './useSocket';
 import { apiService } from '../configs/api.config';
 import { useOptimisticUpdate } from './useOptimisticUpdate';
 
@@ -81,6 +82,12 @@ export function useBurnMonth() {
 // source is actually converting today.
 
 export function useFxRates() {
+  // Diane can change them too (set_exchange_rate): the screen follows.
+  const queryClient = useQueryClient();
+  useSocketEvent('fx-rates:changed', () => {
+    queryClient.invalidateQueries({ queryKey: RATES_KEY });
+    queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+  });
   return useQuery({
     queryKey: RATES_KEY,
     queryFn: () => apiService.settings.rates(),

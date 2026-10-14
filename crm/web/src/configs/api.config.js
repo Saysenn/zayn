@@ -229,8 +229,24 @@ export const apiService = {
       formData.append('file', file);
       return api.upload(`${apiPath}/liquidations/${id}/docs`, formData, onProgress);
     },
+    // Several at once, any kind of document (up to 20, 25 MB each).
+    addDocs: (id, files, onProgress) => {
+      const formData = new FormData();
+      for (const f of files) formData.append('files', f);
+      return api.upload(`${apiPath}/liquidations/${id}/docs`, formData, onProgress);
+    },
+    renameDoc: (id, docId, fileName) => api.patch(`${apiPath}/liquidations/${id}/docs/${docId}`, { fileName }),
+    removeDocs: (id, ids) => api.post(`${apiPath}/liquidations/${id}/docs/remove`, { ids }),
+    rereadDoc: (id, docId) => api.post(`${apiPath}/liquidations/${id}/docs/${docId}/read`),
     // Resolves { blob, filename }.
     downloadDoc: (id, docId) => api.download(`${apiPath}/liquidations/${id}/docs/${docId}`),
+    // Several, or every one (no ids), as one zip.
+    downloadZip: (id, docIds = []) => api.download(`${apiPath}/liquidations/${id}/docs/zip${toQueryString({ ids: docIds.join(',') || undefined })}`),
+    // The page as an Excel file: the rows it shows, in its order.
+    download: (ids, { columns = [], palette } = {}) => api.download(`${apiPath}/liquidations/download${toQueryString({
+      ids: ids.join(','), columns: columns.join(','), palette,
+    })}`),
+    exportOptions: () => api.get(`${apiPath}/liquidations/export-options`),
     removeDoc: (id, docId) => api.delete(`${apiPath}/liquidations/${id}/docs/${docId}`),
   },
   whatbotNumbers: {

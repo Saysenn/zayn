@@ -599,6 +599,16 @@ function BriefingScreen({ items: initialItems, greeting: madeAhead, onDone }) {
   orbLevelRef.current = tts.speaking ? tts.level : listening ? voice.level : -1;
   const orbState = tts.speaking ? ORB_STATE.speaking : listening ? ORB_STATE.listening : ORB_STATE.idle;
 
+  // V2: WHICH TOPIC SHE IS ON, and which are said, for the strip.
+  const { currentKey, doneKeys } = useMemo(() => {
+    const heads = segments.map((seg, i) => ({ seg, i })).filter(({ seg }) => seg.kind === 'head');
+    const on = [...heads].reverse().find(({ i }) => i <= spoken);
+    return {
+      currentKey: on?.seg.key ?? null,
+      doneKeys: new Set(heads.filter(({ i }) => on && i < on.i).map(({ seg }) => seg.key)),
+    };
+  }, [segments, spoken]);
+
   // V2: THE ORB FLARES as each card lands (a topic, the closing, the question).
   const cardsReached = useMemo(
     () => segments.filter((s, i) => i <= spoken && s.kind !== 'read').length,
@@ -677,8 +687,16 @@ function BriefingScreen({ items: initialItems, greeting: madeAhead, onDone }) {
           for (const id of s.ids) state.set(id, now);
         }
         const lit = (id) => state.get(id) ?? READ_STATE.DONE;
+        const item = itemByKey.get(segment.key);
         return (
           <>
+            {/* V2: THE COUNT AS A HEADLINE (his call 2026-10-13: "too plain"). */}
+            {v2 && item && (
+              <div className="bv2-figure" aria-hidden="true">
+                <span className="bv2-figure-n">{item.count}</span>
+                <span className="bv2-figure-label">{TOPIC_LABEL[segment.key] ?? ''}</span>
+              </div>
+            )}
             {lines}
             <CardRows>{breakdown(segment.key, lit)}</CardRows>
           </>
@@ -701,6 +719,20 @@ function BriefingScreen({ items: initialItems, greeting: madeAhead, onDone }) {
           <>
             {lines}
             <AskChoices keys={topics} onPick={open} v2={v2} />
+          </>
+        );
+      }
+      // V2: THE GREETING SAYS WHAT IS COMING: the day, how many topics, the first.
+      if (v2 && segment.kind === 'greet') {
+        const first = items[0];
+        return (
+          <>
+            {lines}
+            <div className="bv2-greet-meta">
+              <span>{new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
+              <span>{`${items.length} ${items.length === 1 ? 'topic' : 'topics'}`}</span>
+              {first && <span>{`Next: ${TOPIC_LABEL[first.key] ?? first.key}`}</span>}
+            </div>
           </>
         );
       }
@@ -867,6 +899,17 @@ function BriefingScreen({ items: initialItems, greeting: madeAhead, onDone }) {
       )}
 
       {/* THE HUD READOUTS, top corners: who is talking, and when. */}
+      {/* V2: EVERY TOPIC AT A GLANCE, the one she is on lit (his call 2026-10-13). */}
+      {v2 && (
+        <div className="bv2-strip pointer-events-none" aria-hidden="true">
+          {items.map((item) => (
+            <span key={item.key} className={`bv2-tile ${item.key === currentKey ? 'is-on' : ''} ${doneKeys.has(item.key) ? 'is-done' : ''}`}>
+              <span className="bv2-tile-n">{item.count}</span>
+              <span className="bv2-tile-label">{TOPIC_LABEL[item.key] ?? item.key}</span>
+            </span>
+          ))}
+        </div>
+      )}
       {v2 ? (
         <div className="bv2-brand pointer-events-none absolute left-[4vw] top-[4vh]">
           <span className="bv2-brand-name">DIANE</span>

@@ -159,4 +159,40 @@ function deleteForPeople(people) {
     .then((result) => result.rows);
 }
 
-module.exports = { create, updateStatus, updateStatusForPeople, deleteForPeople, listGrouped, listForPerson, listOpenPairs };
+/** Every flag these people have, whole: what Diane's undo puts back. */
+function snapshotForPeople(people) {
+  return pool
+    .query(
+      `SELECT ${ROW.split(',').map((col) => `c.${col.trim()}`).join(', ')}
+         FROM tb_concerns c
+         JOIN unnest($1::text[], $2::text[]) AS w(group_name, person_id)
+           ON c.group_name = w.group_name AND c.person_id = w.person_id
+        ORDER BY c.id`,
+      [people.map((p) => p.group), people.map((p) => p.personId)],
+    )
+    .then((result) => result.rows);
+}
+
+/**
+ * PUTS FLAGS BACK exactly as a snapshot had them: a status changed since is
+ * set back, a deleted flag comes back under its own id. Returns how many.
+ */
+async function restoreRows(rows) {
+  let n = 0;
+  for (const r of rows) {
+    // eslint-disable-next-line no-await-in-loop
+    const { rowCount } = await pool.query(
+      `INSERT INTO tb_concerns (id, person_id, group_name, category, message, status, created_at, status_changed_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, status_changed_at = EXCLUDED.status_changed_at`,
+      [r.id, r.person_id, r.group_name, r.category, r.message, r.status, r.created_at, r.status_changed_at],
+    );
+    n += rowCount;
+  }
+  return n;
+}
+
+module.exports = {
+  create, updateStatus, updateStatusForPeople, deleteForPeople, snapshotForPeople, restoreRows,
+  listGrouped, listForPerson, listOpenPairs,
+};

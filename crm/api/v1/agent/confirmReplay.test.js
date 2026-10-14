@@ -452,3 +452,10 @@ test('the period stamp of an ordinary edit need not be read out; a special case 
   assert.equal(alreadyShown('change this deal for October 2026 Otto Fenn at Ironleaf monthly 1,600', prior), true);
   assert.equal(alreadyShown('make Otto Fenn at Ironleaf a special case for October 2026, adding 1,600', prior), false);
 });
+
+test('"OR DO YOU WANT TO HOLD OFF?" IS A YES OR NO, not two readings (2026-10-14)', () => {
+  const { eitherOrAsked } = require('./confirmReplay');
+  assert.equal(eitherOrAsked('GBP: manual 1.3 cleared.\n\nIs that all right, or do you want to hold off?'), false);
+  assert.equal(eitherOrAsked('Shall I go ahead, or wait?'), false);
+  assert.equal(eitherOrAsked('As a flat amount from his fee, or 100 percent?'), true);
+});

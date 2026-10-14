@@ -5,6 +5,7 @@ import { useConcerns } from '../../hooks/useConcerns';
 import { useUnreadChat } from '../../hooks/useChat';
 import { NotificationProvider } from '../../hooks/useNotifications';
 import { useReviewPending } from '../../hooks/useMonthlyReview';
+import { useLiquidationsFollowCompanies } from '../../hooks/useCompanies';
 import { LockIcon, SparkleIcon } from '../icons';
 import * as Icons from '../icons';
 import {
@@ -234,6 +235,8 @@ function AskDianeButton() {
 // read, so it silently exported everything. It is back beside Add person.
 
 function LayoutInner() {
+  // Mounted on every page, so the Liquidations page is never a refresh behind.
+  useLiquidationsFollowCompanies();
   return (
     <div className="min-h-screen flex">
       <Toaster />

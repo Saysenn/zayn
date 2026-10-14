@@ -123,7 +123,9 @@ test('REACHING FOR A HELD TOOL WIDENS THE TURN', () => {
   const from = src.indexOf('A HELD TOOL IS ANNOUNCED');
   const branch = src.slice(from, src.indexOf('same call twice in one round', from));
 
-  assert.match(branch, /HELD_UNTIL_NEEDED\.includes\(c\.function\?\.name\)/);
+  // Held either way: bulk or destructive, or a topic's tools (contexts.js HELD_FOR_TOPIC).
+  assert.match(branch, /isHeld\(c\.function\?\.name\)/);
+  assert.match(src, /const isHeld = \(name\) => HELD_UNTIL_NEEDED\.includes\(name\) \|\| HELD_FOR_TOPIC\.includes\(name\)/);
   assert.match(branch, /roundTools = openAITools/, 'the rest of the turn carries everything');
   assert.match(branch, /IS AVAILABLE NOW/);
   assert.match(branch, /Nothing was done and nothing was `\s*\+ 'refused/);

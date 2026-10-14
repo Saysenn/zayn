@@ -15,6 +15,9 @@ const { deadPeopleTools } = require('./tools/deadPeople');
 const { peopleTools } = require('./tools/people');
 // Work parked for a later month, and the standing list of it.
 const { scheduledTools, withWhen } = require('./tools/parkForMonth');
+const { liquidationTools } = require('./tools/liquidations');
+const { flagTools } = require('./tools/flags');
+const { fxTools } = require('./tools/fxRates');
 const { withDisabled } = require('./disabledTools');
 // What she says she can do, BUILT from the list below rather than written
 // out in the prompt. See capabilities.js: she offered an export she cannot
@@ -55,7 +58,7 @@ const CONTEXTS = {
     // tests, and only the handler stops doing the thing.
     tools: () => withDisabled(withWhen([
       ...masterSheetTools, ...monthlyReviewTools, ...closureTools, ...companyTools, ...deadPeopleTools,
-      ...peopleTools, ...scheduledTools, ...sharedTools,
+      ...peopleTools, ...scheduledTools, ...liquidationTools, ...flagTools, ...fxTools, ...sharedTools,
     ])),
   },
 };
@@ -110,6 +113,23 @@ const HELD_UNTIL_NEEDED = Object.freeze([
   'summarize_deals',
 ]);
 
+/**
+ * ===============================
+ * * HELD FOR THEIR TOPIC (2026-10-13)
+ * ===============================
+ * The Liquidations page, flags and setting rates: five tools most messages
+ * never need. Offered from the first round when the conversation is about
+ * them (their words, the last two of his messages, or her last answer, so
+ * "yes" and "drop 2" to her preview still have them), and otherwise not
+ * sent at all. Calling one anyway hands it over, the same as a held tool.
+ */
+const HELD_FOR_TOPIC = Object.freeze([
+  'list_liquidations', 'update_liquidation', 'liquidation_document', 'update_flags', 'set_exchange_rate',
+  'search_company_documents', 'read_company_document',
+]);
+const TOPIC_WORDS = /\b(?:liquidat\w*|liq|hmrc|winding|wound up|deadlines?|liquidators?|strike[\s-]?off|insolven\w*|stage|letters?|documents?|docs?|pdfs?|files?|attach\w*|uploads?|petition|notice|log|logged|flag\w*|flagged|concerns?|resolv\w*|in progress|reopen|exchange|rates?|fx|xe(?:\.com)?|usd|gbp|eur|euros?|aed|dirhams?|php|pull|conversion)\b/i;
+const topicIn = (text) => TOPIC_WORDS.test(String(text ?? ''));
+
 /** The first round's tools: everything that is not held back. */
 const openingTools = (tools) => tools.filter((t) => !HELD_UNTIL_NEEDED.includes(t.name));
 
@@ -133,5 +153,5 @@ function resolveContext(name) {
 
 module.exports = {
   resolveContext, isValidContext, CONTEXT_KEYS: Object.keys(CONTEXTS), DEFAULT_CONTEXT,
-  HELD_UNTIL_NEEDED, openingTools,
+  HELD_UNTIL_NEEDED, openingTools, HELD_FOR_TOPIC, topicIn,
 };

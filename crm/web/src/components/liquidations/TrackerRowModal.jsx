@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiService } from '../../configs/api.config';
 import { saveBlob } from '../../helpers/api.helper';
 import { useReportingMutation } from '../../hooks/useReportingMutation';
@@ -9,6 +9,9 @@ import Modal from '../modals/Modal';
 import Button from '../buttons/Button';
 import Select from '../forms/Select';
 import Toggle from '../forms/Toggle';
+import ConfirmDialog from '../modals/ConfirmDialog';
+import DocViewer, { liquidationDoc } from '../display/DocViewer';
+import { DownloadIcon } from '../icons';
 import { Skeleton } from '../display/Skeleton';
 import { formatMoney } from '../../helpers/formatMoney';
 import { LIQ_STAGES, stageOf, deadlineTone, shortDate, todayIso } from '../../configs/liquidationStages';
@@ -132,7 +135,7 @@ export default function TrackerRowModal({ id, owners, onClose }) {
           </form>
 
           <Comms id={id} comms={data.comms} detailKey={detailKey} />
-          <Docs id={id} docs={data.docs} detailKey={detailKey} />
+          <Docs id={id} docs={data.docs} detailKey={detailKey} company={row?.company_name} />
           <History history={data.history} />
         </div>
       )}
@@ -206,62 +209,163 @@ function Comms({ id, comms, detailKey }) {
   );
 }
 
-/** Supporting documents: kept on this machine. Removing one moves it aside. */
-function Docs({ id, docs, detailKey }) {
+/** What a document's reading says, short. */
+const READ_LABEL = { waiting: 'Waiting to be read', reading: 'Reading…', read: 'Readable', unreadable: 'Kept, not readable' };
+const READ_CLASS = { waiting: 'text-text-faint', reading: 'text-warning', read: 'text-success-strong', unreadable: 'text-text-muted' };
+const extOf = (name) => (String(name).split('.').pop() || '').slice(0, 5).toUpperCase();
+
+/**
+ * SUPPORTING DOCUMENTS (his call 2026-10-13): any kind, several at once by
+ * picking or dropping them. Each is read on arrival so Diane can answer from
+ * it; its line says whether it was. Click a name to open it here; tick
+ * several to download or remove them together (removed = moved aside).
+ */
+function Docs({ id, docs, detailKey, company }) {
   const input = useRef(null);
   const { notify } = useNotifications();
-  const [removing, setRemoving] = useState(null);
-  const upload = useReportingMutation((file) => apiService.liquidations.addDoc(id, file), {
-    describe: (file) => file.name, verb: 'uploaded', invalidates: [KEY, detailKey],
+  const queryClient = useQueryClient();
+  const [ticked, setTicked] = useState(() => new Set());
+  const [confirming, setConfirming] = useState(false);
+  const [renaming, setRenaming] = useState(null);
+  const [name, setName] = useState('');
+  const [over, setOver] = useState(false);
+  const [viewing, setViewing] = useState(null);
+  const refresh = () => { queryClient.invalidateQueries({ queryKey: detailKey }); queryClient.invalidateQueries({ queryKey: KEY }); };
+
+  // Still being read: look again until every one is done.
+  const pending = docs.some((d) => d.read_status === 'waiting' || d.read_status === 'reading');
+  useEffect(() => {
+    if (!pending) return undefined;
+    const t = setInterval(refresh, 2500);
+    return () => clearInterval(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending]);
+
+  const upload = useReportingMutation((files) => apiService.liquidations.addDocs(id, files), {
+    describe: (files) => (files.length === 1 ? files[0].name : `${files.length} documents`), verb: 'uploaded', invalidates: [KEY, detailKey],
   });
-  const remove = useReportingMutation((docId) => apiService.liquidations.removeDoc(id, docId), {
-    describe: () => 'Document', verb: 'removed', invalidates: [KEY, detailKey],
+  const remove = useReportingMutation((ids) => apiService.liquidations.removeDocs(id, ids), {
+    describe: (ids) => (ids.length === 1 ? 'Document' : `${ids.length} documents`), verb: 'removed', invalidates: [KEY, detailKey],
   });
-  async function download(doc) {
+  const rename = useReportingMutation(({ docId, fileName }) => apiService.liquidations.renameDoc(id, docId, fileName), {
+    describe: () => 'Document', verb: 'renamed', invalidates: [KEY, detailKey],
+  });
+  const send = (list) => { const files = [...list]; if (files.length) upload.mutate(files); };
+  // A FAILED READING TRIED AGAIN (a network blip, the AI key down): read anew.
+  const reread = useReportingMutation((docId) => apiService.liquidations.rereadDoc(id, docId), {
+    describe: () => 'Document', verb: 'sent to be read again', invalidates: [KEY, detailKey],
+  });
+
+  // ONE FILE AS ITSELF, SEVERAL AS ONE ZIP: a browser keeps only the first
+  // of several downloads from one click (his call 2026-10-13).
+  const [zipping, setZipping] = useState(false);
+  async function downloadMany(list) {
+    setZipping(true);
     try {
-      const { blob, filename } = await apiService.liquidations.downloadDoc(id, doc.id);
-      await saveBlob(blob, filename || doc.file_name);
+      const { blob, filename } = list.length === 1
+        ? await apiService.liquidations.downloadDoc(id, list[0].id)
+        : await apiService.liquidations.downloadZip(id, list.length === docs.length ? [] : list.map((d) => d.id));
+      await saveBlob(blob, filename || (list.length === 1 ? list[0].file_name : 'documents.zip'));
     } catch (err) {
-      notify({ level: 'error', message: `Couldn't download ${doc.file_name}`, detail: err.message });
+      notify({ level: 'error', message: `Couldn't download ${list.length === 1 ? list[0].file_name : 'the documents'}`, detail: err.message });
+    } finally {
+      setZipping(false);
     }
   }
+  const toggle = (docId) => setTicked((t) => { const n = new Set(t); if (n.has(docId)) n.delete(docId); else n.add(docId); return n; });
+  const chosen = docs.filter((d) => ticked.has(d.id));
+
   return (
     <Section title="Supporting docs" count={docs.length}>
-      <div className="flex flex-wrap items-center gap-2">
-        <input
-          ref={input}
-          type="file"
-          className="hidden"
-          accept=".pdf,.png,.jpg,.jpeg,.heic,.webp,.doc,.docx,.xls,.xlsx,.csv,.txt,.eml,.msg"
-          onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f); e.target.value = ''; }}
-        />
-        <Button type="button" variant="secondary" size="sm" disabled={upload.isPending} onClick={() => input.current?.click()}>
-          {upload.isPending ? 'Uploading…' : 'Upload a document'}
-        </Button>
-        <span className="text-xs text-text-faint">PDF, pictures, Word, Excel, CSV, text or email, up to 20 MB.</span>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => input.current?.click()}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') input.current?.click(); }}
+        onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => { e.preventDefault(); setOver(false); send(e.dataTransfer.files); }}
+        className={`flex cursor-pointer flex-col items-center justify-center gap-1 rounded border border-dashed px-3 py-4 text-center transition-colors ${over ? 'border-accent-strong bg-accent-tint' : 'border-border-strong hover:border-accent-strong hover:bg-surface-sunken'}`}
+      >
+        <span className="text-sm font-semibold text-text">{upload.isPending ? 'Uploading…' : 'Drop files here, or click to pick'}</span>
+        <span className="text-xs text-text-faint">Any document: PDF, Word, Excel, CSV, pictures, text, email. Up to 20 at once, 25 MB each.</span>
+        <input ref={input} type="file" multiple className="hidden" onChange={(e) => { send(e.target.files); e.target.value = ''; }} />
       </div>
+
       {docs.length > 0 && (
-        <ul className="divide-y divide-border rounded border border-border">
-          {docs.map((d) => (
-            <li key={d.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm">
-              <span className="min-w-0 flex-1 truncate font-medium" title={d.file_name}>{d.file_name}</span>
-              <span className="text-xs tabular-nums text-text-muted">{size(d.size_bytes)} · {shortDate(d.uploaded_at)}</span>
-              {removing === d.id ? (
-                <span className="flex items-center gap-2">
-                  <Button variant="danger" size="sm" disabled={remove.isPending} onClick={() => remove.mutate(d.id, { onSettled: () => setRemoving(null) })}>
-                    {remove.isPending ? 'Removing…' : 'Remove'}
-                  </Button>
-                  <Button variant="secondary" size="sm" onClick={() => setRemoving(null)}>Keep</Button>
-                </span>
-              ) : (
-                <span className="flex items-center gap-2">
-                  <Button variant="secondary" size="sm" onClick={() => download(d)}>Download</Button>
-                  <Button variant="secondary" size="sm" onClick={() => setRemoving(d.id)}>Remove</Button>
-                </span>
-              )}
-            </li>
-          ))}
-        </ul>
+        <>
+          {chosen.length === 0 && docs.length > 1 && (
+            <div className="flex justify-end">
+              <Button variant="secondary" size="sm" disabled={zipping} onClick={() => downloadMany(docs)}>
+                <DownloadIcon width={14} height={14} />
+                {zipping ? 'Zipping…' : `Download all (${docs.length})`}
+              </Button>
+            </div>
+          )}
+          {chosen.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 rounded bg-surface-sunken px-3 py-2 text-sm">
+              <span className="font-semibold">{chosen.length} selected</span>
+              <Button variant="secondary" size="sm" disabled={zipping} onClick={() => downloadMany(chosen)}>{zipping ? 'Zipping…' : chosen.length > 1 ? 'Download as zip' : 'Download'}</Button>
+              <Button variant="danger" size="sm" onClick={() => setConfirming(true)}>Remove</Button>
+              <Button variant="secondary" size="sm" onClick={() => setTicked(new Set())}>Clear</Button>
+            </div>
+          )}
+          <ul className="divide-y divide-border rounded border border-border">
+            {docs.map((d) => (
+              <li key={d.id} className={`flex items-center gap-3 px-3 py-2 text-sm ${ticked.has(d.id) ? 'bg-accent-tint/40' : ''}`}>
+                <input type="checkbox" checked={ticked.has(d.id)} onChange={() => toggle(d.id)} aria-label={`Select ${d.file_name}`} />
+                <span className="w-11 shrink-0 rounded bg-surface-sunken px-1.5 py-0.5 text-center text-[10px] font-semibold text-text-muted">{extOf(d.file_name)}</span>
+                {renaming === d.id ? (
+                  <form className="flex min-w-0 flex-1 flex-wrap items-center gap-2" onSubmit={(e) => { e.preventDefault(); if (name.trim()) rename.mutate({ docId: d.id, fileName: name.trim() }, { onSettled: () => setRenaming(null) }); }}>
+                    <input autoFocus className={`${BOX} min-w-[10rem] flex-1`} value={name} onChange={(e) => setName(e.target.value)} aria-label="New name" />
+                    <Button type="submit" variant="primary" size="sm" disabled={!name.trim()}>Save</Button>
+                    <Button type="button" variant="secondary" size="sm" onClick={() => setRenaming(null)}>Cancel</Button>
+                  </form>
+                ) : (
+                  <>
+                    {/* THE NAME ON ITS OWN LINE, what it is under it: on a phone
+                        the name kept a few letters beside the status and size. */}
+                    <div className="min-w-0 flex-1">
+                      <button type="button" onClick={() => setViewing(d)} className="block min-h-0 w-full justify-start truncate border-0 bg-transparent p-0 text-left font-medium text-text hover:text-accent-strong hover:underline" title={`Open ${d.file_name}`}>
+                        {d.file_name}
+                      </button>
+                      <p className="mt-0.5 truncate text-xs text-text-muted">
+                        <span className={READ_CLASS[d.read_status] ?? 'text-text-faint'} title={d.read_error || d.read_how || ''}>{READ_LABEL[d.read_status] ?? ''}</span>
+                        <span className="tabular-nums"> · {size(d.size_bytes)} · {shortDate(d.uploaded_at)}</span>
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {d.read_status === 'unreadable' && (
+                        <Button variant="secondary" size="sm" disabled={reread.isPending} onClick={() => reread.mutate(d.id)}>Read again</Button>
+                      )}
+                      <Button variant="secondary" size="sm" onClick={() => { setRenaming(d.id); setName(d.file_name); }}>Rename</Button>
+                    </div>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {confirming && (
+        <ConfirmDialog
+          title={chosen.length === 1 ? `Remove ${chosen[0].file_name}?` : `Remove ${chosen.length} documents?`}
+          subject={chosen.map((d) => d.file_name).join(', ')}
+          detail="They come off this company. The files are moved aside on this computer, not deleted."
+          confirmLabel="Remove"
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => { remove.mutate(chosen.map((d) => d.id)); setTicked(new Set()); setConfirming(false); }}
+        />
+      )}
+      {/* THE WHOLE SET opens, at the one clicked: arrows between them. */}
+      {viewing && (
+        <DocViewer
+          docs={docs.map((d) => liquidationDoc(id, d))}
+          start={Math.max(0, docs.findIndex((d) => d.id === viewing.id))}
+          title={company ? `${company} · documents` : undefined}
+          onClose={() => setViewing(null)}
+        />
       )}
     </Section>
   );

@@ -18,6 +18,7 @@ import SectionedList from './forms/SectionedList';
 import TurnOffer from './TurnOffer';
 import SheetCheck from './forms/SheetCheck';
 import ExpenseImage from './forms/ExpenseImage';
+import FileChip, { CardDocs } from './forms/FileChip';
 import { SpinnerIcon } from '../icons';
 
 /**
@@ -150,7 +151,7 @@ function picturedTurns(history) {
   const turnOf = [];
   let turn = 0;
   for (const m of history) {
-    if (m.role === 'user' && !m.list && !m.image && !m.card && !m.form && !m.check) turn += 1;
+    if (m.role === 'user' && !m.list && !m.image && !m.file && !m.card && !m.form && !m.check) turn += 1;
     turnOf.push(turn);
   }
   const withPicture = new Set(history.map((m, i) => (m.image?.id ? turnOf[i] : null)).filter((t) => t !== null));
@@ -165,14 +166,37 @@ function shortOf(text) {
   return first === last ? first : `${first}\n\n${last}`;
 }
 
+/**
+ * DOCUMENTS ON THE ANSWER CARD (his call 2026-10-13): the files a tool hands
+ * back arrive before her answer, and drawn as their own rows they sat
+ * outside it. Each run of files goes onto the plain answer that follows it.
+ * One with no answer after it (still being written) is drawn as a chip.
+ */
+const NOT_PLAIN = ['exportSession', 'check', 'offer', 'file', 'image', 'list', 'card', 'form'];
+function documentsOnCards(history) {
+  const absorbed = new Set();
+  const files = new Map();
+  let run = [];
+  history.forEach((m, i) => {
+    if (m.file) { run.push(i); return; }
+    if (run.length && m.role === 'assistant' && !NOT_PLAIN.some((k) => m[k])) {
+      files.set(i, run.flatMap((j) => history[j].files ?? [history[j].file]));
+      run.forEach((j) => absorbed.add(j));
+    }
+    run = [];
+  });
+  return { absorbed, files };
+}
+
 export default function Messages({
   history, isSending, workingText, progress = null, streamingReply = '', onFormSubmit, onCellEdit,
   onExportPause, onOpenDeal, onRetry, onOffer, onOpenImage,
 }) {
   const pictured = picturedTurns(history);
+  const docsOnCard = documentsOnCards(history);
   return (
     <>
-      {history.map((m, i) => (pictured(i) && m.list && !m.image) ? null : (
+      {history.map((m, i) => ((pictured(i) && m.list && !m.image) || docsOnCard.absorbed.has(i)) ? null : (
         /**
          * A FORM IS A TURN, so it sits in the transcript rather than
          * floating somewhere else on screen. It scrolls away with the
@@ -230,6 +254,11 @@ export default function Messages({
               onAnswer={(choice) => onOffer?.(i, choice)}
             />
           </div>
+        ) : m.file ? (
+          /* THE DOCUMENTS SHE HANDED BACK, one block however many. Click one to open the set. */
+          <div key={i} className="dm-turn self-start flex w-full max-w-[95%] flex-wrap gap-2">
+            {(m.files ?? [m.file]).map((f) => <FileChip key={f.url} file={f} />)}
+          </div>
         ) : m.image ? (
           /* THE EXPENSE PICTURE, under her card. Click to open it large. */
           <div key={i} className="dm-turn self-start w-full max-w-[95%]">
@@ -280,6 +309,9 @@ export default function Messages({
               small button under the answer, clickable links when opened. Never
               in her words, so she never reads a link aloud. */}
           {m.role === 'assistant' && m.sources?.length > 0 && <Sources sources={m.sources} />}
+
+          {/* THE DOCUMENTS SHE GAVE, on the card itself (his call 2026-10-13). */}
+          {docsOnCard.files.get(i) && <CardDocs files={docsOnCard.files.get(i)} />}
 
           {/* RETRY, on the turn that failed. Her excuse is in character and
               deliberately vague, which left retyping the question as the

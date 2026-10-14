@@ -90,3 +90,60 @@
 @media (prefers-reduced-motion: reduce) {
   .bv2 .bv2-tilt { transition: none; }
 }
+
+/* ***************************************************
+ * LESS PLAIN (his call 2026-10-13): a strip of every topic, the count as a
+ * headline, a greeting that says what is coming, and entries as chips.
+ * Static gradients and borders only: no blur, no filter, nothing animated
+ * but opacity and colour, so the low end stays smooth.
+ * *************************************************** */
+.bv2 .bv2-strip {
+  position: absolute; left: 50%; top: 4vh; transform: translateX(-50%); z-index: 2;
+  display: flex; gap: 8px; max-width: min(64vw, 900px); flex-wrap: wrap; justify-content: center;
+  font-family: var(--mono);
+}
+.bv2 .bv2-tile {
+  --cut: 8px;
+  display: flex; align-items: baseline; gap: 8px; padding: 6px 12px;
+  clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut)));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--sig) 10%, transparent), color-mix(in srgb, var(--sig) 3%, transparent));
+  border-top: 1px solid color-mix(in srgb, var(--sig) 30%, transparent);
+  opacity: 0.55; transition: opacity 0.5s ease, background 0.5s ease;
+}
+.bv2 .bv2-tile.is-done { opacity: 0.8; }
+.bv2 .bv2-tile.is-on {
+  opacity: 1;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--sig) 30%, transparent), color-mix(in srgb, var(--acc) 12%, transparent));
+  border-top-color: var(--sig);
+}
+.bv2 .bv2-tile-n { font-size: 15px; font-weight: 700; color: var(--hot); font-variant-numeric: tabular-nums; }
+.bv2 .bv2-tile-label { font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase; color: color-mix(in srgb, var(--dim) 80%, white); white-space: nowrap; }
+
+.bv2 .bv2-figure { display: flex; align-items: baseline; justify-content: center; gap: 12px; margin: 2px 0 2px; }
+.bv2 .bv2-figure-n {
+  font-size: 46px; line-height: 1; font-weight: 800; font-variant-numeric: tabular-nums;
+  background: linear-gradient(180deg, var(--hot), var(--sig)); -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.bv2 .bv2-figure-label { font-size: 10px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--sig); }
+
+.bv2 .bv2-greet-meta {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 14px; margin-top: 10px;
+  font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: color-mix(in srgb, var(--dim) 85%, white);
+}
+.bv2 .bv2-greet-meta span + span::before { content: '◆'; margin-right: 14px; color: var(--sig); font-size: 8px; }
+
+/* entries as chips */
+.bv2 .bv2-panel .briefing-row-in.whitespace-nowrap {
+  display: inline-flex; align-items: baseline; padding: 3px 9px;
+  border: 1px solid color-mix(in srgb, var(--sig) 22%, transparent);
+  background: color-mix(in srgb, var(--sig) 6%, transparent);
+}
+.bv2 .bv2-panel [data-read].flex { border-bottom: 1px solid color-mix(in srgb, var(--sig) 10%, transparent); padding: 5px 4px; }
+
+@media (max-width: 639px) {
+  /* At the bottom on a phone, over BACK and NEXT: at the top it sat behind the cards. */
+  .bv2 .bv2-strip { top: auto; bottom: calc(4vh + 52px); gap: 4px; max-width: 92vw; }
+  .bv2 .bv2-tile { padding: 4px 8px; }
+  .bv2 .bv2-tile-label { display: none; }
+  .bv2 .bv2-figure-n { font-size: 34px; }
+}

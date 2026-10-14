@@ -53,4 +53,7 @@ server.listen(env.port, () => {
   // SILENT otherwise, showing up later as a currency nobody can convert.
   // See shared/fxRates.helper.
   fxRates.warmUp();
+  // LIQUIDATION DOCUMENTS left half read by a restart are read now. See shared/liquidationDocIndex.
+  // eslint-disable-next-line global-require
+  require('./v1/shared/liquidationDocIndex').resumeWaiting();
 });

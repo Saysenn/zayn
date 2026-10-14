@@ -23,24 +23,6 @@
 - A Download Word button exports it as `.docx`.
 - A template saved as ours ("this is our standard contract") goes into the playbook and is reused.
 
-### D. The Liquidations page (agreed 2026-10-13)
-
-- The page lists every company whose status is Liquidation (`/liquidations`, migrations 084 and 086). Diane can
-  already put a company into liquidation (`update_company`), which puts it on the page.
-- She should be able to do on it what an admin can, by asking:
-  1. **Read:** list them, filtered by stage, group or owner; one company's full row (director, mid, stage,
-     instructions, deadline, next action, owner, blamed, liquidator, note, docs, settlement); its contact log and
-     stage history; "what deadlines are due this week".
-  2. **Update:** any of those fields ("set Acme to HMRC liq", "deadline 30 Nov", "owner is admin", "blamed yes").
-     The stage never changes the company status; she says so if asked.
-  3. **Log contact:** add a dated line to the communication log ("log: liquidator emailed for bank statements").
-  4. **Documents:** list them and send one back on request; save a file attached in chat to a company's docs.
-     Removing a document asks first, and moves it aside rather than deleting it.
-  5. **Add and remove:** never on the page itself. A company comes on by setting its status to Liquidation and
-     leaves when it is set back; she does that through `update_company`, which already asks.
-- Every write asks first, like her other writes, and lands in the page's stage history with who asked.
-- Tested with the Diane suite on `crm_suite` only when the owner says to run it (paid runs).
-
 ## This file
 
 The handover between the CRM and Diane, the CRM's assistant. The CRM changes faster than her tools, so every CRM
@@ -106,6 +88,36 @@ Four months: the two before this one, this one and next, the same as the dashboa
 - She cannot create a snapshot.
 
 ## What she can do
+
+### The Liquidations page, flags and rates (built 2026-10-13)
+
+- **Tools:** `list_liquidations`, `update_liquidation`, `liquidation_document` (`tools/liquidations.js`),
+  `update_flags` (`tools/flags.js`), `set_exchange_rate` (`tools/fxRates.js`). They call the pages' own repos.
+- **Held for their topic** (`contexts.js` `HELD_FOR_TOPIC`): sent only when the conversation mentions
+  liquidations, deadlines, flags, letters or rates. Other messages carry no extra schema; on topic it is +8%.
+- **Routed in code** (`runAgent.js` `PAGE_ROUTES`): a plain change on one page goes straight to its tool. A message
+  touching two pages is not routed, so she plans it whole (one preview, one yes).
+- **Messy in, clean out:** one call per request. Code resolves companies and people ("did you mean"), turns
+  "Friday" or "end of month" into a date (`shared/dayWords.helper.js`), checks stages, owners and rates, and shows
+  one numbered preview. A rate typed the wrong way round is flagged against today's pulled rate.
+- **Safety:** nothing is written before yes, except a single company's row in auto mode. Every write is read
+  back. `undo: true` puts back her last change on that page at once, deleted flags included
+  (`tb_agent_undo`, migration 087). A company goes on or off the Liquidations page only by its status.
+- **Documents (2026-10-13):** any file but a program, up to 20 at once, 25 MB each. Read once on upload
+  (`shared/docReader.helper.js`: PDF text via unpdf, scans and pictures by the model, Word old and new, Excel
+  old and new, CSV, RTF, text, email), cut into passages and embedded like the HMRC knowledge
+  (`shared/liquidationDocIndex.js`, migration 088), searched in memory by meaning.
+  - Master sheet mode: `liquidation_document` lists, opens (a chip that opens the viewer), saves files attached
+    in the chat (kept by id in `tb_chat_files`), renames, removes one or many, undoes. `search_company_documents`
+    and `read_company_document` answer from what they say.
+  - Lawyer mode: READ ONLY. Every answer carries OUR LIQUIDATIONS (one line a company) and the passages of their
+    documents that best match; two read tools. Asked to change anything there, it says so in code.
+  - Viewer (`components/display/DocViewer.jsx`): PDF and pictures shown from a session-fetched copy, sheets as a
+    table, the rest as text; CRM and Diane tones.
+- **Suite:** `SUITE_SET=docs` (`scripts/dianeSuite/docCases.mjs`), 11 cases, 11/11 on 2026-10-13, lawyer mode
+  included (a case may set `context: 'hmrc'`; a step may carry an `attachment`).
+- **Suite:** `SUITE_SET=liq` (`scripts/dianeSuite/liqCases.mjs`), 25 cases. 25/25 on 2026-10-13, 1.4 rounds and
+  about 43k input tokens a turn. The main set stayed at 88/88 (two flaky cases passed on a rerun).
 
 **Reads**
 - Totals, filters, breakdowns, people, companies, deal cards. `summarize_deals`: average, sum, min, max, count, per

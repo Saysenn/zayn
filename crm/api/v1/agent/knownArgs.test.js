@@ -58,7 +58,8 @@ test('THE INJECTED ONES PASS, because runAgent adds them and she cannot', () => 
   const injected = Object.fromEntries(INJECTED.map((k) => [k, 'x']));
   assert.equal(unknownArgs(filter, { group: 'INDIGO', ...injected }), null);
   // And the list is deliberate, not open ended.
-  assert.deepEqual(INJECTED, ['said', 'saidRecent', 'priorAnswer', 'open', 'onProgress', 'turn', 'approvedNewGroup']);
+  // chatFiles: the files attached in the chat, for liquidation_document (2026-10-13).
+  assert.deepEqual(INJECTED, ['said', 'saidRecent', 'priorAnswer', 'open', 'onProgress', 'turn', 'approvedNewGroup', 'chatFiles']);
 });
 
 test('a tool that declares NO parameters refuses nothing', () => {

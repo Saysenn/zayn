@@ -1,5 +1,6 @@
 const { randomUUID } = require('node:crypto');
 const { Router } = require('express');
+const { sessionUser } = require('./shared/session.helper');
 const multer = require('multer');
 const repo = require('./repos/masterSheetRows.repo');
 const { parseMasterSheetImport } = require('./masterSheet/parseImport');
@@ -984,29 +985,45 @@ router.post('/master-sheet/bulk-delete', async (req, res, next) => {
  * against the sheet (agent/engine/sheetCheck.js). Nothing is written here.
  * Its own upload, because the import's only takes .xlsx.
  */
+// ANY DOCUMENT NOW (his call 2026-10-13): a sheet to check, or a letter, scan
+// or statement to save onto a company in liquidation. Never a program.
 const attachUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  limits: { fileSize: 25 * 1024 * 1024, files: 1 },
   fileFilter(req, file, cb) {
-    if (!/\.(xlsx|csv|txt|tsv|json|docx|pptx)$/i.test(file.originalname)) {
-      return cb(new AppError(400, `Diane can read Excel, CSV, text, JSON, Word or PowerPoint files, not ${file.originalname}.`));
+    // eslint-disable-next-line global-require
+    if (require('./shared/liquidationDocs.helper').NEVER.test(file.originalname)) {
+      return cb(new AppError(400, `${file.originalname} is a program, not a document.`));
     }
     cb(null, true);
   },
 });
+// The sheets she reads for the sheet check, as before.
+const SHEET_LIKE = /\.(xlsx|csv|txt|tsv|json|docx|pptx)$/i;
 router.post('/master-sheet/agent/attach', (req, res, next) => {
   attachUpload.single('file')(req, res, async (err) => {
     if (err) return next(err instanceof AppError ? err : new AppError(400, err.message));
     try {
       if (!req.file) return next(new AppError(400, messages.noFile));
-      // ANY FILE: cut into its tables and its free text (agent/engine/intake.js).
-      // What the columns mean is worked out when they say what they want.
+      // KEPT AS IT CAME, by id, so "save these to Quarry Lane" saves the file
+      // itself (tb_chat_files, migration 088).
       // eslint-disable-next-line global-require
-      const { intake } = require('./agent/engine/intake');
-      const got = await intake({ buffer: req.file.buffer, filename: req.file.originalname });
+      const chatFiles = require('./shared/chatFiles.helper');
+      const kept = await chatFiles.keep(req.file, sessionUser(req));
+      // A SHEET is also cut into its tables and text, for the sheet check
+      // (agent/engine/intake.js). Anything else is kept, not read here.
+      let got = { tables: [], text: '' };
+      if (SHEET_LIKE.test(req.file.originalname)) {
+        // eslint-disable-next-line global-require
+        const { intake } = require('./agent/engine/intake');
+        got = await intake({ buffer: req.file.buffer, filename: req.file.originalname }).catch(() => ({ tables: [], text: '' }));
+      }
       const rows = got.tables.reduce((n, t) => n + t.rows.length, 0);
       res.json({
         filename: req.file.originalname,
+        fileId: kept.id,
+        mime: kept.mime,
+        size: kept.size,
         tables: got.tables,
         text: got.text,
         lines: rows + got.text.split(/\r?\n/).filter((l) => l.trim()).length,

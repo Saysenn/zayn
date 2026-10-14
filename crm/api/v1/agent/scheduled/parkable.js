@@ -27,6 +27,16 @@
 // Tool name -> how to read its arguments.
 //   idField  which argument names the single row it writes
 //   setOnly  every other argument is an absolute value to set
+/**
+ * A CHANGE FOR A LATER MONTH, said as TIMING: "from next month", "as of
+ * December", "end of this month", "deals next month". Never "to next month",
+ * which is a value ("set the preset to next month"). A tool that cannot park
+ * must not write these now (2026-10-13: "from next month put Ines Calder on
+ * 4200" went through add_deal's hand over to a bulk change, and a yes applied
+ * it at once).
+ */
+const LATER_TIMING = /\bfrom (?:next month|the (?:1st|first|start) of next month|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*)\b|\b(?:starting|as of|beginning|come)\s+(?:next month|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*)\b|\bend of (?:this|the|next) month\b|\b(?:deals?|pay|monthly|rate|fee|add[\s-]?on)\s+next month\b/i;
+
 const PARKABLE = Object.freeze({
   update_master_sheet_row: { idField: 'id', setOnly: true, noun: 'deal' },
   update_person: { idField: 'person', setOnly: true, noun: 'person' },
@@ -104,5 +114,5 @@ function fieldsOf(tool, args = {}) {
 }
 
 module.exports = {
-  PARKABLE, checkParkable, fieldsOf, isRelative, NOT_A_VALUE,
+  PARKABLE, checkParkable, fieldsOf, isRelative, NOT_A_VALUE, LATER_TIMING,
 };

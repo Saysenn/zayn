@@ -7192,6 +7192,16 @@ function handOver(seen, entry) {
  * "yes" applies every person in one act. 2026-09-25.
  */
 async function handOverCall(perPerson, args) {
+  // A LATER MONTH IS PARKED, NEVER HANDED TO A BULK CHANGE (which cannot park).
+  // eslint-disable-next-line global-require
+  const { LATER_TIMING } = require('../scheduled/parkable');
+  if (LATER_TIMING.test(String(args.said ?? ''))) {
+    return {
+      summary: `NOTHING HAS BEEN CHANGED. They said a LATER MONTH ("${String(args.said).match(LATER_TIMING)[0]}"): it changes `
+        + `${perPerson.map((p) => p.person).join(' and ')}'s EXISTING deal then, not now, and it is not a new deal. Call `
+        + 'update_master_sheet_row on that deal with `when` set to that month (one call per person), which parks it.',
+    };
+  }
   const result = await perPersonUpdate({
     perPerson, said: args.said, saidRecent: args.saidRecent, turn: args.turn, handedOver: true,
   });
@@ -10223,6 +10233,20 @@ const updateCompany = {
       keeps.push('It does NOT change any per deal amount: every deal on it keeps its own monthly '
         + 'amount, and a reduced amount is set on the deal itself.');
     }
+    /**
+     * A NOTE THAT ALREADY SAYS SOMETHING IS NOT REPLACED OR CLEARED WITHOUT A
+     * YES. Adding one stays a straight write. Overnight suite 2026-10-13:
+     * "take the creditors list off pinecrest" (a document) cleared Pinecrest's
+     * notes, and "call notes for quarry lane should be called …" replaced
+     * Quarry Lane's, with nothing asked. What was there is said back.
+     */
+    const noteWas = String(before.notes ?? '').trim();
+    if (fields.notes !== undefined && noteWas && String(fields.notes ?? '').trim() !== noteWas) {
+      const now = String(fields.notes ?? '').trim();
+      acts.push(now ? `replace ${before.name}'s notes ("${noteWas.slice(0, 120)}") with "${now.slice(0, 120)}"` : `clear ${before.name}'s notes ("${noteWas.slice(0, 120)}")`);
+      // Not a company's documents: those are the Liquidations page's.
+      keeps.push('Company notes only. A company\'s documents (letters, lists, files) are not notes and are changed with liquidation_document.');
+    }
     if (acts.length > 0) {
       const pending = confirmFirst(confirmed, {
         act: acts.join(', and '),
@@ -11022,6 +11046,26 @@ const undoChange = {
           summary: 'NOTHING HAS BEEN UNDONE. The last thing done was SCHEDULING, not a change: '
             + `${fresh.map((p) => `"${p.said}" for ${p.due_month}`).join('; ')}. To call that off, `
             + 'call cancel_parked_work now. Do not offer to undo any other change.',
+        };
+      }
+      /**
+       * THE LAST CHANGE WAS NOT THE SHEET (2026-10-13): a liquidation, flags
+       * or a rate, made since the last sheet change. Each undoes with its
+       * own tool; this one would have reached an older sheet change.
+       */
+      // eslint-disable-next-line global-require
+      const mine = (await require('../../../configs/db')
+        .query('SELECT kind, summary, created_at FROM tb_agent_undo WHERE undone_at IS NULL ORDER BY created_at DESC, id DESC LIMIT 1')
+        .catch(() => null))?.rows?.[0];
+      const UNDO_TOOL = {
+        liquidations: 'update_liquidation with undo true', flags: 'update_flags with undo true',
+        rates: 'set_exchange_rate with undo true', documents: 'liquidation_document with action undo',
+      };
+      if (mine && Date.now() - new Date(mine.created_at).getTime() < 15 * 60 * 1000
+        && (!lastChange || new Date(mine.created_at) > new Date(lastChange))) {
+        return {
+          summary: `NOTHING HAS BEEN UNDONE. The last change was ${mine.summary}, not the master sheet. `
+            + `Call ${UNDO_TOOL[mine.kind]} now. Do not offer to undo a sheet change.`,
         };
       }
     }

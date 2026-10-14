@@ -22,6 +22,20 @@ import { REVIEW_KEY } from './useMonthlyReview';
  * id, and the page still has to open, rename and annotate it.
  */
 
+/**
+ * THE LIQUIDATIONS PAGE FOLLOWS EVERY COMPANY CHANGE, whatever page is open
+ * (his report 2026-10-13): a company set to liquidation on its own page did
+ * not show there until a refresh, because nothing was listening while the
+ * Liquidations page was closed and its cached list was still "fresh". Mounted
+ * once, in Layout: the cache is marked stale, so opening the page refetches.
+ */
+export function useLiquidationsFollowCompanies() {
+  const queryClient = useQueryClient();
+  const stale = () => queryClient.invalidateQueries({ queryKey: ['liquidations'] });
+  useSocketEvent('companies:changed', stale);
+  useSocketEvent('liquidations:changed', stale);
+}
+
 function useCrossPageRefresh(queryKey) {
   const queryClient = useQueryClient();
   const invalidate = () => queryClient.invalidateQueries({ queryKey });

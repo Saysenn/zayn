@@ -52,7 +52,7 @@ test('the exchange rate answer is spoken in full', () => {
     'Current cached rate, published Thu, 03 Sep 2026 00:02:31 +0000.',
   ].join('\n');
   // in full, with its date said the way a person says it (his call 2026-10-10)
-  assert.equal(speakableReply(answer), answer.replace('03 Sep 2026', '3 September 2026'));
+  assert.equal(speakableReply(answer), answer.replace('Thu, 03 Sep 2026', 'Thursday 3 September 2026'));
 });
 
 test('a one line answer is itself', () => {
@@ -63,4 +63,11 @@ test('nothing to say stays nothing, never the string "null"', () => {
   assert.equal(speakableReply(null), '');
   assert.equal(speakableReply(undefined), '');
   assert.equal(speakableReply('   '), '');
+});
+
+test('A SHORT DAY BEFORE A DATE IS SAID IN FULL, and "the sun" is left alone', () => {
+  assert.equal(
+    speakableReply('Deadline Sun, 18 Oct 2026. The sun is out.'),
+    'Deadline Sunday 18 October 2026. The sun is out.',
+  );
 });

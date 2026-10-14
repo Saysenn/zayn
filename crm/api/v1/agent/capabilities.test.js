@@ -135,7 +135,7 @@ test('THE TWO HALVES ARE BUILT FROM THE TOOL LIST, not written out', () => {
   const only = [{ name: 'list_concerns' }, { name: 'export_sheet' }];
   const block = capabilityBlock(only);
 
-  assert.match(block, /- concerns anybody has raised/);
+  assert.match(block, /- the flags people raised \(the Flagged page\)/);
   assert.doesNotMatch(block, /the monthly review:/, 'an area with no tools was still claimed');
   assert.match(block.split('WHAT YOU CANNOT DO')[1], /- export a sheet/, 'a held-but-disabled tool is still refused by name');
 });

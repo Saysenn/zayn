@@ -207,7 +207,8 @@ test('THE THREE ANSWERS ARE CONTEXTUAL, not three permanent colours', () => {
   // button is a colour you have to look past; an absent one is not there.
   const bar = read('../components/layout/BulkBar.jsx');
   assert.match(page, /<BulkBar count=\{sel\.count\}/);
-  assert.match(bar, /const open = count > 0;/);
+  // Absent while nothing is ticked, and while Diane is open (it sat on her composer, 2026-10-13).
+  assert.match(bar, /const open = count > 0 && !dianeOpen;/);
   assert.match(bar, /if \(!open\) return null;/);
   assert.doesNotMatch(bulk, /disabled=/);
   // NO "N selected" count in the bar, his call 2026-10-08.

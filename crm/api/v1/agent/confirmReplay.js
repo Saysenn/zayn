@@ -54,11 +54,16 @@ const NOT_PLAIN = /\b(but|except|although|instead|change|wait|hold|no)\b|\?/i;
  */
 const NEW_ACT = /\b(?:reopen|close|set|add|stop|end|resume|rename|undo|delete|remove|mark|bump|raise|lower|scrap|cancel|move|park|schedule|answer|show|list|total)\s+(?!(?:it|that|them|this|those|these|him|her|now|ahead)\b)[a-z0-9]/i;
 
+// "SAVE THIS TO PINECREST" is an instruction with a destination, not a yes
+// (suite 2026-10-13: read as agreeing to nothing, and nothing was saved).
+const SAVE_TO = /\b(?:save|put|file|upload|attach|add)\b[^.?!]*\b(?:to|onto|into|under|on)\s+[a-z0-9]/i;
+
 function agreed(said) {
   const text = String(said ?? '').trim();
   if (!text || text.length > 60) return false;
   if (NOT_PLAIN.test(text)) return false;
   if (NEW_ACT.test(text)) return false;
+  if (SAVE_TO.test(text)) return false;
   if (!AGREED.test(text)) return false;
   /**
    * AN "OK SO" IN FRONT OF A WHOLE INSTRUCTION IS THE INSTRUCTION. "ok so
@@ -130,7 +135,9 @@ const CONFIRM_OR = new RegExp(
 // HER WORDINGS VARY: "or is there anything you want to tweak first?",
 // "or should anything be adjusted?", "or anything wrong?". An "or" whose
 // second half is about ANYTHING to fix offers no other reading. 2026-10-06.
-const CONFIRM_OR_LOOSE = /\bor\b[^?]*\b(?:anything|something|tweak\w*|adjust\w*|fix\w*|else|wrong|amend\w*|keep\w*|leave\w*|as (?:it|they) (?:is|are))\b[^?]*\?\s*$/i;
+// "…, OR DO YOU WANT TO HOLD OFF?" is go or don't, not two readings: its yes
+// was refused as picking neither (liq suite, 2026-10-14, a rate cleared).
+const CONFIRM_OR_LOOSE = /\bor\b[^?]*\b(?:anything|something|tweak\w*|adjust\w*|fix\w*|else|wrong|amend\w*|keep\w*|leave\w*|as (?:it|they) (?:is|are)|hold (?:off|on|back)|wait\w*|stop|cancel\w*|not (?:yet|now)|pause|hang on|scrap\w*|skip\w*)\b[^?]*\?\s*$/i;
 
 function eitherOrAsked(answer) {
   const text = String(answer ?? '').trim();
