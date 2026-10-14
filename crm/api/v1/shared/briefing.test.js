@@ -25,6 +25,7 @@ const ROWS = require.resolve('../repos/masterSheetRows.repo');
 const CONCERNS = require.resolve('../repos/concerns.repo');
 const SETTINGS = require.resolve('../repos/settings.repo');
 const PEOPLE = require.resolve('../repos/people.repo');
+const LIQUIDATIONS = require.resolve('../repos/liquidations.repo');
 
 // Owed this month, unpaid, nobody has touched the override.
 const OWED = {
@@ -46,6 +47,8 @@ function load({ due = [], rows = [], concerns = { rows: [], total: 0 } } = {}) {
     [CONCERNS]: { listGrouped: async () => concerns },
     [SETTINGS]: { get: async () => ({ color_uses_end_date: false, crypto_percent: 0 }) },
     [PEOPLE]: { rateMap: async () => new Map([['gloria', { addon: 5, fee: 0 }]]) },
+    // Faked too, or every test reads the real DB's liquidation deadlines.
+    [LIQUIDATIONS]: { dueSoon: async () => [] },
   });
 }
 
