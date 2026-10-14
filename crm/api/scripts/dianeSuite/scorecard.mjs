@@ -88,12 +88,27 @@ export function unsupportedFigures(reply, tools) {
   if (!tools.length) return []; // a reply built in code, with no tool behind it
   const toolText = plain(tools.map((t) => t.output).join('\n'));
   const out = [];
-  for (const m of plain(reply).matchAll(/(?:GBP|AED|EUR|EURO|USD|£|€|\$)\s?(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?)\s?(?:GBP|AED|EUR|EURO|USD)/gi)) {
-    const n = m[1] ?? m[2];
-    if (Number(n) === 0) continue;
-    if (!holdsAmount(toolText, n)) out.push(m[0]);
+  // "£12k" is twelve thousand, not twelve (it was flagged as invented, 2026-10-14).
+  for (const m of plain(reply).matchAll(/(?:GBP|AED|EUR|EURO|USD|£|€|\$)\s?(\d+(?:\.\d+)?)(\s?[km]\b)?|(\d+(?:\.\d+)?)(\s?[km]\b)?\s?(?:GBP|AED|EUR|EURO|USD)/gi)) {
+    const scale = { k: 1e3, m: 1e6 }[String(m[2] ?? m[4] ?? '').trim().toLowerCase()] ?? 1;
+    const n = Number(m[1] ?? m[3]) * scale;
+    if (n === 0) continue;
+    if (!holdsAmount(toolText, n) && !sumOf(toolText, n)) out.push(m[0]);
   }
   return out;
+}
+
+/**
+ * A TOTAL OF THE TOOL'S OWN FIGURES is worked out, not invented: "£31,500
+ * owed in all" from a creditors list of 19,500 and 12,000 (2026-10-14).
+ * Two of them, or all of them.
+ */
+function sumOf(text, amount) {
+  const nums = [...String(text).matchAll(/\d+(?:\.\d+)?/g)].map((x) => Number(x[0])).filter((x) => x > 0).slice(0, 200);
+  const near = (x) => Math.abs(x - amount) < 0.005;
+  if (nums.length > 1 && near(nums.reduce((a, b) => a + b, 0))) return true;
+  for (let i = 0; i < nums.length; i += 1) for (let j = i + 1; j < nums.length; j += 1) if (near(nums[i] + nums[j])) return true;
+  return false;
 }
 
 /** The same call twice in one turn, or a call that could not run. */

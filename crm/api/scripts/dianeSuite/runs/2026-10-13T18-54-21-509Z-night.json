@@ -1,0 +1,242 @@
+{
+  "set": "night",
+  "at": "2026-10-13T18:54:21.509Z",
+  "seconds": 91,
+  "cases": 25,
+  "passed": 15,
+  "passRate": 60,
+  "groups": {
+    "night": {
+      "cases": 25,
+      "passed": 15,
+      "passRate": 60
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 7,
+    "db": 3
+  },
+  "calcAccuracy": null,
+  "inventedRate": 0,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0,
+  "recoveryRate": 66.7,
+  "perTurn": {
+    "turns": 34,
+    "modelRounds": 1.6,
+    "toolCalls": 0.9,
+    "retries": 0.24,
+    "inputTokens": 49037,
+    "cachedPct": 99,
+    "outputTokens": 50,
+    "medianMs": 4447,
+    "slowestMs": 9937
+  },
+  "tokens": {
+    "input": 1667259,
+    "cached": 1646976,
+    "output": 1687
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "send every one",
+      "name": "send every one",
+      "group": "night",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "the deadline, said in full",
+      "name": "the deadline, said in full",
+      "group": "night",
+      "pass": false,
+      "labels": [
+        "answer"
+      ]
+    },
+    {
+      "id": "a company in plain words",
+      "name": "a company in plain words",
+      "group": "night",
+      "pass": false,
+      "labels": [
+        "answer"
+      ]
+    },
+    {
+      "id": "a typo in the ask still lists",
+      "name": "a typo in the ask still lists",
+      "group": "night",
+      "pass": false,
+      "labels": [
+        "answer"
+      ]
+    },
+    {
+      "id": "download all as one",
+      "name": "download all as one",
+      "group": "night",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "open one, loosely named",
+      "name": "open one, loosely named",
+      "group": "night",
+      "pass": false,
+      "labels": [
+        "answer"
+      ]
+    },
+    {
+      "id": "every company in liquidation",
+      "name": "every company in liquidation",
+      "group": "night",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a document that is not there",
+      "name": "a document that is not there",
+      "group": "night",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "the right document with no company named",
+      "name": "the right document with no company named",
+      "group": "night",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a fee from a Word file",
+      "name": "a fee from a Word file",
+      "group": "night",
+      "pass": false,
+      "labels": [
+        "answer"
+      ]
+    },
+    {
+      "id": "lawyer mode plans from the documents",
+      "name": "lawyer mode plans from the documents",
+      "group": "night",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "lawyer mode reads a spreadsheet document",
+      "name": "lawyer mode reads a spreadsheet document",
+      "group": "night",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a figure from a CSV",
+      "name": "a figure from a CSV",
+      "group": "night",
+      "pass": false,
+      "labels": [
+        "answer"
+      ]
+    },
+    {
+      "id": "a total from an Excel file",
+      "name": "a total from an Excel file",
+      "group": "night",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a date from a PDF",
+      "name": "a date from a PDF",
+      "group": "night",
+      "pass": false,
+      "labels": [
+        "answer"
+      ]
+    },
+    {
+      "id": "lawyer mode will not rename",
+      "name": "lawyer mode will not rename",
+      "group": "night",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "save one attachment, said loosely",
+      "name": "save one attachment, said loosely",
+      "group": "night",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    },
+    {
+      "id": "save two attachments at once",
+      "name": "save two attachments at once",
+      "group": "night",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    },
+    {
+      "id": "save with nothing attached",
+      "name": "save with nothing attached",
+      "group": "night",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "rename, company named",
+      "name": "rename, company named",
+      "group": "night",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "rename, no company named",
+      "name": "rename, no company named",
+      "group": "night",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    },
+    {
+      "id": "delete, then undo",
+      "name": "delete, then undo",
+      "group": "night",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "change of mind before yes",
+      "name": "change of mind before yes",
+      "group": "night",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "three changes in one breath",
+      "name": "three changes in one breath",
+      "group": "night",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a deadline in words",
+      "name": "a deadline in words",
+      "group": "night",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}

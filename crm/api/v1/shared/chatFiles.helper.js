@@ -21,7 +21,9 @@ async function keep(file, byUser = null) {
   const ext = path.extname(file.originalname).toLowerCase().slice(0, 12);
   await fs.mkdir(ROOT, { recursive: true });
   const rel = `${id}${ext}`;
-  await fs.writeFile(path.join(ROOT, rel), file.buffer);
+  // ON DISK ALREADY (a video, up to 500 MB, never held in memory): moved in.
+  if (file.path) await fs.rename(file.path, path.join(ROOT, rel)).catch(() => fs.copyFile(file.path, path.join(ROOT, rel)));
+  else await fs.writeFile(path.join(ROOT, rel), file.buffer);
   const mime = typeOf(file.originalname, file.mimetype);
   await pool.query(
     'INSERT INTO tb_chat_files (id, file_name, stored_path, mime, size_bytes, by_user) VALUES ($1, $2, $3, $4, $5, $6)',
@@ -38,8 +40,16 @@ async function take(ids) {
   const { rows } = await pool.query('SELECT * FROM tb_chat_files WHERE id = ANY($1::uuid[])', [list]);
   const out = [];
   for (const r of rows) {
+    const full = path.join(ROOT, path.basename(r.stored_path));
+    // A VIDEO IS NOT READ INTO MEMORY: its transcript job takes the file itself.
+    // eslint-disable-next-line global-require
+    if (require('./videoTranscript.helper').isVideo(r.file_name, r.mime)) {
+      // eslint-disable-next-line no-await-in-loop
+      if (await fs.stat(full).catch(() => null)) out.push({ id: r.id, name: r.file_name, mime: r.mime, path: full, video: true });
+      continue;
+    }
     // eslint-disable-next-line no-await-in-loop
-    const buffer = await fs.readFile(path.join(ROOT, r.stored_path)).catch(() => null);
+    const buffer = await fs.readFile(full).catch(() => null);
     if (buffer) out.push({ id: r.id, name: r.file_name, mime: r.mime, buffer });
   }
   return out;

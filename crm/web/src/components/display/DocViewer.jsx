@@ -44,6 +44,61 @@ function zipOf(list) {
 // A swipe shorter than this is a tap or a scroll.
 const SWIPE_PX = 50;
 
+// THE WAIT IN HER TONE: the page's light skeleton flashed bright grey in her
+// dark viewer for the moment a first document loads (2026-10-14).
+const Wait = ({ dark, className }) => (dark
+  ? <div className={`animate-pulse rounded bg-white/[0.04] ${className}`} aria-hidden="true" />
+  : <Skeleton className={className} />);
+
+/**
+ * ONE CACHE FOR THE SESSION, not one per viewer (his call 2026-10-14: no
+ * delay opening documents). A document opened, hovered or passed once is
+ * there the next time, from her chat or the page alike. A PDF or picture
+ * is kept as its local copy (a blob URL), the oldest let go past CACHE_MAX.
+ * One still being read is never kept: it is asked again next time.
+ */
+const CACHE = new Map();
+const PENDING = new Map();
+const CACHE_MAX = 60;
+const keyOf = (d) => d?.downloadUrl;
+function keep(key, value) {
+  CACHE.delete(key);
+  CACHE.set(key, value);
+  while (CACHE.size > CACHE_MAX) {
+    const [oldest, v] = CACHE.entries().next().value;
+    if (v?.blobUrl) URL.revokeObjectURL(v.blobUrl);
+    CACHE.delete(oldest);
+  }
+}
+/** Loads one document into the cache. Resolves to { read } | { blobUrl } | { error }. */
+export function prefetchDoc(d) {
+  const key = keyOf(d);
+  if (!key) return Promise.resolve(null);
+  if (CACHE.has(key)) return Promise.resolve(CACHE.get(key));
+  if (PENDING.has(key)) return PENDING.get(key);
+  const kind = kindOf(d);
+  const p = (kind === 'text'
+    ? api.get(d.textUrl).then((read) => {
+      const value = { read };
+      if (!STILL_READING.has(read?.status)) keep(key, value);
+      return value;
+    })
+    // A PDF OR A PICTURE IS FETCHED WITH THE SESSION and shown from a local
+    // copy (a blob URL): framed straight from the API it was refused, rightly,
+    // by the API's own headers whenever the page is on another origin (dev).
+    : api.download(d.downloadUrl).then(({ blob }) => {
+      const typed = blob.type && blob.type !== 'application/octet-stream'
+        ? blob : new Blob([blob], { type: kind === 'pdf' ? 'application/pdf' : (d.mime || 'image/png') });
+      const value = { blobUrl: URL.createObjectURL(typed) };
+      keep(key, value);
+      return value;
+    }))
+    .catch((e) => ({ error: e.message }))
+    .finally(() => PENDING.delete(key));
+  PENDING.set(key, p);
+  return p;
+}
+
 export default function DocViewer({
   doc, docs, start = 0, title, tone = 'crm', onClose,
 }) {
@@ -56,43 +111,43 @@ export default function DocViewer({
   const dark = tone === 'diane' || v2;
   const cut = v2 ? 'v2-cut v2-glow' : '';
 
-  // ONE LOAD PER DOCUMENT, kept while the viewer is open: back and forth costs nothing.
-  const [loaded, setLoaded] = useState({});
-  const asked = useRef(new Set());
-  const blobs = useRef(new Set());
+  // FROM THE SESSION'S CACHE AT ONCE when it is there, so a document seen
+  // before opens with no wait at all; anything else as soon as it lands.
+  const [loaded, setLoaded] = useState(() => Object.fromEntries(list.map((d) => [keyOf(d), CACHE.get(keyOf(d))]).filter(([, v]) => v)));
+  const live = useRef(true);
+  useEffect(() => () => { live.current = false; }, []);
   const load = useCallback((d) => {
-    if (!d) return;
-    const key = d.downloadUrl;
-    if (asked.current.has(key)) return;
-    asked.current.add(key);
-    const done = (value) => setLoaded((s) => ({ ...s, [key]: value }));
-    const kind = kindOf(d);
-    if (kind === 'text') {
-      api.get(d.textUrl).then((read) => {
-        // Still being read: asked again when it is next shown.
-        if (STILL_READING.has(read?.status)) asked.current.delete(key);
-        done({ read });
-      }).catch((e) => { asked.current.delete(key); done({ error: e.message }); });
-      return;
-    }
-    // A PDF OR A PICTURE IS FETCHED WITH THE SESSION and shown from a local
-    // copy (a blob URL): framed straight from the API it was refused, rightly,
-    // by the API's own headers whenever the page is on another origin (dev).
-    api.download(d.downloadUrl).then(({ blob }) => {
-      const typed = blob.type && blob.type !== 'application/octet-stream'
-        ? blob : new Blob([blob], { type: kind === 'pdf' ? 'application/pdf' : (d.mime || 'image/png') });
-      const url = URL.createObjectURL(typed);
-      blobs.current.add(url);
-      done({ blobUrl: url });
-    }).catch((e) => { asked.current.delete(key); done({ error: e.message }); });
+    if (!d) return Promise.resolve();
+    const key = keyOf(d);
+    return prefetchDoc(d).then((value) => { if (live.current && value) setLoaded((s) => (s[key] === value ? s : { ...s, [key]: value })); });
   }, []);
-  useEffect(() => () => { for (const u of blobs.current) URL.revokeObjectURL(u); }, []);
 
-  // This one, and the ones either side of it, so the next is already there.
+  // THE WHOLE SET FOLLOWS THE ONE OPENED (from her chat it arrives a moment
+  // later): the viewer stays on that document instead of starting over.
+  const was = useRef({ list, key: keyOf(list[at]) });
   useEffect(() => {
-    load(list[at]);
-    load(list[at + 1]);
-    load(list[at - 1]);
+    if (was.current.list !== list) {
+      const i = list.findIndex((d) => keyOf(d) === was.current.key);
+      was.current.list = list;
+      if (i >= 0 && i !== at) { setAt(i); return; }
+    }
+    was.current.key = keyOf(list[at]);
+  }, [list, at]);
+
+  // This one first, then either side of it, then the rest of the set in the
+  // background, one at a time, so whatever is clicked next is already here.
+  useEffect(() => {
+    let stop = false;
+    (async () => {
+      await load(list[at]);
+      await Promise.all([load(list[at + 1]), load(list[at - 1])]);
+      for (const d of list.slice(0, 20)) {
+        if (stop) return;
+        // eslint-disable-next-line no-await-in-loop
+        await load(d);
+      }
+    })();
+    return () => { stop = true; };
   }, [at, list, load]);
 
   const go = useCallback((step) => setAt((i) => Math.min(Math.max(0, i + step), list.length - 1)), [list.length]);
@@ -161,7 +216,7 @@ export default function DocViewer({
 
   if (!current) return null;
   const kind = kindOf(current);
-  const state = loaded[current.downloadUrl] ?? {};
+  const state = loaded[current.downloadUrl] ?? CACHE.get(current.downloadUrl) ?? {};
   const prev = list[at - 1];
   const next = list[at + 1];
 
@@ -257,7 +312,7 @@ export default function DocViewer({
             </div>
           </div>
 
-          {kind !== 'text' && !state.blobUrl && !state.error && <Skeleton className={`${full ? 'h-[calc(100vh-13rem)]' : 'h-[58vh] md:h-[70vh]'} w-full`} />}
+          {kind !== 'text' && !state.blobUrl && !state.error && <Wait dark={dark} className={`${full ? 'h-[calc(100vh-13rem)]' : 'h-[58vh] md:h-[70vh]'} w-full`} />}
           {state.error && <p className={`text-sm ${muted}`}>{state.error}</p>}
           {/* keyed, so the frame is a new one per document and never shows the last */}
           {kind === 'pdf' && state.blobUrl && <iframe key={state.blobUrl} title={current.name} src={state.blobUrl} className={frame} />}
@@ -267,7 +322,7 @@ export default function DocViewer({
             </div>
           )}
           {kind === 'text' && !state.error && (
-            !state.read ? <Skeleton className="h-[50vh] w-full" />
+            !state.read ? <Wait dark={dark} className="h-[50vh] w-full" />
               : state.read.tables?.length ? (
                 <div className={`${frame} overflow-auto`}>
                   {state.read.tables.map((t, ti) => (

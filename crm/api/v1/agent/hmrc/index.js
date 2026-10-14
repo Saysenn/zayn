@@ -86,6 +86,9 @@ const SYSTEM = (today) => [
   '  statements). Use them to guide them: what a letter asks for, what is due when, what happens next, what the law says',
   '  about it. Name the document a fact came from, and mark it with its source number like any other.',
   '- To find more in their documents use search_company_documents; to read one whole, read_company_document.',
+  '- When you list our companies in liquidation, or give one company\'s details, NAME EVERY DOCUMENT in full, exactly as',
+  '  OUR LIQUIDATIONS writes it (file name and extension), under each company. Never "documents are recorded" or',
+  '  "several documents": the names are what they click to open them.',
   '- You CANNOT change anything here: no stage, deadline, note, document or status. If they ask, say it is done in',
   '  master sheet mode or on the Liquidations page, in one line.',
 ].join('\n');

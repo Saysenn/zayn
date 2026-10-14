@@ -42,7 +42,7 @@ const updateFlags = {
     'FLAGS people raised on WhatsApp (the Flagged page), NOT a deal\'s needs-review mark. Set the flags of '
     + 'one or many people to in progress, resolved or open, or '
     + 'DELETE them. Name people (with their group when they gave one), or use `where` for everyone matching '
-    + '(e.g. every open flag in MILKMAN). All of a person\'s flags in that group move together. '
+    + '(e.g. every open flag in ALPHA). All of a person\'s flags in that group move together. '
     + 'Call with confirmed false first and show the lines; true only after yes. `undo` true puts back the '
     + 'last change you made here AT ONCE (no confirm), deleted flags included.',
   parameters: {

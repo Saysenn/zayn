@@ -124,6 +124,20 @@ export const ImageIcon = (props) => (
   </svg>
 );
 
+export const VideoIcon = (props) => (
+  <svg {...BASE} aria-hidden="true" {...props}>
+    <rect x="2.5" y="6" width="13" height="12" rx="2.5" />
+    <path d="M15.5 10.5l6-3.5v10l-6-3.5" />
+  </svg>
+);
+
+export const DocumentIcon = (props) => (
+  <svg {...BASE} aria-hidden="true" {...props}>
+    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+    <path d="M14 3v5h5M9 13h6M9 17h4" />
+  </svg>
+);
+
 export const SpreadsheetIcon = (props) => (
   <svg {...BASE} aria-hidden="true" {...props}>
     <rect x="3" y="3" width="18" height="18" rx="2.5" />

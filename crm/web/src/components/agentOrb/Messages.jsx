@@ -18,7 +18,8 @@ import SectionedList from './forms/SectionedList';
 import TurnOffer from './TurnOffer';
 import SheetCheck from './forms/SheetCheck';
 import ExpenseImage from './forms/ExpenseImage';
-import FileChip, { CardDocs } from './forms/FileChip';
+import FileChip, { CardDocs, DocNameLink } from './forms/FileChip';
+import { splitDocNames } from './docNames';
 import { SpinnerIcon } from '../icons';
 
 /**
@@ -133,8 +134,15 @@ function Sources({ sources }) {
   );
 }
 
-function Bubble({ text, onOpenDeal }) {
-  return linkify(text, onOpenDeal);
+function Bubble({ text, onOpenDeal, docLinks }) {
+  // THE DOCUMENTS SHE NAMES OPEN (his call 2026-10-14); the rest as before.
+  const pieces = splitDocNames(text, docLinks);
+  if (pieces.length === 1 && !pieces[0].link) return linkify(text, onOpenDeal);
+  return pieces.map((p, i) => (p.link
+    // eslint-disable-next-line react/no-array-index-key
+    ? <DocNameLink key={`d${i}`} file={p.link}>{p.text}</DocNameLink>
+    // eslint-disable-next-line react/no-array-index-key
+    : <span key={`t${i}`}>{linkify(p.text, onOpenDeal)}</span>));
 }
 
 /**
@@ -303,6 +311,7 @@ export default function Messages({
           <Bubble
             text={m.role === 'assistant' && pictured(i) ? shortOf(m.content) : m.content}
             onOpenDeal={m.role === 'assistant' ? onOpenDeal : null}
+            docLinks={m.role === 'assistant' ? m.docLinks : null}
           />
 
           {/* HER SOURCES, LIKE CHATGPT (his call 2026-10-10): hidden behind a

@@ -10,8 +10,11 @@ import Button from '../buttons/Button';
 import Select from '../forms/Select';
 import Toggle from '../forms/Toggle';
 import ConfirmDialog from '../modals/ConfirmDialog';
-import DocViewer, { liquidationDoc } from '../display/DocViewer';
+import DocViewer, { liquidationDoc, prefetchDoc } from '../display/DocViewer';
 import { DownloadIcon } from '../icons';
+import VideoJobs from './VideoJobs';
+import { useVideoUploads } from './useVideoUploads';
+import { isVideoFile } from './videoProgress';
 import { Skeleton } from '../display/Skeleton';
 import { formatMoney } from '../../helpers/formatMoney';
 import { LIQ_STAGES, stageOf, deadlineTone, shortDate, todayIso } from '../../configs/liquidationStages';
@@ -250,7 +253,14 @@ function Docs({ id, docs, detailKey, company }) {
   const rename = useReportingMutation(({ docId, fileName }) => apiService.liquidations.renameDoc(id, docId, fileName), {
     describe: () => 'Document', verb: 'renamed', invalidates: [KEY, detailKey],
   });
-  const send = (list) => { const files = [...list]; if (files.length) upload.mutate(files); };
+  // VIDEOS GO ONE BY ONE, each with its own card; the rest together as before.
+  const videos = useVideoUploads(id, detailKey, docs, setViewing);
+  const send = (list) => {
+    const files = [...list];
+    const rest = files.filter((f) => !isVideoFile(f));
+    if (rest.length) upload.mutate(rest);
+    files.filter(isVideoFile).forEach(videos.start);
+  };
   // A FAILED READING TRIED AGAIN (a network blip, the AI key down): read anew.
   const reread = useReportingMutation((docId) => apiService.liquidations.rereadDoc(id, docId), {
     describe: () => 'Document', verb: 'sent to be read again', invalidates: [KEY, detailKey],
@@ -287,10 +297,19 @@ function Docs({ id, docs, detailKey, company }) {
         onDrop={(e) => { e.preventDefault(); setOver(false); send(e.dataTransfer.files); }}
         className={`flex cursor-pointer flex-col items-center justify-center gap-1 rounded border border-dashed px-3 py-4 text-center transition-colors ${over ? 'border-accent-strong bg-accent-tint' : 'border-border-strong hover:border-accent-strong hover:bg-surface-sunken'}`}
       >
-        <span className="text-sm font-semibold text-text">{upload.isPending ? 'Uploading…' : 'Drop files here, or click to pick'}</span>
+        <span className="text-sm font-semibold text-text">{upload.isPending ? 'Uploading…' : 'Drop files or videos here, or click to pick'}</span>
         <span className="text-xs text-text-faint">Any document: PDF, Word, Excel, CSV, pictures, text, email. Up to 20 at once, 25 MB each.</span>
+        <span className="text-xs text-text-faint">A video (up to 500 MB) becomes a written transcript. The video itself is not kept.</span>
         <input ref={input} type="file" multiple className="hidden" onChange={(e) => { send(e.target.files); e.target.value = ''; }} />
       </div>
+
+      <VideoJobs
+        cards={videos.cards}
+        onCancel={videos.cancel}
+        onDismiss={videos.dismiss}
+        onRetry={(card) => { videos.dismiss(card); input.current?.click(); }}
+        onOpen={videos.open}
+      />
 
       {docs.length > 0 && (
         <>
@@ -312,7 +331,7 @@ function Docs({ id, docs, detailKey, company }) {
           )}
           <ul className="divide-y divide-border rounded border border-border">
             {docs.map((d) => (
-              <li key={d.id} className={`flex items-center gap-3 px-3 py-2 text-sm ${ticked.has(d.id) ? 'bg-accent-tint/40' : ''}`}>
+              <li key={d.id} className={`flex items-center gap-3 px-3 py-2 text-sm transition-colors duration-700 ${ticked.has(d.id) ? 'bg-accent-tint/40' : videos.fresh === d.id ? 'bg-success-tint' : ''}`}>
                 <input type="checkbox" checked={ticked.has(d.id)} onChange={() => toggle(d.id)} aria-label={`Select ${d.file_name}`} />
                 <span className="w-11 shrink-0 rounded bg-surface-sunken px-1.5 py-0.5 text-center text-[10px] font-semibold text-text-muted">{extOf(d.file_name)}</span>
                 {renaming === d.id ? (
@@ -326,7 +345,7 @@ function Docs({ id, docs, detailKey, company }) {
                     {/* THE NAME ON ITS OWN LINE, what it is under it: on a phone
                         the name kept a few letters beside the status and size. */}
                     <div className="min-w-0 flex-1">
-                      <button type="button" onClick={() => setViewing(d)} className="block min-h-0 w-full justify-start truncate border-0 bg-transparent p-0 text-left font-medium text-text hover:text-accent-strong hover:underline" title={`Open ${d.file_name}`}>
+                      <button type="button" onClick={() => setViewing(d)} onMouseEnter={() => prefetchDoc(liquidationDoc(id, d))} onFocus={() => prefetchDoc(liquidationDoc(id, d))} className="block min-h-0 w-full justify-start truncate border-0 bg-transparent p-0 text-left font-medium text-text hover:text-accent-strong hover:underline" title={`Open ${d.file_name}`}>
                         {d.file_name}
                       </button>
                       <p className="mt-0.5 truncate text-xs text-text-muted">

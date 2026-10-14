@@ -102,6 +102,24 @@ function line(r, today) {
   return bits.join(' · ');
 }
 
+/**
+ * THE WHOLE OF ONE COMPANY ON THE PAGE: "show me zz harbour test in full"
+ * was looked up on the master sheet and not found (his screenshot 2026-10-14).
+ */
+const WANTS_ALL = /\b(?:in full|full details|details|about|info|information|overview|summary|rundown|everything)\b/;
+
+/** "update on X" as the noun it is: news, never a change. */
+// The word in front stays: "any news on" is still a question (ASK_START).
+const asNews = (text) => text.replace(/\bupdates?\s+(?:on|for|about|with|re)\b/g, 'news on');
+
+/** "a, b and c", the first `max` then "and N more" (the rest are in the viewer). */
+function namesList(names, max = 8) {
+  const shown = names.slice(0, max);
+  const more = names.length - shown.length;
+  if (more > 0) return `${shown.join(', ')} and ${more} more`;
+  return shown.length > 1 ? `${shown.slice(0, -1).join(', ')} and ${shown.at(-1)}` : (shown[0] ?? '');
+}
+
 /** One letter added, dropped or changed. */
 function near(a, b) {
   if (a === b) return true;
@@ -200,7 +218,8 @@ const listLiquidations = {
         // "•", a real bullet: stripMarkdown takes "- " and "1." off a reply
         // (his screenshot 2026-10-13: the list had no bullets at all).
         ...d.comms.slice(0, 8).map((c) => `• ${sayDay(String(c.said_on).slice(0, 10))}: ${c.body}`),
-        `Documents (${d.docs.length}):${d.docs.length ? ', open them with View documents' : ' none'}`,
+        // "Documents (8):, open them" read as a typo (his screenshot 2026-10-14).
+        `Documents (${d.docs.length})${d.docs.length ? ', open them with View documents:' : ': none'}`,
         ...d.docs.map((x) => `• ${x.file_name} (${READ_WORD[x.read_status] ?? x.read_status})`),
         `Stage history:${d.history.length ? '' : ' no changes'}`,
         ...d.history.slice(0, 6).map((h) => `• ${stageName(h.from_stage)} → ${stageName(h.to_stage)}, ${sayDay(new Date(h.changed_at).toISOString().slice(0, 10))}${h.by_user ? `, by ${h.by_user}` : ''}`),
@@ -227,8 +246,16 @@ const listLiquidations = {
       const reply = `No companies in liquidation${scope ? ` (${scope})` : ''}.`;
       return { summary: reply, reply, computedReply: true };
     }
+    // EVERY COMPANY'S DOCUMENTS ON ITS LINE (his call 2026-10-14), named so
+    // each opens from her words. One query for all of them.
+    const docsOf = new Map();
+    for (const d of await repo.docNames().catch(() => [])) docsOf.set(d.liquidation_id, [...(docsOf.get(d.liquidation_id) ?? []), d]);
+    const docsBit = (r) => {
+      const docs = (docsOf.get(r.id) ?? []).sort((a, b) => b.id - a.id);
+      return docs.length ? ` · documents: ${namesList(docs.map((d) => d.file_name))}` : ' · no documents';
+    };
     const reply = `${rows.length} ${rows.length === 1 ? 'company' : 'companies'} in liquidation${scope ? ` (${scope})` : ''}:\n`
-      + rows.slice(0, MAX_ROWS).map((r) => `• ${line(r, today)}`).join('\n')
+      + rows.slice(0, MAX_ROWS).map((r) => `• ${line(r, today)}${docsBit(r)}`).join('\n')
       + (rows.length > MAX_ROWS ? `\n…and ${rows.length - MAX_ROWS} more on the Liquidations page.` : '');
     return { summary: reply, reply, computedReply: true };
   },
@@ -571,7 +598,8 @@ const liquidationDocument = {
       }
       // DOWNLOADING SEVERAL is the viewer's Download all, one zip (his call 2026-10-13).
       const zipNote = picked.length > 1 && /\b(?:download|zip)\b/i.test(String(args.said ?? '')) ? ' Download all, in the viewer, saves them as one zip.' : '';
-      const reply = `${picked.length === 1 ? `Here is ${picked[0].file_name} from ${row.company_name}.` : `Here are ${picked.length} documents from ${row.company_name}.`}${zipNote}`;
+      // NAMED, so each opens from her words too (his call 2026-10-14).
+      const reply = `${picked.length === 1 ? `Here is ${picked[0].file_name} from ${row.company_name}.` : `Here are ${picked.length} documents from ${row.company_name}: ${namesList(picked.map((d) => d.file_name))}.`}${zipNote}`;
       return { summary: reply, reply, computedReply: true, files: picked.map((d) => docView(row.id, d)) };
     }
 
@@ -585,7 +613,12 @@ const liquidationDocument = {
       }
       const chosen = names.length ? attached.filter((f) => names.some((n) => fold(f.filename).includes(fold(n)) || fold(n).includes(fold(f.filename)))) : attached;
       if (!chosen.length) return { summary: `None of the attached files is called ${names.join(', ')}. Attached: ${attached.map((f) => f.filename).join(', ')}. Ask which.` };
-      const lines = chosen.map((f) => `• ${f.filename} → ${row.company_name}`);
+      // eslint-disable-next-line global-require
+      const video = require('../../shared/videoTranscript.helper');
+      // A VIDEO BECOMES ITS TRANSCRIPT, and the video is not kept (his call 2026-10-14).
+      const lines = chosen.map((f) => (video.isVideo(f.filename)
+        ? `• ${f.filename} → ${row.company_name}, as its written transcript (the video is not kept)`
+        : `• ${f.filename} → ${row.company_name}`));
       const pending = confirmFirst(args.confirmed, {
         act: `save ${chosen.length === 1 ? 'this file' : 'these files'} to ${row.company_name}'s documents`,
         count: chosen.length, noun: 'file', keeps: 'Each is read so you can ask about it.', lines,
@@ -596,14 +629,30 @@ const liquidationDocument = {
       const files = await require('../../shared/chatFiles.helper').take(chosen.map((f) => f.fileId));
       if (!files.length) return { summary: 'NOTHING HAS BEEN SAVED: the attached files are no longer here (over a day old, or the server restarted). Ask them to attach them again.' };
       const saved = [];
+      const jobs = [];
       for (const f of files) {
+        if (f.video) {
+          // Moved out of the chat's files: the job owns it now, and removes it.
+          const tmp = require('node:path').join(video.TEMP_ROOT, 'uploads', `chat-${f.id}${require('node:path').extname(f.name)}`); // eslint-disable-line global-require
+          // eslint-disable-next-line no-await-in-loop
+          await require('node:fs/promises').mkdir(require('node:path').dirname(tmp), { recursive: true }); // eslint-disable-line global-require
+          // eslint-disable-next-line no-await-in-loop, global-require
+          await require('node:fs/promises').rename(f.path, tmp);
+          jobs.push(video.view(video.start(row.id, {
+            videoPath: tmp, fileName: f.name, names: [row.company_name, row.liquidator, row.owner], origin: 'chat',
+          }, BY)));
+          continue;
+        }
         // eslint-disable-next-line no-await-in-loop
         saved.push(await storeDoc(row.id, { buffer: f.buffer, originalName: f.name, mime: f.mime }, BY));
       }
-      await undoRepo.record('documents', `${saved.length} ${saved.length === 1 ? 'document' : 'documents'} saved to ${row.company_name}`, { saved: saved.map((d) => ({ rowId: row.id, id: d.id })) }, BY);
+      if (saved.length) await undoRepo.record('documents', `${saved.length} ${saved.length === 1 ? 'document' : 'documents'} saved to ${row.company_name}`, { saved: saved.map((d) => ({ rowId: row.id, id: d.id })) }, BY);
       broadcast(null, 'liquidations:changed', { via: 'agent' });
-      const reply = `Saved to ${row.company_name}: ${saved.map((d) => d.file_name).join(', ')}. ${saved.length === 1 ? 'It is' : 'They are'} being read now, so you can ask about ${saved.length === 1 ? 'it' : 'them'} in a moment.`;
-      return { summary: reply, reply, computedReply: true };
+      const parts = [];
+      if (saved.length) parts.push(`Saved to ${row.company_name}: ${namesList(saved.map((d) => d.file_name))}. ${saved.length === 1 ? 'It is' : 'They are'} being read now, so you can ask about ${saved.length === 1 ? 'it' : 'them'} in a moment.`);
+      if (jobs.length) parts.push(`Transcribing ${namesList(jobs.map((j) => j.fileName))} now. ${jobs.length === 1 ? 'Its transcript is' : 'Their transcripts are'} saved to ${row.company_name}'s documents when ${jobs.length === 1 ? 'it is' : 'they are'} done, and the video is not kept.`);
+      const reply = parts.join(' ');
+      return { summary: reply, reply, computedReply: true, videoJobs: jobs };
     }
 
     const { picked, unmatched } = pickDocs(docs, names);
@@ -845,7 +894,9 @@ const DOC_FACTS = /\b(?:hearing|court|petition|fees?|charg\w*|cost us|costs?|cre
 const ASK_START = /\?\s*$|^\s*(?:what|whats|what's|which|who|whos|who's|how|hows|how's|is|are|do|does|did|any|when|whens|when's|where|tell me|give me|show|list|update me|remind me)\b/;
 const CHANGE = /\b(?:set|change|move|push|bring forward|update|make|mark|rename|remove|delete|add|log|note that|put|save|file|upload|attach)\b/;
 async function liquidationRoute(said, { hasFiles = false } = {}) {
-  const text = fold(said);
+  // "ANY UPDATE ON QUARRY LANE" asks for news; "update" alone is a change
+  // word, and the question went to the sheet's status (night run 2026-10-14).
+  const text = asNews(fold(said));
   await loadNames();
   const liqWords = /\b(?:in liquidation|winding up|wound up|being liquidated|liquidations)\b/.test(text);
   const company = pageNames.companies.find((n) => new RegExp(`\\b${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:'?s)?\\b`).test(text));
@@ -863,11 +914,13 @@ async function liquidationRoute(said, { hasFiles = false } = {}) {
   if (company && DOC_WORDS.test(text) && /\b(?:have|got|on file|list|which|any)\b/.test(text) && !/\b(?:say|says|said|mention\w*|according)\b/.test(text) && !DOC_FACTS.test(text)) return 'liquidation_document';
   // "DOWNLOAD / SEE EVERYTHING ON FILE / THE PAPERWORK" for a company on the page.
   if (company && DOC_WORDS.test(text) && /\b(?:see|show|open|send|view|download|zip|everything|all)\b/.test(text) && !/\b(?:say|says|said|mention)\b/.test(text)) return 'liquidation_document';
-  if (!asks) return null;
+  // "ZZ HARBOUR TEST LTD DETAILS" asks without a question word (2026-10-14).
+  if (!asks && !(company && WANTS_ALL.test(text) && !CHANGE.test(text))) return null;
   if (!company && liqWords && !CHANGE.test(text.replace(ASK_START, ''))) return 'list_liquidations';
   if (company && DOC_FACTS.test(text) && !CHANGE.test(text.replace(ASK_START, ''))) return 'search_company_documents';
   if (company && !DOC_WORDS.test(text) && !CHANGE.test(text.replace(ASK_START, ''))
-    && /\b(?:deadlines?|due|how long|time left|liquidators?|stage|next action|instructions|liquidation|going on|happening|latest|status|update|where are we|details|everything|news|rundown)\b/.test(text)) return 'list_liquidations';
+    && (/\b(?:deadlines?|due|how long|time left|liquidators?|stage|next action|instructions|liquidation|going on|happening|latest|status|update|where are we|details|everything|news|rundown)\b/.test(text)
+      || WANTS_ALL.test(text))) return 'list_liquidations';
   const liquidator = pageNames.liquidators.find((n) => new RegExp(`\\b${n}\\b`).test(text));
   if (liquidator && !CHANGE.test(text.replace(ASK_START, ''))) return 'search_company_documents';
   return null;
@@ -920,6 +973,6 @@ async function liquidationPlan(said, { hasFiles = false } = {}) {
 }
 
 module.exports = {
-  namesADocument, liquidationRoute, liquidationPlan,
+  namesADocument, liquidationRoute, liquidationPlan, namesList, asNews,
   liquidationTools, listLiquidations, updateLiquidation, liquidationDocument, searchCompanyDocuments, readCompanyDocument, stageFrom,
 };

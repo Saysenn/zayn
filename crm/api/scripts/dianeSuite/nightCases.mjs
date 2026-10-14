@@ -184,7 +184,7 @@ const BARE_LIST = /^\s*(?:-|\d+\.)\s/m;
 
 // ================= READING: details, lists, opening =================
 read('a company in plain words', [
-  { say: ask(["what's going on with quarry lane?", 'any update on quarry lane', 'whats the latest with quarry lane'], ['where are we with quarry lane?', 'give me the rundown on quarry lane', 'tell me everything about quarry lane']), expect: { reply: /Begbies/i, noReply: SHORT_DAY, files: /petition/i } },
+  { say: ask(["what's going on with quarry lane?", 'any update on quarry lane', 'whats the latest with quarry lane'], ['where are we with quarry lane?', 'give me the rundown on quarry lane', 'tell me everything about quarry lane', 'show me quarry lane in full', 'any update on quarry lane']), expect: { reply: /Begbies/i, noReply: SHORT_DAY, files: /petition/i } },
 ]);
 read('the deadline, said in full', [
   { say: ask(['when is quarry lanes deadline', "what's the deadline for quarry lane", 'quarry lane deadline?'], ['when does quarry lane have to be done by', 'remind me of the quarry lane deadline', 'how long have we got on quarry lane']), expect: { reply: /(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)/, noReply: SHORT_DAY } },

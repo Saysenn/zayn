@@ -1,0 +1,137 @@
+{
+  "set": "docs",
+  "at": "2026-10-13T14:18:09.012Z",
+  "seconds": 33,
+  "cases": 11,
+  "passed": 5,
+  "passRate": 45.5,
+  "groups": {
+    "docs": {
+      "cases": 11,
+      "passed": 5,
+      "passRate": 45.5
+    }
+  },
+  "failuresByLabel": {
+    "tool": 1,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 3,
+    "db": 3
+  },
+  "calcAccuracy": null,
+  "inventedRate": 0,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0,
+  "recoveryRate": null,
+  "perTurn": {
+    "turns": 16,
+    "modelRounds": 1.2,
+    "toolCalls": 0.7,
+    "retries": 0,
+    "inputTokens": 37422,
+    "cachedPct": 99,
+    "outputTokens": 34,
+    "medianMs": 2919,
+    "slowestMs": 10860
+  },
+  "tokens": {
+    "input": 598756,
+    "cached": 594944,
+    "output": 542
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "lawyer mode reads the petition and guides",
+      "name": "lawyer mode reads the petition and guides",
+      "group": "docs",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "list a company's documents",
+      "name": "list a company's documents",
+      "group": "docs",
+      "pass": false,
+      "labels": [
+        "tool",
+        "answer"
+      ]
+    },
+    {
+      "id": "answer from what a document says",
+      "name": "answer from what a document says",
+      "group": "docs",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a figure from a spreadsheet document",
+      "name": "a figure from a spreadsheet document",
+      "group": "docs",
+      "pass": false,
+      "labels": [
+        "answer"
+      ]
+    },
+    {
+      "id": "lawyer mode knows our liquidations",
+      "name": "lawyer mode knows our liquidations",
+      "group": "docs",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "open one in the chat",
+      "name": "open one in the chat",
+      "group": "docs",
+      "pass": false,
+      "labels": [
+        "answer"
+      ]
+    },
+    {
+      "id": "lawyer mode changes nothing",
+      "name": "lawyer mode changes nothing",
+      "group": "docs",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "save a file attached in the chat onto a company",
+      "name": "save a file attached in the chat onto a company",
+      "group": "docs",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    },
+    {
+      "id": "remove one, then undo puts it back",
+      "name": "remove one, then undo puts it back",
+      "group": "docs",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    },
+    {
+      "id": "rename one",
+      "name": "rename one",
+      "group": "docs",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "remove several at once",
+      "name": "remove several at once",
+      "group": "docs",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    }
+  ]
+}

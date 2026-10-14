@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { PaperclipIcon } from '../../icons';
-import DocViewer, { liquidationDoc } from '../../display/DocViewer';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { PaperclipIcon, DocumentIcon } from '../../icons';
+import DocViewer, { liquidationDoc, prefetchDoc } from '../../display/DocViewer';
 import { apiService } from '../../../configs/api.config';
 
 /**
@@ -30,6 +30,20 @@ function idsOf(file) {
   };
 }
 
+/**
+ * WARM ON HOVER (his call 2026-10-14: no delay opening documents): the file
+ * and its company's set start loading while the pointer is on the name, so
+ * the click opens what is already here.
+ */
+function useWarm() {
+  const qc = useQueryClient();
+  return (files) => {
+    for (const f of files.slice(0, 3)) prefetchDoc(asDoc(f));
+    const { rowId } = idsOf(files[0]);
+    if (rowId) qc.prefetchQuery({ queryKey: ['liquidations', rowId], queryFn: () => apiService.liquidations.get(rowId), staleTime: 30_000 });
+  };
+}
+
 /** The viewer over `files`, at `first`: the company's whole set when they are one company's. */
 function SetViewer({ files, first, onClose }) {
   const { rowId, docId } = idsOf(first);
@@ -45,9 +59,9 @@ function SetViewer({ files, first, onClose }) {
     ? Math.max(0, data.docs.findIndex((d) => d.id === docId))
     : Math.max(0, files.indexOf(first));
   return (
-    // keyed by the set's arrival, so it opens at this document either way
+    // NOT REMOUNTED when the set arrives (it was, and opened twice): the
+    // viewer keeps the document on screen and the set fills in around it.
     <DocViewer
-      key={set ? 'set' : 'given'}
       docs={docs}
       start={start}
       title={set && data?.row?.company_name ? `${data.row.company_name} · documents` : undefined}
@@ -61,10 +75,13 @@ function SetViewer({ files, first, onClose }) {
 /** One document, as a chip of its own (a reply with no card to sit in). */
 export default function FileChip({ file }) {
   const [open, setOpen] = useState(false);
+  const warm = useWarm();
   return (
     <>
       <button
         type="button"
+        onMouseEnter={() => warm([file])}
+        onFocus={() => warm([file])}
         onClick={() => setOpen(true)}
         className="dm-file inline-flex min-h-0 max-w-full items-center gap-2 rounded-md border border-diane-line bg-transparent px-3 py-2 text-left text-sm text-diane-signal hover:border-diane-signal"
         title={`Open ${file.name}`}
@@ -79,17 +96,46 @@ export default function FileChip({ file }) {
 }
 
 /**
+ * A DOCUMENT NAMED IN HER WORDS (his call 2026-10-14): the name itself is
+ * the link, in her sentence, styled like a deal's #id. Opens the viewer at
+ * it, with its company's whole set beside it.
+ */
+export function DocNameLink({ file, children }) {
+  const [open, setOpen] = useState(false);
+  const warm = useWarm();
+  return (
+    <>
+      <button
+        type="button"
+        onMouseEnter={() => warm([file])}
+        onFocus={() => warm([file])}
+        onClick={() => setOpen(true)}
+        title={`Open ${file.name}`}
+        className="dm-doclink inline min-h-0 border-0 bg-transparent p-0 text-left font-semibold text-diane-signal underline decoration-diane-line underline-offset-2 hover:decoration-diane-signal"
+      >
+        <DocumentIcon width={11} height={11} className="mr-0.5 inline-block -translate-y-px align-middle" />
+        {children}
+      </button>
+      {open && <SetViewer files={[file]} first={file} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+/**
  * THE DOCUMENTS ON HER ANSWER CARD (his call 2026-10-13): five chips above
  * the card were "outside the card response". One small button inside it,
  * the way her sources sit, opening the viewer with every one.
  */
 export function CardDocs({ files }) {
   const [open, setOpen] = useState(false);
+  const warm = useWarm();
   const one = files.length === 1;
   return (
     <div className="mt-2">
       <button
         type="button"
+        onMouseEnter={() => warm(files)}
+        onFocus={() => warm(files)}
         onClick={() => setOpen(true)}
         className="dm-chip inline-flex min-h-0 max-w-full items-center gap-1.5 rounded-full border border-diane-line/40 bg-transparent px-2 py-0.5 text-[10px] text-diane-dim hover:border-diane-signal/60 hover:text-diane-signal"
         title={files.map((f) => f.name).join(', ')}

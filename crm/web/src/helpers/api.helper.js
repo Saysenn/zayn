@@ -55,10 +55,15 @@ const jsonBody = (body) => (body != null ? JSON.stringify(body) : undefined);
 // `fetch` has no clean event for on the upload side — only XHR exposes
 // `upload.onprogress`, so this uses XHR instead of `request()`'s fetch,
 // deliberately, just for this one call.
-function uploadRequest(path, formData, onProgress) {
+// `signal` (an AbortController's) stops it mid-upload: a video's Cancel.
+function uploadRequest(path, formData, onProgress, signal) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${BASE_URL}${path}`);
+    if (signal) {
+      if (signal.aborted) { reject(new DOMException('Cancelled', 'AbortError')); return; }
+      signal.addEventListener('abort', () => { xhr.abort(); reject(new DOMException('Cancelled', 'AbortError')); }, { once: true });
+    }
     xhr.withCredentials = true; // send the httpOnly session cookie, same as credentials: 'include'
 
     xhr.upload.onprogress = (e) => {

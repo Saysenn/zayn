@@ -24,10 +24,19 @@ const {
   onDisk, moveAside, storeDoc, NEVER, MAX_DOC_BYTES, typeOf,
 } = require('./shared/liquidationDocs.helper');
 const docIndex = require('./shared/liquidationDocIndex');
+const video = require('./shared/videoTranscript.helper');
+
+// ON DISK, NOT IN MEMORY: a video can be 500 MB (his call 2026-10-14). The
+// 25 MB rule for everything else is checked once the files are in.
+const UPLOAD_TMP = require('node:path').join(video.TEMP_ROOT, 'uploads');
+// A restart's leftovers (a video it never finished) go now.
+video.sweepTemp().then(() => fs.mkdir(UPLOAD_TMP, { recursive: true })).catch(() => null);
 const upload = multer({
-  storage: multer.memoryStorage(),
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => fs.mkdir(UPLOAD_TMP, { recursive: true }).then(() => cb(null, UPLOAD_TMP), cb),
+  }),
   // SEVERAL AT ONCE, any kind of document; never a program.
-  limits: { fileSize: MAX_DOC_BYTES, files: 20 },
+  limits: { fileSize: video.MAX_VIDEO_BYTES, files: 20 },
   fileFilter(req, file, cb) {
     const ok = !NEVER.test(file.originalname);
     cb(ok ? null : new AppError(400, `${file.originalname} is a program, not a document, so it is not kept.`), ok);
@@ -109,6 +118,11 @@ router.get('/liquidations/download', async (req, res, next) => {
   }
 });
 
+/** Videos sent to a company from Diane's chat, being made transcripts: her chat's cards. Before /:id. */
+router.get('/liquidations/video-jobs', (req, res) => {
+  res.json({ jobs: video.fromChat() });
+});
+
 router.get('/liquidations/:id', async (req, res, next) => {
   try {
     const row = await repo.findById(id(req));
@@ -151,26 +165,53 @@ router.post('/liquidations/:id/comms', async (req, res, next) => {
 router.post('/liquidations/:id/docs', (req, res, next) => {
   // `files` for several, `file` for one (the page's first upload sent that).
   upload.fields([{ name: 'files', maxCount: 20 }, { name: 'file', maxCount: 1 }])(req, res, async (uploadErr) => {
+    const files = [...(req.files?.files ?? []), ...(req.files?.file ?? [])];
+    // Every temp file not handed to a video job goes, whatever happens here.
+    const handed = new Set();
     try {
       if (uploadErr) {
-        if (uploadErr.code === 'LIMIT_FILE_SIZE') return next(new AppError(400, 'A file is over 25 MB.'));
+        if (uploadErr.code === 'LIMIT_FILE_SIZE') return next(new AppError(400, 'A video is over 500 MB.'));
         if (uploadErr.code === 'LIMIT_FILE_COUNT' || uploadErr.code === 'LIMIT_UNEXPECTED_FILE') return next(new AppError(400, 'Up to 20 files at once.'));
         return next(uploadErr instanceof AppError ? uploadErr : new AppError(400, uploadErr.message));
       }
-      const files = [...(req.files?.files ?? []), ...(req.files?.file ?? [])];
       if (!files.length) return next(new AppError(400, 'Pick a file to upload.'));
-      if (!(await repo.findById(id(req)))) return next(new AppError(404, 'That company is not on the Liquidations page.'));
+      const big = files.find((f) => !video.isVideo(f.originalname, f.mimetype) && f.size > MAX_DOC_BYTES);
+      if (big) return next(new AppError(400, `${big.originalname} is over 25 MB.`));
+      const row = await repo.findById(id(req));
+      if (!row) return next(new AppError(404, 'That company is not on the Liquidations page.'));
       const docs = [];
+      const jobs = [];
       for (const f of files) {
-        // eslint-disable-next-line no-await-in-loop
-        docs.push(await storeDoc(id(req), { buffer: f.buffer, originalName: f.originalname, mime: f.mimetype }, sessionUser(req)));
+        if (video.isVideo(f.originalname, f.mimetype)) {
+          // NOT KEPT: it becomes its transcript, after this answers.
+          handed.add(f.path);
+          jobs.push(video.view(video.start(id(req), {
+            videoPath: f.path, fileName: f.originalname, names: [row.company_name, row.liquidator, row.owner],
+          }, sessionUser(req))));
+        } else {
+          // eslint-disable-next-line no-await-in-loop
+          docs.push(await storeDoc(id(req), { buffer: await fs.readFile(f.path), originalName: f.originalname, mime: f.mimetype }, sessionUser(req)));
+        }
       }
-      changed({ id: id(req) });
-      res.status(201).json({ docs, doc: docs[0] });
+      if (docs.length) changed({ id: id(req) });
+      res.status(201).json({ docs, doc: docs[0] ?? null, jobs });
     } catch (err) {
       next(err);
+    } finally {
+      await Promise.all(files.filter((f) => !handed.has(f.path)).map((f) => fs.rm(f.path, { force: true }).catch(() => null)));
     }
   });
+});
+
+/** A company's videos being made into transcripts: the page asks every 2 seconds. */
+router.get('/liquidations/:id/video-jobs', (req, res) => {
+  res.json({ jobs: video.forCompany(id(req)) });
+});
+
+router.post('/liquidations/:id/video-jobs/:jobId/cancel', (req, res, next) => {
+  const job = video.cancel(id(req), req.params.jobId);
+  if (!job) return next(new AppError(404, 'That video is no longer being worked on.'));
+  return res.json({ job: video.view(job) });
 });
 
 /** Rename: the name shown, never the file on disk. */

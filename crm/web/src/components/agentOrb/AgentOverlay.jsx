@@ -9,6 +9,10 @@ import { setSpeechPersona } from './speechPersona';
 import { useFollowScroll } from './useFollowScroll';
 import { apiService } from '../../configs/api.config';
 import { saveBlob } from '../../helpers/api.helper';
+// The upload with its %, for a video (the rest of her uploads stay on fetch).
+import { api } from '../../helpers/api.helper';
+import ChatVideoJobs from './ChatVideoJobs';
+import { isVideoFile, MAX_VIDEO_BYTES } from '../liquidations/videoProgress';
 import { useDiane, CONTEXTS } from './DianeContext';
 import { useSession } from '../../hooks/useAuth';
 import { useSettings, useUpdateSettings } from '../../hooks/useSettings';
@@ -997,7 +1001,7 @@ export default function AgentOverlay({ open, onClose }) {
       // per token: history is what gets sent back to the model next turn,
       // and a half-finished sentence must never end up in it.
       const {
-        reply, claims = [], offer = null, spoken = null, evidence = null, sources = null,
+        reply, claims = [], offer = null, spoken = null, evidence = null, sources = null, docLinks = null,
       } = await whenReachable(() => apiService.masterSheet.agentTurn(
         nextHistory,
         inContext ?? context,
@@ -1297,7 +1301,7 @@ export default function AgentOverlay({ open, onClose }) {
         ...h,
         // `evidence`: the deal ids behind a figure, so "where did that come
         // from?" can list them (api agent/evidence.js). Only on a money answer.
-        { role: 'assistant', content: reply, claims, ...(evidence ? { evidence } : {}), ...(sources?.length ? { sources } : {}) },
+        { role: 'assistant', content: reply, claims, ...(evidence ? { evidence } : {}), ...(sources?.length ? { sources } : {}), ...(docLinks?.length ? { docLinks } : {}) },
         /**
          * AUTO MODE, AS ITS OWN TURN. After the answer, never inside it:
          * a change she just made and a question about how she works are
@@ -1482,6 +1486,8 @@ export default function AgentOverlay({ open, onClose }) {
    */
   const fileRef = useRef(null);
   const [attaching, setAttaching] = useState(false);
+  // A video on its way up: { name, pct }, shown on the chip until it lands.
+  const [uploadingVideo, setUploadingVideo] = useState(null);
   const [attached, setAttached] = useState(null);
   // A file belongs to the context it was attached in: a deals sheet held
   // when switching to Expenses (or a receipt the other way) is dropped.
@@ -1500,6 +1506,17 @@ export default function AgentOverlay({ open, onClose }) {
       const upload = async (file) => {
         const body = new FormData();
         body.append('file', file);
+        // A VIDEO, to be saved to a company as its transcript (his call
+        // 2026-10-14): up to 500 MB, with its upload % on the chip.
+        if (route === 'master-sheet/agent/attach' && isVideoFile(file)) {
+          if (file.size > MAX_VIDEO_BYTES) throw new Error(`${file.name} is over 500 MB. Trim it or lower its quality, then attach it again.`);
+          setUploadingVideo({ name: file.name, pct: 0 });
+          try {
+            return await api.upload(`/api/v1/${route}`, body, (pct) => setUploadingVideo({ name: file.name, pct }));
+          } finally {
+            setUploadingVideo(null);
+          }
+        }
         const res = await whenReachable(() => fetch(`${BASE_URL}/api/v1/${route}`, { method: 'POST', credentials: 'include', body }));
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || data.message || `I couldn't open ${file.name}. Is it an Excel, CSV or text file?`);
@@ -1517,7 +1534,7 @@ export default function AgentOverlay({ open, onClose }) {
         for (const file of list.slice(0, room)) {
           // eslint-disable-next-line no-await-in-loop
           const data = await upload(file);
-          got.push({ filename: data.filename, fileId: data.fileId, kind: /^image\//.test(data.mime) ? 'picture' : /pdf/.test(data.mime) ? 'PDF' : 'file' });
+          got.push({ filename: data.filename, fileId: data.fileId, kind: data.video ? 'video' : /^image\//.test(data.mime) ? 'picture' : /pdf/.test(data.mime) ? 'PDF' : 'file' });
           if (!sheet && (data.tables?.length || data.text)) sheet = { text: data.text ?? '', tables: data.tables ?? [], lines: data.lines };
         }
         const files = [...already, ...got];
@@ -1648,7 +1665,9 @@ export default function AgentOverlay({ open, onClose }) {
       if (tag === 'BUTTON' || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       // The message box is a contentEditable div, so it's a containment
       // test rather than a tag check.
-      if (el?.isContentEditable && input.trim().length > 0) return;
+      // THE BOX ITSELF, not `input`: that copy lags a keystroke behind fast
+      // typing, and a space read as "empty" opened the mic mid-sentence.
+      if (el?.isContentEditable && ((el.innerText ?? '').trim().length > 0 || input.trim().length > 0)) return;
 
       e.preventDefault(); // or the page scrolls behind the overlay
       toggleMicRef.current();
@@ -1889,6 +1908,20 @@ export default function AgentOverlay({ open, onClose }) {
   );
   const composerEl = (
           <form onSubmit={handleSubmit}>
+            {/* VIDEOS SHE IS MAKING INTO TRANSCRIPTS, from this chat (2026-10-14). */}
+            <ChatVideoJobs nudge={history.length} />
+            {uploadingVideo && (
+              <div className="mb-2 flex items-center gap-2 text-[11px] text-diane-signal" aria-live="polite">
+                <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-diane-signal/50 bg-diane-signal/10 px-3 py-1">
+                  <PaperclipIcon width={12} height={12} />
+                  <span className="truncate max-w-[14rem]">{uploadingVideo.name}</span>
+                  <span className="tabular-nums text-white/50">· uploading {uploadingVideo.pct}%</span>
+                </span>
+                <span className="h-1 w-24 overflow-hidden rounded-full bg-white/10">
+                  <span className="block h-full rounded-full bg-diane-signal transition-[width] duration-300" style={{ width: `${Math.max(4, uploadingVideo.pct)}%` }} />
+                </span>
+              </div>
+            )}
             {attached && (
               <div className="mb-2 flex items-center gap-2">
                 <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-diane-signal/50 bg-diane-signal/10 px-3 py-1 text-[11px] text-diane-signal">

@@ -47,7 +47,7 @@ function getClient() {
  * (MediaRecorder's chosen mimeType), and the route maps that to an
  * extension rather than assuming everyone produces webm.
  */
-async function transcribeAudio(buffer, filename = 'speech.webm') {
+async function transcribeAudio(buffer, filename = 'speech.webm', { prompt = null } = {}) {
   const openai = getClient();
   if (!openai) {
     const err = new Error(
@@ -65,6 +65,9 @@ async function transcribeAudio(buffer, filename = 'speech.webm') {
     // something phonetically close but wrong.
     language: 'en',
     response_format: 'text',
+    // THE NAMES IT SHOULD EXPECT (a video's company and liquidator): "Begbies
+    // Traynor" was heard as "Begbee's trainer" without them (2026-10-14).
+    ...(prompt ? { prompt: String(prompt).slice(0, 800) } : {}),
   });
 
   // response_format 'text' returns a bare string on both providers, but

@@ -401,6 +401,8 @@ test('A REPLY IS SHOWN WHOLE. Nothing is hidden behind a click', () => {
   const bubble = messages.slice(messages.indexOf('function Bubble'), messages.indexOf('function Bubble') + 600);
   assert.doesNotMatch(bubble, /useState/, 'the bubble holds no open state');
   // It still links `#47` to the row, which is the only thing it ever did
-  // besides hiding text.
-  assert.match(messages, /function Bubble[\s\S]{0,120}return linkify\(text, onOpenDeal\);/);
+  // besides hiding text. And a document she names opens (his call
+  // 2026-10-14): those names are cut out first, every other piece linkified.
+  assert.match(messages, /function Bubble[\s\S]{0,300}return linkify\(text, onOpenDeal\);/);
+  assert.match(bubble, /<DocNameLink[\s\S]{0,200}linkify\(p\.text, onOpenDeal\)/);
 });

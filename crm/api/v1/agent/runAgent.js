@@ -4333,7 +4333,10 @@ async function runAgentTurn(history, contextName, onEvent) {
        * correct. Both are facts about what the TOOLS returned: a comparison
        * needs two months computed, a superlative needs rows to rank.
        */
-      if (raw && !questionRetry) {
+      // A DOCUMENT'S OWN "MOST" IS READ, NOT RANKED: "who is the biggest
+      // creditor on pinecrest's creditors list" is a figure in the file, and
+      // was refused as a ranking (night run 2026-10-14).
+      if (raw && !questionRetry && !turnState.docQuestion) {
         const check = checkQuestion(raw, lastSaid(history), toolResults);
         if (!check.ok) {
           questionRetry = true;

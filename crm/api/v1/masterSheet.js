@@ -987,9 +987,17 @@ router.post('/master-sheet/bulk-delete', async (req, res, next) => {
  */
 // ANY DOCUMENT NOW (his call 2026-10-13): a sheet to check, or a letter, scan
 // or statement to save onto a company in liquidation. Never a program.
+// ON DISK: a VIDEO comes here too, up to 500 MB, to be made a transcript on
+// a company (his call 2026-10-14). Everything else keeps its 25 MB.
 const attachUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024, files: 1 },
+  storage: multer.diskStorage({
+    // eslint-disable-next-line global-require
+    destination: (req, file, cb) => {
+      const dir = require('node:path').join(require('./shared/videoTranscript.helper').TEMP_ROOT, 'uploads'); // eslint-disable-line global-require
+      require('node:fs/promises').mkdir(dir, { recursive: true }).then(() => cb(null, dir), cb); // eslint-disable-line global-require
+    },
+  }),
+  limits: { fileSize: 500 * 1024 * 1024, files: 1 },
   fileFilter(req, file, cb) {
     // eslint-disable-next-line global-require
     if (require('./shared/liquidationDocs.helper').NEVER.test(file.originalname)) {
@@ -1002,21 +1010,37 @@ const attachUpload = multer({
 const SHEET_LIKE = /\.(xlsx|csv|txt|tsv|json|docx|pptx)$/i;
 router.post('/master-sheet/agent/attach', (req, res, next) => {
   attachUpload.single('file')(req, res, async (err) => {
-    if (err) return next(err instanceof AppError ? err : new AppError(400, err.message));
+    // eslint-disable-next-line global-require
+    const fsp = require('node:fs/promises');
+    // The temp file goes whatever happens; keep() moves it first when kept.
+    const dropTemp = () => (req.file?.path ? fsp.rm(req.file.path, { force: true }).catch(() => null) : null);
+    if (err) {
+      await dropTemp();
+      if (err.code === 'LIMIT_FILE_SIZE') return next(new AppError(400, 'A video can be up to 500 MB.'));
+      return next(err instanceof AppError ? err : new AppError(400, err.message));
+    }
     try {
       if (!req.file) return next(new AppError(400, messages.noFile));
+      // eslint-disable-next-line global-require
+      const video = require('./shared/videoTranscript.helper').isVideo(req.file.originalname, req.file.mimetype);
+      if (!video && req.file.size > 25 * 1024 * 1024) {
+        await dropTemp();
+        return next(new AppError(400, `${req.file.originalname} is over 25 MB.`));
+      }
+      // A SHEET is read before it is moved: its bytes, for the sheet check.
+      const buffer = video ? null : await fsp.readFile(req.file.path);
       // KEPT AS IT CAME, by id, so "save these to Quarry Lane" saves the file
-      // itself (tb_chat_files, migration 088).
+      // itself (tb_chat_files, migration 088). A video is moved, never read.
       // eslint-disable-next-line global-require
       const chatFiles = require('./shared/chatFiles.helper');
       const kept = await chatFiles.keep(req.file, sessionUser(req));
       // A SHEET is also cut into its tables and text, for the sheet check
       // (agent/engine/intake.js). Anything else is kept, not read here.
       let got = { tables: [], text: '' };
-      if (SHEET_LIKE.test(req.file.originalname)) {
+      if (!video && SHEET_LIKE.test(req.file.originalname)) {
         // eslint-disable-next-line global-require
         const { intake } = require('./agent/engine/intake');
-        got = await intake({ buffer: req.file.buffer, filename: req.file.originalname }).catch(() => ({ tables: [], text: '' }));
+        got = await intake({ buffer, filename: req.file.originalname }).catch(() => ({ tables: [], text: '' }));
       }
       const rows = got.tables.reduce((n, t) => n + t.rows.length, 0);
       res.json({
@@ -1024,11 +1048,13 @@ router.post('/master-sheet/agent/attach', (req, res, next) => {
         fileId: kept.id,
         mime: kept.mime,
         size: kept.size,
+        video,
         tables: got.tables,
         text: got.text,
         lines: rows + got.text.split(/\r?\n/).filter((l) => l.trim()).length,
       });
     } catch (e) {
+      await dropTemp();
       // In words they can act on; the reason itself goes to the server log.
       req.log?.warn?.({ err: e.message }, 'diane: an attached file could not be read');
       next(new AppError(400, `I couldn't read ${req.file?.originalname ?? 'that file'}. If it's open in Excel, save it and try again, or send it as a CSV.`));
@@ -1135,6 +1161,13 @@ router.post('/master-sheet/agent', async (req, res, next) => {
       // The canonical reply, whole and post-processed. The client replaces
       // whatever it accumulated from tokens with this, so a cleaning pass
       // that shortened the text mid-stream cannot leave it out of step.
+      // A DOCUMENT SHE NAMES OPENS (his call 2026-10-14): in every mode, so
+      // here and not in one brain. The lawyer's answer never went through runAgent.
+      if (result?.reply) {
+        // eslint-disable-next-line global-require
+        const docLinks = await require('./shared/docLinks.helper').docLinksFor(result.reply);
+        if (docLinks.length) result.docLinks = docLinks;
+      }
       if (open) send({ type: 'done', ...result });
     } catch (err) {
       // Already streaming, so the normal error middleware cannot help: the

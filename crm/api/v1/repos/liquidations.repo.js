@@ -220,6 +220,18 @@ async function saveChunks(docId, chunks) {
   }
 }
 
+/** Every live document's name and whose it is: her answer's names made links. */
+async function docNames() {
+  const { rows } = await pool.query(
+    `SELECT d.id, d.liquidation_id, d.file_name, d.mime, COALESCE(c.name, l.company_key) AS company_name
+       FROM tb_liquidation_docs d
+       JOIN tb_liquidations l ON l.id = d.liquidation_id
+       LEFT JOIN tb_companies c ON lower(regexp_replace(btrim(c.name), '\\s+', ' ', 'g')) = l.company_key
+      WHERE d.removed_at IS NULL`,
+  );
+  return rows;
+}
+
 /** Every passage of every document still on a row, with whose it is. */
 async function allChunks() {
   const { rows } = await pool.query(
@@ -294,5 +306,5 @@ async function dueSoon(days = 7) {
 
 module.exports = {
   STAGE, STAGES, companyKey, list, findById, details, syncFromCompanies, update, addComm, removeComms, addDoc, findDoc, removeDoc, owners, dueSoon,
-  setRead, saveChunks, allChunks, docWithText, unread, renameDoc, restoreDoc, docsVersion,
+  setRead, saveChunks, allChunks, docNames, docWithText, unread, renameDoc, restoreDoc, docsVersion,
 };

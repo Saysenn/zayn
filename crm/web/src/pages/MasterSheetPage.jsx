@@ -49,7 +49,6 @@ import BulkBar, { BulkAction, BulkMenu } from '../components/layout/BulkBar';
 import SelectAll from '../components/forms/SelectAll';
 import useRowSelection from '../hooks/useRowSelection';
 import useBulkActions, { bulkMessage, splitHint, patchQueries, mapCachedRows } from '../hooks/useBulkActions';
-import { monthLabel } from '../helpers/monthLabel';
 import { countOf } from '../helpers/pluralNoun';
 import {
   SearchIcon, ImportIcon, DownloadIcon, PlusIcon, TrashIcon, EditIcon, StopHandIcon,
@@ -1579,88 +1578,6 @@ function dropFromSheet(qc, ids) {
   return patchQueries(qc, [['master-sheet']], (data) => mapCachedRows(data, (r) => (want.has(r.id) ? null : r)));
 }
 
-/**
- * ===============================
- * * ONE FIELD ONTO EVERY TICKED DEAL
- * ===============================
- * The bar's Edit. Only the columns that are genuinely the same across a
- * block of deals: a method, a currency, a group, a preset month, a
- * location. Names, amounts and banking differ row by row, so setting one
- * on six deals at once is a mistake waiting for a click.
- *
- * `month` is the preset: the boss's period marker is a month, and the
- * first of it is what the sheet stores.
- */
-const BULK_EDIT_FIELDS = [
-  { key: 'paymentMethod', label: 'Payment method', from: 'methods', closed: true },
-  { key: 'currency', label: 'Currency', from: 'currencies' },
-  { key: 'groupName', label: 'Group', from: 'groups', searchable: true },
-  { key: 'presetOn', label: 'Preset month', type: 'month' },
-  { key: 'location', label: 'Location', from: 'locations', searchable: true },
-];
-
-function BulkEditModal({ field, rows, options, busy, onClose, onApply }) {
-  const [value, setValue] = useState('');
-  const isMonth = field.type === 'month';
-  const sent = isMonth && value ? `${value}-01` : value;
-  const fields = { [field.key]: sent };
-  // THE SAME WARNING THE CELL GIVES, counted across the ticked rows. A
-  // preset move recomputes the payable amount, and on a row somebody typed
-  // that figure into by hand, the typed one goes.
-  const wiped = sent ? rows.filter((r) => recomputeWarning(r, fields)).length : 0;
-  const shown = isMonth ? monthLabel(value, true) : value;
-  const n = rows.length;
-
-  return (
-    <Modal title={`${field.label} on ${n} ${n === 1 ? 'deal' : 'deals'}`} onClose={onClose}>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (sent) onApply(fields, field.label, shown);
-        }}
-      >
-        <FloatingField label={field.label} filled={isMonth || Boolean(value)}>
-          {isMonth ? (
-            <input
-              type="month"
-              className="form-control"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              aria-label={field.label}
-            />
-          ) : (
-            <Select
-              size="form"
-              value={value}
-              onChange={(v) => setValue(v ?? '')}
-              options={options[field.from] ?? []}
-              searchable={field.searchable}
-              allowCustom={!field.closed}
-              placeholder=""
-            />
-          )}
-        </FloatingField>
-
-        {wiped > 0 && (
-          <div className="mt-3 flex items-start gap-2 rounded-lg bg-warning-tint px-3 py-2.5 text-sm text-warning" role="alert">
-            <AlertCircleIcon width={16} height={16} className="mt-0.5 shrink-0" />
-            <p className="m-0">
-              {wiped} of these {wiped === 1 ? 'has' : 'have'} a payable amount typed by hand.
-              Changing the preset recomputes it from the formula, and the typed figure goes.
-            </p>
-          </div>
-        )}
-
-        <div className="mt-4 flex justify-end gap-2">
-          <Button size="md" onClick={onClose}>Cancel</Button>
-          <Button size="md" type="submit" variant="primary" disabled={!sent || busy} phase={busy ? 'working' : 'idle'}>
-            {busy ? 'Applying…' : `Apply to ${n}`}
-          </Button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
 
 export default function MasterSheetPage() {
   // Roles and companies for the multi-select cells. Same source the row
@@ -1717,7 +1634,6 @@ export default function MasterSheetPage() {
   const { run: runBulk } = useBulkActions();
   const [confirmingBulkStop, setConfirmingBulkStop] = useState(false);
   // Which one field the bar's Edit is setting on every ticked deal.
-  const [bulkEditing, setBulkEditing] = useState(null);
 
   // Parse, look, then apply. Shared with Settings and People so the diff
   // step cannot exist on one door and not the others. See useImportFlow.
@@ -1828,14 +1744,6 @@ export default function MasterSheetPage() {
   useEffect(() => { clearSelection(); }, [clearSelection, group, source, review, status, companyStatus, amount, debouncedQuery, searchField, currency, paymentMethod, dealStatus, specialCase, page]);
 
   const groups = useMemo(() => groupNames ?? [], [groupNames]);
-  // The lists the bar's Edit offers: the same ones the cells and the
-  // filters already read, so a value picked in bulk is one a cell knows.
-  const bulkEditOptions = useMemo(() => ({
-    methods: PAYMENT_METHODS,
-    currencies: unionOptions(filterOptions?.currencies, CURRENCIES),
-    groups,
-    locations: filterOptions?.locations ?? [],
-  }), [filterOptions, groups]);
 
   /**
    * A SWITCH COLUMN ONTO EVERY TICKED DEAL. Special case skips a stopped
@@ -1892,23 +1800,6 @@ export default function MasterSheetPage() {
     sel.clear();
   };
 
-  // ONE FIELD onto every ticked deal, from the bar's Edit.
-  const bulkEdit = (fields, label, shown) => {
-    const ids = sel.ids;
-    setBulkEditing(null);
-    runBulk({
-      call: () => apiService.masterSheet.bulkUpdate(ids, fields),
-      optimistic: (qc) => setOnDeals(qc, ids, fields),
-      toast: bulkMessage(`set to ${shown}`, ids.length, 'deal'),
-      report: (d) => bulkMessage(`set to ${shown}`, d.updated.length, 'deal', [
-        [d.skipped?.same, 'already that'],
-        [d.skipped?.gone, 'gone since'],
-      ]),
-      undoBatch: (d) => d.batchId,
-      failure: `Couldn't change the ${label.toLowerCase()} on ${countOf(ids.length, 'deal')}`,
-    });
-    sel.clear();
-  };
 
   const filterActive = Boolean(group || source || review || status || companyStatus || amount.field || currency || paymentMethod || dealStatus || specialCase);
   const isEmpty = !isLoading && rows && rows.length === 0;
@@ -2348,15 +2239,6 @@ export default function MasterSheetPage() {
         />
       )}
 
-      {bulkEditing && (
-        <BulkEditModal
-          field={bulkEditing}
-          rows={selectedRows}
-          options={bulkEditOptions}
-          onClose={() => setBulkEditing(null)}
-          onApply={bulkEdit}
-        />
-      )}
 
       {/* ===============================
           * THE TYPED PAYABLE AMOUNT IS ABOUT TO GO
@@ -2401,11 +2283,14 @@ export default function MasterSheetPage() {
       {/* NO SHOULD BE PAID / PAID HERE. They are the person's, his call
           2026-10-08, and set from the People page's bar. */}
       <BulkBar count={sel.count} onClear={sel.clear}>
-        <BulkMenu
-          icon={EditIcon}
-          label="Edit"
-          options={BULK_EDIT_FIELDS.map((f) => ({ label: f.label, onSelect: () => setBulkEditing(f) }))}
-        />
+        {/* ONE DEAL, ITS OWN FORM (his call 2026-10-14): Edit opens exactly
+            what clicking the row opens, every field. Several ticked: no Edit,
+            no editing many at once. */}
+        {selectedRows.length === 1 && (
+          <BulkAction icon={EditIcon} onClick={() => setEditing(selectedRows[0])}>
+            Edit
+          </BulkAction>
+        )}
         {/* The same value the row's star writes: true on, false off. */}
         <BulkMenu
           icon={StarIcon}

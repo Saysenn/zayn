@@ -1,0 +1,222 @@
+{
+  "set": "liq",
+  "at": "2026-10-13T19:23:52.656Z",
+  "seconds": 172,
+  "cases": 25,
+  "passed": 25,
+  "passRate": 100,
+  "groups": {
+    "liq": {
+      "cases": 25,
+      "passed": 25,
+      "passRate": 100
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 0,
+    "db": 0
+  },
+  "calcAccuracy": null,
+  "inventedRate": 0,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0,
+  "recoveryRate": 100,
+  "perTurn": {
+    "turns": 45,
+    "modelRounds": 1.4,
+    "toolCalls": 1.2,
+    "retries": 0.24,
+    "inputTokens": 44701,
+    "cachedPct": 97,
+    "outputTokens": 59,
+    "medianMs": 4063,
+    "slowestMs": 18073
+  },
+  "tokens": {
+    "input": 2011533,
+    "cached": 1950336,
+    "output": 2642
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "send a document back",
+      "name": "send a document back",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "who's in liquidation",
+      "name": "who's in liquidation",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "the gbp rate is still read",
+      "name": "the gbp rate is still read",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "deadlines due this week names only the near one",
+      "name": "deadlines due this week names only the near one",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "one company in full",
+      "name": "one company in full",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a stage: shown first, written on yes, status untouched",
+      "name": "a stage: shown first, written on yes, status untouched",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a messy order: stage, deadline in words, a call, and another company's owner",
+      "name": "a messy order: stage, deadline in words, a call, and another company's owner",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "bulk: every company in liquidation to own liq",
+      "name": "bulk: every company in liquidation to own liq",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "undo puts the last liquidation change back",
+      "name": "undo puts the last liquidation change back",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a typo in the company asks, writes nothing",
+      "name": "a typo in the company asks, writes nothing",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a company not in liquidation is pointed at its status, nothing written",
+      "name": "a company not in liquidation is pointed at its status, nothing written",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "end of month is a real date",
+      "name": "end of month is a real date",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "log a contact line",
+      "name": "log a contact line",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "adding a company to the page goes through its status",
+      "name": "adding a company to the page goes through its status",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "resolve one person's flags",
+      "name": "resolve one person's flags",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a name in two groups is asked about",
+      "name": "a name in two groups is asked about",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "delete then undo brings the flags back",
+      "name": "delete then undo brings the flags back",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "bulk: every open flag in BAKER in progress",
+      "name": "bulk: every open flag in BAKER in progress",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "set a rate the xe.com way",
+      "name": "set a rate the xe.com way",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a rate typed upside down is caught before yes",
+      "name": "a rate typed upside down is caught before yes",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "two rates in one message",
+      "name": "two rates in one message",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "clear a manual rate back to the daily one",
+      "name": "clear a manual rate back to the daily one",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "undo a rate change",
+      "name": "undo a rate change",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "one messy message across liquidations, flags and rates",
+      "name": "one messy message across liquidations, flags and rates",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "auto mode: a plain change saves without asking",
+      "name": "auto mode: a plain change saves without asking",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}

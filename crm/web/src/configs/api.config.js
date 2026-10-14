@@ -235,6 +235,17 @@ export const apiService = {
       for (const f of files) formData.append('files', f);
       return api.upload(`${apiPath}/liquidations/${id}/docs`, formData, onProgress);
     },
+    // ONE VIDEO, ON ITS OWN, so its card shows its own upload %. It is not
+    // kept: the answer carries the job that makes its transcript.
+    addVideo: (id, file, onProgress, signal) => {
+      const formData = new FormData();
+      formData.append('files', file);
+      return api.upload(`${apiPath}/liquidations/${id}/docs`, formData, onProgress, signal);
+    },
+    videoJobs: (id) => api.get(`${apiPath}/liquidations/${id}/video-jobs`),
+    // Every company's, started from Diane's chat: the chat's cards.
+    chatVideoJobs: () => api.get(`${apiPath}/liquidations/video-jobs`),
+    cancelVideoJob: (id, jobId) => api.post(`${apiPath}/liquidations/${id}/video-jobs/${jobId}/cancel`),
     renameDoc: (id, docId, fileName) => api.patch(`${apiPath}/liquidations/${id}/docs/${docId}`, { fileName }),
     removeDocs: (id, ids) => api.post(`${apiPath}/liquidations/${id}/docs/remove`, { ids }),
     rereadDoc: (id, docId) => api.post(`${apiPath}/liquidations/${id}/docs/${docId}/read`),
