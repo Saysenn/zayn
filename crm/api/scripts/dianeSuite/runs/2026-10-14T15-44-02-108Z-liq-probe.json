@@ -1,0 +1,135 @@
+{
+  "set": "liq-probe",
+  "at": "2026-10-14T15:44:02.108Z",
+  "seconds": 90,
+  "cases": 12,
+  "passed": 10,
+  "passRate": 83.3,
+  "groups": {
+    "liq": {
+      "cases": 12,
+      "passed": 10,
+      "passRate": 83.3
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 0,
+    "db": 2
+  },
+  "calcAccuracy": null,
+  "inventedRate": 0,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0,
+  "recoveryRate": null,
+  "perTurn": {
+    "turns": 26,
+    "modelRounds": 1,
+    "toolCalls": 1,
+    "retries": 0,
+    "inputTokens": 31836,
+    "cachedPct": 99,
+    "outputTokens": 53,
+    "medianMs": 5331,
+    "slowestMs": 10725
+  },
+  "tokens": {
+    "input": 827742,
+    "cached": 815488,
+    "output": 1376
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "struck off is dissolved: the stage, then the status, its deals stopped",
+      "name": "struck off is dissolved: the stage, then the status, its deals stopped",
+      "group": "liq",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    },
+    {
+      "id": "one company into winding down, its deals keep paying",
+      "name": "one company into winding down, its deals keep paying",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "three companies into winding down in one yes",
+      "name": "three companies into winding down in one yes",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a petition on an active company: status and stage together",
+      "name": "a petition on an active company: status and stage together",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "strike off an active company, voluntary",
+      "name": "strike off an active company, voluntary",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "the old refusal is now a preview: set an active company to hmrc liq",
+      "name": "the old refusal is now a preview: set an active company to hmrc liq",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a company off the page struck off is dissolved, its deals stopped",
+      "name": "a company off the page struck off is dissolved, its deals stopped",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a messy one: in, a CVL with its liquidator and deadline, and one struck off",
+      "name": "a messy one: in, a CVL with its liquidator and deadline, and one struck off",
+      "group": "liq",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    },
+    {
+      "id": "every hmrc petition gets its winding-up order",
+      "name": "every hmrc petition gets its winding-up order",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a typo in a company going into winding down asks, nothing moves",
+      "name": "a typo in a company going into winding down asks, nothing moves",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "undo puts a company back out of winding down",
+      "name": "undo puts a company back out of winding down",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "adding a company to the page goes through its status",
+      "name": "adding a company to the page goes through its status",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}

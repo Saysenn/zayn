@@ -17,7 +17,9 @@ import { TableSkeleton } from '../components/display/Skeleton';
 import { formatMoney, NO_VALUE } from '../helpers/formatMoney';
 import { formatDate } from '../helpers/formatDate';
 import { STOPPED_REASON_LABEL, REOPEN_THE_COMPANY } from '../configs/stoppedReason';
-import { ResumeIcon, SearchIcon, ArchiveIcon, UsersIcon } from '../components/icons';
+import { ResumeIcon, SearchIcon, ArchiveIcon, UsersIcon, BuildingIcon } from '../components/icons';
+import { useQuery } from '@tanstack/react-query';
+import { stageLabel } from '../configs/liquidationStages';
 import { EmptyState, ErrorState } from '../components/display/StateBlocks';
 import SelectAll from '../components/forms/SelectAll';
 import BulkBar, { BulkAction } from '../components/layout/BulkBar';
@@ -51,16 +53,18 @@ const PAGE_SIZE = 25;
 function resumeReport(data) {
   const report = bulkMessage('resumed', data.resumed.length, 'deal', [[data.skipped, 'already live']]);
   if (!data.refused?.length) return report;
-  const refused = `Closed with their company: ${data.refused.join(', ')}. Reopen the company to bring them back.`;
+  const refused = `Dissolved with their company: ${data.refused.join(', ')}. Set the company back to active to bring them back.`;
   return { ...report, detail: report.detail ? `${report.detail} · ${refused}` : refused };
 }
 
-// Two readings of the same stopped deals: one deal at a time, or one person
-// whose every deal is here. Not under 'archive.', so Clear keeps the tab.
-const ARCHIVE_TAB = Object.freeze({ deals: 'deals', dead: 'dead' });
+// Three readings of what is over: one deal at a time, one person whose
+// every deal is here, and the dissolved companies (his call 2026-10-15).
+// Not under 'archive.', so Clear keeps the tab.
+const ARCHIVE_TAB = Object.freeze({ deals: 'deals', dead: 'dead', companies: 'companies' });
 const TABS = [
   { key: ARCHIVE_TAB.deals, label: 'Deals' },
   { key: ARCHIVE_TAB.dead, label: 'Dead people' },
+  { key: ARCHIVE_TAB.companies, label: 'Companies' },
 ];
 
 export default function ArchivePage() {
@@ -69,19 +73,21 @@ export default function ArchivePage() {
   const [tab, setTab] = useStickyState('archiveView.tab', ARCHIVE_TAB.deals, 'tab');
 
   // Each tab reports its own count; the header says the one on screen.
-  const [counts, setCounts] = useState({ deals: 0, dead: 0 });
+  const [counts, setCounts] = useState({ deals: 0, dead: 0, companies: 0 });
   const onTotal = (key) => (n) => setCounts((c) => (c[key] === n ? c : { ...c, [key]: n }));
   const subtitle = tab === ARCHIVE_TAB.dead
     ? `${counts.dead} ${counts.dead === 1 ? 'person has' : 'people have'} no live deal left`
-    : `${counts.deals} ${counts.deals === 1 ? 'deal' : 'deals'} ended`;
+    : tab === ARCHIVE_TAB.companies
+      ? `${counts.companies} ${counts.companies === 1 ? 'company' : 'companies'} dissolved`
+      : `${counts.deals} ${counts.deals === 1 ? 'deal' : 'deals'} ended`;
 
   return (
     <div className="space-y-4">
       <PageHeader title="Archive" subtitle={subtitle} />
       <UnderlineTabs tabs={TABS} active={tab} onChange={setTab} />
-      {tab === ARCHIVE_TAB.dead
-        ? <DeadPeopleTab onTotal={onTotal('dead')} />
-        : <ArchiveDeals onTotal={onTotal('deals')} />}
+      {tab === ARCHIVE_TAB.dead && <DeadPeopleTab onTotal={onTotal('dead')} />}
+      {tab === ARCHIVE_TAB.companies && <DissolvedCompaniesTab onTotal={onTotal('companies')} />}
+      {tab !== ARCHIVE_TAB.dead && tab !== ARCHIVE_TAB.companies && <ArchiveDeals onTotal={onTotal('deals')} />}
     </div>
   );
 }
@@ -458,6 +464,117 @@ function DeadPeopleTab({ onTotal }) {
           Restore
         </BulkAction>
       </BulkBar>
+    </div>
+  );
+}
+
+/**
+ * ***************************************************
+ * * DISSOLVED COMPANIES (his call 2026-10-15)
+ * ***************************************************
+ * Every company whose status is dissolved, newest first. Its deals are on
+ * the Deals tab and its people with nothing left on Dead people; this is
+ * the company itself: who ran it, what ended with it, and how. A row opens
+ * its page, with every handler and deal it had.
+ */
+function DissolvedCompaniesTab({ onTotal }) {
+  const [query, setQuery] = useStickyState('archiveCompanies.query', '');
+  const [page, setPage] = useState(1);
+  const forgetFilters = useClearSticky('archiveCompanies.');
+  const navigate = useNavigate();
+  const debouncedQuery = useDebouncedValue(query);
+
+  useEffect(() => setPage(1), [debouncedQuery]);
+
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['companies', 'archived', { q: debouncedQuery, page }],
+    queryFn: () => apiService.companies.archived({ q: debouncedQuery || undefined, page, pageSize: PAGE_SIZE }),
+  });
+  const rows = data?.rows;
+  const total = data?.total ?? 0;
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => onTotal(total), [total]);
+
+  const open = (key) => navigate(`/archive/companies/${encodeURIComponent(key)}`);
+
+  return (
+    <div className="space-y-4">
+      <Toolbar
+        storageKey="archiveCompanies.panel"
+        search={(
+          <SearchInput
+            icon={SearchIcon}
+            placeholder="Search companies…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        )}
+        onClearFilters={() => { setQuery(''); forgetFilters(); }}
+      />
+
+      <ErrorState error={error} title="Couldn't load dissolved companies" onRetry={refetch} />
+
+      {!error && !isLoading && rows && rows.length === 0 && (
+        <EmptyState
+          icon={BuildingIcon}
+          {...(query
+            ? { title: 'No dissolved company matches that', hint: 'Clear the search to see more.' }
+            : { title: 'No dissolved companies yet', hint: 'A company lands here when it is dissolved, with every deal it had.' })}
+        />
+      )}
+
+      {(isLoading || (rows && rows.length > 0)) && (
+        <div className="table-wrap">
+          <table className="w-full min-w-[1000px] text-sm">
+            <thead>
+              <tr>
+                <th className="th">Company</th>
+                <th className="th">Dissolved</th>
+                <th className="th">How it ended</th>
+                <th className="th">Director</th>
+                <th className="th">Mid</th>
+                <th className="th">Groups</th>
+                <th className="th text-right tabular-nums">Deals</th>
+                <th className="th text-right tabular-nums">Was paying</th>
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading && <TableSkeleton rows={8} columns={8} />}
+              {!isLoading && rows.map((c) => (
+                <tr
+                  key={c.ckey}
+                  tabIndex={0}
+                  role="link"
+                  aria-label={`Open ${c.name}`}
+                  onClick={() => open(c.ckey)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); open(c.ckey); }
+                  }}
+                  className="cursor-pointer border-b border-border last:border-0 hover:bg-surface-sunken"
+                >
+                  <td className="td font-medium text-text">{c.name}</td>
+                  <td className="td whitespace-nowrap">{c.closed_on ? formatDate(c.closed_on) : NO_VALUE}</td>
+                  <td className="td">
+                    {c.stage === 'dissolved'
+                      ? <span className="badge badge-dissolved">{stageLabel(c.stage, c.stage_kind)}</span>
+                      : <span className="text-text-faint">{NO_VALUE}</span>}
+                  </td>
+                  <td className="td">{c.director || NO_VALUE}</td>
+                  <td className="td">{c.mid || NO_VALUE}</td>
+                  <td className="td text-text-muted">{(c.groups ?? []).join(', ') || NO_VALUE}</td>
+                  <td className="td text-right tabular-nums">{c.deal_count}</td>
+                  <td className="td text-right tabular-nums">
+                    {c.ended_monthly ? `${formatMoney(c.ended_monthly, c.currency)} / mo` : NO_VALUE}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {!isLoading && <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />}
     </div>
   );
 }

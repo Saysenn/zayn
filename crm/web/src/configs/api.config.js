@@ -29,11 +29,13 @@ export const apiService = {
     // ended up doing nothing.
     list: (params = {}) => api.get(`${apiPath}/companies${toQueryString(params)}`),
     names: () => api.get(`${apiPath}/companies/names`),
+    // The Archive's Companies tab: every dissolved company.
+    archived: (params = {}) => api.get(`${apiPath}/companies/archived${toQueryString(params)}`),
     get: (key) => api.get(`${apiPath}/companies/${encodeURIComponent(key)}`),
     update: (key, fields) => api.patch(`${apiPath}/companies/${encodeURIComponent(key)}`, fields),
     addHandlers: (key, handlers) =>
       api.post(`${apiPath}/companies/${encodeURIComponent(key)}/handlers`, { handlers }),
-    // The bulk bar: a tier or a (non closing) status onto many companies.
+    // The bulk bar: a tier or a status onto many companies (Dissolved asks first).
     bulk: (keys, fields) => api.post(`${apiPath}/companies/bulk`, { keys, ...fields }),
   },
   // ===============================
@@ -52,6 +54,8 @@ export const apiService = {
     pending: () => api.get(`${apiPath}/monthly-review/pending`),
     // One door, and it takes a list. A selection of one is one answer.
     answer: (dealIds, answer) => api.post(`${apiPath}/monthly-review/answer`, { dealIds, answer }),
+    // Off the list, still paid: Deal status back to Active (his call 2026-10-15).
+    remove: (dealIds) => api.post(`${apiPath}/monthly-review/remove`, { dealIds }),
     // NO CLEAR. The way back from a misclick is History's undo.
   },
   concerns: {

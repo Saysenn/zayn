@@ -18,7 +18,7 @@ export const STOPPED_REASON_LABEL = Object.freeze({
   stopped_by_hand: 'Stopped by hand',
   review_no: 'Answered no at review',
   review_final: 'Final month at review',
-  company_closed: 'Company closed',
+  company_closed: 'Company dissolved',
 });
 
 // The one that cannot be resumed on its own: the company went, and putting

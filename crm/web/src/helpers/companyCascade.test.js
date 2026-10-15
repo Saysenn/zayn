@@ -87,7 +87,7 @@ test('CLOSING STOPS EVERY LIVE DEAL WHEN NO LIST IS SENT', () => {
 
 test('AND ONLY THE TICKED ONES WHEN A LIST IS', () => {
   const out = patchedDeals([deal({ id: 1 }), deal({ id: 2 })], {
-    status: 'dissolved', stopDealIds: [2],
+    status: 'closed', stopDealIds: [2],
   });
   assert.equal(out[0].stopped_on, null, 'unticked, still running');
   assert.equal(out[1].stopped_on, today());

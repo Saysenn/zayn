@@ -29,7 +29,7 @@ import { EmptyState, ErrorState } from '../components/display/StateBlocks';
 import SelectAll from '../components/forms/SelectAll';
 import BulkBar, { BulkAction, BulkMenu } from '../components/layout/BulkBar';
 import ConfirmDialog from '../components/modals/ConfirmDialog';
-import BulkFieldModal from '../components/modals/BulkFieldModal';
+import ManagePersonModal from '../components/modals/ManagePersonModal';
 import useRowSelection from '../hooks/useRowSelection';
 import useBulkActions, { DEAL_TOUCHES, bulkMessage, patchQueries, mapCachedRows, rollbackAll } from '../hooks/useBulkActions';
 import { countOf } from '../helpers/pluralNoun';
@@ -62,9 +62,6 @@ const SHOW_EXPORT = false;
 // the formatting, identical, and `formatMoney` held a third spelling of it.
 // See totalsList.
 
-// The API validates the method against this closed set.
-const PAYMENT_METHODS = ['cash', 'bank', 'crypto'];
-
 /**
  * THE BAR WORKS ON DEALS, the list shows people. A person row is a sum of
  * deals, so "stop these people" means "stop every live deal they hold",
@@ -75,9 +72,6 @@ async function liveDealIdsOf(personIds) {
   const answers = await Promise.all(personIds.map((id) => apiService.people.get(id)));
   return answers.flatMap((a) => (a?.person?.deals ?? []).filter((d) => !d.stopped_on).map((d) => d.id));
 }
-
-// Snake-case deal column for each Edit field the bar offers.
-const DEAL_COLUMN = { groupName: 'group_name', location: 'location', paymentMethod: 'payment_method' };
 
 /**
  * ON SCREEN BEFORE THE SERVER ANSWERS. The People list and every cached
@@ -303,7 +297,8 @@ export default function PeoplePage() {
   const { run } = useBulkActions();
   const [confirmStop, setConfirmStop] = useState(false);
   // The deal field the Edit menu picked, while its value modal is open.
-  const [editField, setEditField] = useState(null);
+  // ONE PERSON, THEIR OWN FORM (his call 2026-10-14).
+  const [editingPerson, setEditingPerson] = useState(null);
   // Should be paid / Paid, per person, from the row's switch or the bar.
   const setPay = usePersonPay();
   const selectedPeople = (people ?? []).filter((p) => sel.has(p.person_id));
@@ -338,41 +333,6 @@ export default function PeoplePage() {
     sel.clear();
     setConfirmStop(false);
   }
-
-  function editAll(value) {
-    const ids = sel.ids;
-    const field = editField;
-    const column = DEAL_COLUMN[field.key];
-    run({
-      call: async () => {
-        const dealIds = await liveDealIdsOf(ids);
-        return dealIds.length
-          ? apiService.masterSheet.bulkUpdate(dealIds, { [field.key]: value })
-          : { updated: [], skipped: {}, batchId: null };
-      },
-      optimistic: (qc) => patchPeople(
-        qc, ids,
-        // Only Group shows on the row; the rest live on the deals.
-        (row) => (field.key === 'groupName' ? { ...row, groups: [value] } : row),
-        (d) => ({ ...d, [column]: value }),
-      ),
-      invalidates: DEAL_TOUCHES,
-      toast: { message: `${field.label} set to ${value} for ${countOf(ids.length, 'person')}` },
-      report: (data) => bulkMessage(`set to ${value}`, data.updated.length, 'deal', [
-        [data.skipped?.same ?? 0, 'already set'], [data.skipped?.gone ?? 0, 'gone'],
-      ]),
-      undoBatch: (data) => data.batchId,
-      failure: `Couldn't change ${field.label.toLowerCase()} for ${countOf(ids.length, 'person')}`,
-    });
-    sel.clear();
-    setEditField(null);
-  }
-
-  const editFields = [
-    { key: 'groupName', label: 'Group', options: filterOptions?.groups ?? [], allowCustom: true },
-    { key: 'location', label: 'Location', options: filterOptions?.locations ?? [], allowCustom: true },
-    { key: 'paymentMethod', label: 'Payment method', options: PAYMENT_METHODS, allowCustom: false },
-  ];
 
   function setFilter(key, value) {
     setFilters((f) => {
@@ -585,16 +545,8 @@ export default function PeoplePage() {
           onConfirm={stopAll}
         />
       )}
-      {editField && (
-        <BulkFieldModal
-          title={`Set ${editField.label.toLowerCase()} on every live deal`}
-          label={editField.label}
-          options={editField.options}
-          allowCustom={editField.allowCustom}
-          onApply={editAll}
-          onClose={() => setEditField(null)}
-        />
-      )}
+
+      {editingPerson && <ManagePersonModal personId={editingPerson} onClose={() => setEditingPerson(null)} />}
 
       {/* No Export here: the page's own export is switched off
           (SHOW_EXPORT), and it exports by filter, not by tick. */}
@@ -619,12 +571,13 @@ export default function PeoplePage() {
         <BulkAction icon={BuildingIcon} onClick={() => setAddingTo(true)}>
           Add companies
         </BulkAction>
-        <BulkMenu
-          icon={EditIcon}
-          label="Edit"
-          hint="Sets it on every live deal they hold"
-          options={editFields.map((f) => ({ label: f.label, onSelect: () => setEditField(f) }))}
-        />
+        {/* ONE PERSON, THEIR OWN FORM (his call 2026-10-14): the same full
+            form as the Edit on their page. Several ticked: no Edit. */}
+        {sel.count === 1 && (
+          <BulkAction icon={EditIcon} onClick={() => setEditingPerson(sel.ids[0])}>
+            Edit
+          </BulkAction>
+        )}
       </BulkBar>
 
       {addingTo && (

@@ -673,22 +673,12 @@ test('a field not mentioned is not sent at all', async () => {
   assert.deepEqual(Object.keys(seen.companyUpdate.fields), ['tier']);
 });
 
-test('CLOSING A COMPANY WRITES NOTHING WITHOUT A CONFIRM', async () => {
-  // Its only guard was the words "Confirm before closing" in a parameter
-  // description. The route cascades now, so that sentence stood between a
-  // typo and everybody on the company being stopped.
+test('UPDATE_COMPANY NEVER DISSOLVES: the Winding down page does (his call 2026-10-15)', async () => {
   const { tool, seen } = load({ company: { name: 'Reliapay', status: 'active' } });
-  const out = await tool('update_company').handler({ name: 'Reliapay', status: 'closed' });
-  assert.equal(seen.companyUpdate, null, 'nothing may be written on the first call');
-  assert.equal(out.pending, true);
-  assert.match(out.summary, /NOTHING HAS BEEN CHANGED YET/);
-  assert.match(out.summary, /STOP/);
-});
-
-test('AND WRITES ONCE CONFIRMED', async () => {
-  const { tool, seen } = load({ company: { name: 'Reliapay', status: 'active' } });
-  await tool('update_company').handler({ name: 'Reliapay', status: 'closed', confirmed: true });
-  assert.equal(seen.companyUpdate.fields.status, 'closed');
+  const out = await tool('update_company').handler({ name: 'Reliapay', status: 'closed', confirmed: true });
+  assert.equal(seen.companyUpdate, null, 'nothing may be written');
+  assert.match(out.summary, /NOTHING HAS BEEN CHANGED/);
+  assert.match(out.summary, /Winding down page/);
 });
 
 test('LIQUIDATION NEEDS NO CONFIRM. It stops nothing', async () => {

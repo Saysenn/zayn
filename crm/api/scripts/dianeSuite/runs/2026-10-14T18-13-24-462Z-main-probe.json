@@ -1,0 +1,61 @@
+{
+  "set": "main-probe",
+  "at": "2026-10-14T18:13:24.462Z",
+  "seconds": 23,
+  "cases": 2,
+  "passed": 2,
+  "passRate": 100,
+  "groups": {
+    "main": {
+      "cases": 2,
+      "passed": 2,
+      "passRate": 100
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 0,
+    "db": 0
+  },
+  "calcAccuracy": null,
+  "inventedRate": 0,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0.33,
+  "recoveryRate": 100,
+  "perTurn": {
+    "turns": 3,
+    "modelRounds": 3.3,
+    "toolCalls": 2.3,
+    "retries": 0.33,
+    "inputTokens": 94690,
+    "cachedPct": 99,
+    "outputTokens": 88,
+    "medianMs": 4534,
+    "slowestMs": 12589
+  },
+  "tokens": {
+    "input": 284071,
+    "cached": 280832,
+    "output": 265
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "a liquidation total previews, and never changes the status",
+      "name": "a liquidation total previews, and never changes the status",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a company status changes on its own",
+      "name": "a company status changes on its own",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}

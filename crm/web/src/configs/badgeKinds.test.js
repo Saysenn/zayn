@@ -78,10 +78,10 @@ test('THE CLASS IS STILL COMPOSED, which is why the safelist is needed', () => {
   assert.match(read('../components/badges/StatusBadge.jsx'), /badge-\$\{status\}/);
 });
 
-test('THE FIVE COMPANY STATUSES ALL HAVE A BADGE', () => {
+test('THE COMPANY STATUSES ALL HAVE A BADGE, and the Dissolved stage too', () => {
   // The mirror that started it: migration 058 added two and 059 a fifth,
   // and each arrived unstyled because the class was never scanned.
-  for (const status of ['active', 'going_concern', 'liquidation', 'dissolved', 'closed']) {
+  for (const status of ['active', 'going_concern', 'liquidation', 'closed', 'dissolved']) {
     assert.ok(status in BADGE_LABELS, `${status} has no badge`);
   }
 });

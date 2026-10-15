@@ -22,9 +22,14 @@ import MoneyTotals from '../components/display/MoneyTotals';
 import { formatTotalsWhole } from '../helpers/formatMoney';
 import Select from '../components/forms/Select';
 import StatusBadge from '../components/badges/StatusBadge';
-import { COMPANY_STATUS, COMPANY_STATUS_OPTIONS, isTerminalStatus } from '../configs/companyStatus';
+import { COMPANY_STATUS, COMPANY_STATUS_OPTIONS } from '../configs/companyStatus';
 import { CardSkeleton, TableSkeleton } from '../components/display/Skeleton';
-import { BuildingIcon, SearchIcon, StarIcon, UserIcon } from '../components/icons';
+import { BuildingIcon, SearchIcon, StarIcon, UserIcon, EditIcon } from '../components/icons';
+import ManageCompanyModal from '../components/modals/ManageCompanyModal';
+import ConfirmDialog from '../components/modals/ConfirmDialog';
+import DealChecklist from '../components/forms/DealChecklist';
+import { confirm } from '../configs/confirms.config';
+import { GOING_CONCERN } from '../configs/sheetValues';
 
 const GRID_PAGE_SIZE = 16;
 const ROW_PAGE_SIZE = 25;
@@ -33,9 +38,13 @@ const ROW_PAGE_SIZE = 25;
 // the deals and people that read their company's tier and status.
 const COMPANY_TOUCHES = [['companies'], ['company'], ['master-sheet'], ['people']];
 
-// The bar only sets a status that keeps the deals running. Closed and
-// dissolved stop every deal, which is one company at a time on purpose.
-const BULK_STATUS_OPTIONS = COMPANY_STATUS_OPTIONS.filter((o) => !isTerminalStatus(o.value));
+// NEVER DISSOLVED HERE (his call 2026-10-15): only the Winding down page dissolves.
+const BULK_STATUS_OPTIONS = COMPANY_STATUS_OPTIONS;
+// THE THREE THAT ASK WHICH DEALS, as the company page does (his call 2026-10-15).
+const ASKS_DEALS = [COMPANY_STATUS.LIQUIDATION, COMPANY_STATUS.REVIEW, COMPANY_STATUS.GOING_CONCERN];
+const alreadyTicked = (status) => (status === COMPANY_STATUS.GOING_CONCERN
+  ? (d) => d.end_note === GOING_CONCERN
+  : (d) => Boolean(d.review_monthly));
 
 /**
  * The bar's tier/status write, put on every cached Companies page and on
@@ -194,6 +203,32 @@ export default function CompaniesPage() {
   const visibleKeys = useMemo(() => (companies ?? []).map((c) => c.ckey), [companies]);
   const sel = useRowSelection(visibleKeys);
   const [addingHandler, setAddingHandler] = useState(false);
+  const [editingCompany, setEditingCompany] = useState(null);
+  // WINDING DOWN, REVIEW OR GOING CONCERN for the ticked companies: their
+  // live deals, under each company, ticked the way the company page ticks
+  // them (what is already ticked, else all), then one save.
+  const [asking, setAsking] = useState(null);
+  async function askDeals(status) {
+    const keys = sel.ids;
+    const label = keys.length === 1
+      ? (companies ?? []).find((c) => c.ckey === keys[0])?.name ?? '1 company'
+      : `${keys.length} companies`;
+    setAsking({ status, keys, label, loading: true, deals: [], ids: [] });
+    try {
+      const got = await Promise.all(keys.map((k) => apiService.companies.get(k)));
+      const deals = [];
+      const ids = [];
+      for (const { company } of got) {
+        const live = (company?.deals ?? []).filter((d) => !d.stopped_on).map((d) => ({ ...d, company: company.name }));
+        const ticked = live.filter(alreadyTicked(status));
+        deals.push(...live);
+        ids.push(...(ticked.length ? ticked : live).map((d) => d.id));
+      }
+      setAsking((a) => (a && a.status === status ? { ...a, loading: false, deals, ids } : a));
+    } catch {
+      setAsking((a) => (a ? { ...a, loading: false, failed: true } : a));
+    }
+  }
   const { run } = useBulkActions();
   // On screen at once: every cached Companies page shows the new tier or
   // status the moment it is picked. A status filter that no longer holds
@@ -344,6 +379,14 @@ export default function CompaniesPage() {
       {!isLoading && <Pagination page={page} pageSize={pageSize} total={total} onPageChange={setPage} />}
 
       <BulkBar count={sel.count} onClear={sel.clear}>
+        {/* ONE COMPANY, ITS OWN FORM (his call 2026-10-14): the same full
+            form as the Edit on its page. Several ticked: no Edit. Tier and
+            status stay many at once, below. */}
+        {sel.count === 1 && (
+          <BulkAction icon={EditIcon} onClick={() => setEditingCompany(sel.ids[0])}>
+            Edit
+          </BulkAction>
+        )}
         <BulkAction icon={UserIcon} onClick={() => setAddingHandler(true)}>
           Add handlers
         </BulkAction>
@@ -358,13 +401,49 @@ export default function CompaniesPage() {
         <BulkMenu
           icon={BuildingIcon}
           label="Set status"
-          hint="Closed and dissolved are set one company at a time"
           options={BULK_STATUS_OPTIONS.map((o) => ({
             label: o.label,
-            onSelect: () => bulkSet({ status: o.value }, `set to ${o.label.toLowerCase()}`),
+            onSelect: () => (ASKS_DEALS.includes(o.value)
+              ? askDeals(o.value)
+              : bulkSet({ status: o.value }, `set to ${o.label.toLowerCase()}`)),
           }))}
         />
       </BulkBar>
+
+      {editingCompany && <ManageCompanyModal companyKey={editingCompany} onClose={() => setEditingCompany(null)} />}
+
+      {asking && (
+        <ConfirmDialog
+          {...confirm.companyDeals({ status: asking.status, companyName: asking.label })}
+          busy={asking.loading}
+          onCancel={() => setAsking(null)}
+          onConfirm={() => {
+            const label = COMPANY_STATUS_OPTIONS.find((o) => o.value === asking.status)?.label ?? asking.status;
+            bulkSet({
+              status: asking.status,
+              ...(asking.status === COMPANY_STATUS.GOING_CONCERN
+                ? { goingConcernDealIds: asking.ids }
+                : { reviewMonthlyDealIds: asking.ids }),
+            }, `set to ${label.toLowerCase()}`);
+            setAsking(null);
+          }}
+        >
+          {asking.loading
+            ? <p className="text-xs text-text-faint">Loading their deals…</p>
+            : asking.failed
+              ? <p className="text-xs text-danger">Couldn't load their deals. Close this and try again.</p>
+              : (
+                <DealChecklist
+                  label={asking.status === COMPANY_STATUS.GOING_CONCERN ? 'Deals with no end date' : 'Reviewed monthly'}
+                  deals={asking.deals}
+                  chosen={asking.ids}
+                  onChosen={(ids) => setAsking((a) => ({ ...a, ids }))}
+                  empty="These companies have no live deals."
+                />
+              )}
+        </ConfirmDialog>
+      )}
+
 
       {addingHandler && (
         <BulkAddDealsModal

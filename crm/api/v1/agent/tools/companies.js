@@ -1,6 +1,6 @@
 const { randomUUID } = require('node:crypto');
 const companiesRepo = require('../../repos/companies.repo');
-const { applyCompanyStatus, wouldStop, wouldResume } = require('../../shared/companyStatus.helper');
+const { applyCompanyStatus, wouldStop, wouldResume, defaultReviewIds } = require('../../shared/companyStatus.helper');
 const { confirmFirst } = require('./confirmFirst');
 const { broadcast } = require('../../sockets/index');
 const { asksUndo, undoSentence, USE_UNDO } = require('../undoIntent');
@@ -278,7 +278,9 @@ const bulkUpdateCompanies = {
  * for a word.
  */
 const REOPEN = 'active';
-const ENDINGS = ['closed', 'dissolved'];
+// NO ENDING HERE (his call 2026-10-15): a company is dissolved only on the
+// Winding down page, by its stage (update_liquidation). Reopen and the marks stay.
+const ENDINGS = [];
 /**
  * ===============================
  * * AND THE TWO MARKS THAT STOP NOTHING
@@ -306,7 +308,7 @@ const MARK_KEEPS = {
   going_concern: 'No deal stops and no amount changes: a going concern is paid exactly like '
     + 'an active company.',
   review: 'No deal stops and no amount changes. Which of their deals are reviewed monthly is '
-    + 'ticked per deal on each company\'s status screen, and this ticks none of them.',
+    + 'chosen per deal; this puts every live deal on them in the review (any can be taken off on the Review page).',
 };
 
 const bulkCloseCompanies = {
@@ -315,9 +317,8 @@ const bulkCloseCompanies = {
   stops: true,
   writes: true,
   description:
-    'End several companies at once, or put several back. Every live deal on a company being ended '
-    + 'STOPS and moves to the Archive. "closed" means we ended it, "dissolved" means it legally '
-    + 'ceased to exist; both stop the deals and differ only in what they record. "active" REOPENS '
+    'Put several companies back, or mark them. It NEVER dissolves or closes one: that is only through '
+    + 'the Winding down page (update_liquidation). "active" REOPENS '
     + 'them, bringing back every deal their closure stopped. "going_concern" and "review" MARK '
     + 'them and stop nothing: use review for "put these companies on monthly review". Always '
     + 'call with confirmed false first, read out the company count, the deal count and the money, '
@@ -331,8 +332,8 @@ const bulkCloseCompanies = {
       },
       status: {
         type: 'string', enum: BULK_STATUSES,
-        description: 'closed if we ended it, dissolved if it legally ceased to exist, active to '
-          + 'reopen it and bring back the deals its closure stopped. going_concern (trading, no '
+        description: 'active to '
+          + 'reopen it and bring back the deals its dissolving stopped. going_concern (trading, no '
           + 'end date) and review (asked about every month) stop nothing.',
       },
       confirmed: {
@@ -344,6 +345,13 @@ const bulkCloseCompanies = {
   },
   async handler(args = {}) {
     // "REOPEN X" IS STATUS ACTIVE, whatever she sent with it.
+    if (['closed', 'dissolved'].includes(args.status)) {
+      return {
+        summary: 'NOTHING HAS BEEN CHANGED. A company is dissolved only on the Winding down page. For companies '
+          + 'winding down, call update_liquidation with stage dissolved (that dissolves them). For any that are not, '
+          + 'offer to put them into winding down (update_liquidation, status "winding down"). Never say one was dissolved.',
+      };
+    }
     if (/^\s*(?:ok\s+|okay\s+|please\s+|can you\s+)?(?:reopen|re-open|unclose)\b/i.test(String(args.said ?? ''))) {
       // eslint-disable-next-line no-param-reassign
       args = { ...args, status: REOPEN };
@@ -351,8 +359,9 @@ const bulkCloseCompanies = {
     if (!BULK_STATUSES.includes(args.status)) {
       return {
         summary: `"${args.status}" is not one of these. It is closed, or dissolved, or active to `
-          + 'put them back, or going_concern or review to mark them. Liquidation is not an '
-          + 'ending: it keeps paying, at amounts set per deal, and it is set one company at a time.',
+          + 'put them back, or going_concern or review to mark them. Liquidation (winding down) is not an '
+          + 'ending: it keeps paying. For many companies INTO winding down, call update_liquidation with '
+          + 'one item per company and status "winding down" (and any stage they said).',
       };
     }
     const reopening = args.status === REOPEN;
@@ -403,7 +412,7 @@ const bulkCloseCompanies = {
       // A MARK PUTS BACK ONLY WHAT A CLOSURE STOPPED, and only on a company
       // that is closed now: the cascade resumes nothing on one still open.
       // eslint-disable-next-line no-await-in-loop
-      const closedNow = marking && ENDINGS.includes((await companiesRepo.findByKey(company.key))?.status);
+      const closedNow = marking && companiesRepo.isTerminal((await companiesRepo.findByKey(company.key))?.status);
       if (marking && !closedNow) continue;
       // eslint-disable-next-line no-await-in-loop
       const ahead = reopening || marking ? await wouldResume(company.name) : await wouldStop(company.name);
@@ -443,12 +452,18 @@ const bulkCloseCompanies = {
     // Whether ANY of them moved a page other than this one. One broadcast
     // for the batch, not one per company.
     let touchedTheSheet = false;
+    let joined = 0;
     for (const company of found) {
       // THE SHARED CASCADE, the same one the page uses. Calling the repo
       // directly here is how her closes stopped nothing while the page's
       // stopped everybody.
       // eslint-disable-next-line no-await-in-loop
-      const result = await applyCompanyStatus(company.key, { status: args.status, via: 'diane' });
+      // ON REVIEW, ITS DEALS JOIN IT (his call 2026-10-15): the dialog's default.
+      // eslint-disable-next-line no-await-in-loop
+      const joins = args.status === 'review' ? await defaultReviewIds(company.name ?? company.key) : undefined;
+      if (joins) joined += joins.length;
+      // eslint-disable-next-line no-await-in-loop
+      const result = await applyCompanyStatus(company.key, { status: args.status, via: 'diane', ...(joins ? { reviewMonthlyDealIds: joins } : {}) });
       done.push(result.company?.name ?? company.name);
       moved += (reopening || marking ? result.deals?.resumed : result.deals?.stopped)?.length ?? 0;
       touchedTheSheet = touchedTheSheet || Boolean(result.deals) || result.reviewQueueChanged;
@@ -469,7 +484,7 @@ const bulkCloseCompanies = {
     const marked = () => `${done.length} ${companyWord} marked ${MARK_LABEL[args.status]}: `
       + `${done.join(', ')}. No deal stopped.`
       + `${moved > 0 ? ` ${moved} ${dealWord} a closure had stopped came back on the master sheet.` : ''}`
-      + `${args.status === 'review' ? ' No deal was ticked for the monthly review: that is chosen per deal on each company\'s status screen.' : ''}`
+      + `${args.status === 'review' ? ` ${joined} ${joined === 1 ? 'deal goes' : 'deals go'} to Review every month.` : ''}`
       + `${missingLine(missing)}`;
     const reply = marking ? marked() : reopening
       ? `${done.length} ${companyWord} reopened: ${done.join(', ')}. ${moved} ${dealWord} back on `
@@ -668,7 +683,7 @@ const listCompanies = {
     // "1 in liquidation", never "1 liquidation": the status as a phrase.
     const PHRASE = {
       active: 'active', going_concern: 'on going concern', review: 'under review',
-      liquidation: 'in liquidation', dissolved: 'dissolved', closed: 'closed',
+      liquidation: 'winding down', closed: 'dissolved',
     };
     const parts = [...byStatus].map(([s, n]) => `${n} ${PHRASE[s] ?? (STATUS_LABEL[s] ?? s).toLowerCase()}`
       + `${PAYING.has(s) ? ' (still paying)' : ''}`);

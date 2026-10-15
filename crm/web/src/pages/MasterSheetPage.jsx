@@ -387,7 +387,9 @@ function Field({ field, form, onChange, options, isNew, single = false }) {
  * row is a starting draft, not something to protect (which is the opposite
  * of Companies, where sync deliberately wins — see companies.repo.js).
  */
-function RowModal({ row, onClose }) {
+// ONE DEAL FORM EVERYWHERE (his call 2026-10-14): the company and person
+// pages' Edit opens this same form, so editing a deal never differs by page.
+export function RowModal({ row, onClose }) {
   // Every picker's list comes from the page's own data, so a role or
   // company the boss invents next month appears here on its own. Same
   // source the Add person wizard reads.
@@ -1375,7 +1377,7 @@ const SheetRow = memo(function SheetRow({
             {row.company}
             {row.company_status === COMPANY_STATUS.LIQUIDATION && (
               <span className="badge badge-liquidation ml-2" title="This company is winding down">
-                liquidation
+                winding down
               </span>
             )}
           </>

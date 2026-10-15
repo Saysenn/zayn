@@ -17,16 +17,24 @@ const CKEY = `lower(regexp_replace(btrim(company), '\\s+', ' ', 'g'))`;
 // is READ from the deals and tb_companies, never copied in: a copy would be
 // a second answer to "who is the director" that drifts.
 
-/** The stages, in the order the page offers them. */
+/**
+ * The stages, in the order the page offers them: the process as it really
+ * runs (his corrected flowchart, 2026-10-14, migration 090). The strike off
+ * road, then liquidation's, then the end. See the migration.
+ */
 const STAGE = Object.freeze({
+  ACTIVE: 'active',
+  ACTIVE_PROPOSAL: 'active_proposal',
+  STRIKE_OFF_SUSPENDED: 'strike_off_suspended',
+  STRIKE_OFF_REJECTED: 'strike_off_rejected',
+  LIQUIDATION: 'liquidation',
   OWN_LIQ: 'own_liq',
   HMRC_LIQ: 'hmrc_liq',
-  STRIKE_OFF: 'strike_off',
-  STRIKE_OFF_REJECTED: 'strike_off_rejected',
   DISSOLVED: 'dissolved',
-  ACTIVE: 'active',
 });
 const STAGES = Object.freeze(Object.values(STAGE));
+// Which kinds each stage may carry (Active proposal, Own liq, HMRC liq, Dissolved).
+const { STAGE_KINDS, kindFits } = require('../shared/liquidationStages');
 
 const companyKey = (value) => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
 
@@ -51,6 +59,8 @@ const LIST_SQL = `
     (SELECT string_agg(DISTINCT d.person_name, ', ') FROM deals d WHERE d.ckey = l.company_key AND d.stopped_on IS NULL AND lower(d.role) = 'director') AS director,
     (SELECT string_agg(DISTINCT d.person_name, ', ') FROM deals d WHERE d.ckey = l.company_key AND d.stopped_on IS NULL AND lower(d.role) = 'mid') AS mid,
     (SELECT SUM(d.monthly_amount)::float FROM deals d WHERE d.ckey = l.company_key AND d.stopped_on IS NULL) AS allocated,
+    -- How many deals closing it would stop: said before stage Dissolved closes it.
+    (SELECT COUNT(*)::int FROM deals d WHERE d.ckey = l.company_key AND d.stopped_on IS NULL) AS live_deals,
     (SELECT MAX(d.currency) FROM deals d WHERE d.ckey = l.company_key) AS currency,
     (SELECT row_to_json(m) FROM (
        SELECT said_on, body FROM tb_liquidation_comms WHERE liquidation_id = l.id ORDER BY said_on DESC, id DESC LIMIT 1
@@ -70,6 +80,18 @@ async function syncFromCompanies() {
       WHERE status = 'liquidation' AND btrim(name) <> ''
      ON CONFLICT (company_key) DO NOTHING`,
   );
+}
+
+/**
+ * THE ROW FOR ONE COMPANY, made if it has none, whatever its status: Diane
+ * putting a company INTO winding down, or recording that one off the page
+ * was struck off, sets its stage in the same act (suite 2026-10-14).
+ */
+async function ensureRow(key) {
+  const k = companyKey(key);
+  await pool.query('INSERT INTO tb_liquidations (company_key) VALUES ($1) ON CONFLICT (company_key) DO NOTHING', [k]);
+  const { rows } = await pool.query(`${LIST_SQL} WHERE l.company_key = $1`, [k]);
+  return rows[0] ?? null;
 }
 
 // Most urgent first: a passed deadline, then the nearest, then none.
@@ -101,6 +123,7 @@ async function details(id) {
 // The fields the page edits, and their columns.
 const COLUMNS = Object.freeze({
   stage: 'stage',
+  stageKind: 'stage_kind',
   instructions: 'instructions',
   deadline: 'deadline',
   nextAction: 'next_action',
@@ -115,7 +138,11 @@ const COLUMNS = Object.freeze({
  * transaction, so the history can never disagree with the row.
  * Returns { before, after } stages, or null when the row is gone.
  */
-async function update(id, fields, byUser) {
+async function update(id, fieldsIn, byUser) {
+  // A NEW STAGE STARTS WITH NO KIND unless one comes with it: a kind belongs
+  // to its stage (an MVL is no kind of strike off).
+  const fields = fieldsIn.stage !== undefined && fieldsIn.stageKind === undefined
+    ? { ...fieldsIn, stageKind: null } : fieldsIn;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -305,6 +332,6 @@ async function dueSoon(days = 7) {
 }
 
 module.exports = {
-  STAGE, STAGES, companyKey, list, findById, details, syncFromCompanies, update, addComm, removeComms, addDoc, findDoc, removeDoc, owners, dueSoon,
+  STAGE, STAGES, STAGE_KINDS, kindFits, companyKey, list, findById, details, syncFromCompanies, ensureRow, update, addComm, removeComms, addDoc, findDoc, removeDoc, owners, dueSoon,
   setRead, saveChunks, allChunks, docNames, docWithText, unread, renameDoc, restoreDoc, docsVersion,
 };

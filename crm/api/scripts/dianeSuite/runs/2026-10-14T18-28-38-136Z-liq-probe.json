@@ -1,0 +1,61 @@
+{
+  "set": "liq-probe",
+  "at": "2026-10-14T18:28:38.136Z",
+  "seconds": 19,
+  "cases": 2,
+  "passed": 2,
+  "passRate": 100,
+  "groups": {
+    "liq": {
+      "cases": 2,
+      "passed": 2,
+      "passRate": 100
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 0,
+    "db": 0
+  },
+  "calcAccuracy": null,
+  "inventedRate": 0,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0,
+  "recoveryRate": null,
+  "perTurn": {
+    "turns": 4,
+    "modelRounds": 1,
+    "toolCalls": 1,
+    "retries": 0,
+    "inputTokens": 32381,
+    "cachedPct": 99,
+    "outputTokens": 85,
+    "medianMs": 7799,
+    "slowestMs": 8258
+  },
+  "tokens": {
+    "input": 129523,
+    "cached": 128128,
+    "output": 339
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "struck off is dissolved: the stage, then closed, its deals stopped",
+      "name": "struck off is dissolved: the stage, then closed, its deals stopped",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a messy one: in, a CVL with its liquidator and deadline, and one struck off",
+      "name": "a messy one: in, a CVL with its liquidator and deadline, and one struck off",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}

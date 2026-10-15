@@ -138,6 +138,10 @@ function fullMonthThree(row, preset) {
  * is no month to measure it against and the answer is yes.
  */
 function isOwedThisMonth(row, { useEndDate = false } = {}) {
+  // DISSOLVED WITH ITS COMPANY (his call 2026-10-15): nothing more is owed,
+  // not even for the month it happened in. A deal stopped by hand keeps the
+  // rule below: owed for the month it stopped in.
+  if (row.stopped_on && row.stopped_reason === 'company_closed') return false;
   const preset = asDate(row.preset_on);
   // NO PRESET IS THE STANDING ROSTER, owed every month. Unless somebody
   // stopped it: that is an explicit statement about THIS deal, and it beats

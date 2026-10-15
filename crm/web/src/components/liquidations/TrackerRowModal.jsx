@@ -10,6 +10,7 @@ import Button from '../buttons/Button';
 import Select from '../forms/Select';
 import Toggle from '../forms/Toggle';
 import ConfirmDialog from '../modals/ConfirmDialog';
+import { confirm } from '../../configs/confirms.config';
 import DocViewer, { liquidationDoc, prefetchDoc } from '../display/DocViewer';
 import { DownloadIcon } from '../icons';
 import VideoJobs from './VideoJobs';
@@ -17,7 +18,9 @@ import { useVideoUploads } from './useVideoUploads';
 import { isVideoFile } from './videoProgress';
 import { Skeleton } from '../display/Skeleton';
 import { formatMoney } from '../../helpers/formatMoney';
-import { LIQ_STAGES, stageOf, deadlineTone, shortDate, todayIso } from '../../configs/liquidationStages';
+import {
+  STAGE_PICK_OPTIONS, stageOf, stageLabel, deadlineTone, shortDate, todayIso,
+} from '../../configs/liquidationStages';
 
 /**
  * ONE COMPANY ON THE LIQUIDATION TRACKER: every field, the contact log, the
@@ -35,9 +38,10 @@ const INPUT = 'min-h-9 rounded border border-border-strong bg-surface px-2.5 tex
 const BOX = `w-full ${INPUT}`;
 const AREA = `${BOX} py-2 leading-relaxed`;
 
-const FIELDS = ['stage', 'instructions', 'deadline', 'nextAction', 'owner', 'blamed', 'liquidator', 'note'];
+const FIELDS = ['stage', 'stageKind', 'instructions', 'deadline', 'nextAction', 'owner', 'blamed', 'liquidator', 'note'];
 const fromRow = (r) => ({
   stage: r.stage ?? '',
+  stageKind: r.stage_kind ?? '',
   instructions: r.instructions ?? '',
   deadline: r.deadline ?? '',
   nextAction: r.next_action ?? '',
@@ -84,12 +88,18 @@ export default function TrackerRowModal({ id, owners, onClose }) {
   const save = useReportingMutation((fields) => apiService.liquidations.update(id, fields), {
     describe: () => row?.company_name ?? 'Liquidation', verb: 'saved', invalidates: [KEY, detailKey],
   });
+  // DISSOLVED CLOSES IT (migration 091): asked first, with what it stops.
+  const [closingAsk, setClosingAsk] = useState(false);
   function submit(e) {
     e.preventDefault();
     if (!dirty) return;
+    if (draft.stage === 'dissolved' && saved.stage !== 'dissolved') { setClosingAsk(true); return; }
+    send();
+  }
+  function send() {
     const changed = Object.fromEntries(FIELDS.filter((f) => draft[f] !== saved[f]).map((f) => [f, draft[f]]));
-    // the server re-reads its own row after; the form follows it
-    save.mutate(changed, { onSuccess: (res) => setDraft(fromRow(res.row)) });
+    // the server re-reads its own row after; the form follows it. Closed, it leaves the page.
+    save.mutate(changed, { onSuccess: (res) => { if (res.closed) onClose(); else setDraft(fromRow(res.row)); } });
   }
 
   return (
@@ -103,8 +113,17 @@ export default function TrackerRowModal({ id, owners, onClose }) {
           <form onSubmit={submit} className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Status">
-                <Select size="form" value={draft.stage} onChange={(v) => set('stage')(v || '')} placeholder="Not set"
-                  options={[{ value: '', label: 'Not set' }, ...LIQ_STAGES.map((s) => ({ value: s.value, label: s.label }))]} />
+                {/* THE SAME PICKER AS THE TABLE'S CELL (his call 2026-10-14: be
+                    consistent): a step's kinds in the pane beside the
+                    list. Another stage clears the kind. */}
+                <Select size="form" value={draft.stage} subValue={draft.stageKind || null} placeholder="Not set"
+                  onChange={(v, extra) => setDraft((d) => ({
+                    ...d,
+                    stage: v || '',
+                    stageKind: extra?.sub ?? '',
+                  }))}
+                  options={[{ value: '', label: 'Not set' }, ...STAGE_PICK_OPTIONS]} />
+                {stageOf(draft.stage).hint && <span className="block text-xs text-text-faint">{stageOf(draft.stage).hint}</span>}
               </Field>
               <Field label="Deadline">
                 <input type="date" className={BOX} value={draft.deadline} onChange={(e) => set('deadline')(e.target.value)} />
@@ -142,6 +161,17 @@ export default function TrackerRowModal({ id, owners, onClose }) {
           <History history={data.history} />
         </div>
       )}
+      {closingAsk && row && (
+        <ConfirmDialog
+          {...confirm.closeOnDissolved({
+            companyName: row.company_name,
+            count: row.live_deals ?? 0,
+            money: formatMoney(row.allocated ?? 0, row.currency),
+          })}
+          onCancel={() => setClosingAsk(false)}
+          onConfirm={() => { setClosingAsk(false); send(); }}
+        />
+      )}
     </Modal>
   );
 }
@@ -159,7 +189,7 @@ function Summary({ row }) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className={stageOf(row.stage).badge}>{stageOf(row.stage).label}</span>
+        <span className={stageOf(row.stage).badge}>{stageLabel(row.stage, row.stage_kind)}</span>
         <Link to={`/companies/${encodeURIComponent(row.company_key)}`} className="text-sm font-semibold text-accent-strong hover:underline">
           Open company page →
         </Link>

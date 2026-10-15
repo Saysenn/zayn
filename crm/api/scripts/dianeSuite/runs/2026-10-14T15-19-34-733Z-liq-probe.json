@@ -1,0 +1,81 @@
+{
+  "set": "liq-probe",
+  "at": "2026-10-14T15:19:34.733Z",
+  "seconds": 72,
+  "cases": 4,
+  "passed": 1,
+  "passRate": 25,
+  "groups": {
+    "liq": {
+      "cases": 4,
+      "passed": 1,
+      "passRate": 25
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 0,
+    "db": 3
+  },
+  "calcAccuracy": null,
+  "inventedRate": null,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0,
+  "recoveryRate": 100,
+  "perTurn": {
+    "turns": 10,
+    "modelRounds": 1.4,
+    "toolCalls": 0.5,
+    "retries": 0.1,
+    "inputTokens": 42220,
+    "cachedPct": 98,
+    "outputTokens": 74,
+    "medianMs": 9969,
+    "slowestMs": 16793
+  },
+  "tokens": {
+    "input": 422204,
+    "cached": 414720,
+    "output": 736
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "own liq as a CVL",
+      "name": "own liq as a CVL",
+      "group": "liq",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    },
+    {
+      "id": "an hmrc petition, then the winding-up order",
+      "name": "an hmrc petition, then the winding-up order",
+      "group": "liq",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    },
+    {
+      "id": "struck off is dissolved",
+      "name": "struck off is dissolved",
+      "group": "liq",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    },
+    {
+      "id": "a messy order: stage, deadline in words, a call, and another company's owner",
+      "name": "a messy order: stage, deadline in words, a call, and another company's owner",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}

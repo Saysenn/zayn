@@ -1,0 +1,56 @@
+{
+  "set": "liq-probe",
+  "at": "2026-10-14T15:25:37.375Z",
+  "seconds": 12,
+  "cases": 1,
+  "passed": 0,
+  "passRate": 0,
+  "groups": {
+    "liq": {
+      "cases": 1,
+      "passed": 0,
+      "passRate": 0
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 0,
+    "db": 1
+  },
+  "calcAccuracy": null,
+  "inventedRate": null,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0,
+  "recoveryRate": null,
+  "perTurn": {
+    "turns": 2,
+    "modelRounds": 1,
+    "toolCalls": 1,
+    "retries": 0,
+    "inputTokens": 30807,
+    "cachedPct": 99,
+    "outputTokens": 55,
+    "medianMs": 10175,
+    "slowestMs": 10175
+  },
+  "tokens": {
+    "input": 61613,
+    "cached": 60928,
+    "output": 110
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "a messy order: stage, deadline in words, a call, and another company's owner",
+      "name": "a messy order: stage, deadline in words, a call, and another company's owner",
+      "group": "liq",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    }
+  ]
+}

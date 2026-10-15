@@ -42,11 +42,12 @@ export const BADGE_LABELS = Object.freeze({
   paying: 'Paying',
   newly_opened: 'Newly opened',
   closing: 'Closing',
-  closed: 'Closed',
-  // The other two COMPANY statuses. Liquidation is still paying, reduced;
-  // dissolved is terminal like closed and differs only in what it says
-  // happened. A DELIBERATE MIRROR of configs/companyStatus.js.
-  liquidation: 'Liquidation',
+  // The company status shown as Dissolved (his call 2026-10-15).
+  closed: 'Dissolved',
+  // Winding down is still paying, reduced. A DELIBERATE MIRROR of
+  // configs/companyStatus.js. Dissolved is no company status since
+  // migration 091, but the Winding down page's last STAGE wears its badge.
+  liquidation: 'Winding down',
   dissolved: 'Dissolved',
   // The fifth COMPANY status, and his own word. Trading and expected to
   // keep trading, so it reads green like active and NOT grey like closed:

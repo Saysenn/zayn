@@ -68,7 +68,7 @@ const { showSheetPreset } = require('./sheetPreset');
 // eslint-disable-next-line import/order
 const { guarded, outcomeCodes } = require('../readGuard');
 const { confirmFirst } = require('./confirmFirst');
-const { applyCompanyStatus, wouldStop } = require('../../shared/companyStatus.helper');
+const { applyCompanyStatus, wouldStop, defaultReviewIds } = require('../../shared/companyStatus.helper');
 // "Add 3%" written as "set to 3" took 160 AED out of a month in silence.
 // The confirm names the LEVEL, the FROM and the TO. See rateChange.js.
 const {
@@ -2734,8 +2734,8 @@ const FILTER_PARAMS = {
   companyStatus: pluralFilter({
     type: 'string',
     enum: Object.values(companiesRepo.COMPANY_STATUS),
-    description: "The COMPANY's status, not the deal's. liquidation is still paying. closed and "
-      + 'dissolved have both ended and stopped every deal on it. This finds the DEALS on such a '
+    description: "The COMPANY's status, not the deal's. liquidation (winding down) is still paying. closed "
+      + '(dissolved is closed) has ended and stopped every deal on it. This finds the DEALS on such a '
       + 'company. To name the COMPANIES themselves, "which companies are in liquidation", that is '
       + 'list_companies, not this.',
   }),
@@ -10085,8 +10085,8 @@ const updateCompany = {
         enum: Object.values(companiesRepo.COMPANY_STATUS),
         description: 'active is trading. going_concern is trading with no end date, paid exactly '
           + 'like active. review is STILL PAYING and asked about every month. liquidation is '
-          + 'winding down and STILL PAYING, at amounts set per deal. closed and dissolved both END '
-          + 'it and stop every deal on it. Only closed and dissolved stop anything.',
+          + 'winding down (the CRM shows it as "Winding down": a strike off or a liquidation) and STILL PAYING, at amounts set per deal. closed ENDS '
+          + 'it and stops every deal on it (dissolved and struck off are closed). Only closed stops anything.',
       },
       /**
        * THE SETTLEMENT, which the repo and undo held and she could not set.
@@ -10100,7 +10100,7 @@ const updateCompany = {
       },
       confirmed: {
         type: 'boolean',
-        description: 'Needed to close or dissolve, and to set a liquidation total. False first, '
+        description: 'Needed to close (or dissolve, which is close), and to set a liquidation total. False first, '
           + 'true after they agree.',
       },
     },
@@ -10116,6 +10116,31 @@ const updateCompany = {
     const fields = Object.fromEntries(
       editable.filter((k) => args[k] !== undefined && args[k] !== null).map((k) => [k, args[k]]),
     );
+    // ONE ENDING (migration 091): a "dissolved" sent is closed.
+    if (fields.status === 'dissolved') fields.status = 'closed';
+    // SEVERAL COMPANIES IN ONE ASK ARE ONE PREVIEW (suite 2026-10-15): "put
+    // ironleaf and harbor nine on monthly review" was written one by one,
+    // before any yes. This tool writes at once, so it hands them over.
+    if (fields.status !== undefined && fields.status !== 'closed' && args.said) {
+      const said = ` ${String(args.said).toLowerCase().replace(/[^a-z0-9 ]+/g, ' ')} `;
+      const named = (await companiesRepo.names()).filter((c) => c.ckey && said.includes(` ${c.ckey.replace(/[^a-z0-9 ]+/g, ' ').trim()} `));
+      if (named.length > 1) {
+        return {
+          summary: `NOTHING HAS BEEN CHANGED. They named ${named.length} companies (${named.map((c) => c.name).join(', ')}). `
+            + (fields.status === 'liquidation'
+              ? 'Call update_liquidation ONCE with an item per company, status "winding down": it previews them together.'
+              : 'Call bulk_close_companies ONCE with all of them: it previews them together.'),
+        };
+      }
+    }
+    // DISSOLVED ONLY THROUGH WINDING DOWN (his call 2026-10-15).
+    if (fields.status === 'closed') {
+      return {
+        summary: `NOTHING HAS BEEN CHANGED. A company is dissolved only on the Winding down page. If ${name} `
+          + 'is winding down, call update_liquidation with its stage dissolved (that dissolves it). If it is not, '
+          + 'offer to put it into winding down (update_liquidation, status "winding down"). Never say it was dissolved.',
+      };
+    }
     // An undo of a LOGGED detail is the undo tool's. A status is not logged, so reopening stays here.
     const logged = Object.keys(fields).some((k) => COMPANY_LOGGED_FIELD[k]);
     if (logged && fields.status === undefined && asksUndo(undoSentence(args))) return { summary: USE_UNDO };
@@ -10145,12 +10170,13 @@ const updateCompany = {
     if (fields.status !== undefined && args.said !== undefined) {
       const heard = `${args.said ?? ''}\n${args.saidRecent ?? ''}`.replace(/liquidation\s+total/gi, '');
       const STATUS_SAID = {
-        active: /\b(?:active|reopen|re-open|open it|back on)\b/i,
+        // "BRING PINECREST BACK" undoes a dissolving (suite 2026-10-15).
+        active: /\b(?:active|reopen|re-open|open it|back on|restore\w*|undissolve)\b|\bbring\b[^.?!]*\bback\b/i,
         going_concern: /\bgoing\s+concern\b/i,
-        liquidation: /\bliquidat\w*/i,
+        liquidation: /\bliquidat\w*|\bwinding[\s-]?down\b|\bwind\w*\s+(?:\w+\s+)?down\b/i,
         review: /\breview\w*/i,
-        dissolved: /\bdissolv\w*/i,
-        closed: /\bclos\w*|\bshut\b/i,
+        // ONE ENDING (migration 091): dissolved and struck off are closed.
+        closed: /\bclos\w*|\bshut\b|\bdissolv\w*|\bstruck[\s-]?off\b/i,
       };
       if (STATUS_SAID[fields.status] && !STATUS_SAID[fields.status].test(heard)) {
         return {
@@ -10205,7 +10231,7 @@ const updateCompany = {
     const keeps = [];
     if (ending) {
       const ahead = await wouldStop(before.name);
-      acts.push(`${fields.status === 'dissolved' ? 'dissolve' : 'close'} ${before.name} and STOP `
+      acts.push(`dissolve ${before.name} and STOP `
         + `${ahead.count} live ${ahead.count === 1 ? 'deal' : 'deals'} on it, `
         + `${ahead.currency} ${Number(ahead.money).toLocaleString('en-GB', {
           minimumFractionDigits: 2, maximumFractionDigits: 2,
@@ -10259,7 +10285,13 @@ const updateCompany = {
     }
 
     // Logged as hers, so History and undo say who changed it.
-    const { company, deals, reviewQueueChanged } = await applyCompanyStatus(ckey, { ...fields, via: 'diane' });
+    // INTO WINDING DOWN OR REVIEW, ITS DEALS JOIN THE REVIEW (his call
+    // 2026-10-15): the company page's dialog default, ticked here the same way.
+    const joins = fields.status !== undefined && companiesRepo.isReviewedMonthly(fields.status) === true
+      && before.status !== fields.status ? await defaultReviewIds(before.name) : undefined;
+    const { company, deals, reviewQueueChanged } = await applyCompanyStatus(ckey, {
+      ...fields, via: 'diane', ...(joins ? { reviewMonthlyDealIds: joins } : {}),
+    });
     if (!company) return { summary: `No company called "${name}".` };
 
     broadcast(null, 'companies:changed', { action: 'updated', company: company.name, via: 'agent' });
@@ -10286,9 +10318,8 @@ const updateCompany = {
      * REVIEWED_MONTHLY), and she has no checklist, so she must not let
      * "put it on review" sound like every deal joined the queue.
      */
-    const entersReview = reviewQueueChanged && companiesRepo.isReviewedMonthly(fields.status) === true;
-    const reviewNote = entersReview
-      ? ' No deal was ticked for the monthly review: that is chosen per deal on the company\'s status screen, so say so.'
+    const reviewNote = joins
+      ? ` ${joins.length} of its deals ${joins.length === 1 ? 'goes' : 'go'} to Review every month (any can be taken off there). Say so.`
       : '';
     const settled = fields.liquidationTotal !== undefined ? ' No deal\'s amount changed.' : '';
     return {

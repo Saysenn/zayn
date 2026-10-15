@@ -200,7 +200,7 @@ export default function PeopleCards({ people }) {
                       <span className="sep">·</span>
                       {money(d.monthly_amount, d.currency)} ÷ {daysInPresetMonth(d.preset_on)} days × {d.payable_days}
                       <span className="sep">·</span>
-                      {periodLabel(d.payment_period ?? d.status)}
+                      {d.stopped_on ? 'Ended' : periodLabel(d.payment_period ?? d.status)}
                       {d.needs_review && <><span className="sep">·</span>needs a check</>}
                     </p>
                   </div>

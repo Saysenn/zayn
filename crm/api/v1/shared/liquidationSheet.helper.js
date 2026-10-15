@@ -10,14 +10,8 @@ const { PALETTE, DEFAULT_PALETTE, paletteFor } = require('../expenses/expenseCol
 // colour, frozen and filterable. Text cut nowhere: the screen clips, the
 // file is where the whole of it is read.
 
-const STAGE_LABEL = Object.freeze({
-  own_liq: 'Own liq',
-  hmrc_liq: 'HMRC liq',
-  strike_off: 'Strike off',
-  strike_off_rejected: 'Strike off rejected',
-  dissolved: 'Dissolved',
-  active: 'Active',
-});
+// One set of stage words for the file, Diane and the rest (2026-10-14).
+const { STAGE_LABEL, stageText } = require('./liquidationStages');
 
 const MONEY_FMT = '#,##0.00';
 
@@ -73,7 +67,8 @@ function buildLiquidationSheet(rows, { columns, palette } = {}) {
       director: r.director ?? null,
       mid: r.mid ?? null,
       group: (r.groups ?? []).join(', ') || null,
-      stage: STAGE_LABEL[r.stage] ?? 'Not set',
+      // A stage with a kind says it: "Own liq (CVL)".
+      stage: stageText(r.stage, r.stage_kind),
       instructions: r.instructions ?? null,
       deadline: dateOf(r.deadline),
       nextAction: r.next_action ?? null,

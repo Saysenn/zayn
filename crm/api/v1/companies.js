@@ -69,6 +69,16 @@ router.get('/companies', async (req, res, next) => {
 });
 
 // For the assign-a-handler picker's search box.
+// THE ARCHIVE'S COMPANIES TAB: every dissolved company (his call 2026-10-15).
+router.get('/companies/archived', async (req, res, next) => {
+  try {
+    const { page, pageSize } = parsePagination(req.query);
+    res.json(await companiesRepo.archived({ q: req.query.q || undefined, page, pageSize }));
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/companies/names', async (req, res, next) => {
   try {
     res.json({ companies: await companiesRepo.names() });
@@ -112,32 +122,41 @@ router.get('/companies/:key', async (req, res, next) => {
  * company. Through applyCompanyStatus, one company at a time, the same
  * door the single edit and Diane use.
  *
- * NEVER A CLOSING STATUS. Closing or dissolving asks, per company, which
- * deals stop; there is no honest way to answer that for ten at once.
+ * NEVER DISSOLVED (his call 2026-10-15): a company is dissolved only on
+ * the Winding down page, by its stage.
  */
 router.post('/companies/bulk', async (req, res, next) => {
   try {
-    const { keys, tier, status } = req.body || {};
+    // THE TICKED DEALS ride with the status (his call 2026-10-15): the bar
+    // asks the same question the company page does. One flat list; each
+    // company's write takes only its own deals.
+    const { keys, tier, status, reviewMonthlyDealIds, goingConcernDealIds } = req.body || {};
     const list = (Array.isArray(keys) ? keys : []).filter((k) => typeof k === 'string' && k);
     if (status !== undefined) {
       if (!Object.values(companiesRepo.COMPANY_STATUS).includes(status)) {
         return next(new AppError(400, messages.notACompanyStatus(status)));
       }
-      if (companiesRepo.isTerminal(status)) {
-        return next(new AppError(400, 'Close or dissolve companies one at a time, so you can pick which deals stop.'));
-      }
+      if (companiesRepo.isTerminal(status)) return next(new AppError(400, messages.dissolveOnWindingDown));
     }
     if (tier === undefined && status === undefined) return next(new AppError(400, 'Nothing to set.'));
     const updated = [];
     let cascaded = false;
     for (const key of list) {
       // eslint-disable-next-line no-await-in-loop
-      const out = await applyCompanyStatus(key, { tier, status });
+      const out = await applyCompanyStatus(key, {
+        tier,
+        status,
+        ...(Array.isArray(reviewMonthlyDealIds) ? { reviewMonthlyDealIds } : {}),
+        ...(Array.isArray(goingConcernDealIds) ? { goingConcernDealIds } : {}),
+      });
       if (out?.company) updated.push(key);
       if (out?.deals || out?.reviewQueueChanged) cascaded = true;
     }
     broadcast(null, 'companies:changed', { action: 'bulk-updated' });
-    if (cascaded) broadcast(null, 'master-sheet:changed', { action: 'company-status' });
+    if (cascaded) {
+      broadcast(null, 'master-sheet:changed', { action: 'company-status' });
+      broadcast(null, 'people:changed', { action: 'company-status' });
+    }
     res.json({ updated });
   } catch (err) {
     next(err);
@@ -166,6 +185,9 @@ router.patch('/companies/:key', async (req, res, next) => {
     if (status !== undefined && !Object.values(companiesRepo.COMPANY_STATUS).includes(status)) {
       return next(new AppError(400, messages.notACompanyStatus(status)));
     }
+    // DISSOLVED ONLY THROUGH WINDING DOWN (his call 2026-10-15): its stage
+    // Dissolved on that page is the one door (liquidations.js).
+    if (companiesRepo.isTerminal(status)) return next(new AppError(400, messages.dissolveOnWindingDown));
     let result = null;
 
     // A rename touches every deal naming the company, so it runs in its

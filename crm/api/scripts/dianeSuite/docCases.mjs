@@ -128,7 +128,7 @@ read('lawyer mode knows our liquidations', [
   { say: 'which of our companies in liquidation has the nearest deadline, and who is the liquidator?', expect: { reply: /Quarry Lane[\s\S]*Begbies|Begbies[\s\S]*Quarry Lane/i } },
 ], { context: 'hmrc' });
 write('lawyer mode changes nothing', [
-  { say: 'remove the call notes from quarry lane', expect: { reply: /master sheet|Liquidations page/i, db: untouched } },
+  { say: 'remove the call notes from quarry lane', expect: { reply: /master sheet|Liquidations page|Winding down page/i, db: untouched } },
 ], { context: 'hmrc' });
 
 // ================= MASTER SHEET MODE: changing =================

@@ -143,14 +143,32 @@ async function applyCompanyStatus(key, fields = {}) {
 
   // Same rule, same shape: `undefined` was never asked, `[]` is a real
   // answer meaning none of them.
+  /**
+   * BACK TO ACTIVE TAKES ITS DEALS OFF THE REVIEW (his call 2026-10-15):
+   * out of Winding down or Review, nothing is left to review, so each
+   * ticked deal's Deal status goes back to Active, the same write as the
+   * Review page's Remove from review, in this act's one batch. Only when
+   * the caller did not answer the checklist itself.
+   */
+  let unreviewed = null;
+  if (asked && fields.status === 'active' && ['liquidation', 'review'].includes(before?.status)
+    && !Array.isArray(reviewMonthlyDealIds)) {
+    const { rows: live } = await rowsRepo.findAll({ company: name, pageSize: 500 });
+    unreviewed = [];
+    for (const row of live.filter((r) => r.review_monthly && !r.stopped_on)) {
+      // eslint-disable-next-line no-await-in-loop
+      if (await rowsRepo.setDealStatus(row.id, 'active', stamp)) unreviewed.push(row.id);
+    }
+  }
+
   let goingConcern = null;
   if (Array.isArray(goingConcernDealIds)) {
     goingConcern = await rowsRepo.setGoingConcernForCompany(name, goingConcernDealIds, stamp);
   }
 
   return {
-    company, deals, reviewed, goingConcern, batchId,
-    reviewQueueChanged, becameTerminal, reopened,
+    company, deals, reviewed, goingConcern, batchId, unreviewed,
+    reviewQueueChanged: reviewQueueChanged || Boolean(unreviewed?.length), becameTerminal, reopened,
   };
 }
 
@@ -185,4 +203,16 @@ async function wouldResume(name) {
   return { count: total, money, currency: rows[0]?.currency ?? 'GBP' };
 }
 
-module.exports = { applyCompanyStatus, wouldStop, wouldResume };
+/**
+ * WHICH DEALS JOIN THE REVIEW when Diane puts a company into winding down
+ * or review (his call 2026-10-15): the dialog's default, so the two agree.
+ * What is already ticked, else every live deal.
+ */
+async function defaultReviewIds(name) {
+  const { rows } = await rowsRepo.findAll({ company: name, pageSize: 500 });
+  const live = rows.filter((r) => !r.stopped_on);
+  const ticked = live.filter((r) => r.review_monthly);
+  return (ticked.length ? ticked : live).map((r) => r.id);
+}
+
+module.exports = { applyCompanyStatus, wouldStop, wouldResume, defaultReviewIds };

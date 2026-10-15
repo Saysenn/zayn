@@ -58,7 +58,7 @@ export const NAV_GROUPS = [
       // THE LIQUIDATION TRACKER, his top priority 2026-10-13: companies
       // being wound down, their deadlines and who owns each. Beside
       // Companies because every row IS a company.
-      { to: '/liquidations', label: 'Liquidations', icon: 'HourglassIcon' },
+      { to: '/liquidations', label: 'Winding down', icon: 'HourglassIcon' },
       // ===============================
       // * THE ONE PAGE THAT ASKS RATHER THAN SHOWS
       // ===============================

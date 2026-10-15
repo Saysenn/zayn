@@ -188,38 +188,46 @@ export const confirm = {
    * ONE PRESS, BOTH DECISIONS, the same rule the modal follows. The status
    * and the deals it touches are written together or not at all.
    */
-  companyDeals: ({ status, companyName, count, total, clearsDates }) => ({
-    title: status === 'going_concern'
-      ? `Set ${companyName} to going concern?`
-      : `Set ${companyName} to ${status === 'review' ? 'review' : 'liquidation'}?`,
-    subject: `${count} of ${total} ${total === 1 ? 'deal' : 'deals'} ticked.`,
-    detail: [
-      clearsDates
-        ? 'Each ticked deal reads "Going concern" instead of a date, and ITS END DATE IS '
-          + 'CLEARED. Unticking later puts the word back to blank; it cannot bring a date back.'
-        : 'Each ticked deal joins the Review list every month and its end date reads '
-          + '"Reviewed monthly" instead of a date.',
-      count === 0
-        ? 'Nothing is ticked, so the status changes and no deal is touched.'
-        : 'Anything left unticked keeps exactly what it has now.',
-      clearsDates
-        ? 'The dates are kept in History, so this can be undone in one press.'
-        : 'This can be undone in one press from History.',
-    ],
-    confirmLabel: 'Save status',
-    busyLabel: 'Saving…',
-  }),
+  /**
+   * WHICH DEALS A STATUS TOUCHES, simplified (his call 2026-10-15): a title,
+   * one line, the checklist (the dialog's children) and one button. The
+   * company page and the Companies bottom bar ask it the same way.
+   */
+  companyDeals: ({ status, companyName }) => {
+    const words = {
+      liquidation: {
+        title: `Wind down ${companyName}?`,
+        line: 'Ticked deals go to Review › Winding down every month. Unticked deals carry on as they are.',
+        button: 'Wind down',
+      },
+      review: {
+        title: `Put ${companyName} on review?`,
+        line: 'Ticked deals go to Review › Marked for review every month. Unticked deals carry on as they are.',
+        button: 'Put on review',
+      },
+      going_concern: {
+        title: `Set ${companyName} to going concern?`,
+        line: 'Ticked deals have no end date: their end date is cleared. Unticked deals keep theirs.',
+        button: 'Set going concern',
+      },
+    }[status];
+    return {
+      title: words.title,
+      detail: words.line,
+      confirmLabel: words.button,
+      // Red only where something is lost: going concern clears end dates.
+      confirmVariant: status === 'going_concern' ? 'danger' : 'accent',
+      busyLabel: 'Saving…',
+    };
+  },
 
   closeCompany: ({ status, companyName, count, total, money }) => ({
-    title: status === 'dissolved' ? `Dissolve ${companyName}?` : `Close ${companyName}?`,
+    title: `Dissolve ${companyName}?`,
     subject: count === total
       ? `${count} ${count === 1 ? 'deal' : 'deals'} still running on it, ${money} a month.`
       : `${count} of ${total} deals, ${money} a month.`,
     detail: [
-      status === 'dissolved'
-        ? 'Dissolved means the company is legally gone. Closed means we ended it. Both stop the '
-          + 'deals; the word is what an audit reads later.'
-        : 'Closed means we ended it. Dissolved is the word for a company that is legally gone.',
+      'The company moves to the Archive\'s Companies tab, with who ran it and its deals.',
       count === 0
         ? 'No deal is ticked, so the status changes and nothing stops. Every deal keeps running '
           + 'and keeps costing what it costs.'
@@ -231,7 +239,66 @@ export const confirm = {
         : 'Setting the company back to active brings back only what this stops. Anything left '
           + 'ticked off keeps running in the meantime.',
     ],
-    confirmLabel: status === 'dissolved' ? 'Dissolve company' : 'Close company',
+    confirmLabel: 'Dissolve company',
+    busyLabel: 'Saving…',
+  }),
+
+  /**
+   * OFF THE REVIEW, STILL PAID (his call 2026-10-15). Nothing stops, so the
+   * dialog says what changes: the Reviewed monthly mark, and only that.
+   */
+  removeFromReview: ({ count, names, skipped }) => ({
+    title: `Take ${count} ${count === 1 ? 'deal' : 'deals'} off the review?`,
+    subject: names.length > 4 ? `${names.slice(0, 4).join(', ')} and ${names.length - 4} more` : names.join(', '),
+    detail: [
+      `${count === 1 ? 'Its' : 'Their'} Deal status goes back to Active: off this list, still paid every month, nothing stops.`,
+      ...(skipped ? [`${skipped} ticked ${skipped === 1 ? 'deal is' : 'deals are'} here for a past end date, not the review mark, and ${skipped === 1 ? 'stays' : 'stay'}. Answer ${skipped === 1 ? 'it' : 'them'} instead.`] : []),
+      'Undo puts the mark back.',
+    ],
+    confirmLabel: 'Remove from review',
+    // Nothing stops, so not red (his rule: colour says what a button does).
+    confirmVariant: 'accent',
+    busyLabel: 'Saving…',
+  }),
+
+  /**
+   * DISSOLVING MANY FROM THE COMPANIES BAR (his call 2026-10-15). No
+   * checklist for ten companies at once: every live deal on each stops,
+   * so the count is said before anything is written.
+   */
+  dissolveCompanies: ({ count, handlers }) => ({
+    title: `Dissolve ${count} ${count === 1 ? 'company' : 'companies'}?`,
+    subject: `${handlers} ${handlers === 1 ? 'handler' : 'handlers'} on ${count === 1 ? 'it' : 'them'}.`,
+    detail: [
+      `Every live deal on ${count === 1 ? 'it' : 'them'} stops today and moves to the Archive. Every month already paid is untouched.`,
+      count === 1
+        ? 'The company moves to the Archive\'s Companies tab. Setting it back to active on its page brings its deals back.'
+        : 'The companies move to the Archive\'s Companies tab. Setting one back to active on its page brings its deals back.',
+    ],
+    confirmLabel: count === 1 ? 'Dissolve company' : 'Dissolve companies',
+    busyLabel: 'Saving…',
+  }),
+
+  /**
+   * STAGE DISSOLVED CLOSES THE COMPANY (his call 2026-10-14, migration 091):
+   * the end of either road on the Winding down page. Asked first, with what
+   * it stops, the same as closing it from its own page.
+   */
+  closeOnDissolved: ({ companyName, count, money }) => ({
+    title: `Dissolve ${companyName}?`,
+    subject: count
+      ? `${count} live ${count === 1 ? 'deal' : 'deals'} on it, ${money} a month.`
+      : 'No live deals on it.',
+    detail: [
+      'Dissolved is the end of winding down: the company is dissolved and moves to the Archive\'s Companies tab.',
+      count
+        ? 'Every live deal stops today and moves to the Archive. Every month already paid is untouched.'
+        : 'Nothing stops.',
+      count
+        ? 'It leaves the Winding down page. Setting it back to active on its page brings these deals back.'
+        : 'It leaves the Winding down page. It can be set back to active on its own page.',
+    ],
+    confirmLabel: 'Dissolve company',
     busyLabel: 'Saving…',
   }),
 

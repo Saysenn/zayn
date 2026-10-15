@@ -77,9 +77,11 @@ export function DetailCard({ title, action, flush = false, highlighted = false, 
 // the value, and a row of bold captions is a row of things to read past.
 export function Stat({ label, value, lead = false }) {
   return (
-    <div>
+    // MIN-W-0 AND BREAK-WORDS (his call 2026-10-15: no broken cards): a long
+    // name list or one long word wraps inside its card, never past it.
+    <div className="min-w-0">
       <p className="text-xs font-semibold uppercase tracking-wide text-text-faint">{label}</p>
-      <p className={`mt-0.5 font-semibold tabular-nums ${lead ? 'text-lg' : 'text-xs'}`}>{value}</p>
+      <p className={`mt-0.5 break-words font-semibold tabular-nums ${lead ? 'text-lg' : 'text-xs'}`}>{value}</p>
     </div>
   );
 }

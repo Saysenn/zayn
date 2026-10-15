@@ -1,6 +1,7 @@
 const { Router } = require('express');
 const { randomUUID } = require('node:crypto');
 const repo = require('./repos/monthlyReview.repo');
+const rowsRepo = require('./repos/masterSheetRows.repo');
 const { AppError } = require('./middlewares/errors');
 const { messages } = require('./shared/messages');
 const { currentMonth } = require('./shared/presetMonth.helper');
@@ -105,6 +106,43 @@ router.post('/monthly-review/answer', async (req, res, next) => {
       return next(new AppError(400, messages.notAnAnswer(answer)));
     }
     res.json(await answerAll(req, answer));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * ***************************************************
+ * * TAKE DEALS OFF THE REVIEW, KEEP PAYING THEM (his call 2026-10-15)
+ * ***************************************************
+ * The tick, not the money: each deal's Deal status goes back to Active,
+ * through the same write the master sheet's Deal status cell uses, so it
+ * leaves the list and keeps being paid with nothing stopped. One batch, so
+ * History undoes the lot in one press. A deal here only for a past end
+ * date is not ticked, so it is reported as left and stays.
+ */
+router.post('/monthly-review/remove', async (req, res, next) => {
+  try {
+    const ids = (Array.isArray(req.body?.dealIds) ? req.body.dealIds : []).map(Number).filter(Number.isInteger);
+    if (!ids.length) return next(new AppError(400, 'Pick the deals to take off the review.'));
+    const batchId = randomUUID();
+    const removed = [];
+    let notTicked = 0;
+    for (const id of ids) {
+      // eslint-disable-next-line no-await-in-loop
+      const before = await rowsRepo.findById(id);
+      if (!before || before.stopped_on) continue;
+      if (!before.review_monthly) { notTicked += 1; continue; }
+      // eslint-disable-next-line no-await-in-loop
+      const row = await rowsRepo.setDealStatus(id, rowsRepo.DEAL_STATUS?.ACTIVE ?? 'active', { via: 'admin', batchId });
+      if (row) removed.push(row.id);
+    }
+    if (removed.length) {
+      broadcast(null, 'master-sheet:changed', { action: 'deal-status' });
+      broadcast(null, 'companies:changed', { action: 'deal-status' });
+      broadcast(null, 'monthly-review:changed', { action: 'removed' });
+    }
+    res.json({ removed, notTicked, batchId: removed.length ? batchId : null });
   } catch (err) {
     next(err);
   }

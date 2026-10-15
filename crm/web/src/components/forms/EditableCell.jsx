@@ -55,7 +55,9 @@ function toEditValue(raw, type) {
 // but is not one of the two an override writes.
 function toOptions(options) {
   return (options ?? []).map((o) => (
-    typeof o === 'object' && o !== null ? { value: String(o.value), label: o.label ?? String(o.value), disabled: Boolean(o.disabled) } : { value: String(o), label: String(o) }
+    // A group heading passes through as itself (the CRM's dropdown shows it).
+    typeof o === 'object' && o !== null && o.heading ? { heading: o.heading }
+      : typeof o === 'object' && o !== null ? { value: String(o.value), label: o.label ?? String(o.value), disabled: Boolean(o.disabled), ...(o.sub ? { sub: o.sub } : {}) } : { value: String(o), label: String(o) }
   ));
 }
 
@@ -69,7 +71,7 @@ function validate(value, type, options) {
   }
   if (type === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(v)) return 'must be a real date';
   if (type === 'select' && options) {
-    const allowed = toOptions(options);
+    const allowed = toOptions(options).filter((o) => !o.heading);
     if (!allowed.some((o) => o.value === v)) {
       return `must be one of ${allowed.map((o) => o.label).join(', ')}`;
     }
@@ -99,7 +101,9 @@ export default function EditableCell({
   display,               // formatted string shown when not editing
   className = '',
   title,
-  onSave,                // (coercedValue) => void — fires only on a real change
+  onSave,                // (coercedValue, { sub }) => void — fires only on a real change
+  subValue = null,       // for a 'select' whose options carry `sub`: the sub-choice
+                         // held now (a Liquidations stage's kind, 2026-10-14)
   onEditingChange,       // told when this cell opens/closes; the page uses it
                          // to hold off socket-driven refetches mid-edit
   as = 'td',             // 'div' when the page already owns the <td>: a td
@@ -205,7 +209,11 @@ export default function EditableCell({
       // className carries through to the EDITING state too. Without it a
       // sticky column lost its `position: sticky` the moment a cell was
       // opened, so the cell jumped out of the frozen block mid-keystroke.
-      <Cell className={`td ${className}`} ref={cellRef}>
+      // STOPPED HERE TOO, not only before editing: the row is clickable, and
+      // a click on the open picker reached it and threw the row's whole
+      // editor over the cell (his screenshot 2026-10-14, the Liquidations
+      // status). A picker's own list in a portal bubbles here as well.
+      <Cell className={`td ${className}`} ref={cellRef} onClick={(e) => e.stopPropagation()}>
         {/* 'combo' is a real dropdown that also accepts a new value.
             'suggest' used a native <input list=…> datalist, which only
             filters as you type and shows nothing at all on click in
@@ -245,10 +253,29 @@ export default function EditableCell({
             onChange={commitValue}
             onOpenChange={(isOpen) => { if (!isOpen && !committed.current) cancel(); }}
           />
+        ) : type === 'select' && toOptions(options).some((o) => o.sub?.length) ? (
+          /* OPTIONS WITH THEIR OWN CHOICES (his call 2026-10-14): the CRM's
+             dropdown, opened at once, with the side pane a native <select>
+             cannot draw. The stage and its kind save together, in one go. */
+          <Select
+            size="sm"
+            autoOpen
+            value={draft}
+            subValue={subValue}
+            options={[...(clearable ? [{ value: '', label: '—' }] : []), ...toOptions(options)]}
+            onChange={(next, extra) => {
+              if (committed.current) return;
+              committed.current = true;
+              setEditing(false);
+              const sub = extra?.sub ?? null;
+              if (String(value ?? '') !== String(next ?? '') || String(subValue ?? '') !== String(sub ?? '')) onSave?.(next || null, { sub });
+            }}
+            onOpenChange={(isOpen) => { if (!isOpen && !committed.current) cancel(); }}
+          />
         ) : type === 'select' ? (
           <select {...shared}>
             {clearable && <option value="">—</option>}
-            {toOptions(options).map((o) => (
+            {toOptions(options).filter((o) => !o.heading).map((o) => (
               <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>
             ))}
           </select>

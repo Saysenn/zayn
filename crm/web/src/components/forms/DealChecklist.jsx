@@ -30,6 +30,7 @@ export default function DealChecklist({
   disabled = false,
 }) {
   const ids = new Set(chosen ?? []);
+  const grouped = new Set(deals.map((d) => d.company)).size > 1;
 
   const toggle = (id) => {
     const next = new Set(ids);
@@ -59,9 +60,16 @@ export default function DealChecklist({
       {deals.length === 0 ? (
         <p className="text-[11px] text-text-faint">{empty}</p>
       ) : (
-        <ul className="flex max-h-48 flex-col overflow-y-auto">
-          {deals.map((deal) => (
+        <ul className="flex max-h-64 flex-col overflow-y-auto">
+          {deals.map((deal, i) => (
             <li key={deal.id}>
+              {/* SEVERAL COMPANIES (the bottom bar, 2026-10-15): each one's
+                  deals under its name. One company needs no heading. */}
+              {grouped && deal.company !== deals[i - 1]?.company && (
+                <p title={deal.company} className="truncate px-1 pb-0.5 pt-2 text-[11px] font-semibold uppercase tracking-wide text-text-faint first:pt-0.5">
+                  {deal.company}
+                </p>
+              )}
               {/* The panel is white, so a hovered row SINKS. White on
                   white is no hover at all. */}
               <label className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 hover:bg-surface-sunken">
@@ -71,7 +79,12 @@ export default function DealChecklist({
                   onChange={() => toggle(deal.id)}
                   disabled={disabled}
                 />
-                <span className="min-w-0 flex-1 truncate text-xs">
+                {/* LONG NAMES ARE CUT, never pushed past the money (his call
+                    2026-10-15: no broken cards); the whole line on hover. */}
+                <span
+                  className="min-w-0 flex-1 truncate text-xs"
+                  title={[deal.person_name ?? '(no handler)', deal.group_name, deal.role_label].filter(Boolean).join(' · ')}
+                >
                   {deal.person_name ?? '(no handler)'}
                   <span className="text-text-faint">
                     {' · '}

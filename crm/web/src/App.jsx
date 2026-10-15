@@ -20,6 +20,7 @@ import SettingsPage from './pages/SettingsPage';
 import LogsPage from './pages/LogsPage';
 import DashboardPage from './pages/DashboardPage';
 import DeadPersonDetailPage from './pages/DeadPersonDetailPage';
+import DissolvedCompanyPage from './pages/DissolvedCompanyPage';
 // TEMPORARY, removed once the orb is approved.
 import OrbTestPage from './pages/OrbTestPage';
 
@@ -55,6 +56,7 @@ export default function App() {
         {/* The same rows read as history. See ArchivePage. */}
         <Route path="archive" element={<ArchivePage />} />
         <Route path="archive/people/:personId" element={<DeadPersonDetailPage />} />
+        <Route path="archive/companies/:key" element={<DissolvedCompanyPage />} />
         {/* Every edit in the CRM, and the Undo for it. */}
         <Route path="history" element={<HistoryPage />} />
         <Route path="settings" element={<SettingsPage />} />

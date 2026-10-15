@@ -1,0 +1,96 @@
+{
+  "set": "library-ambiguous",
+  "at": "2026-10-14T13:58:51.474Z",
+  "seconds": 10,
+  "cases": 7,
+  "passed": 7,
+  "passRate": 100,
+  "groups": {
+    "ambiguous": {
+      "cases": 7,
+      "passed": 7,
+      "passRate": 100
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 0,
+    "db": 0
+  },
+  "calcAccuracy": null,
+  "inventedRate": 0,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0,
+  "recoveryRate": null,
+  "perTurn": {
+    "turns": 7,
+    "modelRounds": 0.4,
+    "toolCalls": 0.7,
+    "retries": 0,
+    "inputTokens": 11286,
+    "cachedPct": 99,
+    "outputTokens": 7,
+    "medianMs": 4283,
+    "slowestMs": 8215
+  },
+  "tokens": {
+    "input": 78999,
+    "cached": 77824,
+    "output": 47
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "AMB-002-a",
+      "name": "ABC Ltd and ABC Limited are two companies: she asks which: \"what do we pay abc?\"",
+      "group": "ambiguous",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "AMB-002-b",
+      "name": "ABC Ltd and ABC Limited are two companies: she asks which: \"who is on abc\"",
+      "group": "ambiguous",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "AMB-001-b",
+      "name": "three Johns: she asks which, and names them: \"what's john owed\"",
+      "group": "ambiguous",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "AMB-001-a",
+      "name": "three Johns: she asks which, and names them: \"how much did john make?\"",
+      "group": "ambiguous",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "AMB-003-b",
+      "name": "\"what's outstanding\" is answered from the sheet, not refused: \"anything still to pay?\"",
+      "group": "ambiguous",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "AMB-004-a",
+      "name": "\"what happened last month\" reads the record: \"what happened last month?\"",
+      "group": "ambiguous",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "AMB-003-a",
+      "name": "\"what's outstanding\" is answered from the sheet, not refused: \"what's outstanding?\"",
+      "group": "ambiguous",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}

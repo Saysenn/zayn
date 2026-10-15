@@ -1,0 +1,208 @@
+{
+  "set": "eval",
+  "at": "2026-10-14T13:59:55.608Z",
+  "seconds": 63,
+  "cases": 23,
+  "passed": 23,
+  "passRate": 100,
+  "groups": {
+    "eval": {
+      "cases": 23,
+      "passed": 23,
+      "passRate": 100
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 0,
+    "db": 0
+  },
+  "calcAccuracy": null,
+  "inventedRate": 0,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0,
+  "recoveryRate": 100,
+  "perTurn": {
+    "turns": 32,
+    "modelRounds": 0.8,
+    "toolCalls": 1.2,
+    "retries": 0.03,
+    "inputTokens": 22457,
+    "cachedPct": 98,
+    "outputTokens": 23,
+    "medianMs": 3526,
+    "slowestMs": 13292
+  },
+  "tokens": {
+    "input": 718617,
+    "cached": 707200,
+    "output": 729
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "one person's monthly, short form",
+      "name": "one person's monthly, short form",
+      "group": "eval",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "who is paid in a currency",
+      "name": "who is paid in a currency",
+      "group": "eval",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a group total, casual",
+      "name": "a group total, casual",
+      "group": "eval",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "people at a company",
+      "name": "people at a company",
+      "group": "eval",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a yes/no about cash",
+      "name": "a yes/no about cash",
+      "group": "eval",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "missing phones in a group",
+      "name": "missing phones in a group",
+      "group": "eval",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "is someone on the sheet",
+      "name": "is someone on the sheet",
+      "group": "eval",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "everyone at a company",
+      "name": "everyone at a company",
+      "group": "eval",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "count of one person's deals",
+      "name": "count of one person's deals",
+      "group": "eval",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "ranking, top two",
+      "name": "ranking, top two",
+      "group": "eval",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "one field, a role",
+      "name": "one field, a role",
+      "group": "eval",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a phone that is not there",
+      "name": "a phone that is not there",
+      "group": "eval",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "who has been stopped",
+      "name": "who has been stopped",
+      "group": "eval",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "two people in one question",
+      "name": "two people in one question",
+      "group": "eval",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "one person's monthly, possessive",
+      "name": "one person's monthly, possessive",
+      "group": "eval",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "how many companies",
+      "name": "how many companies",
+      "group": "eval",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "the AED rate",
+      "name": "the AED rate",
+      "group": "eval",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "company with most deals",
+      "name": "company with most deals",
+      "group": "eval",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a deal that ended",
+      "name": "a deal that ended",
+      "group": "eval",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a group by group comparison",
+      "name": "a group by group comparison",
+      "group": "eval",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "take an amount off, then put it back in plain words",
+      "name": "take an amount off, then put it back in plain words",
+      "group": "eval",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a group add-on, then take it back",
+      "name": "a group add-on, then take it back",
+      "group": "eval",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "stop a deal said casually, then bring it back",
+      "name": "stop a deal said casually, then bring it back",
+      "group": "eval",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}

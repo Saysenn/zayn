@@ -16,7 +16,11 @@ import EditableCell from '../components/forms/EditableCell';
 import { useOptimisticUpdate } from '../hooks/useOptimisticUpdate';
 import TrackerRowModal from '../components/liquidations/TrackerRowModal';
 import { formatMoney } from '../helpers/formatMoney';
-import { LIQ_STAGES, stageOf, deadlineTone, shortDate } from '../configs/liquidationStages';
+import ConfirmDialog from '../components/modals/ConfirmDialog';
+import { confirm } from '../configs/confirms.config';
+import {
+  STAGE_PICK_OPTIONS, stagePickOptions, stageOf, stageLabel, deadlineTone, shortDate,
+} from '../configs/liquidationStages';
 
 /**
  * ***************************************************
@@ -45,7 +49,6 @@ const DEADLINE_CLASS = {
 };
 const DEADLINE_LABEL = { passed: 'Passed', soon: 'Due soon' };
 // What a cell offers. "Not set" is the select's own blank.
-const STAGE_OPTIONS = LIQ_STAGES.map((s) => ({ value: s.value, label: s.label }));
 const BLAMED_OPTIONS = [{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes' }];
 
 /** Long text in a cell: one line, cut, the whole of it on hover. */
@@ -73,15 +76,30 @@ export default function LiquidationsPage() {
   const cellEdit = useOptimisticUpdate({
     queryKey: LIQ_KEY,
     mutationFn: ({ id, fields }) => apiService.liquidations.update(id, fields),
-    applyToCache: (old, { id, column, value }) => {
-      if (Array.isArray(old?.rows)) return { ...old, rows: old.rows.map((r) => (r.id === id ? { ...r, [column]: value } : r)) };
-      if (old?.row?.id === id) return { ...old, row: { ...old.row, [column]: value } };
+    // `also`: a second column the same save moves (a stage's kind).
+    applyToCache: (old, { id, column, value, also }) => {
+      if (Array.isArray(old?.rows)) return { ...old, rows: old.rows.map((r) => (r.id === id ? { ...r, [column]: value, ...(also ?? {}) } : r)) };
+      if (old?.row?.id === id) return { ...old, row: { ...old.row, [column]: value, ...(also ?? {}) } };
       return old;
     },
     describe: ({ company, label }) => `${company}'s ${label}`,
   });
   const saveCell = (r, field, column, label, value) => cellEdit.mutate({
     id: r.id, fields: { [field]: value }, column, value, company: r.company_name, label,
+  });
+  // THE STAGE AND ITS KIND IN ONE SAVE (2026-10-14): a kind belongs to its stage (migration 090).
+  // DISSOLVED CLOSES IT (migration 091): asked first, with what it stops.
+  const [closing, setClosing] = useState(null);
+  const pickStage = (r, stage, kind) => (stage === 'dissolved' && r.stage !== 'dissolved'
+    ? setClosing({ r, stage, kind }) : saveStage(r, stage, kind));
+  const saveStage = (r, stage, kind) => cellEdit.mutate({
+    id: r.id,
+    fields: { stage, stageKind: kind },
+    column: 'stage',
+    value: stage,
+    also: { stage_kind: kind },
+    company: r.company_name,
+    label: 'stage',
   });
   useSocketEvent('liquidations:changed', refresh);
   useSocketEvent('companies:changed', refresh);
@@ -119,7 +137,7 @@ export default function LiquidationsPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Liquidations"
+        title="Winding down"
         subtitle={[
           `${rows.length} ${rows.length === 1 ? 'company' : 'companies'}`,
           passed ? `${passed} past deadline` : null,
@@ -149,7 +167,7 @@ export default function LiquidationsPage() {
         filters={(
           <>
             <Select size="sm" className="w-48" value={filters.stage ?? ''} placeholder="Any stage"
-              options={[{ value: '__none', label: 'Not set' }, ...LIQ_STAGES.map((s) => ({ value: s.value, label: s.label }))]}
+              options={[{ value: '__none', label: 'Not set' }, ...stagePickOptions({ withKinds: false })]}
               onChange={(v) => setFilters((f) => ({ ...f, stage: v || undefined }))} />
             <Select size="sm" className="w-44" value={filters.group ?? ''} placeholder="All groups"
               options={groups.map((g) => ({ value: g, label: g }))}
@@ -161,7 +179,7 @@ export default function LiquidationsPage() {
         )}
       />
 
-      <ErrorState error={error} title="Couldn't load the liquidation tracker" />
+      <ErrorState error={error} title="Couldn't load the winding down tracker" />
 
       <div className="table-wrap">
         <table className="w-full min-w-[1700px] text-sm">
@@ -192,8 +210,8 @@ export default function LiquidationsPage() {
                 asRow
                 colSpan={15}
                 icon={HourglassIcon}
-                title={rows.length ? 'No companies match' : 'No companies in liquidation'}
-                hint={rows.length ? 'Try another search or clear the filters.' : "Set a company's status to Liquidation on its page and it shows here."}
+                title={rows.length ? 'No companies match' : 'No companies winding down'}
+                hint={rows.length ? 'Try another search or clear the filters.' : "Set a company's status to Winding down on its page and it shows here."}
               />
             )}
             {!isLoading && shown.map((r) => {
@@ -210,9 +228,9 @@ export default function LiquidationsPage() {
                   <td className="td"><Clip width="max-w-[10rem]">{r.director}</Clip></td>
                   <td className="td"><Clip width="max-w-[10rem]">{r.mid}</Clip></td>
                   <td className="td">{(r.groups ?? []).join(', ') || <span className="text-text-faint">—</span>}</td>
-                  <EditableCell type="select" options={STAGE_OPTIONS} value={r.stage ?? ''} onEditingChange={onEditingChange}
-                    display={<span className={stage.badge}>{stage.label}</span>}
-                    onSave={(v) => saveCell(r, 'stage', 'stage', 'stage', v || null)} />
+                  <EditableCell type="select" options={STAGE_PICK_OPTIONS} value={r.stage ?? ''} subValue={r.stage_kind} onEditingChange={onEditingChange}
+                    display={<span className={stage.badge}>{stageLabel(r.stage, r.stage_kind)}</span>}
+                    onSave={(v, extra) => pickStage(r, v || null, extra?.sub ?? null)} />
                   <EditableCell className="max-w-[16rem]" value={r.instructions ?? ''} onEditingChange={onEditingChange}
                     onSave={(v) => saveCell(r, 'instructions', 'instructions', 'instructions', v ?? '')} />
                   <EditableCell type="date" value={r.deadline} onEditingChange={onEditingChange}
@@ -268,6 +286,17 @@ export default function LiquidationsPage() {
       )}
 
       {openId && <TrackerRowModal id={openId} owners={owners} onClose={() => setOpenId(null)} />}
+      {closing && (
+        <ConfirmDialog
+          {...confirm.closeOnDissolved({
+            companyName: closing.r.company_name,
+            count: closing.r.live_deals ?? 0,
+            money: formatMoney(closing.r.allocated ?? 0, closing.r.currency),
+          })}
+          onCancel={() => setClosing(null)}
+          onConfirm={() => { saveStage(closing.r, closing.stage, closing.kind); setClosing(null); }}
+        />
+      )}
     </div>
   );
 }

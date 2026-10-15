@@ -16,9 +16,12 @@ const { broadcast } = require('./sockets/index');
 //
 // THE PAGE FOLLOWS THE COMPANY STATUS (his call 2026-10-13): a company is
 // listed because its status is liquidation, set on its company page or by
-// Diane. Nobody adds one here, and the stage NEVER moves the company status:
-// the status is the company's, the stage is the step its liquidation is at.
-// (It did, for a day: own liq set liquidation, active set it back. Gone.)
+// Diane. Nobody adds one here, and the stage does not move the company
+// status, WITH ONE EXCEPTION (his call 2026-10-14, migration 091): stage
+// Dissolved is the end of either road, so it CLOSES the company and stops
+// its live deals. The page asks first, saying how many deals stop.
+// (Own liq once set liquidation and active set it back, for a day. Gone.)
+const { applyCompanyStatus } = require('./shared/companyStatus.helper');
 
 const {
   onDisk, moveAside, storeDoc, NEVER, MAX_DOC_BYTES, typeOf,
@@ -58,6 +61,11 @@ async function cleanFields(body) {
     else if (!repo.STAGES.includes(body.stage)) throw new AppError(400, 'Pick one of the stages.');
     else out.stage = body.stage;
   }
+  // THE STAGE'S KIND (migration 090): '' or null is not said. Checked against
+  // its stage in the route, once the stage it will sit on is known.
+  // `proposalKind` is the name it had for a day; still read.
+  const kind = body.stageKind !== undefined ? body.stageKind : body.proposalKind;
+  if (kind !== undefined) out.stageKind = kind === null || kind === '' ? null : String(kind);
   for (const f of ['instructions', 'nextAction', 'liquidator', 'note']) {
     if (body[f] !== undefined) out[f] = text(body[f]);
   }
@@ -108,7 +116,7 @@ router.get('/liquidations/download', async (req, res, next) => {
     const { buildLiquidationSheet } = require('./shared/liquidationSheet.helper');
     const day = new Date().toISOString().slice(0, 10);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="liquidations-${day}.xlsx"`);
+    res.setHeader('Content-Disposition', `attachment; filename="winding-down-${day}.xlsx"`);
     res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
     const columns = String(req.query.columns ?? '').split(',').map((c) => c.trim()).filter(Boolean);
     await buildLiquidationSheet(rows, { columns, palette: req.query.palette }).xlsx.write(res);
@@ -126,7 +134,7 @@ router.get('/liquidations/video-jobs', (req, res) => {
 router.get('/liquidations/:id', async (req, res, next) => {
   try {
     const row = await repo.findById(id(req));
-    if (!row) return next(new AppError(404, 'That company is not on the Liquidations page.'));
+    if (!row) return next(new AppError(404, 'That company is not on the Winding down page.'));
     res.json({ row, ...(await repo.details(row.id)) });
   } catch (err) {
     next(err);
@@ -137,11 +145,29 @@ router.patch('/liquidations/:id', async (req, res, next) => {
   try {
     const fields = await cleanFields(req.body ?? {});
     if (!Object.keys(fields).length) return next(new AppError(400, 'Nothing to change.'));
+    // A KIND BELONGS TO ITS STAGE: the one being set, or the one it has now.
+    if (fields.stageKind) {
+      const stage = fields.stage !== undefined ? fields.stage : (await repo.findById(id(req)))?.stage;
+      if (!repo.kindFits(stage, fields.stageKind)) {
+        const offered = Object.values(repo.STAGE_KINDS[stage] ?? {});
+        return next(new AppError(400, offered.length ? `Pick ${offered.join(' or ')}.` : 'That stage has no kinds.'));
+      }
+    }
+    const before = await repo.findById(id(req));
     const result = await repo.update(id(req), fields, sessionUser(req));
-    if (!result) return next(new AppError(404, 'That company is not on the Liquidations page.'));
+    if (!result) return next(new AppError(404, 'That company is not on the Winding down page.'));
+    // DISSOLVED CLOSES IT: the stage is written first, so how it ended is kept.
+    let closed = null;
+    if (fields.stage === 'dissolved' && before?.pay_status === 'liquidation') {
+      const done = await applyCompanyStatus(before.company_name, { status: 'closed', via: 'admin' });
+      closed = { stopped: done.deals?.stopped?.length ?? 0 };
+      broadcast(null, 'companies:changed', { action: 'updated' });
+      broadcast(null, 'master-sheet:changed', { action: 'company-status' });
+      broadcast(null, 'people:changed', { action: 'company-status' });
+    }
     const row = await repo.findById(id(req));
     changed(row);
-    res.json({ row });
+    res.json({ row, closed });
   } catch (err) {
     next(err);
   }
@@ -153,7 +179,7 @@ router.post('/liquidations/:id/comms', async (req, res, next) => {
     if (!body) return next(new AppError(400, 'Write what was said.'));
     const saidOn = req.body?.saidOn;
     if (saidOn && !/^\d{4}-\d{2}-\d{2}$/.test(saidOn)) return next(new AppError(400, 'The date is a date, like 2026-10-13.'));
-    if (!(await repo.findById(id(req)))) return next(new AppError(404, 'That company is not on the Liquidations page.'));
+    if (!(await repo.findById(id(req)))) return next(new AppError(404, 'That company is not on the Winding down page.'));
     const comm = await repo.addComm(id(req), { saidOn, body }, sessionUser(req));
     changed({ id: id(req) });
     res.status(201).json({ comm });
@@ -178,7 +204,7 @@ router.post('/liquidations/:id/docs', (req, res, next) => {
       const big = files.find((f) => !video.isVideo(f.originalname, f.mimetype) && f.size > MAX_DOC_BYTES);
       if (big) return next(new AppError(400, `${big.originalname} is over 25 MB.`));
       const row = await repo.findById(id(req));
-      if (!row) return next(new AppError(404, 'That company is not on the Liquidations page.'));
+      if (!row) return next(new AppError(404, 'That company is not on the Winding down page.'));
       const docs = [];
       const jobs = [];
       for (const f of files) {
@@ -296,7 +322,7 @@ router.post('/liquidations/:id/docs/:docId/read', async (req, res, next) => {
 router.get('/liquidations/:id/docs/zip', async (req, res, next) => {
   try {
     const row = await repo.findById(id(req));
-    if (!row) return next(new AppError(404, 'That company is not on the Liquidations page.'));
+    if (!row) return next(new AppError(404, 'That company is not on the Winding down page.'));
     const wanted = String(req.query.ids ?? '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0);
     const { docs } = await repo.details(row.id);
     const chosen = wanted.length ? docs.filter((d) => wanted.includes(d.id)) : docs;

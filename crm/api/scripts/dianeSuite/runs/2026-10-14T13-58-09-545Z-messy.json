@@ -1,0 +1,184 @@
+{
+  "set": "messy",
+  "at": "2026-10-14T13:58:09.545Z",
+  "seconds": 211,
+  "cases": 19,
+  "passed": 17,
+  "passRate": 89.5,
+  "groups": {
+    "messy": {
+      "cases": 19,
+      "passed": 17,
+      "passRate": 89.5
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 0,
+    "db": 2
+  },
+  "calcAccuracy": null,
+  "inventedRate": 0,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0.02,
+  "recoveryRate": 87.5,
+  "perTurn": {
+    "turns": 43,
+    "modelRounds": 1.5,
+    "toolCalls": 1.3,
+    "retries": 0.21,
+    "inputTokens": 44506,
+    "cachedPct": 97,
+    "outputTokens": 68,
+    "medianMs": 4007,
+    "slowestMs": 25887
+  },
+  "tokens": {
+    "input": 1913759,
+    "cached": 1855488,
+    "output": 2936
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "a typo in the name, no field: payable +100",
+      "name": "a typo in the name, no field: payable +100",
+      "group": "messy",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "chat filler and a typo: take 50 off",
+      "name": "chat filler and a typo: take 50 off",
+      "group": "messy",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "two people, two figures, one message",
+      "name": "two people, two figures, one message",
+      "group": "messy",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "one person, two fields, run on sentence",
+      "name": "one person, two fields, run on sentence",
+      "group": "messy",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "several people in a list, one field",
+      "name": "several people in a list, one field",
+      "group": "messy",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    },
+    {
+      "id": "a group raise by percent touches that group only",
+      "name": "a group raise by percent touches that group only",
+      "group": "messy",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a group note, slangy",
+      "name": "a group note, slangy",
+      "group": "messy",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    },
+    {
+      "id": "vague: a person and no change asks once, writes nothing",
+      "name": "vague: a person and no change asks once, writes nothing",
+      "group": "messy",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a name that is two people asks which, writes nothing",
+      "name": "a name that is two people asks which, writes nothing",
+      "group": "messy",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a run on order, then undo puts both fields back",
+      "name": "a run on order, then undo puts both fields back",
+      "group": "messy",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "auto mode: a typo order on a one deal person lands at once",
+      "name": "auto mode: a typo order on a one deal person lands at once",
+      "group": "messy",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a month that is the VALUE, not the timing: preset to next month for a group",
+      "name": "a month that is the VALUE, not the timing: preset to next month for a group",
+      "group": "messy",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "mixed values per person in one breath",
+      "name": "mixed values per person in one breath",
+      "group": "messy",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "clearing a field",
+      "name": "clearing a field",
+      "group": "messy",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a group change with an exception",
+      "name": "a group change with an exception",
+      "group": "messy",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a whole sheet change is previewed, and only applies on yes",
+      "name": "a whole sheet change is previewed, and only applies on yes",
+      "group": "messy",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "undo the last 3 changes puts all three back",
+      "name": "undo the last 3 changes puts all three back",
+      "group": "messy",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a plain question changes nothing",
+      "name": "a plain question changes nothing",
+      "group": "messy",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "risky: delete a whole group is only ever previewed, and no keeps it",
+      "name": "risky: delete a whole group is only ever previewed, and no keeps it",
+      "group": "messy",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}

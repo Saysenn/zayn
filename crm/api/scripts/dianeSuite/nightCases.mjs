@@ -233,7 +233,7 @@ read('lawyer mode reads a spreadsheet document', [
   { say: ask(['per our creditors list, what does pinecrest owe hmrc?', 'how much does pinecrest owe hmrc on the creditors list'], ['on the pinecrest creditors list, what is the hmrc debt?', 'what is pinecrests hmrc debt according to our records']), expect: { reply: /19,?500/ } },
 ], { context: 'hmrc' });
 write('lawyer mode will not rename', [
-  { say: ask(['rename the call notes on quarry lane to begbies call', 'delete the call notes from quarry lane'], ['remove quarry lanes call notes', 'change the call notes name on quarry lane to begbies call']), expect: { reply: /master sheet|Liquidations page/i, db: untouched } },
+  { say: ask(['rename the call notes on quarry lane to begbies call', 'delete the call notes from quarry lane'], ['remove quarry lanes call notes', 'change the call notes name on quarry lane to begbies call']), expect: { reply: /master sheet|Liquidations page|Winding down page/i, db: untouched } },
 ], { context: 'hmrc' });
 
 // ================= CHANGING: saving from the chat =================

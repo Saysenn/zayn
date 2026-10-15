@@ -1,4 +1,5 @@
 const rowsRepo = require('../../repos/masterSheetRows.repo');
+const companiesRepo = require('../../repos/companies.repo');
 // A stop or resume refreshes the pages as the page's own routes do (v1/masterSheet.js).
 const { broadcast } = require('../../sockets/index');
 function moved(action, row) {
@@ -294,6 +295,22 @@ const resumeDeal = {
     required: ['person'],
   },
   async handler(rawResumeArgs = {}) {
+    /**
+     * A DISSOLVED COMPANY COMES BACK WHOLE (suite 2026-10-15): "bring
+     * pinecrest back, it was dissolved by mistake" came here, found no deal
+     * of its own to resume, and on yes said it was open again. Its way back
+     * is its status, which brings every deal the dissolving stopped.
+     */
+    const asked = ` ${String(`${rawResumeArgs.said ?? ''} ${rawResumeArgs.person ?? ''} ${rawResumeArgs.company ?? ''}`).toLowerCase().replace(/[^a-z0-9 ]+/g, ' ')} `;
+    const dissolved = ((await companiesRepo.findAll({ status: 'closed', pageSize: 200 }).catch(() => null))?.rows ?? [])
+      .filter((c) => asked.includes(` ${String(c.name).toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').trim()} `));
+    if (dissolved.length) {
+      return {
+        summary: `NOTHING HAS BEEN CHANGED. ${dissolved.map((c) => c.name).join(', ')} ${dissolved.length === 1 ? 'is a dissolved company' : 'are dissolved companies'}. `
+          + 'To bring one back, call bulk_close_companies with status "active" for it: it previews, and on yes it is active '
+          + 'again with every deal the dissolving stopped. Never say it is back before that.',
+      };
+    }
     /**
      * ONLY WHEN THEY ASKED. Live 2026-09-30: "set casey test's fee to 3%"
      * found her deal stopped, and she resumed it on her own. A fee change is

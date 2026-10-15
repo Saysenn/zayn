@@ -419,7 +419,8 @@ READS.push(
   },
   {
     name: 'closing with an unknown name says nothing was closed',
-    turns: [{ say: 'close brightwell and quarryy lanez', expect: { reply: /Nothing has been closed/ } }],
+    // DISSOLVING IS THE WINDING DOWN PAGE'S (his call 2026-10-15): nothing closes, whatever the names.
+    turns: [{ say: 'close brightwell and quarryy lanez', expect: { db: async (db) => ((await company(db, 'Brightwell'))?.status === 'closed' ? 'Brightwell was closed' : null) } }],
   },
 );
 
@@ -748,29 +749,31 @@ const parkedCount = async (db, about) => (await one(
 
 WRITES.push(
   {
-    name: 'a close with a reason closes the company, and "ok reopen it" puts it back',
+    // ONLY THROUGH WINDING DOWN (his call 2026-10-15): asked to close an
+    // active company, she offers winding down; struck off there dissolves it.
+    name: 'a close is offered winding down, struck off dissolves it, and "ok reopen it" puts it back',
     turns: [
-      { say: "close brightwell, they've gone bust" },
-      // "Gone bust" may fairly be read as dissolved: either ends it and stops the deals.
-      { say: 'yes', expect: { db: async (db) => (['closed', 'dissolved'].includes((await company(db, 'Brightwell'))?.status) ? null : 'brightwell not closed') } },
+      { say: "close brightwell, they've gone bust", expect: { reply: /winding down/i, db: async (db) => ((await company(db, 'Brightwell'))?.status === 'closed' ? 'closed in one step' : null) } },
+      { say: 'yes put it into winding down' },
+      { say: 'yes', expect: { db: async (db) => ((await company(db, 'Brightwell'))?.status === 'liquidation' ? null : 'not winding down') } },
+      { say: 'brightwell has been struck off' },
+      { say: 'yes', expect: { db: async (db) => ((await company(db, 'Brightwell'))?.status === 'closed' ? null : 'brightwell not dissolved') } },
       { say: "bring theo brandt's deal back", expect: { reply: /reopen/i, db: async (db) => ((await deal(db, 'Theo Brandt', 'Brightwell')).stopped_on ? null : 'resumed a closure stop') } },
       { say: 'ok reopen brightwell then' },
       { say: 'yes', expect: { db: async (db) => ((await company(db, 'Brightwell'))?.status === 'active' && !(await deal(db, 'Theo Brandt', 'Brightwell')).stopped_on ? null : 'not reopened') } },
     ],
   },
   {
-    name: 'closing "at the end of this month" is scheduled for the 1st, nothing closes now',
+    // NO DISSOLVING ON A DATE (his call 2026-10-15): only the Winding down page dissolves.
+    name: 'closing "at the end of this month" parks nothing and closes nothing',
     turns: [
-      { say: 'close harbor nine at the end of this month' },
       {
-        say: 'yes',
-        expect: { db: async (db) => {
+        say: 'close harbor nine at the end of this month',
+        expect: { reply: /winding down/i, db: async (db) => {
           if ((await company(db, 'Harbor Nine'))?.status === 'closed') return 'closed today';
-          return (await parkedCount(db, 'Harbor Nine')) >= 1 ? null : 'not scheduled';
+          return (await parkedCount(db, 'Harbor Nine')) === 0 ? null : 'a close was parked';
         } },
       },
-      { say: 'actually cancel the harbor nine one' },
-      { say: 'yes', expect: { db: async (db) => ((await parkedCount(db, 'Harbor Nine')) === 0 ? null : 'still scheduled') } },
     ],
   },
   {
@@ -906,25 +909,15 @@ WRITES.push(
 
 const nextMonth = () => { const d = new Date(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() + 1); return d.toISOString().slice(0, 7); };
 
-// TWO COMPANIES CLOSED THE SAME MONTH BOTH STAY PARKED, and "instead" moves
-// one rather than adding a second. Both broke 2026-10-04: a company close has
-// no row ids, so the second replaced the first; "end of next month instead"
-// kept November beside December.
+// OFF THE REVIEW, STILL PAID (his call 2026-10-15): the mark comes off,
+// the deal keeps running.
 WRITES.push({
-  name: 'two closures in one month both stay scheduled, and "instead" moves one',
+  name: 'a deal taken off the review keeps being paid',
   turns: [
-    { say: 'close harbor nine at the end of this month' },
-    { say: 'yes' },
-    { say: 'close quarry lane at the end of this month' },
-    { say: 'yes', expect: { db: async (db) => ((await parkedCount(db, 'Harbor Nine')) === 1 && (await parkedCount(db, 'Quarry Lane')) === 1 ? null : 'one closure replaced the other') } },
-    { say: 'actually close quarry lane at the end of next month instead' },
-    {
-      say: 'yes',
-      expect: { db: async (db) => {
-        const q = await one(db, "SELECT count(*)::int n, max(due_month) m FROM tb_scheduled_actions WHERE status = 'parked' AND said ILIKE '%Quarry Lane%'");
-        return q.n === 1 && q.m > nextMonth() && (await parkedCount(db, 'Harbor Nine')) === 1 ? null : `quarry lane parked ${q.n} (latest ${q.m})`;
-      } },
-    },
+    { say: "mark mara quill's pinecrest deal reviewed monthly" },
+    { say: 'yes', expect: { db: async (db) => ((await deal(db, 'Mara Quill', 'Pinecrest')).review_monthly ? null : 'not marked') } },
+    { say: 'take mara quill off the review, she is fine' },
+    { say: 'yes', expect: { db: async (db) => { const d = await deal(db, 'Mara Quill', 'Pinecrest'); return !d.review_monthly && !d.stopped_on ? null : `review ${d.review_monthly}, stopped ${d.stopped_on}`; } } },
   ],
 });
 

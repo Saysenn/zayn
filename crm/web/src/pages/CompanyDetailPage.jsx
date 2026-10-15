@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { formatDate as date } from '../helpers/formatDate';
 import { formatMoney as money, formatTotals as totals, totalsOf } from '../helpers/formatMoney';
-import { useParams } from 'react-router-dom';
+import { Navigate, useParams } from 'react-router-dom';
 import { useCompany, useUpdateCompany } from '../hooks/useCompanies';
 import { usePeopleFilters } from '../hooks/usePeople';
 import { useSettings } from '../hooks/useSettings';
@@ -19,7 +19,6 @@ import Button from '../components/buttons/Button';
 import Breadcrumb from '../components/layout/Breadcrumb';
 import BulkBar, { BulkAction } from '../components/layout/BulkBar';
 import SelectAll from '../components/forms/SelectAll';
-import Modal from '../components/modals/Modal';
 import { EmptyState, ErrorState } from '../components/display/StateBlocks';
 import PageHeader from '../components/layout/PageHeader';
 import { DetailGrid, DetailCard, Stat } from '../components/layout/DetailLayout';
@@ -43,6 +42,8 @@ import {
 import { GOING_CONCERN } from '../configs/sheetValues';
 import Select from '../components/forms/Select';
 import FloatingField from '../components/forms/FloatingField';
+// The master sheet's deal form, so editing a deal is the same on every page.
+import { RowModal } from './MasterSheetPage';
 import { Skeleton } from '../components/display/Skeleton';
 import RecordCard, { CardList } from '../components/display/RecordCard';
 import { RestoreIcon, EditIcon, StopHandIcon, BuildingIcon, UsersIcon } from '../components/icons';
@@ -94,29 +95,13 @@ export default function CompanyDetailPage() {
   const dealIds = useMemo(() => (company?.deals ?? []).map((d) => d.id), [company]);
   const sel = useRowSelection(dealIds);
   const { run } = useBulkActions();
-  const [bulkEditing, setBulkEditing] = useState(false);
+  // ONE DEAL, ITS OWN FORM: the master sheet's (his call 2026-10-14).
+  const [editingDeal, setEditingDeal] = useState(null);
   const [bulkStopping, setBulkStopping] = useState(false);
 
   // NEITHER WAITS. The ticked deals change on this page the moment the
   // dialog is confirmed, the dialog and the ticks go, and the toast (with
   // Undo) is already up. A failure puts the deals back. See useBulkActions.
-  function editSelected(fields, label) {
-    const ids = sel.ids;
-    const cached = Object.fromEntries(Object.entries(fields).map(([k, v]) => [k.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`), v]));
-    run({
-      call: () => apiService.masterSheet.bulkUpdate(ids, fields),
-      optimistic: (qc) => patchCompanyDeals(qc, key, ids, (d) => ({ ...d, ...cached })),
-      invalidates: DEAL_TOUCHES,
-      toast: bulkMessage(`given a new ${label}`, ids.length, 'deal'),
-      report: (data) => bulkMessage(`given a new ${label}`, data.updated.length, 'deal', [
-        [data.skipped?.same ?? 0, 'already set'], [data.skipped?.gone ?? 0, 'gone'],
-      ]),
-      undoBatch: (data) => data.batchId,
-      failure: `Couldn't change the ${label} on ${countOf(ids.length, 'deal')}`,
-    });
-    setBulkEditing(false);
-    sel.clear();
-  }
 
   function stopSelected() {
     const ids = sel.ids;
@@ -187,6 +172,9 @@ export default function CompanyDetailPage() {
       </div>
     );
   }
+
+  // A DISSOLVED COMPANY LIVES IN THE ARCHIVE (his call 2026-10-15): its own read-only page.
+  if (isTerminalStatus(company.status)) return <Navigate replace to={`/archive/companies/${encodeURIComponent(key)}`} />;
 
   const deals = company.deals || [];
 
@@ -309,7 +297,7 @@ export default function CompanyDetailPage() {
             <CompanyStatusPicker
               value={company.status}
               onChange={pickStatus}
-              note={company.closed_on ? `Closed ${date(company.closed_on)}.` : undefined}
+              note={company.closed_on ? `Dissolved ${date(company.closed_on)}.` : undefined}
               disabled={updateCompany.isPending}
             />
             {company.status === COMPANY_STATUS.LIQUIDATION && (
@@ -424,13 +412,7 @@ export default function CompanyDetailPage() {
           writes on click, so it asks here and saves both together. */}
       {askingStatus && (
         <ConfirmDialog
-          {...confirm.companyDeals({
-            status: askingStatus,
-            companyName: company.name,
-            count: askIds.length,
-            total: liveDeals.length,
-            clearsDates: askingStatus === COMPANY_STATUS.GOING_CONCERN,
-          })}
+          {...confirm.companyDeals({ status: askingStatus, companyName: company.name })}
           /**
            * RED ONLY WHERE SOMETHING IS LOST. Going concern CLEARS end
            * dates, so it earns the danger button. Review and Liquidation
@@ -438,7 +420,6 @@ export default function CompanyDetailPage() {
            * about a write that takes nothing away. Seen in the browser
            * 2026-09-22.
            */
-          confirmVariant={askingStatus === COMPANY_STATUS.GOING_CONCERN ? 'danger' : 'primary'}
           busy={updateCompany.isPending}
           onCancel={() => setAskingStatus(null)}
           onConfirm={() => {
@@ -494,14 +475,8 @@ export default function CompanyDetailPage() {
           />
         </ConfirmDialog>
       )}
-      {bulkEditing && (
-        <BulkEditDeals
-          count={sel.count}
-          groups={options?.groups ?? []}
-          onClose={() => setBulkEditing(false)}
-          onApply={editSelected}
-        />
-      )}
+
+      {editingDeal && <RowModal row={editingDeal} onClose={() => { setEditingDeal(null); sel.clear(); }} />}
 
       {bulkStopping && (
         <ConfirmDialog
@@ -514,63 +489,17 @@ export default function CompanyDetailPage() {
       )}
 
       <BulkBar count={sel.count} onClear={sel.clear}>
-        <BulkAction icon={EditIcon} onClick={() => setBulkEditing(true)}>Edit</BulkAction>
+        {/* ONE DEAL, THE MASTER SHEET'S OWN FORM (his call 2026-10-14):
+            every field. Several ticked: no Edit. */}
+        {sel.count === 1 && (
+          <BulkAction icon={EditIcon} onClick={() => setEditingDeal((company?.deals ?? []).find((d) => d.id === sel.ids[0]) ?? null)}>Edit</BulkAction>
+        )}
         <BulkAction icon={StopHandIcon} variant="danger" onClick={() => setBulkStopping(true)}>Stop</BulkAction>
       </BulkBar>
     </div>
   );
 }
 
-/**
- * ONE FIELD ONTO EVERY TICKED DEAL. Payment method, group or preset date:
- * the three a company's handlers are most often set to together. One
- * field per apply, so the toast and History each say exactly what moved.
- */
-const BULK_FIELDS = [
-  { value: 'paymentMethod', label: 'Payment method' },
-  { value: 'groupName', label: 'Group' },
-  { value: 'presetOn', label: 'Preset date' },
-];
-const METHODS = [{ value: 'cash', label: 'Cash' }, { value: 'bank', label: 'Bank' }, { value: 'crypto', label: 'Crypto' }];
-
-function BulkEditDeals({ count, groups, onApply, onClose }) {
-  const [field, setField] = useState('paymentMethod');
-  const [value, setValue] = useState('');
-  const pick = (next) => { setField(next ?? 'paymentMethod'); setValue(''); };
-  const label = BULK_FIELDS.find((f) => f.value === field)?.label.toLowerCase();
-
-  return (
-    <Modal title={`Edit ${count} ${count === 1 ? 'deal' : 'deals'}`} onClose={onClose}>
-      <div className="space-y-3">
-        <Select label="Field" size="form" value={field} onChange={pick} options={BULK_FIELDS} />
-        {field === 'paymentMethod' && (
-          <Select label="Payment method" size="form" value={value} onChange={(v) => setValue(v ?? '')}
-            options={METHODS} placeholder="Pick a method" />
-        )}
-        {field === 'groupName' && (
-          <Select label="Group" size="form" searchable value={value} onChange={(v) => setValue(v ?? '')}
-            options={groups.map((g) => (typeof g === 'string' ? { value: g, label: g } : g))} placeholder="Pick a group" />
-        )}
-        {field === 'presetOn' && (
-          <FloatingField label="Preset date" filled>
-            <input type="date" className="form-control" value={value} onChange={(e) => setValue(e.target.value)} />
-          </FloatingField>
-        )}
-        <div className="flex justify-end gap-2 pt-1">
-          <Button size="md" variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button
-            size="md"
-            variant="primary"
-            disabled={!value}
-            onClick={() => onApply({ [field]: value }, label)}
-          >
-            Apply
-          </Button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
 
 /**
  * Everyone paid through this company: cards on a phone, the table from md
@@ -601,7 +530,7 @@ function CompanyHandlers({ deals, options, cellEdit, sel }) {
               leadLabel="payable"
               badges={
                 <>
-                  <PaymentPeriod period={d.payment_period} />
+                  <PaymentPeriod period={d.payment_period} stoppedOn={d.stopped_on} />
                   {dealReceived(d.payment_outcome) && <PaymentReceived value={dealReceived(d.payment_outcome)} />}
                 </>
               }
@@ -699,6 +628,7 @@ function CompanyHandlers({ deals, options, cellEdit, sel }) {
                   <td className="td">
                     <PaymentPeriod
                       period={d.payment_period}
+                      stoppedOn={d.stopped_on}
                       endOn={d.end_on}
                       presetOn={d.preset_on}
                       paymentStartOn={d.payment_start_on}

@@ -1,0 +1,54 @@
+{
+  "set": "liq-probe",
+  "at": "2026-10-15T07:07:24.521Z",
+  "seconds": 19,
+  "cases": 1,
+  "passed": 1,
+  "passRate": 100,
+  "groups": {
+    "liq": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 0,
+    "db": 0
+  },
+  "calcAccuracy": null,
+  "inventedRate": 0,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0,
+  "recoveryRate": 100,
+  "perTurn": {
+    "turns": 4,
+    "modelRounds": 1.8,
+    "toolCalls": 1.3,
+    "retries": 0.25,
+    "inputTokens": 53696,
+    "cachedPct": 100,
+    "outputTokens": 56,
+    "medianMs": 5603,
+    "slowestMs": 6266
+  },
+  "tokens": {
+    "input": 214785,
+    "cached": 213760,
+    "output": 225
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "a dissolved company brought back by chat",
+      "name": "a dissolved company brought back by chat",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}

@@ -9,7 +9,7 @@ import SelectAll from '../components/forms/SelectAll';
 import { EmptyState, ErrorState } from '../components/display/StateBlocks';
 import useRowSelection from '../hooks/useRowSelection';
 import {
-  CheckIcon, HourglassIcon, RestoreIcon, SearchIcon, StopHandIcon,
+  CheckIcon, HourglassIcon, MinusIcon, RestoreIcon, SearchIcon, StopHandIcon,
 } from '../components/icons';
 import { TableSkeleton } from '../components/display/Skeleton';
 import { useMonthlyReview } from '../hooks/useMonthlyReview';
@@ -172,6 +172,28 @@ export default function ReviewPage() {
     });
     sel.clear();
     setConfirming(null);
+  }
+
+  // OFF THE REVIEW, STILL PAID (his call 2026-10-15): only a ticked deal
+  // has the mark to take off; one here for a past end date is answered.
+  const [removing, setRemoving] = useState(false);
+  const removable = chosen.filter((row) => row.review_monthly);
+  function removeFromReview() {
+    const dealIds = removable.map((row) => row.id);
+    const ids = new Set(dealIds);
+    run({
+      call: () => apiService.monthlyReview.remove(dealIds),
+      invalidates: DEAL_TOUCHES,
+      optimistic: (qc) => patchQueries(qc, [['monthly-review']], (old) => (
+        Array.isArray(old?.rows) ? { ...old, rows: old.rows.filter((row) => !ids.has(row.id)) } : old
+      )),
+      toast: bulkMessage('taken off the review', dealIds.length, 'deal'),
+      report: (data) => bulkMessage('taken off the review', data?.removed?.length ?? dealIds.length, 'deal'),
+      undoBatch: (data) => data?.batchId,
+      failure: `Couldn't take ${countOf(dealIds.length, 'deal')} off the review`,
+    });
+    sel.clear();
+    setRemoving(false);
   }
 
   function press(value) {
@@ -368,7 +390,25 @@ export default function ReviewPage() {
         <BulkAction icon={StopHandIcon} variant="danger" onClick={() => press(REVIEW_ANSWER.NO)}>
           {REVIEW_ANSWER_LABEL[REVIEW_ANSWER.NO]}
         </BulkAction>
+        {/* NOT AN ANSWER, so set apart: it takes the mark off and keeps paying. */}
+        {removable.length > 0 && (
+          <BulkAction icon={MinusIcon} onClick={() => setRemoving(true)}>
+            Remove from review
+          </BulkAction>
+        )}
       </BulkBar>
+
+      {removing && (
+        <ConfirmDialog
+          {...confirm.removeFromReview({
+            count: removable.length,
+            names: removable.map((row) => row.person_name ?? '(no handler)'),
+            skipped: chosen.length - removable.length,
+          })}
+          onCancel={() => setRemoving(false)}
+          onConfirm={removeFromReview}
+        />
+      )}
 
       {confirming && (
         <ConfirmDialog

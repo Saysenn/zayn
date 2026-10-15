@@ -277,7 +277,7 @@ async function runTurns(c, db) {
         rounds: stats?.rounds ?? null, retries: stats?.retries ?? [],
       })}\n`);
     }
-    const unsupported = stats ? unsupportedFigures(reply, called) : [];
+    const unsupported = stats ? unsupportedFigures(reply, called, step.say) : [];
     // SAID WHICH, so an "invented" score can be checked, not guessed at (2026-10-14).
     if (unsupported.length) console.log(`      [invented?] ${where}: ${unsupported.join(', ')} | tools: ${calledNames.join(', ') || 'none'}`);
     turns.push({

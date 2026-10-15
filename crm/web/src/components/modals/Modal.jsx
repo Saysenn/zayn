@@ -155,7 +155,7 @@ export default function Modal({
             phone the dialog is the whole screen, and a heading that
             scrolls away leaves you in a form with no idea what it is. */}
         <div className={`flex shrink-0 items-center justify-between px-4 py-3 ${skin.head}`}>
-          <h2 className={`truncate pr-2 text-base font-bold sm:text-lg ${skin.title}`}>{title}</h2>
+          <h2 title={typeof title === 'string' ? title : undefined} className={`min-w-0 truncate pr-2 text-base font-bold sm:text-lg ${skin.title}`}>{title}</h2>
           {/* The shared icon, never a ✕ glyph, which sat at the font's
               weight rather than the 2px stroke every other icon has. Diane
               keeps her own bare button: btn-quiet's grey fill would land

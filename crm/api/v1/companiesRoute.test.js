@@ -50,7 +50,7 @@ function loadRoute({ update, findByKey, sent = [] }) {
       ACTIVE: 'active', LIQUIDATION: 'liquidation', DISSOLVED: 'dissolved', CLOSED: 'closed',
     },
   });
-  require.cache[rowsPath] = stub({});
+  require.cache[rowsPath] = stub({ findAll: async () => ({ rows: [], total: 0 }), setDealStatus: async () => null });
   require.cache[settingsPath] = stub({ get: async () => ({ color_uses_end_date: false }) });
   require.cache[socketsPath] = {
     id: 'x',

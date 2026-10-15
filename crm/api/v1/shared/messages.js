@@ -47,8 +47,12 @@ const messages = {
 
   // Whitelisted where tier deliberately is not: this one decides whether
   // every deal on the company stops.
+  // DISSOLVED ONLY THROUGH WINDING DOWN (his call 2026-10-15).
+  dissolveOnWindingDown: 'A company is dissolved only on the Winding down page: put it into winding down, '
+    + 'then set its stage to Dissolved.',
+
   notACompanyStatus: (status) => (
-    `"${status}" is not a company status. It is active, liquidation, dissolved or closed.`
+    `"${status}" is not a company status. It is active, going concern, review, winding down (liquidation) or closed.`
   ),
 
   // A DEAL has three, and they are the three a LIVE arrangement can be.

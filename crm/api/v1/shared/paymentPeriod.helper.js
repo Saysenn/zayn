@@ -135,6 +135,9 @@ function paymentPeriodSql(alias = 'd') {
   // finished, and that is the split this CASE exists to keep.
   const notStarted = `${a}payment_start_on IS NOT NULL AND ${a}payment_start_on > ${monthEnd}`;
   return `CASE
+    -- DISSOLVED WITH ITS COMPANY: over at once, this month too (his call
+    -- 2026-10-15). Mirrors isOwedThisMonth's first line.
+    WHEN ${a}stopped_on IS NOT NULL AND ${a}stopped_reason = 'company_closed' THEN '${PERIOD.ENDED}'
     WHEN ${a}preset_on IS NULL AND ${a}stopped_on IS NOT NULL THEN '${PERIOD.ENDED}'
     WHEN ${a}preset_on IS NULL THEN '${PERIOD.ACTIVE}'
     /**

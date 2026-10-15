@@ -157,46 +157,16 @@ test('TOO MANY IS REFUSED, not silently capped', async () => {
 // * bulk_close_companies, which ends them
 // ===============================
 
-test('THE FIRST CALL WRITES NOTHING, and says the DEALS and the MONEY', async () => {
-  // A bulk close that only reports afterwards is a number nobody could
-  // have checked.
-  const { tools, wrote } = load({ deals: { 'northstar care': [1, 2, 3], acqua: [4] } });
-  const out = await tools.bulkCloseCompanies.handler({
-    companies: ['Northstar Care', 'Acqua'], status: 'closed',
-  });
-  assert.equal(wrote.length, 0);
-  assert.equal(out.pending, true);
-  assert.match(out.summary, /2 companies/);
-  assert.match(out.summary, /STOP 4 live deals/);
-  assert.match(out.summary, /4,000\.00 a month/);
-});
-
-test('AND IT SAYS WHAT SURVIVES', async () => {
-  const { tools } = load({ deals: { acqua: [1] } });
-  const out = await tools.bulkCloseCompanies.handler({ companies: ['Acqua'], status: 'closed' });
-  assert.match(out.summary, /kept and moves to the Archive/);
-  assert.match(out.summary, /already paid are untouched/);
-  assert.match(out.summary, /back to active brings its deals back/);
-});
-
-test('CONFIRMED, it goes through the SHARED cascade', async () => {
-  // Calling the repo directly is how her closes stopped nothing while the
-  // page's stopped everybody.
-  const { tools, wrote } = load({ deals: { acqua: [1, 2] } });
-  const out = await tools.bulkCloseCompanies.handler({
-    companies: ['Acqua'], status: 'closed', confirmed: true,
-  });
-  assert.deepEqual(wrote.map((w) => w.status), ['acqua']);
-  assert.match(out.reply, /2 deals stopped and moved to the Archive/);
-});
-
-test('DISSOLVED IS OFFERED, because it is a different FACT', async () => {
-  const { tools, wrote } = load({ deals: { acqua: [1] } });
-  const out = await tools.bulkCloseCompanies.handler({
-    companies: ['Acqua'], status: 'dissolved', confirmed: true,
-  });
-  assert.equal(wrote[0].fields.status, 'dissolved');
-  assert.match(out.reply, /dissolved/);
+test('IT NEVER DISSOLVES: that is the Winding down page (his call 2026-10-15)', async () => {
+  for (const status of ['closed', 'dissolved']) {
+    const { tools, wrote } = load({ deals: { acqua: [1, 2] } });
+    // eslint-disable-next-line no-await-in-loop
+    const out = await tools.bulkCloseCompanies.handler({ companies: ['Acqua'], status, confirmed: true });
+    assert.equal(wrote.length, 0, status);
+    assert.match(out.summary, /NOTHING HAS BEEN CHANGED/);
+    assert.match(out.summary, /Winding down page/);
+    assert.match(out.summary, /update_liquidation/);
+  }
 });
 
 test('LIQUIDATION IS REFUSED. It is not an ending', async () => {
@@ -263,7 +233,7 @@ test('TOO MANY IS REFUSED HERE TOO', async () => {
   const many = Array.from({ length: 40 }, (_, i) => `Co ${i}`);
   const { tools, wrote } = load({ names: many });
   const out = await tools.bulkCloseCompanies.handler({
-    companies: many, status: 'closed', confirmed: true,
+    companies: many, status: 'review', confirmed: true,
   });
   assert.equal(wrote.length, 0);
   assert.match(out.summary, /narrow it/);
@@ -287,7 +257,7 @@ test('THREE TOOLS, and only one of them can end anything', () => {
   // And the two marks that stop nothing, added 2026-09-30.
   assert.deepEqual(
     tools.bulkCloseCompanies.parameters.properties.status.enum,
-    ['closed', 'dissolved', 'active', 'going_concern', 'review'],
+    ['active', 'going_concern', 'review'],
   );
 });
 
@@ -420,7 +390,7 @@ test('THE LIST SAYS THE TIER EITHER WAY', async () => {
 test('A TYPO IN A BULK ACT GETS "DID YOU MEAN", and writes nothing at all', async () => {
   const { tools, wrote } = load({ sheet: ['Northstar Care', 'Acqua', 'Relia PA'] });
   const out = await tools.bulkCloseCompanies.handler({
-    companies: ['Acqa', 'Northstar Care'], status: 'closed', confirmed: true, said: 'close Acqa and Northstar Care',
+    companies: ['Acqa', 'Northstar Care'], status: 'review', confirmed: true, said: 'put Acqa and Northstar Care on review',
   });
   assert.equal(wrote.length, 0);
   assert.match(out.summary, /NOTHING HAS BEEN CHANGED/);
@@ -439,7 +409,8 @@ test('MONTHLY REVIEW IS ONE BULK CALL, previewed, and stops nothing', async () =
   const done = await tools.bulkCloseCompanies.handler({ companies: ['Acqua'], status: 'review', confirmed: true });
   assert.equal(wrote[0].fields.status, 'review');
   assert.match(done.reply, /No deal stopped/);
-  assert.match(done.reply, /No deal was ticked for the monthly review/);
+  // ITS DEALS JOIN THE REVIEW now (his call 2026-10-15), and the reply says how many.
+  assert.match(done.reply, /go to Review every month/);
 });
 
 test('A MARK ON A CLOSED COMPANY SAYS WHAT COMES BACK', async () => {

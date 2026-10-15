@@ -84,9 +84,11 @@ export function checkAnswer(want, { reply, claims, tools }) {
 }
 
 /** Money in her reply that no tool returned this turn: an invented figure. */
-export function unsupportedFigures(reply, tools) {
+export function unsupportedFigures(reply, tools, said = '') {
   if (!tools.length) return []; // a reply built in code, with no tool behind it
-  const toolText = plain(tools.map((t) => t.output).join('\n'));
+  // WHAT THEY SAID backs a figure too: "deduct 100" read back as "100 GBP"
+  // is their own number, not one she made up (2026-10-14).
+  const toolText = plain([...tools.map((t) => t.output), said].join('\n'));
   const out = [];
   // "£12k" is twelve thousand, not twelve (it was flagged as invented, 2026-10-14).
   for (const m of plain(reply).matchAll(/(?:GBP|AED|EUR|EURO|USD|£|€|\$)\s?(\d+(?:\.\d+)?)(\s?[km]\b)?|(\d+(?:\.\d+)?)(\s?[km]\b)?\s?(?:GBP|AED|EUR|EURO|USD)/gi)) {

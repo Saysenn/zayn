@@ -1995,7 +1995,7 @@ export default function AgentOverlay({ open, onClose }) {
                     title={context === 'expenses'
                       ? 'Attach a receipt photo, PDF or sheet of expenses'
                       : context === 'hmrc' ? 'Attach a PDF, Word or text document: Diane reads it, and can save it to our playbook'
-                        : 'Attach a sheet to check against the CRM, or any documents (PDF, Word, pictures…) to save onto a company in liquidation'}
+                        : 'Attach a sheet to check against the CRM, or any documents (PDF, Word, pictures…) to save onto a company winding down'}
                   >
                     <PaperclipIcon width={17} height={17} />
                   </button>

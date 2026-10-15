@@ -62,7 +62,8 @@ test('a stage in their words is the stored one', () => {
   assert.equal(stageFrom('HMRC liq'), 'hmrc_liq');
   assert.equal(stageFrom('our own liquidation'), 'own_liq');
   assert.equal(stageFrom('strike off rejected'), 'strike_off_rejected');
-  assert.equal(stageFrom('strike-off'), 'strike_off');
+  // No strike off stage since migration 090: on its own it is the proposal.
+  assert.equal(stageFrom('strike-off'), 'active_proposal');
   assert.equal(stageFrom('not set'), null);
   assert.equal(stageFrom('banana'), undefined);
 });
@@ -91,10 +92,10 @@ test('A MESSY REQUEST IS ONE PREVIEW, dates worked out in code, nothing written'
   const friday = dayFrom('friday', currentDay());
   // In full, as she says it (his call 2026-10-13: "Sun" was read as the word).
   const shown = require('../../shared/dayWords.helper').sayDay(friday);
-  assert.ok(out.summary.includes(`deadline — → ${shown}`), out.summary);
+  assert.ok(out.summary.includes(`deadline none → ${shown}`), out.summary);
   assert.match(out.summary, /stage Not set → HMRC liq/);
   assert.match(out.summary, /log "Begbies called for bank statements"/);
-  assert.match(out.summary, /• ZZ Diane Liq Beta: stage Not set → Own liq; owner — → "admin"/);
+  assert.match(out.summary, /• ZZ Diane Liq Beta: stage Not set → Own liq; owner none → "admin"/);
   const row = (await pool.query("SELECT stage FROM tb_liquidations WHERE company_key = 'zz diane liq alpha'")).rows[0];
   assert.equal(row.stage, null, 'nothing is written before yes');
 });
@@ -123,7 +124,7 @@ test('YES WRITES IT ALL, reads it back, and the status is untouched', { skip: sk
 test('BULK: the same change to every company matching `where`', { skip: skip() }, async () => {
   const pending = await updateLiquidation.handler({ where: { stage: 'own liq' }, set: { nextAction: 'Chase the liquidator' } });
   assert.equal(pending.pending, true);
-  assert.match(pending.summary, /ZZ Diane Liq Beta: next action — → "Chase the liquidator"/);
+  assert.match(pending.summary, /ZZ Diane Liq Beta: next action none → "Chase the liquidator"/);
 });
 
 test('UNDO puts the last change back, the contact line included', { skip: skip() }, async () => {
@@ -138,12 +139,15 @@ test('UNDO puts the last change back, the contact line included', { skip: skip()
   assert.equal(comms, 0);
 });
 
-test('A TYPO ASKS, a company not in liquidation is pointed at its status', { skip: skip() }, async () => {
+test('A TYPO ASKS; a step puts a company on the page, anything else for it is refused', { skip: skip() }, async () => {
   const typo = await updateLiquidation.handler({ items: [{ company: 'ZZ Diane Liq Alpa', stage: 'hmrc' }] });
   assert.match(typo.summary, /NOTHING HAS BEEN CHANGED/);
-  const off = await updateLiquidation.handler({ items: [{ company: OFF, stage: 'hmrc' }] });
-  assert.match(off.summary, /not in liquidation/);
-  assert.match(off.summary, /update_company/);
+  // A step for a company not winding down: shown with its status move, nothing written.
+  const step = await updateLiquidation.handler({ items: [{ company: OFF, stage: 'hmrc' }] });
+  assert.match(step.summary, /status Active → Winding down/);
+  assert.doesNotMatch(step.summary, /NOTHING HAS BEEN CHANGED\. /);
+  const off = await updateLiquidation.handler({ items: [{ company: OFF, deadline: 'friday' }] });
+  assert.match(off.summary, /not winding down/);
 });
 
 test('A DAY IT CANNOT BE SURE OF IS ASKED, never guessed', { skip: skip() }, async () => {

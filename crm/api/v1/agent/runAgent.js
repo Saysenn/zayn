@@ -139,7 +139,7 @@ const LATER_MONTH = /\b(?:next month|from (?:next|the \d|jan|feb|mar|apr|may|jun
 // What another tool owns: a rate, their own details, or ending and undoing.
 // THE FLAGGED PAGE, THE LIQUIDATIONS PAGE: a person or company named there is
 // not a deal edit. "Resolve Otto's flags" was routed to Otto's deal. 2026-10-13.
-const PAGE_TOOL = /\bflags?\b|\bflagged\b|\bliquidat\w*|\bliq\b|\bliquidators?\b|\bdeadlines?\b|\bhmrc\b|\bstrike[\s-]?off\b|\bstage\b/i;
+const PAGE_TOOL = /\bflags?\b|\bflagged\b|\bliquidat\w*|\bliq\b|\bliquidators?\b|\bdeadlines?\b|\bhmrc\b|\bstrike[\s-]?off\b|\bstruck[\s-]?off\b|\bpetition\b|\b[cm]vl\b|\bstage\b/i;
 const OWN_TOOL = /%|\bpercent|\bfees?\b|\badd[\s-]?ons?\b|\brates?\b|post\s*code|\bdoor\b|\bbank\b|\baccount\b|sort\s*code|\bphone\b|postals?\b|\b(?:stop|end|terminate|delete|remove|resume|restart|reopen|undo|revert|roll\s*back|answer|review|rename|close|archive)\b/i;
 
 /**
@@ -167,6 +167,20 @@ const NAMED_FIELDS = [
   [['feePercent', 'feePercentDelta'], /\bfee\b/i],
   [['addonPercent', 'addonPercentDelta'], /\badd[\s-]?on\b/i],
 ];
+// THE SAME FOR THE WINDING DOWN PAGE (suite 2026-10-14): "quarry lane went
+// hmrc liq, deadline friday, begbies rang…" previewed the stage and the call
+// with no deadline, one run in two. Only a deadline or owner GIVEN, never one
+// mentioned in passing ("begbies said the deadline moved").
+const LIQ_NAMED = [
+  ['deadline', /\bdeadline\s+(?:is\s+|to\s+|now\s+|moved\s+to\s+|by\s+|of\s+)?(?:mon|tue|wed|thu|fri|sat|sun|today|tomorrow|next|this|end|in\s+\d|\d)/i],
+  ['owner', /\bowner\s+(?:is|to|now|should be)\b/i],
+];
+function liqFieldsLeftOut(said, args = {}) {
+  const items = Array.isArray(args.items) ? args.items : [args];
+  return LIQ_NAMED.filter(([key, words]) => words.test(String(said ?? '')) && !items.some((i) => i && i[key] !== undefined))
+    .map(([key]) => key);
+}
+
 function fieldsLeftOut(said, args = {}) {
   const sent = new Set([...Object.keys(args), ...Object.keys(args.add ?? {})]);
   return NAMED_FIELDS.filter(([keys, words]) => words.test(String(said ?? '')) && !keys.some((k) => sent.has(k)))
@@ -263,7 +277,10 @@ const PAGE_ROUTES = {
       && !/\b(?:monthly|payable|fee|add[\s-]?on|deal|paid|owed|days?)\b/i.test(s))
     || /\b(?:pull|fetch|refresh)\b[^.]*\brates?\b|\bclear\b[^.]*\brates?\b/i.test(s)),
   update_liquidation: (s) => !ASKING.test(s) && !/\badd\b[^.]*\bliquidations? page\b|\bstatus\b/i.test(s)
-    && /\b(?:deadlines?|liquidators?|next action|stage|hmrc liq|own liq|strike[\s-]?off|liquidation note|log (?:for|that|a call)|every company in liquidation|all (?:the )?liquidations)\b/i.test(s),
+    // A STEP'S KIND IS A STAGE TOO (winding down, migration 090): "hmrc
+    // filed a winding up petition", "struck off", "a CVL" went to the
+    // general brain, which made a preview up (suite 2026-10-14).
+    && /\b(?:deadlines?|liquidators?|next action|stage|hmrc liq|own liq|strike[\s-]?off|struck[\s-]?off|(?:in|into|onto|on|to)\s+(?:the\s+)?winding[\s-]?down|wind(?:ing)?\s+(?:\w+\s+){0,3}?down|(?:winding[\s-]?up )?petitions?|winding[\s-]?up orders?|[cm]vl|(?:creditors|members)'?\s+voluntary|liquidation note|log (?:for|that|a call)|every company in liquidation|all (?:the )?liquidations)\b/i.test(s),
   list_liquidations: (s) => ASKING.test(s) && /\b(?:in liquidation|liquidations?|winding up|liquidation deadlines?)\b/i.test(s)
     && !/\bstatus\b/i.test(s),
   liquidation_document: (s) => /\b(?:send|give|show|open|get|download|zip|rename|remove|delete|pull up|bring up|view)\b[^.]*\b(?:letters?|documents?|docs?|pdfs?|files?|petitions?|notices?|statements?|orders?|notes)\b/i.test(s)
@@ -388,7 +405,9 @@ const FORCED_ROUTES = [
   // run in three. A company close is one door; a DEAL is stop_deal. 2026-10-03.
   // "ACTUALLY CLOSE IT AT THE END OF NEXT MONTH INSTEAD" is a close too: with
   // "actually" in front it was taken as a cancel, and the new date was lost.
-  [/^\s*(?:(?:ok|okay|actually|no|wait|sorry|please|can you|then)[\s,]+)*(?:close|shut(?:\s+down)?|dissolve|wind up)\b(?![^.?!]*\bdeals?\b)/i, 'bulk_close_companies'],
+  // DISSOLVING IS THE WINDING DOWN PAGE'S (his call 2026-10-15): its tool
+  // dissolves one winding down, and offers winding down to any other.
+  [/^\s*(?:(?:ok|okay|actually|no|wait|sorry|please|can you|then)[\s,]+)*(?:close|shut(?:\s+down)?|dissolve|wind up)\b(?![^.?!]*\bdeals?\b)/i, 'update_liquidation'],
   // "reopen relia pa" listed the company and reopened nothing. 2026-10-03.
   [/^\s*(?:ok\s+|okay\s+|please\s+|can you\s+)?(?:reopen|re-open|unclose)\b/i, 'bulk_close_companies'],
   // A PERSON'S DETAIL is looked up every time, never recalled. 2026-10-03.
@@ -2134,6 +2153,16 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
         };
       }
     }
+    if (name === 'update_liquidation' && modelArgs.confirmed !== true) {
+      const missing = liqFieldsLeftOut(args.said, modelArgs);
+      if (missing.length > 0) {
+        logger.warn({ tool: name, missing }, 'diane: left out a winding down field they named');
+        return {
+          summary: `NOTHING HAS BEEN CHANGED. They also gave the ${missing.join(' and ')}, which this call left out. `
+            + 'Call update_liquidation again with EVERY field they named in this message.',
+        };
+      }
+    }
     if (tool.writes && asksRateCheck(args.said)) {
       return {
         summary: 'NOTHING HAS BEEN CHANGED. They asked a question about a rate, not for a change. '
@@ -2352,6 +2381,23 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
         summary: 'NOT CALLED. They asked about a company\'s documents, not the master sheet: answer from the passages '
           + 'search_company_documents gave, naming the document. If those do not answer it, say so.',
       };
+    }
+    /**
+     * "OTTO + MARA + FELIX FEE 3%" SETS A RATE, it does not ask for a total:
+     * it was read as a question, their pay totals shown, and the "yes" after
+     * found nothing waiting (messy suite 2026-10-14). A question ("what is
+     * otto's fee?") still reads.
+     */
+    if (['total_master_sheet', 'breakdown_master_sheet'].includes(name)) {
+      const said = String(lastSaid(history) ?? '');
+      if (/\b(?:fee|add[\s-]?on)s?\b[^?]{0,20}?\b\d+(?:\.\d+)?\s*%/i.test(said) && !/\?\s*$|^\s*(?:what|whats|what's|how|which|who|is|are|does|do|show|list|tell)\b/i.test(said)) {
+        return {
+          // Firmer wording ("call it NOW, ask nothing") made her CLAIM it was being
+          // set with no call at all (2026-10-14): this one stays honest.
+          summary: 'NOT CALLED. They are SETTING a fee or add on percentage, not asking for totals. Call update_person for '
+            + 'each person they named (feePercent or addonPercent), confirmed false first, and show what would change.',
+        };
+      }
     }
     if (name === 'bulk_update_master_sheet' && !turn?.planRun && !turn?.applyingHeld
       && require('./scheduled/parkable').LATER_TIMING.test(String(args.said ?? ''))) {

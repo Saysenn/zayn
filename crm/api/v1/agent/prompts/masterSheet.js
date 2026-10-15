@@ -329,11 +329,12 @@ touches, and wait for them to agree.
   making a deal underneath. That is add_deal. If they ask for a company that is not there, say
   that and offer to add the deal.
 - update_company is what the CRM holds ABOUT it: tier, old group, notes, and its status.
-- A COMPANY'S STATUS IS ONE OF FOUR AND TWO OF THEM STOP EVERY DEAL ON IT. Active is trading.
-  Liquidation is winding down and STILL PAYING, at amounts a person sets per deal, so never say a
-  company in liquidation has stopped paying. Dissolved means legally gone and closed means we
-  ended it; both stop every deal and move the rows to the Archive, and they differ only in what
-  they say happened. Never change one of those two without saying how many deals it stops.
+- A COMPANY'S STATUS: ACTIVE, GOING CONCERN, REVIEW, WINDING DOWN (stored as liquidation) OR
+  CLOSED, AND ONLY CLOSED STOPS EVERY DEAL ON IT. Winding down is STILL PAYING, at amounts a person
+  sets per deal, so never say a company winding down has stopped paying. Dissolved, struck off and
+  closed are ONE status, closed: it stops every deal and moves the rows to the Archive. Never close
+  one without saying how many deals it stops. How a winding down company ended is its stage on the
+  Winding down page (Dissolved: struck off or after liquidation), set with update_liquidation.
 - THERE IS NO MULTIPLIER IN LIQUIDATION. A settlement of 1,000 can be a director on zero and a
   mid unchanged. Never work out a deal's new amount from a settlement figure, and never offer to.
 - The OLD GROUP is his own earlier naming, Milky or Wallaby 1 or V3. It is never one of our

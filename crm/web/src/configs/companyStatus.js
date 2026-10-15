@@ -26,14 +26,14 @@ export const COMPANY_STATUS = Object.freeze({
   // about this company every month. Both ask through the CHECKLIST.
   REVIEW: 'review',
   LIQUIDATION: 'liquidation',
-  DISSOLVED: 'dissolved',
   CLOSED: 'closed',
 });
 
-// Both terminal, and they stop every deal identically. They differ only in
-// what they SAY happened, which is why there are two: one company ceased to
-// exist, the other we walked away from, and an audit asks which.
-export const TERMINAL_STATUS = Object.freeze(['dissolved', 'closed']);
+// ONE ENDING (his call 2026-10-14, migration 091): "closed and dissolved
+// are the same thing on our process". How a winding down company ended is
+// its stage on the Winding down page (Dissolved: struck off or after
+// liquidation), and reaching that stage closes it.
+export const TERMINAL_STATUS = Object.freeze(['closed']);
 
 export const isTerminalStatus = (status) => TERMINAL_STATUS.includes(status);
 
@@ -75,7 +75,7 @@ export const asksDeals = (status) => ASKS_DEALS.includes(status);
 
 // What each one means for the money, shown under the picker so nobody has
 // to remember which of the four still pays.
-export const COMPANY_STATUS_OPTIONS = Object.freeze([
+const ALL_STATUS_OPTIONS = Object.freeze([
   { value: 'active', label: 'Active', means: 'Trading, paying in full.' },
   {
     value: 'going_concern',
@@ -89,28 +89,30 @@ export const COMPANY_STATUS_OPTIONS = Object.freeze([
   },
   {
     value: 'liquidation',
-    label: 'Liquidation',
-    means: 'Winding down. Still paying, at amounts you set per deal.',
+    label: 'Winding down',
+    means: 'A strike off or a liquidation. Still paying, at amounts you set per deal.',
   },
-  {
-    value: 'dissolved',
-    label: 'Dissolved',
-    means: 'Legally gone. Every deal stops and moves to the Archive.',
-  },
+  // SHOWN AS DISSOLVED (his call 2026-10-15), stored as closed: the one
+  // ending. The company goes to the Archive's Companies tab.
   {
     value: 'closed',
-    label: 'Closed',
-    means: 'We ended it. Every deal stops and moves to the Archive.',
+    label: 'Dissolved',
+    means: 'Gone. Every deal stopped and moved to the Archive, and so did the company. Set on the Winding down page.',
   },
 ]);
 
+// WHAT A PICKER OFFERS (his call 2026-10-15): never Dissolved. A company is
+// dissolved only on the Winding down page, by its stage, so no status
+// picker, filter or bulk bar offers it.
+export const COMPANY_STATUS_OPTIONS = Object.freeze(ALL_STATUS_OPTIONS.filter((o) => o.value !== 'closed'));
+
 export const COMPANY_STATUS_MEANS = Object.freeze(
-  Object.fromEntries(COMPANY_STATUS_OPTIONS.map((o) => [o.value, o.means])),
+  Object.fromEntries(ALL_STATUS_OPTIONS.map((o) => [o.value, o.means])),
 );
 
 // The word on its own, for a page header or a subtitle. Same source as the
 // picker, so a status cannot be spelled one way in a dropdown and another
 // above the page it belongs to.
 export const COMPANY_STATUS_LABEL = Object.freeze(
-  Object.fromEntries(COMPANY_STATUS_OPTIONS.map((o) => [o.value, o.label])),
+  Object.fromEntries(ALL_STATUS_OPTIONS.map((o) => [o.value, o.label])),
 );

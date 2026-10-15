@@ -108,10 +108,12 @@ test('THE OPTIONS SCROLL, THE RAIL DOES NOT', () => {
  * sum, and the two drifting apart is the same clipped list.
  */
 test('THE RAIL IS ADDED TO THE PANEL FLOOR, not taken out of it', () => {
-  assert.match(SELECT_CODE, /const MIN_W = \d+ \+ \(hasRail \? RAIL_W : 0\);/);
+  // The side pane of an option's own choices is added the same way (2026-10-14).
+  assert.match(SELECT_CODE, /const MIN_W = \d+ \+ \(hasRail \? RAIL_W : 0\) \+ \(hasSubEarly \? SUB_W : 0\);/);
   assert.match(SELECT_CODE, /^const RAIL_W = \d+;$/m);
+  assert.match(SELECT_CODE, /^const SUB_W = \d+;$/m);
   // Placed while open, so the width has to be recomputed when it changes.
-  assert.match(SELECT_CODE, /\}, \[open, hasRail\]\);/);
+  assert.match(SELECT_CODE, /\}, \[open, hasRail, hasSubEarly\]\);/);
   // Never a second number: w-28 beside RAIL_W is two definitions of one width.
   const rail = SELECT_CODE.match(/\{hasRail && \([\s\S]*?\n {12}\)\}/)?.[0];
   assert.match(rail, /style=\{\{ width: RAIL_W \}\}/);

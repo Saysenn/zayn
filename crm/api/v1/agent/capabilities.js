@@ -76,7 +76,7 @@ const AREAS = Object.freeze([
      * two that move money.
      */
     label: 'companies: list them, rename one, correct its tier, old group or notes, change its '
-      + 'STATUS (active, going concern, liquidation, dissolved, closed), close or reopen one or '
+      + 'STATUS (active, going concern, review, winding down, closed: dissolved is closed), close or reopen one or '
       + 'several, and mark which of its deals are reviewed every month',
     tools: [
       'list_companies', 'active_companies', 'update_company', 'bulk_update_companies',
@@ -95,7 +95,7 @@ const AREAS = Object.freeze([
   },
   {
     // His call 2026-10-13: the page is every company whose status is liquidation.
-    label: 'the Liquidations page: who is in liquidation and at what stage, deadlines due or passed, one '
+    label: 'the Winding down page (strike offs and liquidations): every company winding down and at what stage, deadlines due or passed, one '
       + 'company in full; change stage, deadline, owner, instructions, next action, liquidator, note or '
       + 'blamed on one or many, log a contact; its documents: list, open, save files attached here, rename, '
       + 'remove one or many, and answer from what they say; and undo',

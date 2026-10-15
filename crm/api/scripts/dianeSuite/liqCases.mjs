@@ -35,6 +35,21 @@ const flagsOf = async (db, person) => (await db.query(
 )).rows;
 const rate = async (db, code) => (await db.query('SELECT usd_per_unit::text AS u FROM tb_fx_rates WHERE code = $1', [code])).rows[0]?.u ?? null;
 const day = (words) => dayFrom(words, currentDay());
+// A company's own status, its live deals, and several checks as one.
+const statusIs = (name, want) => async (db) => { const s = await status(db, name); return s === want ? null : `${name} status ${s}, not ${want}`; };
+const live = async (db, name) => (await db.query('SELECT count(*)::int n FROM tb_mastersheet WHERE lower(btrim(company)) = $1 AND stopped_on IS NULL', [name])).rows[0].n;
+const liveIs = (name, n) => async (db) => { const got = await live(db, name); return got === n ? null : `${name} has ${got} live deals, not ${n}`; };
+const liveKept = (name) => async (db) => { const got = await live(db, name); return got > 0 ? null : `${name} lost its live deals`; };
+const all = (...checks) => async (db) => { for (const c of checks) { const why = await c(db); if (why) return why; } return null; };
+// NOTHING MOVED BEFORE THE YES: the companies keep their status, the page its rows.
+const unmoved = (...names) => async (db) => {
+  for (const n of names) {
+    const was = seedState.status.find((c) => c.name.toLowerCase() === n)?.status ?? 'active';
+    const now = await status(db, n);
+    if (now !== was) return `${n} status moved to ${now} before yes`;
+  }
+  return untouched(db);
+};
 
 export async function extraSeed({ api, db }) {
   // Two companies in liquidation, set the way the page and Diane set it.
@@ -67,19 +82,24 @@ export async function extraSeed({ api, db }) {
   seedState.liq = (await db.query('SELECT * FROM tb_liquidations')).rows;
   seedState.flags = (await db.query('SELECT * FROM tb_concerns')).rows;
   seedState.rates = (await db.query('SELECT * FROM tb_fx_rates')).rows;
-  seedState.status = (await db.query('SELECT name, status FROM tb_companies')).rows;
+  seedState.status = (await db.query('SELECT name, status, closed_on FROM tb_companies')).rows;
+  // The deals live at the start: a dissolve in one case must not leave the next short.
+  seedState.liveIds = (await db.query('SELECT id FROM tb_mastersheet WHERE stopped_on IS NULL')).rows.map((r) => r.id);
 }
 
 const reset = {
   act: async ({ db }) => {
     for (const r of seedState.liq) {
       await db.query(
-        'UPDATE tb_liquidations SET stage = $2, deadline = $3, next_action = $4, owner = $5, blamed = $6, liquidator = $7, note = $8, instructions = $9 WHERE id = $1',
-        [r.id, r.stage, r.deadline, r.next_action, r.owner, r.blamed, r.liquidator, r.note, r.instructions],
+        'UPDATE tb_liquidations SET stage = $2, stage_kind = $10, deadline = $3, next_action = $4, owner = $5, blamed = $6, liquidator = $7, note = $8, instructions = $9 WHERE id = $1',
+        [r.id, r.stage, r.deadline, r.next_action, r.owner, r.blamed, r.liquidator, r.note, r.instructions, r.stage_kind],
       );
     }
+    // Rows a case made for companies it put on the page, and deals a dissolve stopped.
+    await db.query('UPDATE tb_mastersheet SET stopped_on = NULL, stopped_reason = NULL WHERE id = ANY($1::int[]) AND stopped_on IS NOT NULL', [seedState.liveIds]);
     await db.query('DELETE FROM tb_liquidation_comms');
     await db.query('DELETE FROM tb_liquidation_history');
+    await db.query('DELETE FROM tb_liquidations WHERE NOT (id = ANY($1::int[]))', [seedState.liq.map((r) => r.id)]);
     await db.query('UPDATE tb_liquidation_docs SET removed_at = NULL');
     await db.query('DELETE FROM tb_concerns');
     for (const c of seedState.flags) {
@@ -90,7 +110,9 @@ const reset = {
     for (const r of seedState.rates) {
       await db.query('INSERT INTO tb_fx_rates (code, per_usd, usd_per_unit, updated_at, updated_by) VALUES ($1,$2,$3,$4,$5)', [r.code, r.per_usd, r.usd_per_unit, r.updated_at, r.updated_by]);
     }
-    for (const c of seedState.status) await db.query('UPDATE tb_companies SET status = $2 WHERE name = $1', [c.name, c.status]);
+    for (const c of seedState.status) await db.query('UPDATE tb_companies SET status = $2, closed_on = $3 WHERE name = $1', [c.name, c.status, c.closed_on]);
+    // A company with no record until a case set its status is active again.
+    await db.query("UPDATE tb_companies SET status = 'active', closed_on = NULL WHERE NOT (name = ANY($1::text[]))", [seedState.status.map((c) => c.name)]);
     await db.query('DELETE FROM tb_agent_undo');
   },
 };
@@ -131,6 +153,137 @@ write('a stage: shown first, written on yes, status untouched', [
   { say: 'put quarry lane on hmrc liq', expect: { db: async (db) => ((await liq(db, 'quarry lane')).stage ? 'written before yes' : null) } },
   { say: 'yes', expect: { db: async (db) => ((await liq(db, 'quarry lane')).stage !== 'hmrc_liq' ? 'stage not hmrc_liq' : (await status(db, 'quarry lane')) !== 'liquidation' ? 'company status moved' : null) } },
 ]);
+// THE PROCESS'S NEW STAGES (his flowchart, 2026-10-14): a proposal says its kind.
+write('an active proposal, compulsory, then suspended', [
+  { say: 'pinecrest got a first gazette notice, its a compulsory strike off proposal', expect: { db: async (db) => ((await liq(db, 'pinecrest')).stage ? 'written before yes' : null) } },
+  { say: 'yes', expect: { db: async (db) => { const r = await liq(db, 'pinecrest'); return r.stage === 'active_proposal' && r.stage_kind === 'compulsory' ? null : `stage ${r.stage}, kind ${r.stage_kind}`; } } },
+  { say: 'someone objected, pinecrest strike off is suspended now', expect: {} },
+  { say: 'yes', expect: { db: async (db) => { const r = await liq(db, 'pinecrest'); return r.stage === 'strike_off_suspended' && r.stage_kind === null ? null : `stage ${r.stage}, kind ${r.stage_kind}`; } } },
+]);
+// EVERY STAGE WITH KINDS (his corrected flowchart, 2026-10-14, migration 090).
+const stageIs = (key, stage, kind) => async (db) => { const r = await liq(db, key); return r?.stage === stage && (r?.stage_kind ?? null) === kind ? null : `${key} stage ${r?.stage}, kind ${r?.stage_kind}`; };
+write('own liq as a CVL', [
+  { say: 'quarry lane is a creditors voluntary liquidation, a CVL', expect: { db: untouched } },
+  { say: 'yes', expect: { db: stageIs('quarry lane', 'own_liq', 'cvl') } },
+]);
+write('an hmrc petition, then the winding-up order', [
+  { say: 'hmrc filed a winding up petition against pinecrest', expect: { db: untouched } },
+  { say: 'yes', expect: { db: stageIs('pinecrest', 'hmrc_liq', 'petition') } },
+  { say: 'the court made the winding up order for pinecrest today', expect: {} },
+  { say: 'yes', expect: { db: stageIs('pinecrest', 'hmrc_liq', 'winding_up_order') } },
+]);
+write('struck off is dissolved: the stage, then closed, its deals stopped', [
+  { say: 'quarry lane has been struck off', expect: { db: untouched } },
+  { say: 'yes', expect: { db: all(stageIs('quarry lane', 'dissolved', 'struck_off'), statusIs('quarry lane', 'closed'), liveIs('quarry lane', 0)) } },
+]);
+
+// ================= INTO AND OUT OF WINDING DOWN (his call 2026-10-14) =================
+// One at a time, many at once, with a step, and messy: each a preview, then one yes.
+write('one company into winding down, its deals keep paying', [
+  { say: 'put ironleaf into winding down', expect: { db: unmoved('ironleaf') } },
+  { say: 'yes', expect: { db: all(statusIs('ironleaf', 'liquidation'), liveKept('ironleaf')) } },
+]);
+write('three companies into winding down in one yes', [
+  { say: 'pls move ironleaf, harbor nine and brightwell to the winding down page', expect: { db: unmoved('ironleaf', 'harbor nine', 'brightwell') } },
+  { say: 'yes', expect: { db: all(statusIs('ironleaf', 'liquidation'), statusIs('harbor nine', 'liquidation'), statusIs('brightwell', 'liquidation')) } },
+]);
+write('a petition on an active company: status and stage together', [
+  { say: 'hmrc filed a winding up petition against ironleaf', expect: { db: unmoved('ironleaf') } },
+  { say: 'yes', expect: { db: all(statusIs('ironleaf', 'liquidation'), stageIs('ironleaf', 'hmrc_liq', 'petition')) } },
+]);
+write('strike off an active company, voluntary', [
+  { say: 'strike off brightwell, its a voluntary one, we sent the ds01', expect: { db: unmoved('brightwell') } },
+  { say: 'yes', expect: { db: all(statusIs('brightwell', 'liquidation'), stageIs('brightwell', 'active_proposal', 'voluntary')) } },
+]);
+write('the old refusal is now a preview: set an active company to hmrc liq', [
+  { say: 'set ironleaf to hmrc liq', expect: { db: unmoved('ironleaf') } },
+  { say: 'yes', expect: { db: all(statusIs('ironleaf', 'liquidation'), stageIs('ironleaf', 'hmrc_liq', null)) } },
+]);
+// DISSOLVED ONLY FROM WINDING DOWN (his call 2026-10-15): a company off the page is offered it first.
+write('a company off the page struck off is offered winding down, never dissolved', [
+  { say: 'brightwell got struck off last week', expect: { reply: /winding down/i, db: unmoved('brightwell') } },
+]);
+write('a messy one: in, a CVL with its liquidator and deadline, and one struck off', [
+  { say: 'ironleaf got a compulsory strike off notice, harbor nine is going into a CVL with begbies as liquidator deadline friday, oh and pinecrest has been struck off', expect: { db: unmoved('ironleaf', 'harbor nine', 'pinecrest') } },
+  { say: 'yes', expect: { db: all(
+    statusIs('ironleaf', 'liquidation'), stageIs('ironleaf', 'active_proposal', 'compulsory'),
+    statusIs('harbor nine', 'liquidation'), stageIs('harbor nine', 'own_liq', 'cvl'),
+    async (db) => { const r = await liq(db, 'harbor nine'); return /begbies/i.test(r?.liquidator ?? '') && String(r?.deadline).slice(0, 10) === day('friday') ? null : `harbor nine liquidator ${r?.liquidator}, deadline ${r?.deadline}`; },
+    statusIs('pinecrest', 'closed'), stageIs('pinecrest', 'dissolved', 'struck_off'),
+  ) } },
+]);
+write('every hmrc petition gets its winding-up order', [
+  { say: 'quarry lane and pinecrest both got hmrc winding up petitions', expect: {} },
+  { say: 'yes', expect: { db: all(stageIs('quarry lane', 'hmrc_liq', 'petition'), stageIs('pinecrest', 'hmrc_liq', 'petition')) } },
+  { say: 'the court made winding up orders on all the hmrc petitions', expect: {} },
+  { say: 'yes', expect: { db: all(stageIs('quarry lane', 'hmrc_liq', 'winding_up_order'), stageIs('pinecrest', 'hmrc_liq', 'winding_up_order')) } },
+]);
+write('a typo in a company going into winding down asks, nothing moves', [
+  { say: 'put ironlef into winding down', expect: { reply: /ironleaf/i, db: unmoved('ironleaf') } },
+]);
+write('a messy edit across the page columns, two companies', [
+  { say: 'pinecrest is a cvl now, owner suite-admin, blame them. quarry lane: next action chase begbies for the statement, note awaiting bank statement', expect: { db: untouched } },
+  { say: 'yes', expect: { db: all(
+    stageIs('pinecrest', 'own_liq', 'cvl'),
+    async (db) => { const r = await liq(db, 'pinecrest'); return r.owner === 'suite-admin' && r.blamed === true ? null : `pinecrest owner ${r.owner}, blamed ${r.blamed}`; },
+    async (db) => { const r = await liq(db, 'quarry lane'); return /chase begbies/i.test(r.next_action ?? '') && /bank statement/i.test(r.note ?? '') ? null : `quarry lane next ${r.next_action}, note ${r.note}`; },
+  ) } },
+]);
+write('dissolve a company winding down: its stage, then dissolved', [
+  { say: 'dissolve pinecrest', expect: { db: unmoved('pinecrest') } },
+  { say: 'yes', expect: { db: all(async (db) => ((await liq(db, 'pinecrest'))?.stage === 'dissolved' ? null : 'pinecrest stage not dissolved'), statusIs('pinecrest', 'closed'), liveIs('pinecrest', 0)) } },
+]);
+write('dissolve an active company is offered winding down first', [
+  { say: 'dissolve harbor nine', expect: { reply: /winding down/i, db: unmoved('harbor nine') } },
+]);
+// THE GAPS (his question 2026-10-15): bulk dissolve with its undo, a messy
+// status mix, bulk marks, and a dissolved company brought back by chat.
+write('two companies struck off in one yes, and undo brings both back', [
+  { say: 'quarry lane and pinecrest have both been struck off', expect: { db: unmoved('quarry lane', 'pinecrest') } },
+  { say: 'yes', expect: { db: all(
+    statusIs('quarry lane', 'closed'), stageIs('quarry lane', 'dissolved', 'struck_off'), liveIs('quarry lane', 0),
+    statusIs('pinecrest', 'closed'), stageIs('pinecrest', 'dissolved', 'struck_off'), liveIs('pinecrest', 0),
+  ) } },
+  { say: 'undo that', expect: { db: all(statusIs('quarry lane', 'liquidation'), statusIs('pinecrest', 'liquidation'), liveKept('quarry lane'), liveKept('pinecrest')) } },
+]);
+write('a messy status mix: one in with a petition, one dissolved after liquidation, one deadline', [
+  { say: 'hmrc petitioned ironleaf so put it into winding down, pinecrest is dissolved after the liquidation finished, and quarry lane deadline is friday', expect: { db: unmoved('ironleaf', 'pinecrest', 'quarry lane') } },
+  { say: 'yes', expect: { db: all(
+    statusIs('ironleaf', 'liquidation'), stageIs('ironleaf', 'hmrc_liq', 'petition'),
+    statusIs('pinecrest', 'closed'), stageIs('pinecrest', 'dissolved', 'after_liquidation'),
+    async (db) => (String((await liq(db, 'quarry lane')).deadline).slice(0, 10) === day('friday') ? null : `quarry lane deadline ${(await liq(db, 'quarry lane')).deadline}`),
+  ) } },
+]);
+write('two companies on monthly review in one yes', [
+  { say: 'put ironleaf and harbor nine on monthly review', expect: { db: unmoved('ironleaf', 'harbor nine') } },
+  { say: 'yes', expect: { db: all(statusIs('ironleaf', 'review'), statusIs('harbor nine', 'review')) } },
+]);
+write('a dissolved company brought back by chat', [
+  { say: 'dissolve pinecrest', expect: {} },
+  { say: 'yes', expect: { db: statusIs('pinecrest', 'closed') } },
+  { say: 'bring pinecrest back, it was dissolved by mistake', expect: {} },
+  { say: 'yes', expect: { db: all(async (db) => (['active', 'liquidation'].includes(await status(db, 'pinecrest')) ? null : `pinecrest still ${await status(db, 'pinecrest')}`), liveKept('pinecrest')) } },
+]);
+// WINDING DOWN PUTS ITS DEALS ON THE REVIEW, BACK TO ACTIVE TAKES THEM OFF (his call 2026-10-15).
+const ticked = async (db, name) => (await db.query('SELECT count(*)::int n FROM tb_mastersheet WHERE lower(btrim(company)) = $1 AND stopped_on IS NULL AND review_monthly', [name])).rows[0].n;
+write('two companies into winding down: their deals go to the review', [
+  { say: 'put ironleaf and harbor nine into winding down', expect: { db: unmoved('ironleaf', 'harbor nine') } },
+  { say: 'yes', expect: { db: all(
+    statusIs('ironleaf', 'liquidation'), statusIs('harbor nine', 'liquidation'),
+    async (db) => ((await ticked(db, 'ironleaf')) === (await live(db, 'ironleaf')) && (await ticked(db, 'harbor nine')) === (await live(db, 'harbor nine')) ? null : 'their deals are not all on the review'),
+  ) } },
+]);
+write('back to active takes its deals off the review', [
+  { say: 'put harbor nine into winding down', expect: {} },
+  { say: 'yes', expect: { db: async (db) => ((await ticked(db, 'harbor nine')) > 0 ? null : 'no deal went to the review') } },
+  { say: 'harbor nine is trading fine again, set it back to active', expect: {} },
+  { say: 'yes', expect: { db: all(statusIs('harbor nine', 'active'), async (db) => ((await ticked(db, 'harbor nine')) === 0 ? null : 'its deals are still on the review'), liveKept('harbor nine')) } },
+]);
+write('undo puts a company back out of winding down', [
+  { say: 'harbor nine is going into a members voluntary liquidation', expect: { db: unmoved('harbor nine') } },
+  { say: 'yes', expect: { db: all(statusIs('harbor nine', 'liquidation'), stageIs('harbor nine', 'own_liq', 'mvl')) } },
+  { say: 'undo that', expect: { db: statusIs('harbor nine', 'active') } },
+]);
 write('a messy order: stage, deadline in words, a call, and another company\'s owner', [
   { say: 'quarry lane went hmrc liq, deadline friday, begbies rang asking for bank statements. oh and pinecrest owner is suite-admin', expect: { db: untouched } },
   {
@@ -161,9 +314,6 @@ write('undo puts the last liquidation change back', [
 write('a typo in the company asks, writes nothing', [
   { say: 'set quary lane to strike off', expect: { reply: /Quarry Lane/i, db: untouched } },
 ]);
-write('a company not in liquidation is pointed at its status, nothing written', [
-  { say: 'set ironleaf to hmrc liq', expect: { reply: /not in liquidation|status/i, db: async (db) => ((await status(db, 'ironleaf')) !== 'active' ? 'Ironleaf status moved' : untouched(db)) } },
-]);
 write('end of month is a real date', [
   { say: 'pinecrest deadline is end of month', expect: { db: untouched } },
   { say: 'yes', expect: { db: async (db) => (String((await liq(db, 'pinecrest')).deadline).slice(0, 10) === day('end of month') ? null : `deadline ${(await liq(db, 'pinecrest')).deadline}`) } },
@@ -175,7 +325,8 @@ write('log a contact line', [
 // Its status is the only door, and liquidation writes straight away by
 // design (it stops no deal; companies.js WHICH STATUSES ASK FIRST).
 write('adding a company to the page goes through its status', [
-  { say: 'add brightwell to the liquidations page', expect: { tools: ['update_company'], db: async (db) => ((await status(db, 'brightwell')) === 'liquidation' ? null : 'Brightwell not put into liquidation') } },
+  { say: 'add brightwell to the liquidations page', expect: {} },
+  { say: 'yes', expect: { db: statusIs('brightwell', 'liquidation') } },
 ]);
 
 // ================= FLAGS =================

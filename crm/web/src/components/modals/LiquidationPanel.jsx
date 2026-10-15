@@ -83,13 +83,13 @@ export default function LiquidationPanel({ company, deals, busy, onSave, onClose
   return (
     <Modal
       wide
-      title={`Liquidation: ${company?.name ?? 'this company'}`}
+      title={`Winding down: ${company?.name ?? 'this company'}`}
       onClose={onClose}
     >
       <div className="flex flex-col gap-4">
         <p className="text-sm text-text-muted">
           Set what each person is paid while this winds down. The company keeps paying until you
-          close or dissolve it.
+          close it (on the Winding down page, stage Dissolved closes it).
         </p>
 
         <div className="flex flex-wrap items-end gap-3 border-b border-border pb-3">

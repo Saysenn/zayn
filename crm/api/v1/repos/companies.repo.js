@@ -46,11 +46,12 @@ const COMPANY_STATUS = Object.freeze({
    */
   REVIEW: 'review',
   LIQUIDATION: 'liquidation',
-  DISSOLVED: 'dissolved',
+  // ONE ENDING (his call 2026-10-14, migration 091): dissolved is closed.
+  // How it ended is the Winding down page's stage Dissolved.
   CLOSED: 'closed',
 });
 
-const TERMINAL = Object.freeze([COMPANY_STATUS.DISSOLVED, COMPANY_STATUS.CLOSED]);
+const TERMINAL = Object.freeze([COMPANY_STATUS.CLOSED]);
 
 const isTerminal = (status) => TERMINAL.includes(status);
 
@@ -132,7 +133,10 @@ async function findAll({
     where.push(`company ILIKE $${params.length}`);
   }
 
-  let statusSql = '';
+  // A DISSOLVED COMPANY IS IN THE ARCHIVE (his call 2026-10-15), like a
+  // stopped deal off the sheet: the plain list leaves it out, and asking
+  // for the status by name still finds it.
+  let statusSql = `AND COALESCE(c.status, 'active') <> 'closed'`;
   if (status) {
     params.push(status);
     statusSql = `AND COALESCE(c.status, 'active') = $${params.length}`;
@@ -182,9 +186,10 @@ async function findAll({
          d.ckey,
          MAX(btrim(d.company))                                  AS sheet_name,
          ARRAY_AGG(DISTINCT d.group_name ORDER BY d.group_name) AS groups,
-         COUNT(*)::int                                          AS deal_count,
-         COUNT(DISTINCT d.person_id)::int                       AS handler_count,
-         COUNT(*) FILTER (WHERE d.payment_period = 'active')::int AS active_count,
+         -- LIVE DEALS ONLY (his report 2026-10-15): a stopped deal is in the Archive.
+         COUNT(*) FILTER (WHERE d.stopped_on IS NULL)::int       AS deal_count,
+         COUNT(DISTINCT d.person_id) FILTER (WHERE d.stopped_on IS NULL)::int AS handler_count,
+         COUNT(*) FILTER (WHERE d.payment_period = 'active' AND d.stopped_on IS NULL)::int AS active_count,
          BOOL_OR(d.needs_review)                                AS needs_review,
          -- "One or more handlers on this company were removed." The deal
          -- survived the person being deleted, so the company still has a
@@ -279,11 +284,13 @@ async function findByKey(key) {
        c.old_group                  AS old_group,
        COALESCE(c.notes, '')        AS notes,
        (SELECT ARRAY_AGG(DISTINCT group_name ORDER BY group_name) FROM deals) AS groups,
-       (SELECT COUNT(*)::int FROM deals)                                      AS deal_count,
-       (SELECT COUNT(DISTINCT person_id)::int FROM deals)                     AS handler_count,
+       (SELECT COUNT(*)::int FROM deals WHERE stopped_on IS NULL)              AS deal_count,
+       (SELECT COUNT(DISTINCT person_id)::int FROM deals WHERE stopped_on IS NULL) AS handler_count,
        (SELECT COUNT(*)::int FROM deals WHERE orphaned_person)                AS missing_handler_count,
        (SELECT jsonb_object_agg(currency, subtotal) FROM totals)              AS monthly_totals,
-       COALESCE((SELECT json_agg(d ORDER BY d.role_label, d.person_name) FROM deals d), '[]') AS deals
+       COALESCE((SELECT json_agg(d ORDER BY d.role_label, d.person_name) FROM deals d), '[]') AS deals,
+       -- Its Winding down stage, for how a dissolved one ended (his call 2026-10-15).
+       (SELECT row_to_json(w) FROM (SELECT stage, stage_kind FROM tb_liquidations WHERE company_key = $1) w) AS winding
      FROM (SELECT 1) _
      LEFT JOIN tb_companies c ON lower(c.name) = $1`,
     [ckey],
@@ -682,7 +689,50 @@ async function names() {
   return rows;
 }
 
+/**
+ * ***************************************************
+ * * THE ARCHIVE'S COMPANIES (his call 2026-10-15)
+ * ***************************************************
+ * Every dissolved company (stored closed, migration 091), newest first,
+ * with who ran it and what ended with it: its last director and mid, its
+ * groups, its deals and what they paid a month, and how it ended when it
+ * went through the Winding down page (Struck off or After liquidation).
+ */
+async function archived({ q, page = 1, pageSize = 25 } = {}) {
+  const params = [];
+  let qSql = '';
+  if (q) { params.push(`%${q}%`); qSql = `AND c.name ILIKE $${params.length}`; }
+  const ckey = keySql('c.name');
+  const { rows } = await pool.query(
+    `WITH gone AS (
+       SELECT c.name, c.closed_on, ${ckey} AS ckey FROM tb_companies c
+        WHERE c.status = 'closed' ${qSql}
+     ),
+     deals AS (SELECT ${CKEY} AS ckey, * FROM tb_mastersheet WHERE company IS NOT NULL),
+     rows AS (
+       SELECT g.name, g.ckey, g.closed_on, l.stage, l.stage_kind,
+         (SELECT ARRAY_AGG(DISTINCT d.group_name ORDER BY d.group_name) FROM deals d WHERE d.ckey = g.ckey AND d.group_name IS NOT NULL) AS groups,
+         (SELECT string_agg(DISTINCT d.person_name, ', ') FROM deals d WHERE d.ckey = g.ckey AND lower(d.role) = 'director') AS director,
+         (SELECT string_agg(DISTINCT d.person_name, ', ') FROM deals d WHERE d.ckey = g.ckey AND lower(d.role) LIKE 'mid%') AS mid,
+         (SELECT COUNT(*)::int FROM deals d WHERE d.ckey = g.ckey) AS deal_count,
+         (SELECT COUNT(DISTINCT d.person_id)::int FROM deals d WHERE d.ckey = g.ckey) AS handler_count,
+         -- What it paid a month before it ended: the deals its dissolving stopped.
+         (SELECT SUM(d.monthly_amount)::float FROM deals d WHERE d.ckey = g.ckey AND d.stopped_reason = $${params.length + 1}) AS ended_monthly,
+         (SELECT MAX(d.currency) FROM deals d WHERE d.ckey = g.ckey) AS currency
+       FROM gone g
+       LEFT JOIN tb_liquidations l ON l.company_key = g.ckey
+     )
+     SELECT (SELECT COUNT(*)::int FROM rows) AS total,
+            COALESCE((SELECT json_agg(r) FROM (
+              SELECT * FROM rows ORDER BY closed_on DESC NULLS LAST, name LIMIT $${params.length + 2} OFFSET $${params.length + 3}
+            ) r), '[]') AS rows`,
+    [...params, 'company_closed', pageSize, (page - 1) * pageSize],
+  );
+  return { rows: rows[0].rows ?? [], total: rows[0].total };
+}
+
 module.exports = {
+  archived,
   findAll, findByKey, findAllPlain, rename, update, revertCompanyField, names, tierMap, setTiers,
   oldGroups, tiersInUse, CKEY,
   COMPANY_STATUS, TERMINAL, isTerminal, REVIEWED_MONTHLY, isReviewedMonthly,

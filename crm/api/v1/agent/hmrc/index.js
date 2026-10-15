@@ -90,7 +90,7 @@ const SYSTEM = (today) => [
   '  OUR LIQUIDATIONS writes it (file name and extension), under each company. Never "documents are recorded" or',
   '  "several documents": the names are what they click to open them.',
   '- You CANNOT change anything here: no stage, deadline, note, document or status. If they ask, say it is done in',
-  '  master sheet mode or on the Liquidations page, in one line.',
+  '  master sheet mode or on the Winding down page, in one line.',
 ].join('\n');
 
 const TOOLS = [
@@ -361,7 +361,7 @@ async function hmrcTurn(history, send, { user = null } = {}) {
       || names.some((n) => n.length > 2 && asked.toLowerCase().includes(n));
     if (about) {
       return {
-        reply: 'In lawyer mode I only read our liquidations and their documents, I can\'t change them. Switch to Master sheet mode and ask me there, or do it on the Liquidations page.',
+        reply: 'In lawyer mode I only read the companies winding down and their documents, I can\'t change them. Switch to Master sheet mode and ask me there, or do it on the Winding down page.',
         claims: [],
       };
     }

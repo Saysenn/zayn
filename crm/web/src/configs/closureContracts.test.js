@@ -69,7 +69,7 @@ test('monthLabel names the month, and never guesses at rubbish', () => {
   assert.equal(monthLabel('nonsense'), 'this month');
 });
 
-test('THE SIX COMPANY STATUSES, exactly as migrations 059 and 061 spell them', () => {
+test('THE FIVE COMPANY STATUSES, as migrations 059, 061 and 091 leave them', () => {
   // `going_concern` is his own word, added 2026-09-21. It is not a synonym
   // for active in what it SAYS: its deals carry no end date on purpose,
   // and the end date cell says so rather than sitting blank.
@@ -77,22 +77,23 @@ test('THE SIX COMPANY STATUSES, exactly as migrations 059 and 061 spell them', (
   // `review` is his too, the same day: the company is asked about every
   // month without winding down. NOT liquidation, and the difference is
   // money, which is why it is its own value rather than a flag on that one.
-  const SIX = ['active', 'closed', 'dissolved', 'going_concern', 'liquidation', 'review'];
-  assert.deepEqual(Object.values(COMPANY_STATUS).sort(), SIX);
-  assert.deepEqual(COMPANY_STATUS_OPTIONS.map((o) => o.value).sort(), SIX);
+  // Dissolved merged into closed (his call 2026-10-14): one ending.
+  const FIVE = ['active', 'closed', 'going_concern', 'liquidation', 'review'];
+  assert.deepEqual(Object.values(COMPANY_STATUS).sort(), FIVE);
+  // THE PICKERS NEVER OFFER DISSOLVED (his call 2026-10-15): the Winding down page does.
+  assert.deepEqual(COMPANY_STATUS_OPTIONS.map((o) => o.value).sort(), FIVE.filter((v) => v !== 'closed'));
 });
 
-test('STILL ONLY TWO ARE TERMINAL, and the two new-ish ones are NOT', () => {
+test('ONLY CLOSED IS TERMINAL, and the paying ones are NOT', () => {
   // Liquidation is still paying, reduced. Going concern is paying in full.
   // Treating either as terminal would stop every deal on a company that is
   // still being paid, which is the widest write in the CRM.
-  assert.deepEqual([...TERMINAL_STATUS].sort(), ['closed', 'dissolved']);
+  assert.deepEqual([...TERMINAL_STATUS], ['closed']);
   assert.equal(isTerminalStatus('liquidation'), false);
   assert.equal(isTerminalStatus('going_concern'), false);
   assert.equal(isTerminalStatus('review'), false);
   assert.equal(isTerminalStatus('active'), false);
   assert.equal(isTerminalStatus('closed'), true);
-  assert.equal(isTerminalStatus('dissolved'), true);
 });
 
 test('EVERY STATUS SAYS WHAT IT MEANS FOR THE MONEY', () => {

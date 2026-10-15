@@ -58,7 +58,7 @@ export function reviewReason(row) {
  * make the tabs move under somebody's hand as they answer rows.
  */
 export const REVIEW_TABS = Object.freeze([
-  { key: REVIEW_REASON.LIQUIDATION, label: 'Liquidation' },
+  { key: REVIEW_REASON.LIQUIDATION, label: 'Winding down' },
   { key: REVIEW_REASON.REVIEW, label: 'Marked for review' },
   { key: REVIEW_REASON.PAST_END, label: 'Past a year' },
 ]);

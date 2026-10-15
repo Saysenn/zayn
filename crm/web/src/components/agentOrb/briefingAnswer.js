@@ -275,7 +275,7 @@ export const TOPIC_LABEL = Object.freeze({
   needsReview: 'Needs a check',
   specialCase: 'Special case on',
   payableOver: 'Payable over monthly',
-  liquidationDeadlines: 'Liquidation deadlines',
+  liquidationDeadlines: 'Winding down deadlines',
 });
 export const HUD_LABEL = Object.freeze({
   greet: 'Incoming briefing',

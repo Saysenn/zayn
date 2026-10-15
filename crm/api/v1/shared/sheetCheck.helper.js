@@ -209,7 +209,7 @@ const RULES = [
   )],
   ['contradicts', (r, ctx) => {
     const status = fold(ctx.companyStatus(r.company));
-    return (status === 'closed' || status === 'dissolved') && !r.stopped_on
+    return status === 'closed' && !r.stopped_on
       ? `its company is ${status}, but this deal is live`
       : null;
   }],

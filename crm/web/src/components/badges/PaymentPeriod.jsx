@@ -1,4 +1,5 @@
 import StatusBadge from './StatusBadge';
+import { formatDate } from '../../helpers/formatDate';
 
 /**
  * A deal's payment period: `active` or `ended`.
@@ -26,7 +27,10 @@ import StatusBadge from './StatusBadge';
  * them and because the day this needs to say something about a date again,
  * it will have them.
  */
-export default function PaymentPeriod({ period }) {
+export default function PaymentPeriod({ period, stoppedOn }) {
+  // A STOPPED DEAL IS ENDED, whatever its dates say: a dissolved company's
+  // deals read "Active" on its page (browser check 2026-10-15).
+  if (stoppedOn) return <StatusBadge status="ended" label={`Ended ${formatDate(stoppedOn)}`} />;
   if (!period) return <span className="text-text-faint">—</span>;
   return <StatusBadge status={period} />;
 }

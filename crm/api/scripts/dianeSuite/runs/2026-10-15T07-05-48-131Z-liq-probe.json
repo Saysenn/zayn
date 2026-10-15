@@ -1,0 +1,84 @@
+{
+  "set": "liq-probe",
+  "at": "2026-10-15T07:05:48.131Z",
+  "seconds": 49,
+  "cases": 5,
+  "passed": 4,
+  "passRate": 80,
+  "groups": {
+    "liq": {
+      "cases": 5,
+      "passed": 4,
+      "passRate": 80
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 0,
+    "db": 1
+  },
+  "calcAccuracy": null,
+  "inventedRate": 0,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0,
+  "recoveryRate": null,
+  "perTurn": {
+    "turns": 14,
+    "modelRounds": 1.2,
+    "toolCalls": 1.1,
+    "retries": 0,
+    "inputTokens": 37729,
+    "cachedPct": 98,
+    "outputTokens": 54,
+    "medianMs": 4194,
+    "slowestMs": 9361
+  },
+  "tokens": {
+    "input": 528210,
+    "cached": 515968,
+    "output": 761
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "a messy status mix: one in with a petition, one dissolved after liquidation, one deadline",
+      "name": "a messy status mix: one in with a petition, one dissolved after liquidation, one deadline",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "two companies on monthly review in one yes",
+      "name": "two companies on monthly review in one yes",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "a dissolved company brought back by chat",
+      "name": "a dissolved company brought back by chat",
+      "group": "liq",
+      "pass": false,
+      "labels": [
+        "db"
+      ]
+    },
+    {
+      "id": "two companies into winding down: their deals go to the review",
+      "name": "two companies into winding down: their deals go to the review",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "back to active takes its deals off the review",
+      "name": "back to active takes its deals off the review",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}

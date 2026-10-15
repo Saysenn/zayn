@@ -37,7 +37,7 @@ export default function LiquidationsExportModal({
   const activePalette = palette ?? options?.defaultPalette ?? palettes[0]?.id;
 
   return (
-    <Modal title="Export liquidations" onClose={busy ? () => {} : onClose}>
+    <Modal title="Export winding down" onClose={busy ? () => {} : onClose}>
       {loading ? (
         <Skeleton className="h-44 rounded-lg" />
       ) : (

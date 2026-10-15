@@ -36,6 +36,8 @@ import FloatingField from './FloatingField';
 // the rail and a term in the panel's minimum width, and the two drifting
 // apart is a list squeezed to a few characters.
 const RAIL_W = 112;
+// The side pane's width: an option's own sub-choices (2026-10-14).
+const SUB_W = 168;
 
 function normalize(option) {
   return typeof option === 'string' ? { value: option, label: option } : option;
@@ -98,17 +100,38 @@ export default function Select({
   // away from an opened picker left the field sitting in edit mode
   // forever, while a plain text input beside it collapsed on blur.
   onOpenChange,
+  /**
+   * AN OPTION'S OWN CHOICES, in a pane beside the list (his call 2026-10-14,
+   * the export rail's look). An option carrying `sub: [{ value, label, hint }]`
+   * opens it while highlighted, by pointer or arrows; → steps into it, ← back.
+   * Picking one calls onChange(option.value, { sub }); picking the option
+   * itself calls onChange(option.value, { sub: null }). `subValue` is the
+   * sub-choice held now, shown on the trigger as "Active proposal · Compulsory".
+   * Single select only.
+   */
+  subValue = null,
 }) {
   const [open, setOpen] = useState(autoOpen);
+  // Where the arrows are inside the side pane; null while they are in the list.
+  const [subActive, setSubActive] = useState(null);
   // Whole answers only make sense where a whole set can be set at once.
   const hasRail = multiple && presets.length > 0;
   // Where the portalled panel goes. Measured from the trigger, in viewport
   // coordinates, because the panel is rendered into <body> and knows
   // nothing about the field it belongs to.
   const [panelBox, setPanelBox] = useState(null);
+  // Any option with its own choices: computed here, before the layout effect reads it.
+  const hasSubEarly = !multiple && options.some((o) => o && typeof o === 'object' && o.sub?.length);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const rootRef = useRef(null);
+  // The trigger. An autoOpen picker takes the keys at once (2026-10-14): a
+  // table cell opened it with focus left on the page, so ↑ ↓ → did nothing.
+  const triggerRef = useRef(null);
+  useEffect(() => {
+    if (autoOpen && !searchable && !allowCustom) triggerRef.current?.focus();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const searchRef = useRef(null);
   const listRef = useRef(null);
   const panelRef = useRef(null);
@@ -169,7 +192,8 @@ export default function Select({
      */
     // THE RAIL IS ADDED TO THE FLOOR, not taken out of it. Without this a
     // 224px panel gave the options 112px and clipped every one of them.
-    const MIN_W = 224 + (hasRail ? RAIL_W : 0);
+    // The side pane is room taken up front, so opening it never moves the list.
+    const MIN_W = 224 + (hasRail ? RAIL_W : 0) + (hasSubEarly ? SUB_W : 0);
     const MAX_H = 288; // matches the list's own max-height below
 
     const place = () => {
@@ -201,26 +225,34 @@ export default function Select({
       window.removeEventListener('scroll', place, true);
       window.removeEventListener('resize', place);
     };
-  }, [open, hasRail]);
+  }, [open, hasRail, hasSubEarly]);
 
   const items = useMemo(() => options.map(normalize).filter(Boolean), [options]);
+  const hasSub = !multiple && items.some((o) => o.sub?.length);
   const selected = multiple ? (Array.isArray(value) ? value : []) : value;
 
+  // A `heading` item names the group under it (the roads of winding down,
+  // 2026-10-14): shown, never picked, and dropped while searching.
   const filtered = useMemo(() => {
     if (!query.trim()) return items;
     const needle = query.trim().toLowerCase();
-    return items.filter((o) => String(o.label).toLowerCase().includes(needle));
+    return items.filter((o) => !o.heading && String(o.label).toLowerCase().includes(needle));
   }, [items, query]);
 
   // A typed value that matches nothing gets offered as itself, so the
   // company picker can accept a company nobody has entered before without
   // a separate "add new" affordance.
   const custom =
-    allowCustom && query.trim() && !items.some((o) => o.label.toLowerCase() === query.trim().toLowerCase())
+    allowCustom && query.trim() && !items.some((o) => !o.heading && o.label.toLowerCase() === query.trim().toLowerCase())
       ? { value: query.trim(), label: query.trim(), isCustom: true }
       : null;
 
   const visible = custom ? [custom, ...filtered] : filtered;
+  // The next pickable row from `i` going `dir`, past any heading; `i` when there is none.
+  const step = (i, dir) => {
+    for (let j = i + dir; j >= 0 && j < visible.length; j += dir) if (!visible[j]?.heading) return j;
+    return i;
+  };
 
   // Close on a click anywhere else. Pointerdown rather than click so the
   // panel is gone before the other element's own handler runs.
@@ -240,9 +272,19 @@ export default function Select({
 
   useEffect(() => {
     if (open && (searchable || allowCustom)) searchRef.current?.focus();
+    // OPENS ON WHAT YOU HAVE (2026-10-14): the arrows start from it, and an
+    // option with its own choices shows them at once, the one held lit.
+    if (open && !multiple && value !== undefined && value !== null) {
+      const list = options.map(normalize).filter(Boolean);
+      const at = list.findIndex((o) => !o.heading && o.value === value);
+      if (at >= 0) setActive(at);
+      // Nothing held: the first row you can pick, never a heading.
+      else if (list[0]?.heading) setActive(list.findIndex((o) => !o.heading));
+    }
     if (!open) {
       setQuery('');
       setActive(0);
+      setSubActive(null);
     }
   }, [open, searchable, allowCustom]);
 
@@ -260,6 +302,11 @@ export default function Select({
       onChange(next);
       setQuery('');
       // Panel stays open: picking several is the whole point of multiple.
+    } else if (option.sub?.length) {
+      // AN OPTION WITH ITS OWN CHOICES never clears by a second click: it is
+      // the step, and the pane beside it says which kind.
+      onChange(option.value, { sub: null });
+      setOpenAndReport(false);
     } else {
       // Clicking the value that is already picked CLEARS it. Without this
       // there was no way back to "nothing selected" once anything had been
@@ -270,8 +317,22 @@ export default function Select({
     }
   }
 
+  function pickSub(option, sub) {
+    onChange(option.value, { sub: sub.value });
+    setOpenAndReport(false);
+  }
+
   function onKeyDown(e) {
     if (disabled) return;
+    // INSIDE THE SIDE PANE: ↑ ↓ move, Enter picks, ← or Escape back to the list.
+    const subOf = visible[active]?.sub;
+    if (open && subActive !== null && subOf?.length) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setSubActive((i) => Math.min(i + 1, subOf.length - 1)); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setSubActive((i) => Math.max(i - 1, 0)); return; }
+      if (e.key === 'Enter') { e.preventDefault(); pickSub(visible[active], subOf[subActive]); return; }
+      if (e.key === 'ArrowLeft' || e.key === 'Escape') { e.preventDefault(); setSubActive(null); return; }
+    }
+    if (open && e.key === 'ArrowRight' && subOf?.length) { e.preventDefault(); setSubActive(0); return; }
     if (!open && (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown')) {
       e.preventDefault();
       setOpenAndReport(true);
@@ -284,13 +345,15 @@ export default function Select({
       setOpenAndReport(false);
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setActive((i) => Math.min(i + 1, visible.length - 1));
+      setSubActive(null);
+      setActive((i) => step(i, 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setActive((i) => Math.max(i - 1, 0));
+      setSubActive(null);
+      setActive((i) => step(i, -1));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      if (visible[active]) pick(visible[active]);
+      if (visible[active] && !visible[active].heading) pick(visible[active]);
     } else if (e.key === 'Tab') {
       setOpenAndReport(false);
     }
@@ -304,7 +367,11 @@ export default function Select({
       : selected.length === 1
         ? items.find((o) => o.value === selected[0])?.label ?? selected[0]
         : `${selected.length} selected`
-    : (items.find((o) => o.value === value)?.label ?? value) || placeholder;
+    : (() => {
+      const o = items.find((x) => x.value === value);
+      const sub = o?.sub?.find((x) => x.value === subValue);
+      return (o ? (sub ? `${o.label} · ${sub.label}` : o.label) : value) || placeholder;
+    })();
 
   const isPlaceholder = multiple ? selected.length === 0 : !value;
 
@@ -317,6 +384,7 @@ export default function Select({
     <div ref={rootRef} className={`relative ${open ? 'z-40' : ''} ${label ? '' : className}`}>
       <button
         type="button"
+        ref={triggerRef}
         id={fieldId}
         disabled={disabled}
         aria-haspopup="listbox"
@@ -467,6 +535,15 @@ export default function Select({
                 <li className="px-3 py-2 text-sm text-text-muted">{query ? 'No matches' : emptyLabel}</li>
               )}
               {visible.map((option, i) => {
+                // A GROUP'S HEADING: a quiet label, never a choice.
+                if (option.heading) {
+                  return (
+                    <li key={`h-${option.heading}-${i}`} role="presentation"
+                      className="px-3 pb-1 pt-2.5 text-[10px] font-semibold uppercase tracking-wide text-text-faint first:pt-1">
+                      {option.heading}
+                    </li>
+                  );
+                }
                 const isSelected = multiple ? selected.includes(option.value) : option.value === value;
                 return (
                   <li key={`${option.value}-${i}`}>
@@ -475,7 +552,7 @@ export default function Select({
                       role="option"
                       aria-selected={isSelected}
                       data-active={i === active}
-                      onMouseEnter={() => setActive(i)}
+                      onMouseEnter={() => { setActive(i); setSubActive(null); }}
                       onClick={() => pick(option)}
                       // whitespace-normal and items-start override the base
                       // button rule in index.css, which forces nowrap and
@@ -497,11 +574,51 @@ export default function Select({
                         {option.isCustom ? `Add "${option.label}"` : option.label}
                       </span>
                       {isSelected && <CheckCircleIcon width={14} height={14} className="shrink-0 text-accent" />}
+                      {/* It has its own choices: a pane opens beside the list. */}
+                      {option.sub?.length > 0 && <ChevronIcon width={12} height={12} className="mt-1 shrink-0 text-text-faint" aria-hidden="true" />}
                     </button>
                   </li>
                 );
               })}
             </ul>
+            {/* ===============================
+                * THE HIGHLIGHTED OPTION'S OWN CHOICES, beside the list
+                * ===============================
+                His call 2026-10-14: an Active proposal says which kind, in the
+                cell itself, not only in the panel. The export rail's look,
+                on the other side: same sunken pane, same accent when it is
+                what you have. The room is reserved, so the list never moves. */}
+            {hasSub && (
+              <div style={{ width: SUB_W }} className="shrink-0 border-l border-border bg-surface-sunken p-1">
+                {visible[active]?.sub?.length ? (
+                  <>
+                    <p className="px-2 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-text-faint">{visible[active].label}</p>
+                    {visible[active].sub.map((sub, j) => {
+                      const on = visible[active].value === value && sub.value === subValue;
+                      return (
+                        <button
+                          key={sub.value}
+                          type="button"
+                          title={sub.hint}
+                          data-active={subActive === j}
+                          onMouseEnter={() => setSubActive(j)}
+                          onClick={() => pickSub(visible[active], sub)}
+                          // whitespace-normal: the base button rule forces nowrap, which cut the hints off.
+                          className={`block w-full min-h-0 whitespace-normal rounded border-0 px-2 py-1.5 text-left text-xs transition ${on
+                            ? 'bg-accent-tint font-semibold text-accent-strong'
+                            : subActive === j ? 'bg-surface text-text' : 'bg-transparent text-text-muted hover:bg-surface hover:text-text'}`}
+                        >
+                          {sub.label}
+                          {sub.hint && <span className="mt-0.5 block text-[10px] font-normal leading-snug text-text-faint">{sub.hint}</span>}
+                        </button>
+                      );
+                    })}
+                  </>
+                ) : (
+                  <p className="px-2 py-2 text-[11px] leading-snug text-text-faint">Kinds appear here for a choice marked ›</p>
+                )}
+              </div>
+            )}
           </div>
 
           {multiple && selected.length > 0 && (

@@ -2,12 +2,9 @@ import { useState } from 'react';
 import { formatDate as date } from '../helpers/formatDate';
 import { formatMoney as money, formatTotals as totals } from '../helpers/formatMoney';
 
-// The API validates the method against this closed set.
-const PAYMENT_METHODS = ['cash', 'bank', 'crypto'];
-
 // Raw buttons that edit in place still need a visible keyboard focus.
 const FOCUS = 'focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-accent';
-import { Link, useParams } from 'react-router-dom';
+import { Link, Navigate, useParams } from 'react-router-dom';
 import { usePerson, useUpdatePerson, usePeopleFilters } from '../hooks/usePeople';
 import { useMasterSheetCellEdit, useUpdateMasterSheetRow } from '../hooks/useMasterSheet';
 import useRowSelection from '../hooks/useRowSelection';
@@ -42,8 +39,9 @@ import { Skeleton } from '../components/display/Skeleton';
 import RecordCard, { CardList } from '../components/display/RecordCard';
 import { EmptyState, ErrorState } from '../components/display/StateBlocks';
 import SelectAll from '../components/forms/SelectAll';
-import BulkBar, { BulkAction, BulkMenu } from '../components/layout/BulkBar';
-import BulkFieldModal from '../components/modals/BulkFieldModal';
+import BulkBar, { BulkAction } from '../components/layout/BulkBar';
+// The master sheet's deal form, so editing a deal is the same on every page.
+import { RowModal } from './MasterSheetPage';
 import { RestoreIcon, EditIcon, StopHandIcon, BuildingIcon } from '../components/icons';
 import { INTERNAL, NEVER_BANK, IN_PERSON } from '../configs/sheetValues';
 
@@ -215,7 +213,8 @@ export default function PersonDetailPage() {
   const sel = useRowSelection((person?.deals ?? []).map((d) => d.id));
   const { run } = useBulkActions();
   const [confirmStop, setConfirmStop] = useState(false);
-  const [editField, setEditField] = useState(null);
+  // ONE DEAL, ITS OWN FORM: the master sheet's (his call 2026-10-14).
+  const [editingDeal, setEditingDeal] = useState(null);
   // Should be paid / Paid for the whole person, onto every live deal.
   const setPay = usePersonPay();
 
@@ -236,27 +235,6 @@ export default function PersonDetailPage() {
     });
     sel.clear();
     setConfirmStop(false);
-  }
-
-  function editSelected(value) {
-    const ids = sel.ids;
-    const field = editField;
-    const column = field.key.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`);
-    // A month picker answers "2026-10"; the cached column is a date.
-    const cached = field.type === 'month' && /^\d{4}-\d{2}$/.test(value) ? `${value}-01` : value;
-    run({
-      call: () => apiService.masterSheet.bulkUpdate(ids, { [field.key]: value }),
-      optimistic: (qc) => patchPersonDeals(qc, personId, ids, (d) => ({ ...d, [column]: cached })),
-      invalidates: DEAL_TOUCHES,
-      toast: bulkMessage(`${field.label.toLowerCase()} changed`, ids.length, 'deal'),
-      report: (data) => bulkMessage(`${field.label.toLowerCase()} changed`, data.updated.length, 'deal', [
-        [data.skipped?.same ?? 0, 'already set'], [data.skipped?.gone ?? 0, 'gone'],
-      ]),
-      undoBatch: (data) => data.batchId,
-      failure: `Couldn't change ${field.label.toLowerCase()} on ${countOf(ids.length, 'deal')}`,
-    });
-    sel.clear();
-    setEditField(null);
   }
 
   if (isLoading) {
@@ -301,6 +279,13 @@ export default function PersonDetailPage() {
   }
 
   const deals = person.deals || [];
+  // NOTHING LIVE LEFT: they are on the Archive's Dead people, read only
+  // (his call 2026-10-15, the same as a dissolved company).
+  if (deals.length > 0 && deals.every((d) => d.stopped_on)) {
+    return <Navigate replace to={`/archive/people/${encodeURIComponent(person.person_id ?? personId)}`} />;
+  }
+  // ENDED DEALS STAY LISTED, as history, and are counted apart (2026-10-15).
+  const endedCount = deals.filter((d) => d.stopped_on).length;
   // How many of their rows carry a rate of their own. The two levels STACK,
   // so the person field says so rather than looking like the only one.
   const dealRates = {
@@ -444,7 +429,7 @@ export default function PersonDetailPage() {
             </DetailCard>
         )}
         records={(
-            <DetailCard title={`Companies (${deals.length})`} flush>
+            <DetailCard title={`Companies (${endedCount ? `${deals.length - endedCount} live, ${endedCount} ended` : deals.length})`} flush>
               {/* On a phone these are cards. The table is eleven columns
                   wide, and the reason you opened a person on a phone is to
                   see what they earn where, which is three of them.
@@ -562,28 +547,17 @@ export default function PersonDetailPage() {
           onConfirm={stopSelected}
         />
       )}
-      {editField && (
-        <BulkFieldModal
-          title={`Set ${editField.label.toLowerCase()} on ${sel.count} ${sel.count === 1 ? 'deal' : 'deals'}`}
-          label={editField.label}
-          type={editField.type}
-          options={editField.options}
-          allowCustom={editField.allowCustom}
-          onApply={editSelected}
-          onClose={() => setEditField(null)}
-        />
-      )}
+
+      {editingDeal && <RowModal row={editingDeal} onClose={() => { setEditingDeal(null); sel.clear(); }} />}
 
       <BulkBar count={sel.count} onClear={sel.clear}>
-        <BulkMenu
-          icon={EditIcon}
-          label="Edit"
-          options={[
-            { label: 'Payment method', onSelect: () => setEditField({ key: 'paymentMethod', label: 'Payment method', options: PAYMENT_METHODS }) },
-            { label: 'Group', onSelect: () => setEditField({ key: 'groupName', label: 'Group', options: options?.groups ?? [], allowCustom: true }) },
-            { label: 'Preset month', onSelect: () => setEditField({ key: 'presetOn', label: 'Preset month', type: 'month' }) },
-          ]}
-        />
+        {/* ONE DEAL, THE MASTER SHEET'S OWN FORM (his call 2026-10-14):
+            every field. Several ticked: no Edit. */}
+        {sel.count === 1 && (
+          <BulkAction icon={EditIcon} onClick={() => setEditingDeal((person?.deals ?? []).find((d) => d.id === sel.ids[0]) ?? null)}>
+            Edit
+          </BulkAction>
+        )}
         <BulkAction icon={StopHandIcon} variant="danger" onClick={() => setConfirmStop(true)}>
           Stop
         </BulkAction>
@@ -626,7 +600,7 @@ function PersonDeals({ deals, options, cellEdit, sel }) {
               leadLabel="payable"
               badges={
                 <>
-                  <PaymentPeriod period={d.payment_period} />
+                  <PaymentPeriod period={d.payment_period} stoppedOn={d.stopped_on} />
                   {dealReceived(d.payment_outcome) && <PaymentReceived value={dealReceived(d.payment_outcome)} />}
                 </>
               }
@@ -726,6 +700,7 @@ function PersonDeals({ deals, options, cellEdit, sel }) {
                   <td className="td">
                     <PaymentPeriod
                       period={d.payment_period}
+                      stoppedOn={d.stopped_on}
                       endOn={d.end_on}
                       presetOn={d.preset_on}
                       paymentStartOn={d.payment_start_on}

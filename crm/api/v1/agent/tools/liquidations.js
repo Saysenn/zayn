@@ -3,6 +3,7 @@ const undoRepo = require('../../repos/agentUndo.repo');
 const { resolveCompanies } = require('./companies');
 const companiesRepo = require('../../repos/companies.repo');
 const { confirmFirst } = require('./confirmFirst');
+const { applyCompanyStatus, wouldStop, wouldResume, defaultReviewIds } = require('../../shared/companyStatus.helper');
 const { broadcast } = require('../../sockets/index');
 const { currentDay } = require('../../shared/presetMonth.helper');
 const { dayFrom, sayDay } = require('../../shared/dayWords.helper');
@@ -33,39 +34,82 @@ const logger = require('../../../configs/logger');
 const BY = 'Diane';
 const MAX_ROWS = 40;
 
-const STAGE_LABEL = {
-  own_liq: 'Own liq', hmrc_liq: 'HMRC liq', strike_off: 'Strike off',
-  strike_off_rejected: 'Strike off rejected', dissolved: 'Dissolved', active: 'Active',
-};
+// One set of stage words for her, the export and the page (2026-10-14).
+const { STAGE_LABEL, STAGE_KINDS, stageText } = require('../../shared/liquidationStages');
 const stageName = (s) => (s ? STAGE_LABEL[s] ?? s : 'Not set');
+// THE COMPANY STATUSES this tool moves, and how a preview says them.
+const STATUS_LABEL = { active: 'Active', liquidation: 'Winding down', closed: 'Dissolved', review: 'Review', going_concern: 'Going concern' };
+const STATUS_WORD = (w) => {
+  const t = fold(w);
+  if (!t) return null;
+  if (/dissolv|struck|clos/.test(t)) return 'closed';
+  if (/wind|liquidat/.test(t)) return 'liquidation';
+  return null;
+};
 // Their words for a stage, folded to the stored value.
+// ORDER MATTERS (his corrected flowchart, 2026-10-14): "struck off" IS
+// dissolved, while "strike off" on its own is the proposal; "strike off
+// suspended" is not either; "a voluntary proposal" is no liquidation.
 const STAGE_WORDS = [
   [/^(?:not set|none|unset|clear|blank)$/, null],
-  [/hmrc/, 'hmrc_liq'],
-  [/reject/, 'strike_off_rejected'],
-  [/strike/, 'strike_off'],
-  [/own|ours|our|voluntary|cvl|mvl/, 'own_liq'],
-  [/dissolv/, 'dissolved'],
+  [/struck off|dissolv/, 'dissolved'],
+  [/hmrc|compulsory liq|winding.?up|petition/, 'hmrc_liq'],
+  [/suspend|objection|objected/, 'strike_off_suspended'],
+  [/reject|cancel/, 'strike_off_rejected'],
+  [/proposal|gazette|proposed|strike/, 'active_proposal'],
+  [/own|ours|our|voluntary liq|cvl|mvl|creditors.? voluntary|members.? voluntary/, 'own_liq'],
+  [/^(?:in )?liquidation$|^liq$|liquidating/, 'liquidation'],
   [/^active$/, 'active'],
 ];
+/**
+ * Which kind of `stage` their words say, or undefined. Only Active proposal,
+ * Own liq, HMRC liq and Dissolved have kinds (migration 090).
+ */
+function kindFrom(stage, said) {
+  const t = String(said ?? '').toLowerCase();
+  if (stage === 'active_proposal') {
+    if (/compulsory|forced|companies house/.test(t)) return 'compulsory';
+    if (/voluntary|ds01|applied|we asked/.test(t)) return 'voluntary';
+  }
+  if (stage === 'own_liq') {
+    // CVL first: "insolvent" has "solvent" in it.
+    if (/\bcvl\b|creditors|insolvent|can.?t pay|cannot pay/.test(t)) return 'cvl';
+    if (/\bmvl\b|members|solvent|can pay/.test(t)) return 'mvl';
+  }
+  if (stage === 'hmrc_liq') {
+    if (/order|wound up|court (?:made|granted|ordered)/.test(t)) return 'winding_up_order';
+    if (/petition/.test(t)) return 'petition';
+  }
+  if (stage === 'dissolved') {
+    if (/struck|strike/.test(t)) return 'struck_off';
+    if (/liquidat|after liq|liquidator/.test(t)) return 'after_liquidation';
+  }
+  return undefined;
+}
+// Every kind's words, for a preview line: "kind none → CVL".
+const KIND_LABEL = Object.assign({}, ...Object.values(STAGE_KINDS));
 function stageFrom(said) {
   const t = String(said ?? '').trim().toLowerCase().replace(/_/g, ' ');
-  if (STAGE_LABEL[t.replace(/ /g, '_')]) return t.replace(/ /g, '_');
+  // A stage's own name, but never the old "strike_off" (a history word only, migration 090).
+  const exact = t.replace(/ /g, '_');
+  if (STAGE_LABEL[exact] && exact !== 'strike_off') return exact;
   for (const [re, value] of STAGE_WORDS) if (re.test(t)) return value;
   return undefined;
 }
 
 const FIELD_LABEL = {
-  stage: 'stage', deadline: 'deadline', nextAction: 'next action', instructions: 'instructions',
+  stage: 'stage', stageKind: 'kind', deadline: 'deadline', nextAction: 'next action', instructions: 'instructions',
   owner: 'owner', blamed: 'blamed', liquidator: 'liquidator', note: 'note',
 };
 const COLUMN = {
-  stage: 'stage', deadline: 'deadline', nextAction: 'next_action', instructions: 'instructions',
+  stage: 'stage', stageKind: 'stage_kind', deadline: 'deadline', nextAction: 'next_action', instructions: 'instructions',
   owner: 'owner', blamed: 'blamed', liquidator: 'liquidator', note: 'note',
 };
 const show = (field, v) => {
-  if (v === null || v === undefined || v === '') return field === 'stage' ? 'Not set' : '—';
+  // "none", never "—": her dash rule made it "proposal type, → compulsory" (2026-10-14).
+  if (v === null || v === undefined || v === '') return field === 'stage' ? 'Not set' : 'none';
   if (field === 'stage') return stageName(v);
+  if (field === 'stageKind') return KIND_LABEL[v] ?? v;
   if (field === 'deadline') return sayDay(String(v).slice(0, 10));
   if (field === 'blamed') return v ? 'yes' : 'no';
   return `"${String(v).length > 60 ? `${String(v).slice(0, 57)}…` : v}"`;
@@ -80,6 +124,14 @@ const sameCompany = (r, name) => {
   return r.company_key === key || fold(r.company_name) === key || (bare(name) !== '' && bare(r.company_name) === bare(name));
 };
 
+/** The parts of a message about one company, else the whole message. */
+function clauseFor(name, text) {
+  const key = bare(name).split(' ')[0];
+  if (!key) return text;
+  const parts = String(text ?? '').split(/[,.;!?]|\b(?:and|oh|also|then)\b/i).filter((p) => fold(p).includes(key));
+  return parts.length ? parts.join(' ') : text;
+}
+
 /** How near a deadline is, in words a person says. */
 function nearness(deadline, today) {
   if (!deadline) return '';
@@ -91,7 +143,7 @@ function nearness(deadline, today) {
 
 function line(r, today) {
   const bits = [
-    `${r.company_name}: ${stageName(r.stage)}`,
+    `${r.company_name}: ${stageText(r.stage, r.stage_kind)}`,
     r.deadline ? `deadline ${sayDay(String(r.deadline).slice(0, 10))}${nearness(r.deadline, today)}` : 'no deadline',
     r.owner ? `owner ${r.owner}` : null,
     r.director ? `director ${r.director}` : null,
@@ -144,6 +196,7 @@ async function rowsFor(names, said) {
     if (hit) { if (!found.includes(hit)) found.push(hit); } else unknown.push(String(name ?? '').trim());
   }
   const notOnPage = [];
+  const offPage = [];
   const missing = [];
   const corrections = [];
   if (unknown.length) {
@@ -151,20 +204,21 @@ async function rowsFor(names, said) {
     for (const name of [...unknown]) {
       // eslint-disable-next-line no-await-in-loop
       const company = await companiesRepo.findByKey(name).catch(() => null);
-      if (company) { notOnPage.push(company.name); unknown.splice(unknown.indexOf(name), 1); }
+      if (company) { notOnPage.push(company.name); offPage.push({ name: company.name, key: fold(company.name), said: name }); unknown.splice(unknown.indexOf(name), 1); }
     }
   }
   if (unknown.length) {
     const sheet = await resolveCompanies(unknown, said ?? '');
     notOnPage.push(...sheet.found.map((f) => f.name));
+    offPage.push(...sheet.found.map((f) => ({ name: f.name, key: f.key })));
     for (const name of unknown.filter((n) => !sheet.found.some((f) => f.key === fold(n)))) {
       const close = rows.filter((r) => near(fold(r.company_name), fold(name))).map((r) => r.company_name);
-      if (close.length) corrections.push(`No company called "${name}" on the Liquidations page. Did you mean ${close.join(' or ')}?`);
+      if (close.length) corrections.push(`No company called "${name}" on the Winding down page. Did you mean ${close.join(' or ')}?`);
       else missing.push(name);
     }
     if (!corrections.length && sheet.corrections.length && missing.length) corrections.push(...sheet.corrections);
   }
-  return { rows: found, missing, corrections, notOnPage, all: rows };
+  return { rows: found, missing, corrections, notOnPage, offPage, all: rows };
 }
 
 function problems({ missing, corrections, notOnPage }) {
@@ -172,8 +226,9 @@ function problems({ missing, corrections, notOnPage }) {
   if (corrections.length) out.push(...corrections);
   else if (missing.length) out.push(`No company called ${missing.map((m) => `"${m}"`).join(', ')}.`);
   if (notOnPage.length) {
-    out.push(`${notOnPage.join(', ')} ${notOnPage.length === 1 ? 'is' : 'are'} not in liquidation, so not on the Liquidations page. `
-      + 'A company goes on it when its status is set to liquidation (update_company); offer that, do not change anything else.');
+    out.push(`${notOnPage.join(', ')} ${notOnPage.length === 1 ? 'is' : 'are'} not winding down, so not on the Winding down page. `
+      + 'Only a winding down step or status "winding down" puts a company on it; ask whether to put it into winding down, '
+      + 'do not change anything else.');
   }
   return out.length ? `NOTHING HAS BEEN CHANGED. ${out.join(' ')}` : null;
 }
@@ -184,7 +239,7 @@ function problems({ missing, corrections, notOnPage }) {
 const listLiquidations = {
   name: 'list_liquidations',
   description:
-    'The Liquidations page: every company whose status is liquidation, with its stage, deadline, owner, '
+    'The Winding down page: every company whose status is liquidation, with its stage, deadline, owner, '
     + 'director, mid, next action. Filter by stage, group, owner or deadline ("due this week", "passed"). '
     + 'Name ONE company to get it in full: instructions, liquidator, note, blamed, settlement, its '
     + 'contact log, stage history and documents.',
@@ -192,7 +247,7 @@ const listLiquidations = {
     type: 'object',
     properties: {
       company: { type: 'string', description: 'One company, for its full row.' },
-      stage: { type: 'string', description: 'own liq, HMRC liq, strike off, strike off rejected, dissolved, active, or not set.' },
+      stage: { type: 'string', description: 'active, active proposal (a strike off proposed), strike off suspended, strike off rejected (or cancelled), liquidation, own liq, HMRC liq, dissolved (struck off is dissolved), or not set.' },
       group: { type: 'string' },
       owner: { type: 'string', description: 'An admin username, or "none".' },
       due: { type: 'string', enum: ['week', 'passed'], description: 'week: passed or due in the next 7 days. passed: already passed.' },
@@ -256,7 +311,7 @@ const listLiquidations = {
     };
     const reply = `${rows.length} ${rows.length === 1 ? 'company' : 'companies'} in liquidation${scope ? ` (${scope})` : ''}:\n`
       + rows.slice(0, MAX_ROWS).map((r) => `• ${line(r, today)}${docsBit(r)}`).join('\n')
-      + (rows.length > MAX_ROWS ? `\n…and ${rows.length - MAX_ROWS} more on the Liquidations page.` : '');
+      + (rows.length > MAX_ROWS ? `\n…and ${rows.length - MAX_ROWS} more on the Winding down page.` : '');
     return { summary: reply, reply, computedReply: true };
   },
 };
@@ -273,6 +328,30 @@ async function cleanItem(item, today, owners) {
     const s = stageFrom(item.stage);
     if (s === undefined) why.push(`"${item.stage}" is not a stage`);
     else set.stage = s;
+    // "Own liq, a CVL" said in the one stage: its kind too.
+    const k = s ? kindFrom(s, item.stage) : undefined;
+    if (k && item.stageKind === undefined && item.proposalKind === undefined) set.stageKind = k;
+  }
+  // `proposalKind` is the name it had for a day; still read.
+  const kindSaid = item.stageKind !== undefined ? item.stageKind : item.proposalKind;
+  if (kindSaid !== undefined) {
+    if (kindSaid === null || /^(?:none|clear|not said)$/i.test(String(kindSaid))) set.stageKind = null;
+    else {
+      // Read against the stage it will sit on: the one set here, else checked at apply.
+      const onStage = set.stage ?? item.onStage;
+      let k = onStage ? kindFrom(onStage, kindSaid) : undefined;
+      // A KIND NAMES ITS STEP (suite 2026-10-14): "liquidation, a CVL" is
+      // Own liq · CVL. Only when no stage or the bare Liquidation was said:
+      // "active proposal, a CVL" is a clash, and asked. Liquidation's own
+      // kinds first, so "creditors voluntary" is a CVL, not a voluntary strike off.
+      if (!k && (!set.stage || set.stage === 'liquidation')) {
+        const roads = set.stage === 'liquidation' ? ['own_liq', 'hmrc_liq'] : ['own_liq', 'hmrc_liq', 'dissolved', 'active_proposal'];
+        const st = roads.find((r) => kindFrom(r, kindSaid));
+        if (st) { k = kindFrom(st, kindSaid); if (st !== onStage) set.stage = st; }
+      }
+      if (!k) why.push(`"${kindSaid}" is not a kind of ${onStage ? stageName(onStage) : 'any stage'}`);
+      else set.stageKind = k;
+    }
   }
   if (item.deadline !== undefined) {
     if (item.deadline === null || /^(?:none|clear|no deadline|remove)$/i.test(String(item.deadline).trim())) set.deadline = null;
@@ -307,7 +386,14 @@ const ITEM = {
   type: 'object',
   properties: {
     company: { type: 'string', description: 'As they named it.' },
-    stage: { type: 'string', description: 'own liq, HMRC liq, strike off, strike off rejected, dissolved, active, or not set.' },
+    status: {
+      type: 'string',
+      description: 'Only to move the company itself: "winding down" puts it on this page (its deals keep paying); '
+        + '"closed" when it HAS BEEN struck off or dissolved (stage Dissolved; closes it and stops its live deals). Leave out otherwise. '
+        + 'A step said for a company not winding down yet ("strike off X", "HMRC petitioned X") puts it on by itself.',
+    },
+    stage: { type: 'string', description: 'active, active proposal (a strike off proposed), strike off suspended, strike off rejected (or cancelled), liquidation, own liq, HMRC liq, dissolved (struck off is dissolved), or not set.' },
+    stageKind: { type: 'string', description: 'The stage\'s kind, as they said it. Active proposal: compulsory or voluntary. Own liq: MVL or CVL. HMRC liq: petition filed or winding-up order. Dissolved: struck off or after liquidation.' },
     deadline: { type: 'string', description: 'THEIR WORDS ("Friday", "30 Nov", "end of month"), or "none". Never work the date out yourself.' },
     nextAction: { type: 'string' },
     instructions: { type: 'string', description: 'The current instructions.' },
@@ -325,13 +411,14 @@ const updateLiquidation = {
   name: 'update_liquidation',
   writes: true,
   description:
-    'Change companies on the Liquidations page: stage, deadline, next action, instructions, owner, blamed, '
+    'Change companies on the Winding down page: stage, deadline, next action, instructions, owner, blamed, '
     + 'liquidator, note, and add contact log lines. ONE CALL FOR THE WHOLE REQUEST, however messy: one item per '
     + 'company, every change for it in that item. For the same change to many, use `where` and `set`. '
     + 'Pass their words; code works out dates and names. Call with confirmed false first and show the lines; '
     + 'true only after yes. `undo` true puts back the last change you made here AT ONCE (no confirm). '
-    + '"Every company in liquidation" is `where` {} with `set`. It never puts a company on '
-    + 'or off the page: that is its status (update_company).',
+    + '"Every company in liquidation" is `where` {} with `set`. PUTTING COMPANIES INTO WINDING DOWN is here too, '
+    + 'one or many: an item each with status "winding down" and any stage they said ("strike off X" is Active proposal). '
+    + '"X has been struck off" / "X is dissolved" is stage dissolved: the company is CLOSED in the same yes (dissolved and closed are one).',
   parameters: {
     type: 'object',
     properties: {
@@ -354,15 +441,44 @@ const updateLiquidation = {
     // Who, and what for each.
     let targets = [];
     // "EVERY COMPANY" said as one item with no name, or "all": the same as where {}.
-    const ALL = /^\s*(?:\*|all|every(?:one|thing)?|all (?:of )?(?:them|companies|the companies)|every company(?: in liquidation| on the page)?|all (?:the )?liquidations)?\s*$/i;
-    if (Array.isArray(args.items) && args.items.length === 1 && ALL.test(String(args.items[0].company ?? '')) && !args.where) {
-      const { company, ...rest } = args.items[0];
-      args = { ...args, items: undefined, where: {}, set: rest };
+    // "companies in liquidation", "all the companies on the page" too: it was
+    // passed as a company name and refused as unknown (suite 2026-10-14).
+    const ALL = /^\s*(?:\*|all|every(?:one|thing)?|(?:all (?:of )?(?:the )?|every |each )?(?:them|compan(?:y|ies))(?: (?:in|on|under) (?:liquidation|the (?:liquidations )?page|the list))?|all (?:the )?liquidations)?\s*$/i;
+    // EVERY ITEM NAMELESS OR "ALL", with or without a `where` beside it: she
+    // sent company "" AND where {} and was told "" is no company (suite
+    // 2026-10-14). The items' changes become the set; any `where` is kept.
+    if (Array.isArray(args.items) && args.items.length && args.items.every((i) => ALL.test(String(i?.company ?? '')))) {
+      const set = Object.assign({}, ...args.items.map(({ company, ...rest }) => rest), args.set ?? {});
+      args = { ...args, items: undefined, where: args.where ?? {}, set };
+    }
+    // A CHANGE WITH NO "WHO", when they said every or all: every company on the page.
+    if (!args.where && !(args.items ?? []).length && args.set && /\b(?:every|all|each)\b/i.test(String(args.said ?? ''))) {
+      args = { ...args, where: {} };
     }
     if (Array.isArray(args.items) && args.items.length) {
       const { rows, ...rest } = await rowsFor(args.items.map((i) => i.company), args.said);
-      const stop = problems(rest);
+      // NOT ON THE PAGE YET (his call 2026-10-14): a company told to wind down,
+      // or given a step, comes on with it. Anything else for it is still refused.
+      const joins = [];
+      for (const off of rest.offPage) {
+        const its = args.items.filter((i) => sameCompany({ company_key: off.key, company_name: off.name }, i.company)
+          || (off.said && fold(off.said) === fold(i.company)));
+        const item = Object.assign({}, ...its);
+        const s = item.stage !== undefined ? stageFrom(item.stage) : undefined;
+        const kindStage = item.stageKind ? ['own_liq', 'hmrc_liq', 'dissolved', 'active_proposal'].find((st) => kindFrom(st, item.stageKind)) : undefined;
+        if (!its.length || !(STATUS_WORD(item.status) || (s && s !== 'active') || kindStage)) continue;
+        // eslint-disable-next-line no-await-in-loop
+        const company = await companiesRepo.findByKey(off.key).catch(() => null);
+        if (!company) continue;
+        joins.push({ company, item: { ...item, company: company.name } });
+      }
+      const joined = joins.map((j) => j.company.name);
+      const stop = problems({ ...rest, notOnPage: rest.notOnPage.filter((n) => !joined.includes(n)) });
       if (stop) return { summary: stop };
+      for (const { company, item } of joins) {
+        const row = { id: null, company_name: company.name, company_key: fold(company.name), stage: null, stage_kind: null, pay_status: company.status };
+        targets.push({ row, item, company });
+      }
       const byName = new Map();
       for (const i of args.items) {
         const row = rows.find((r) => sameCompany(r, i.company));
@@ -371,7 +487,7 @@ const updateLiquidation = {
         const was = byName.get(row.id);
         byName.set(row.id, { row, item: { ...(was?.item ?? {}), ...i } });
       }
-      targets = [...byName.values()];
+      targets = [...targets, ...byName.values()];
     } else if (args.where && args.set) {
       const all = await repo.list();
       let rows = all;
@@ -389,7 +505,7 @@ const updateLiquidation = {
         const groups = [...new Set(all.flatMap((r) => r.groups ?? []))].join(', ');
         const stages = [...new Set(all.map((r) => stageName(r.stage)))].join(', ');
         return {
-          summary: `No company on the Liquidations page matches ${JSON.stringify(args.where)}. Nothing has been changed. `
+          summary: `No company on the Winding down page matches ${JSON.stringify(args.where)}. Nothing has been changed. `
             + `On the page now: ${all.length} companies; stages ${stages || 'none'}; groups ${groups || 'none'}. `
             + 'For EVERY company on the page call again with where {} (empty). Otherwise fix the filter.',
         };
@@ -405,12 +521,48 @@ const updateLiquidation = {
     const refused = [];
     for (const { row, item } of targets) {
       // eslint-disable-next-line no-await-in-loop
-      const { set, log, why } = await cleanItem(item, today, owners);
+      // `onStage`: a kind said alone ("pinecrest is a CVL") is read against the stage it has.
+      const { set, log, why } = await cleanItem({ ...item, onStage: row.stage }, today, owners);
       if (why.length) { refused.push(`${row.company_name}: ${why.join('; ')}`); continue; }
+      // THE COMPANY'S OWN STATUS, when this act moves it (his call 2026-10-14):
+      // stage Dissolved is the end of either road, so the company is CLOSED
+      // and its deals stop (one ending, migration 091); a step for a company
+      // not winding down yet puts it on the page.
+      const statusNow = row.pay_status ?? 'liquidation';
+      const said = STATUS_WORD(item.status);
+      let statusTo = null;
+      if (said === 'closed' || set.stage === 'dissolved') statusTo = 'closed';
+      else if (said === 'liquidation' || (statusNow !== 'liquidation' && set.stage)) statusTo = 'liquidation';
+      if (statusTo === 'closed' && set.stage === undefined && row.stage !== 'dissolved') set.stage = 'dissolved';
+      // HOW IT ENDED, when they did not name the kind: their words, else its road.
+      if (set.stage === 'dissolved' && set.stageKind == null) {
+        // THE YES ONLY SAYS "yes": the words that asked are in saidRecent (suite 2026-10-14).
+        // ITS OWN PART OF THE MESSAGE (2026-10-15): "ironleaf was struck off and
+        // pinecrest dissolved after the liquidation" is two different endings.
+        const own = `${clauseFor(row.company_name, `${args.said ?? ''} ${args.saidRecent ?? ''}`)} ${item.stage ?? ''} ${item.status ?? ''}`;
+        set.stageKind = /strike|struck/i.test(own) ? 'struck_off'
+          : /liquidat/i.test(own) ? 'after_liquidation'
+          : (['own_liq', 'hmrc_liq', 'liquidation'].includes(row.stage) ? 'after_liquidation'
+            : (['active_proposal', 'strike_off_suspended'].includes(row.stage) ? 'struck_off' : null));
+      }
+      if (statusTo === statusNow) statusTo = null;
+      // DISSOLVED ONLY FROM WINDING DOWN (his call 2026-10-15): a company not
+      // winding down is offered that first, never dissolved in one step.
+      if (statusTo === 'closed' && statusNow !== 'liquidation') {
+        refused.push(`${row.company_name} is not winding down, and a company is dissolved only from the Winding down page. `
+          + 'Offer to put it into winding down (status "winding down") first; do not dissolve it');
+        continue;
+      }
       const changes = Object.entries(set).filter(([f, v]) => (row[COLUMN[f]] ?? null) !== (v ?? null)
         && !(f === 'deadline' && String(row.deadline ?? '').slice(0, 10) === String(v ?? '')));
-      if (!changes.length && !log) continue;
-      plan.push({ row, set: Object.fromEntries(changes), log });
+      if (!changes.length && !log && !statusTo) continue;
+      // eslint-disable-next-line no-await-in-loop
+      const stops = statusTo === 'closed' ? await wouldStop(row.company_name) : null;
+      // eslint-disable-next-line no-await-in-loop
+      const resumes = statusTo === 'liquidation' && companiesRepo.isTerminal(statusNow) ? await wouldResume(row.company_name) : null;
+      // eslint-disable-next-line no-await-in-loop
+      const joins = statusTo === 'liquidation' ? (await defaultReviewIds(row.company_name)).length : 0;
+      plan.push({ row, set: Object.fromEntries(changes), log, status: statusTo ? { from: statusNow, to: statusTo, stops, resumes, joins } : null });
     }
     if (refused.length) {
       return { summary: `NOTHING HAS BEEN CHANGED. ${refused.join('. ')}. Ask them, then call again with the whole request.` };
@@ -420,17 +572,24 @@ const updateLiquidation = {
       return { summary: reply, reply, computedReply: true };
     }
 
-    const lines = plan.map(({ row, set, log }, i) => {
-      const parts = Object.entries(set).map(([f, v]) => `${FIELD_LABEL[f]} ${show(f, row[COLUMN[f]])} → ${show(f, v)}`);
+    const lines = plan.map(({ row, set, log, status }) => {
+      const parts = [];
+      if (status) {
+        const deals = status.stops
+          ? (status.stops.count ? `, stops its ${status.stops.count} live ${status.stops.count === 1 ? 'deal' : 'deals'} (${status.stops.currency} ${money(status.stops.money)} a month)` : ', no live deals to stop')
+          : status.resumes?.count ? `, puts back its ${status.resumes.count} stopped ${status.resumes.count === 1 ? 'deal' : 'deals'}` : `, its deals keep paying${status.joins ? ` and ${status.joins} ${status.joins === 1 ? 'goes' : 'go'} to Review every month` : ''}`;
+        parts.push(`status ${STATUS_LABEL[status.from] ?? status.from} → ${STATUS_LABEL[status.to]}${deals}`);
+      }
+      parts.push(...Object.entries(set).map(([f, v]) => `${FIELD_LABEL[f]} ${show(f, row[COLUMN[f]])} → ${show(f, v)}`));
       if (log) parts.push(`log "${log.body}" (${sayDay(log.saidOn)})`);
       return `• ${row.company_name}: ${parts.join('; ')}`;
     });
     const pending = confirmFirst(args.confirmed, {
-      act: 'change these companies on the Liquidations page',
+      act: 'change these companies on the Winding down page',
       count: plan.length,
       noun: 'company',
       plural: 'companies',
-      keeps: 'Their company status and pay do not change.',
+      keeps: plan.some((p) => p.status) ? 'Nothing else on the sheet changes.' : 'Their company status and pay do not change.',
       lines,
       // Matched against what she read out, which drops the "1." numbering.
       identity: lines.map((l) => l.replace(/^\d+\.\s*/, '')).join(' '),
@@ -438,8 +597,25 @@ const updateLiquidation = {
     if (pending) return { ...pending, aimedAt: plan.map((p) => p.row.company_name) };
 
     // WRITE, keeping what each replaced for undo.
-    const restore = { rows: [], comms: [] };
-    for (const { row, set, log } of plan) {
+    const restore = { rows: [], comms: [], statuses: [] };
+    let statusMoved = false;
+    for (const p of plan) {
+      const { set, log, status } = p;
+      // INTO winding down first: the row is the page's once the status is.
+      if (status?.to === 'liquidation') {
+        // eslint-disable-next-line no-await-in-loop
+        // ITS DEALS JOIN THE REVIEW (his call 2026-10-15): the dialog's default.
+        // eslint-disable-next-line no-await-in-loop
+        await applyCompanyStatus(p.row.company_name, { status: 'liquidation', via: 'diane', reviewMonthlyDealIds: await defaultReviewIds(p.row.company_name) });
+        restore.statuses.push({ name: p.row.company_name, status: status.from });
+        statusMoved = true;
+      }
+      if (p.row.id === null) {
+        // eslint-disable-next-line no-await-in-loop
+        const made = await repo.ensureRow(p.row.company_name);
+        p.row = { ...made, company_name: p.row.company_name };
+      }
+      const { row } = p;
       if (Object.keys(set).length) {
         restore.rows.push({ id: row.id, fields: Object.fromEntries(Object.keys(set).map((f) => [f, row[COLUMN[f]] ?? null])) });
         // eslint-disable-next-line no-await-in-loop
@@ -450,17 +626,35 @@ const updateLiquidation = {
         const c = await repo.addComm(row.id, log, BY);
         restore.comms.push(c.id);
       }
+      // OUT, closed, last: the stage says how it ended before it leaves the page.
+      if (status?.to === 'closed') {
+        // eslint-disable-next-line no-await-in-loop
+        await applyCompanyStatus(row.company_name, { status: 'closed', via: 'diane' });
+        restore.statuses.push({ name: row.company_name, status: status.from });
+        statusMoved = true;
+      }
     }
     // READ BACK: every field as written, or it is not reported as done.
-    const after = new Map((await repo.list()).map((r) => [r.id, r]));
-    const failed = plan.filter(({ row, set }) => Object.entries(set).some(([f, v]) => {
+    const after = new Map();
+    for (const { row } of plan) after.set(row.id, await repo.findById(row.id)); // eslint-disable-line no-await-in-loop
+    for (const { row, status } of plan.filter((p) => p.status)) {
+      // eslint-disable-next-line no-await-in-loop
+      const c = await companiesRepo.findByKey(fold(row.company_name)).catch(() => null);
+      if (c?.status !== status.to) after.set(row.id, null);
+    }
+    const failed = plan.filter(({ row, set, status }) => (status && !after.get(row.id)) || Object.entries(set).some(([f, v]) => {
       const got = after.get(row.id)?.[COLUMN[f]] ?? null;
       return f === 'deadline' ? String(got ?? '').slice(0, 10) !== String(v ?? '') : got !== (v ?? null);
     }));
-    await undoRepo.record('liquidations', `${plan.length} ${plan.length === 1 ? 'company' : 'companies'} on the Liquidations page`, restore, BY);
+    await undoRepo.record('liquidations', `${plan.length} ${plan.length === 1 ? 'company' : 'companies'} on the Winding down page`, restore, BY);
     broadcast(null, 'liquidations:changed', { via: 'agent' });
+    if (statusMoved) {
+      broadcast(null, 'companies:changed', { action: 'updated', via: 'agent' });
+      broadcast(null, 'master-sheet:changed', { action: 'company-status', via: 'agent' });
+      broadcast(null, 'people:changed', { action: 'company-status', via: 'agent' });
+    }
     const reply = failed.length
-      ? `Saved, but ${failed.map((p) => p.row.company_name).join(', ')} did not read back as written: check them on the Liquidations page.`
+      ? `Saved, but ${failed.map((p) => p.row.company_name).join(', ')} did not read back as written: check them on the Winding down page.`
       : `Done. ${lines.join('\n')}`;
     return { summary: reply, reply, computedReply: true };
   },
@@ -469,13 +663,22 @@ const updateLiquidation = {
 async function undoLiquidations() {
   const last = await undoRepo.latest('liquidations');
   if (!last) {
-    const reply = 'There is no change of mine on the Liquidations page to undo.';
+    const reply = 'There is no change of mine on the Winding down page to undo.';
     return { summary: reply, reply, computedReply: true };
   }
   // AT ONCE: "undo that" is the instruction, and it only puts back what she
   // herself changed. A preview of "back as it was" had nothing in it a yes
   // could be matched to, so the yes undid nothing (suite, 2026-10-13).
-  const { rows = [], comms = [] } = last.restore;
+  const { rows = [], comms = [], statuses = [] } = last.restore;
+  // The statuses first, newest last undone first: a dissolve reopens its deals.
+  for (const s of [...statuses].reverse()) {
+    // eslint-disable-next-line no-await-in-loop
+    await applyCompanyStatus(s.name, { status: s.status, via: 'diane' });
+  }
+  if (statuses.length) {
+    broadcast(null, 'companies:changed', { action: 'updated', via: 'agent' });
+    broadcast(null, 'master-sheet:changed', { action: 'company-status', via: 'agent' });
+  }
   for (const r of rows) {
     // eslint-disable-next-line no-await-in-loop
     await repo.update(r.id, r.fields, `${BY} (undo)`);
@@ -525,7 +728,7 @@ const liquidationDocument = {
   name: 'liquidation_document',
   writes: true,
   description:
-    'A company\'s documents on the Liquidations page. action list: what it has. open: show one or several in this chat. '
+    'A company\'s documents on the Winding down page. action list: what it has. open: show one or several in this chat. '
     + 'save: put the files they ATTACHED in this chat onto the company (all of them unless they name some). rename: one, '
     + 'to newName. remove: one or several (moved aside, never deleted). undo: puts back your last save, rename or remove at '
     + 'once. save, rename and remove: confirmed false first and show the lines; true only after yes. To ANSWER from what '
@@ -846,7 +1049,7 @@ async function namesADocument(said) {
   return docNames.names.some((n) => text.includes(n));
 }
 
-// What is on the Liquidations page, by name, for routing: its companies,
+// What is on the Winding down page, by name, for routing: its companies,
 // their liquidators and their documents. Looked up once a 30 seconds.
 let pageNames = { at: 0, companies: [], liquidators: [] };
 async function loadNames() {
@@ -908,6 +1111,11 @@ async function liquidationRoute(said, { hasFiles = false } = {}) {
   if (asks && docNames.names.some((n) => text.includes(n)) && !CHANGE.test(text.replace(ASK_START, ''))) return 'search_company_documents';
   // "DOWNLOAD EVERYTHING FOR PINECREST": downloading is documents, never the sheet's export.
   if (company && /\b(?:download|zip)\b/.test(text)) return 'liquidation_document';
+  // A STAGE SAID IS A CHANGE, not its paperwork: "pinecrest GOT a first
+  // gazette NOTICE, a compulsory strike off proposal" listed its documents
+  // (suite 2026-10-14). Opening or sending a file still goes to the files.
+  if (company && /\b(?:gazette|proposal|suspend\w*|objected|objection|strike off|struck off|own liq|hmrc liq|dissolv\w*|winding up order)\b/.test(text)
+    && !/\b(?:open|show|send|view|see|pull up|bring up|letter|pdf|document|documents|docs?|files?)\b/.test(text)) return null;
   // "PINECREST DOCS PLS": a company and its documents, nothing else, is its list.
   if (company && DOC_WORDS.test(text) && text.replace(/[^a-z0-9 ]/g, '').split(/\s+/).filter(Boolean).length <= 5 && !DOC_FACTS.test(text)) return 'liquidation_document';
   // "WHAT PAPERWORK HAVE WE GOT FOR PINECREST" is its list, not what it says.
@@ -935,7 +1143,7 @@ async function liquidationRoute(said, { hasFiles = false } = {}) {
  * a company's documents listed or opened. Changes stay with the model, whose
  * confirm and preview flow they need. Returns { tool, args } or null.
  */
-const FILTER_WORDS = /\b(?:own liq|hmrc liq|strike|dissolved|active|not set|passed|overdue|due|this week|owner|owned|group|blamed|stage)\b/;
+const FILTER_WORDS = /\b(?:own liq|hmrc liq|strike|dissolved|active|proposal|gazette|suspended|rejected|cancel\w*|not set|passed|overdue|due|this week|owner|owned|group|blamed|stage)\b/;
 async function liquidationPlan(said, { hasFiles = false } = {}) {
   const text = fold(said);
   if (hasFiles) return null;
@@ -949,10 +1157,10 @@ async function liquidationPlan(said, { hasFiles = false } = {}) {
     // eslint-disable-next-line global-require
     const company = await require('../../repos/companies.repo').findByKey(adding[1].replace(/'s$/, '')).catch(() => null);
     if (!company) return null;
-    if (company.status === 'liquidation') return { reply: `${company.name} is already in liquidation, so it is on the Liquidations page.` };
+    if (company.status === 'liquidation') return { reply: `${company.name} is already winding down, so it is on the Winding down page.` };
     return {
       tool: 'update_company', args: { name: company.name, status: 'liquidation' },
-      reply: `${company.name} is now in liquidation, so it is on the Liquidations page. Its stage starts as Not set.`,
+      reply: `${company.name} is now winding down, so it is on the Winding down page. Its stage starts as Not set.`,
     };
   }
   const tool = await liquidationRoute(said) ?? ((await namesADocument(said)) && /\b(?:open|show|send|get|give|pull up|bring up|view|see|download)\b/.test(text) ? 'liquidation_document' : null);
@@ -973,6 +1181,6 @@ async function liquidationPlan(said, { hasFiles = false } = {}) {
 }
 
 module.exports = {
-  namesADocument, liquidationRoute, liquidationPlan, namesList, asNews,
+  namesADocument, liquidationRoute, liquidationPlan, namesList, asNews, kindFrom, cleanItem,
   liquidationTools, listLiquidations, updateLiquidation, liquidationDocument, searchCompanyDocuments, readCompanyDocument, stageFrom,
 };

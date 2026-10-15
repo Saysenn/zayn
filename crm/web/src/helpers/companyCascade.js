@@ -38,7 +38,7 @@ export const CLOSURE_STOP = 'company_closed';
 
 // Mirrors companyStatus.js TERMINAL_STATUS. Kept here rather than imported
 // so this file stays free of anything but dates and rows.
-const TERMINAL = Object.freeze(['dissolved', 'closed']);
+const TERMINAL = Object.freeze(['closed']);
 
 /**
  * The badge is DERIVED, here as in SQL, so a deal whose stop just changed

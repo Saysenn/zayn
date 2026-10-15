@@ -120,8 +120,13 @@ const parkForMonth = {
     }
 
     if (check.spec.companyLevel) {
+      // NO DISSOLVING LATER (his call 2026-10-15): only the Winding down page dissolves.
+      if (['closed', 'dissolved'].includes(args.status)) {
+        return { summary: 'NOTHING HAS BEEN PARKED. A company is dissolved only on the Winding down page, by its stage, '
+          + 'never on a date. Offer to put it into winding down instead.' };
+      }
       const companies = [].concat(args[check.spec.idField] ?? []).map(String).filter(Boolean);
-      const act = args.status === 'dissolved' ? 'dissolve' : args.status === 'active' ? 'reopen' : 'close';
+      const act = args.status === 'active' ? 'reopen' : 'close';
       const what = `${act} ${companies.join(', ')}, stopping every live deal on ${companies.length === 1 ? 'it' : 'them'}`;
       const needs = confirmFirst(rawArgs.confirmed, {
         act: `${act} ${companies.join(', ')} at the START of each month below`,

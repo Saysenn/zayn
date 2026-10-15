@@ -187,9 +187,12 @@ async function findAll(filters = {}) {
          -- would show 4 of 6 for someone on three companies and quietly
          -- mean something else.
          COUNT(DISTINCT ${companyKeySql()})
-           FILTER (WHERE d.payment_period = 'active')::int       AS active_company_count,
+           FILTER (WHERE d.payment_period = 'active' AND d.stopped_on IS NULL)::int       AS active_company_count,
          COUNT(*)::int                                           AS deal_count,
-         COUNT(*) FILTER (WHERE d.payment_period = 'active')::int AS active_count,
+         -- A PERSON WITH NO LIVE DEAL IS ON THE DEAD LIST, not here (his
+         -- report 2026-10-15: Abe stayed after A J Rayson was dissolved).
+         COUNT(*) FILTER (WHERE d.stopped_on IS NULL)::int        AS live_count,
+         COUNT(*) FILTER (WHERE d.payment_period = 'active' AND d.stopped_on IS NULL)::int AS active_count,
          -- Is this person still being paid at all: 'paying' while any one
          -- of their deals is still in its period, 'ended' once every last
          -- one has finished.
@@ -231,6 +234,7 @@ async function findAll(filters = {}) {
        LEFT JOIN tb_people p   ON p.person_id = a.person_id
        LEFT JOIN pay           ON pay.person_id = a.person_id
        WHERE ${personWhere.length ? personWhere.join(' AND ') : 'true'}
+         AND a.live_count > 0
      )
      SELECT
        (SELECT COUNT(*)::int FROM joined) AS total,
@@ -294,15 +298,15 @@ async function findById(personId) {
        (SELECT ARRAY_AGG(DISTINCT role_label ORDER BY role_label) FROM deals)                  AS roles,
        (SELECT ARRAY_AGG(DISTINCT group_name ORDER BY group_name) FROM deals)                  AS groups,
        (SELECT COUNT(*)::int FROM deals)                                                       AS deal_count,
-       (SELECT COUNT(*) FILTER (WHERE payment_period = 'active')::int FROM deals)              AS active_count,
-       (SELECT CASE WHEN COUNT(*) FILTER (WHERE payment_period = 'active') > 0
+       (SELECT COUNT(*) FILTER (WHERE payment_period = 'active' AND stopped_on IS NULL)::int FROM deals)              AS active_count,
+       (SELECT CASE WHEN COUNT(*) FILTER (WHERE payment_period = 'active' AND stopped_on IS NULL) > 0
                     THEN 'paying' ELSE 'ended' END FROM deals)                                  AS pay_status,
        -- These two exist on findAll's aggregate too. Missing here, the
        -- detail page's Companies card read "undefined active of
        -- undefined" — the counts are per COMPANY, not per deal, because
        -- that card is labelled Companies.
        (SELECT COUNT(DISTINCT ${companyKeySql('')})::int FROM deals)                           AS company_count,
-       (SELECT COUNT(DISTINCT ${companyKeySql('')}) FILTER (WHERE payment_period = 'active')::int FROM deals) AS active_company_count,
+       (SELECT COUNT(DISTINCT ${companyKeySql('')}) FILTER (WHERE payment_period = 'active' AND stopped_on IS NULL)::int FROM deals) AS active_company_count,
        (SELECT jsonb_object_agg(currency, subtotal) FROM totals)                               AS monthly_totals,
        -- The header's switches and tag, over live deals. See personPayState.helper.
        pay.should_be_paid_state, pay.paid_state, pay.payment_received,

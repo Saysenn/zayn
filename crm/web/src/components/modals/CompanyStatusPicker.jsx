@@ -47,33 +47,14 @@ const ASKS = [
     label: 'Reviewed monthly',
     // What a stored deal looks like when it is already ticked.
     ticked: (d) => Boolean(d.review_monthly),
-    note: (
-      <>
-        Ticked deals join the Review list every month and their end date reads
-        {' '}
-        <em>Reviewed monthly</em>
-        {' '}
-        instead of a date.
-      </>
-    ),
+    note: 'Ticked deals go to Review every month. Unticked deals carry on as they are.',
   },
   {
     key: 'goingConcern',
     when: (status) => status === COMPANY_STATUS.GOING_CONCERN,
     label: 'Deals with no end date',
     ticked: (d) => d.end_note === GOING_CONCERN,
-    note: (
-      <>
-        Ticked deals read
-        {' '}
-        <em>Going concern</em>
-        {' '}
-        instead of a date, and
-        {' '}
-        <strong>their end dates are cleared</strong>
-        . Unticking puts the word back to blank; it cannot bring a date back.
-      </>
-    ),
+    note: 'Ticked deals have no end date: their end date is cleared. Unticked deals keep theirs.',
   },
 ];
 
