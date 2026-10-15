@@ -1,0 +1,61 @@
+{
+  "set": "liq-probe",
+  "at": "2026-10-15T07:42:21.092Z",
+  "seconds": 23,
+  "cases": 2,
+  "passed": 2,
+  "passRate": 100,
+  "groups": {
+    "liq": {
+      "cases": 2,
+      "passed": 2,
+      "passRate": 100
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 0,
+    "db": 0
+  },
+  "calcAccuracy": null,
+  "inventedRate": 0,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0,
+  "recoveryRate": null,
+  "perTurn": {
+    "turns": 7,
+    "modelRounds": 1.1,
+    "toolCalls": 1.1,
+    "retries": 0,
+    "inputTokens": 37004,
+    "cachedPct": 98,
+    "outputTokens": 50,
+    "medianMs": 4359,
+    "slowestMs": 6361
+  },
+  "tokens": {
+    "input": 259028,
+    "cached": 254592,
+    "output": 352
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "an active proposal, compulsory, then suspended",
+      "name": "an active proposal, compulsory, then suspended",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "two companies struck off in one yes, and undo brings both back",
+      "name": "two companies struck off in one yes, and undo brings both back",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}

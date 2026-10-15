@@ -349,7 +349,13 @@ async function cleanItem(item, today, owners) {
         const st = roads.find((r) => kindFrom(r, kindSaid));
         if (st) { k = kindFrom(st, kindSaid); if (st !== onStage) set.stage = st; }
       }
-      if (!k) why.push(`"${kindSaid}" is not a kind of ${onStage ? stageName(onStage) : 'any stage'}`);
+      // A STAGE SENT AS A KIND (suite 2026-10-15): "suspended" came as the
+      // proposal's kind and was refused. A stage's own word is the stage.
+      if (!k && !set.stage) {
+        const asStage = stageFrom(kindSaid);
+        if (asStage) { set.stage = asStage; set.stageKind = null; }
+        else why.push(`"${kindSaid}" is not a kind of ${onStage ? stageName(onStage) : 'any stage'}`);
+      } else if (!k) why.push(`"${kindSaid}" is not a kind of ${onStage ? stageName(onStage) : 'any stage'}`);
       else set.stageKind = k;
     }
   }

@@ -1,0 +1,54 @@
+{
+  "set": "liq-probe",
+  "at": "2026-10-15T07:44:02.340Z",
+  "seconds": 11,
+  "cases": 1,
+  "passed": 1,
+  "passRate": 100,
+  "groups": {
+    "liq": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 0,
+    "db": 0
+  },
+  "calcAccuracy": null,
+  "inventedRate": null,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0,
+  "recoveryRate": null,
+  "perTurn": {
+    "turns": 4,
+    "modelRounds": 1,
+    "toolCalls": 1,
+    "retries": 0,
+    "inputTokens": 31044,
+    "cachedPct": 98,
+    "outputTokens": 35,
+    "medianMs": 4199,
+    "slowestMs": 5151
+  },
+  "tokens": {
+    "input": 124176,
+    "cached": 121728,
+    "output": 139
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "an active proposal, compulsory, then suspended",
+      "name": "an active proposal, compulsory, then suspended",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}
