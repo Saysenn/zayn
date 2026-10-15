@@ -26,9 +26,12 @@ const ASKS_UNDO = /\b(?:undo|revert|roll ?back)\b/i;
 const UNDO_VERB = /\b(?:undo|revert|reverse|roll ?back|scrap|cancel|scratch|take (?:that|it|this) back|put (?:that|it|this|everything|them) back|change (?:that|it|this|them) back|set (?:that|it|this|them) back|go back to (?:what|how) it was)\b/i;
 const AT_THE_CHANGE = /\b(?:that|it|this|the (?:last )?(?:change|edit|update)|what you (?:just )?(?:did|changed|made|set)|(?:the )?(?:change|edit) you (?:just )?made|your (?:last )?(?:change|edit))\b/i;
 const NEW_VALUE = /\b(?:to|make it|set it to|instead)\s+\d/i;
+// "SET IT BACK TO ACTIVE" NAMES THE VALUE (suite 2026-10-15): a status set,
+// not an undo of whatever she did last.
+const NAMES_A_STATUS = /\bback\s+(?:to|on|into)\s+(?:active|trading|winding down|review|going concern|liquidation)\b/i;
 const asksUndoPlainly = (said) => {
   const text = String(said ?? '');
-  return UNDO_VERB.test(text) && AT_THE_CHANGE.test(text) && !NEW_VALUE.test(text);
+  return UNDO_VERB.test(text) && AT_THE_CHANGE.test(text) && !NEW_VALUE.test(text) && !NAMES_A_STATUS.test(text);
 };
 // "undo that" names nothing, so the thing it undoes was named one message back.
 const NAMES_NOTHING = /^\s*(?:please\s+)?(?:undo|revert)\s+(?:that|it|this)\b[\s.!?]*$/i;

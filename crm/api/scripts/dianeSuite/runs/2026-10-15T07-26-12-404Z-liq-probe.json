@@ -1,0 +1,61 @@
+{
+  "set": "liq-probe",
+  "at": "2026-10-15T07:26:12.404Z",
+  "seconds": 22,
+  "cases": 2,
+  "passed": 2,
+  "passRate": 100,
+  "groups": {
+    "liq": {
+      "cases": 2,
+      "passed": 2,
+      "passRate": 100
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 0,
+    "db": 0
+  },
+  "calcAccuracy": null,
+  "inventedRate": 0,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0,
+  "recoveryRate": null,
+  "perTurn": {
+    "turns": 7,
+    "modelRounds": 1.1,
+    "toolCalls": 1.1,
+    "retries": 0,
+    "inputTokens": 37737,
+    "cachedPct": 98,
+    "outputTokens": 48,
+    "medianMs": 3771,
+    "slowestMs": 6955
+  },
+  "tokens": {
+    "input": 264156,
+    "cached": 259968,
+    "output": 338
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "two companies struck off in one yes, and undo brings both back",
+      "name": "two companies struck off in one yes, and undo brings both back",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    },
+    {
+      "id": "back to active takes its deals off the review",
+      "name": "back to active takes its deals off the review",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}

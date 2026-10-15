@@ -1,0 +1,54 @@
+{
+  "set": "main-probe",
+  "at": "2026-10-15T07:27:17.336Z",
+  "seconds": 13,
+  "cases": 1,
+  "passed": 1,
+  "passRate": 100,
+  "groups": {
+    "main": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 0,
+    "db": 0
+  },
+  "calcAccuracy": null,
+  "inventedRate": null,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0,
+  "recoveryRate": null,
+  "perTurn": {
+    "turns": 5,
+    "modelRounds": 0.8,
+    "toolCalls": 1.2,
+    "retries": 0,
+    "inputTokens": 27206,
+    "cachedPct": 97,
+    "outputTokens": 30,
+    "medianMs": 1032,
+    "slowestMs": 5451
+  },
+  "tokens": {
+    "input": 136029,
+    "cached": 132480,
+    "output": 151
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "take N days off moves every deal BY N, once, and undo puts them back",
+      "name": "take N days off moves every deal BY N, once, and undo puts them back",
+      "group": "main",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}

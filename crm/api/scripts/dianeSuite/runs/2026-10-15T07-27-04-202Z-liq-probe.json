@@ -1,0 +1,54 @@
+{
+  "set": "liq-probe",
+  "at": "2026-10-15T07:27:04.202Z",
+  "seconds": 22,
+  "cases": 1,
+  "passed": 1,
+  "passRate": 100,
+  "groups": {
+    "liq": {
+      "cases": 1,
+      "passed": 1,
+      "passRate": 100
+    }
+  },
+  "failuresByLabel": {
+    "tool": 0,
+    "args": 0,
+    "records": 0,
+    "calc": 0,
+    "answer": 0,
+    "db": 0
+  },
+  "calcAccuracy": null,
+  "inventedRate": null,
+  "unsafeRate": null,
+  "wastedCallsPerTurn": 0,
+  "recoveryRate": 100,
+  "perTurn": {
+    "turns": 4,
+    "modelRounds": 3,
+    "toolCalls": 2,
+    "retries": 0.75,
+    "inputTokens": 85466,
+    "cachedPct": 99,
+    "outputTokens": 80,
+    "medianMs": 5420,
+    "slowestMs": 11203
+  },
+  "tokens": {
+    "input": 341863,
+    "cached": 337024,
+    "output": 319
+  },
+  "costUsd": null,
+  "results": [
+    {
+      "id": "back to active takes its deals off the review",
+      "name": "back to active takes its deals off the review",
+      "group": "liq",
+      "pass": true,
+      "labels": []
+    }
+  ]
+}

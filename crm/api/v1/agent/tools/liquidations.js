@@ -539,7 +539,11 @@ const updateLiquidation = {
         // THE YES ONLY SAYS "yes": the words that asked are in saidRecent (suite 2026-10-14).
         // ITS OWN PART OF THE MESSAGE (2026-10-15): "ironleaf was struck off and
         // pinecrest dissolved after the liquidation" is two different endings.
-        const own = `${clauseFor(row.company_name, `${args.said ?? ''} ${args.saidRecent ?? ''}`)} ${item.stage ?? ''} ${item.status ?? ''}`;
+        const heard = `${args.said ?? ''} ${args.saidRecent ?? ''}`;
+        let own = `${clauseFor(row.company_name, heard)} ${item.stage ?? ''} ${item.status ?? ''}`;
+        // "QUARRY LANE AND PINECREST HAVE BOTH BEEN STRUCK OFF": its own part
+        // names no ending, so the ending said for them all is its own (suite 2026-10-15).
+        if (!/strike|struck|liquidat/i.test(own)) own = `${heard} ${item.stage ?? ''} ${item.status ?? ''}`;
         set.stageKind = /strike|struck/i.test(own) ? 'struck_off'
           : /liquidat/i.test(own) ? 'after_liquidation'
           : (['own_liq', 'hmrc_liq', 'liquidation'].includes(row.stage) ? 'after_liquidation'
