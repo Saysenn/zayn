@@ -27,7 +27,11 @@ Read this before touching anything under `crm/api/v1/masterSheet/` or
    Drivers. The **Master sheet itself keeps them** (it is the active deals list and
    is uploaded back). Hidden payouts keep the row marked "no", out of the total.
    The export modal still warns about them (`isPaymentRun`, `exportQuery.js`).
-8. **No cell value on live is touched** by an export fix. A value present is good;
+8. **Monthly review:** No / Final month stop the deal (archive), so it leaves
+   every export. Unanswered counts as Yes and stays paid, with an export warning
+   (`unanswered-review`), which also covers "Reviewed monthly" deals with no end
+   date (`unansweredIn`, `exportQuery.js`).
+9. **No cell value on live is touched** by an export fix. A value present is good;
    only blanks are issues.
 
 ## The exports

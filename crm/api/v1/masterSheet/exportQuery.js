@@ -264,8 +264,11 @@ function isPaymentRun(q) {
  */
 async function unansweredIn(rows) {
   const month = `${currentMonth()}-01`;
-  const couldBe = rows.some((row) => (
-    !row.stopped_on && row.end_on && String(row.end_on).slice(0, 10) < month
+  // A "Reviewed monthly" deal is asked every month and has no end date, so
+  // the end date alone skipped it: a file of only those never warned.
+  // 2026-10-20.
+  const couldBe = rows.some((row) => !row.stopped_on && (
+    row.review_monthly || (row.end_on && String(row.end_on).slice(0, 10) < month)
   ));
   if (!couldBe) return new Set();
   try {
