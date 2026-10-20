@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useLogin, useVerifyCode, LOGIN_TRANSITION_MS } from '../../hooks/useAuth';
 import DianeEnvironment from '../agentOrb/DianeEnvironment';
 import HoloFrame from '../agentOrb/HoloFrame';
@@ -104,6 +104,15 @@ export default function LoginForm() {
     const t = setTimeout(() => setReady(true), 260);
     return () => clearTimeout(t);
   }, []);
+
+  // THE CODE FIELD TAKES THE CURSOR ITSELF. `autoFocus` fired while the card
+  // was still fading between steps and lost the focus, so the code could not
+  // be typed without a click first. Focused once the swap has finished, and
+  // again after a wrong code. 2026-10-20.
+  const codeRef = useRef(null);
+  useEffect(() => {
+    if (step === STEP.CODE && !swapping && phase === PHASE.IDLE) codeRef.current?.focus();
+  }, [step, swapping, phase]);
 
   function goToStep(next) {
     setSwapping(true);
@@ -274,6 +283,7 @@ export default function LoginForm() {
                   <KeyIcon />
                 </span>
                 <input
+                  ref={codeRef}
                   id="secret-code"
                   name="secret-code"
                   type={showCode ? 'text' : 'password'}

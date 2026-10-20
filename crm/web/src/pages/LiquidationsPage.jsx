@@ -181,6 +181,17 @@ export default function LiquidationsPage() {
 
       <ErrorState error={error} title="Couldn't load the winding down tracker" />
 
+      {/* NO COMPANIES AT ALL, NO TABLE. Fifteen empty column headers over a
+          message pushed off to the right said less than the message alone.
+          A search or filter that matches nothing keeps the table, so the
+          columns stay put while the filters change. 2026-10-20. */}
+      {!isLoading && !error && rows.length === 0 ? (
+        <EmptyState
+          icon={HourglassIcon}
+          title="No companies winding down"
+          hint="Set a company's status to Winding down on its page and it shows here."
+        />
+      ) : (
       <div className="table-wrap">
         <table className="w-full min-w-[1700px] text-sm">
           <thead>
@@ -210,8 +221,8 @@ export default function LiquidationsPage() {
                 asRow
                 colSpan={15}
                 icon={HourglassIcon}
-                title={rows.length ? 'No companies match' : 'No companies winding down'}
-                hint={rows.length ? 'Try another search or clear the filters.' : "Set a company's status to Winding down on its page and it shows here."}
+                title="No companies match"
+                hint="Try another search or clear the filters."
               />
             )}
             {!isLoading && shown.map((r) => {
@@ -269,6 +280,7 @@ export default function LiquidationsPage() {
           </tbody>
         </table>
       </div>
+      )}
 
       {exportOpen && (
         <LiquidationsExportModal
