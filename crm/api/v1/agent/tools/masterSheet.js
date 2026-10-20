@@ -182,7 +182,11 @@ function summarizeRow(r) {
     company: r.company,
     payableAmount: r.payable_amount,
     currency: r.currency,
-    status: r.status,
+    // THE LIVE PERIOD, never the stored `status`: that one is written once
+    // at upload off the end date and never updated, so Gary read "ended"
+    // here while £6,250 of his was in the month. A deal ends only when it
+    // is stopped. Same rule as payableThisMonth's card. 2026-10-20.
+    status: r.payment_period ?? null,
     // THE DEAL'S OWN RATES. Dropped here, she could not answer "what is
     // Gloria on for this company" from any tool that returns rows.
     addonPercent: Number(r.addon_percent) || 0,

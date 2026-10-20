@@ -1,5 +1,6 @@
 const ExcelJS = require('exceljs');
 const { scrubWorkbook } = require('../shared/scrubWorkbook.helper');
+const { PERIOD_LABEL } = require('../shared/paymentPeriod.helper');
 
 /**
  * What each person earns this month, from each company they handle.
@@ -125,7 +126,9 @@ function writePerson(sheet, rows, startRow) {
     row.getCell(7).value = toNumber(d.payable_amount);
     row.getCell(8).value = d.currency;
     row.getCell(9).value = METHOD_LABELS[d.payment_method] ?? d.payment_method;
-    row.getCell(10).value = d.status;
+    // The live period, worded as the master sheet's badge. The stored
+    // `status` is the upload's stale reading of the end date. 2026-10-20.
+    row.getCell(10).value = PERIOD_LABEL[d.payment_period] ?? '';
     money(sheet, row.getCell(4), d.currency);
     money(sheet, row.getCell(7), d.currency);
     row.border = RULE;
