@@ -1,5 +1,5 @@
 const { scrubWorkbook } = require('../shared/scrubWorkbook.helper');
-const { DATE_FMT, MONEY_FMT } = require('../shared/sheetFormats');
+const { DATE_FMT, MONEY_FMT, withExcelDates } = require('../shared/sheetFormats');
 const ExcelJS = require('exceljs');
 const {
   styleHeader, styleNumberColumns, sortGroupNames, METHOD_LABELS, pickColumns,
@@ -342,7 +342,7 @@ function addTab(wb, name, spec, rows, cols, useEndDate) {
     .filter(Boolean);
 
   for (const r of rows) {
-    const added = sheet.addRow(spec.row(r));
+    const added = sheet.addRow(withExcelDates(spec.row(r)));
 
     // TINTED OFF THE TOTAL'S OWN RULE, not off `isPeriodEnded`. That marked
     // a row the total had already counted and left an uncounted one plain,

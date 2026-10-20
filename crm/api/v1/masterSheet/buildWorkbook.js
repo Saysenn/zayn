@@ -1,5 +1,5 @@
 const ExcelJS = require('exceljs');
-const { DATE_FMT, MONEY_FMT } = require('../shared/sheetFormats');
+const { DATE_FMT, MONEY_FMT, withExcelDates } = require('../shared/sheetFormats');
 const { scrubWorkbook } = require('../shared/scrubWorkbook.helper');
 const { activeCompanies, paymentBreakdown } = require('./groupTables');
 const { breakdownDesignFor, forcesPercentagesTable, NONE_ID } = require('./breakdowns');
@@ -22,6 +22,9 @@ const {
 // Monthly and Payable already carry their rates.
 const { withRates } = require('../shared/rates.helper');
 const { rateTextFor } = require('../shared/rateText.helper');
+const {
+  startFromAppointment, isWeekOneAppointment, asDateString, isRealDate,
+} = require('../shared/fromAppointment.helper');
 
 /**
  * The CRM's final master sheet, as a downloadable .xlsx.
@@ -820,13 +823,16 @@ function cellByKey(row, key) {
  *  so a row cannot be marked on one setting and unmarked on another: the
  *  export modal promises a finished period is "marked in the file", and it
  *  has to stay true with every total switched off. */
-function addDealRow(sheet, r, {
+function addDealRow(sheet, deal, {
   useEndDate = false, tintEmpty = false, includeTags = false, month,
 } = {}) {
+  // The start the row is actually paid from, so the date, its tint and the
+  // figure beside it tell one story. See shownPaymentStart.
+  const r = deal.rolled_to ? { ...deal, payment_start_on: shownPaymentStart(deal) } : deal;
   // group_name is written only when the tab actually has that column,
   // which is when sheetNameFor had to rename the tab. exceljs matches on
   // the column key, so it costs nothing on every other tab.
-  const added = sheet.addRow({ group_name: r.group_name, ...toRow(r) });
+  const added = sheet.addRow(withExcelDates({ group_name: r.group_name, ...toRow(r) }));
   if (tintEmpty) tintBlanks(added);
   // AFTER the gap tint: the cell is explained, not missing, so yellow
   // beats red.
@@ -860,6 +866,31 @@ function addDealRow(sheet, r, {
   const startCell = cellByKey(added, 'payment_start_on');
   if (startCell) startCell.fill = paymentStartFill(r, { useEndDate });
   return added;
+}
+
+/**
+ * ===============================
+ * * A FIRST WEEK DEAL SHOWS THE START IT IS PAID FROM
+ * ===============================
+ * The stored payment start on a first week deal can still hold the old
+ * rule (appointment + 90, or the 1st), while its pay already follows the
+ * new one: the last Friday of month 3, whole month paid. The month sheet
+ * printed Social work partners PR starting 2026-11-03 beside 31 days
+ * payable in October, where the master sheet's own formula says
+ * 2026-10-30. Found 2026-10-20.
+ *
+ * A start somebody typed by hand is theirs and is printed as it is.
+ * Nothing is written back: this is what the file shows, not the record.
+ *
+ * ONLY ON A GENERATED MONTH (a rolled row). The working file is read back
+ * by the import and by Diane's sheet check, and a start that differs from
+ * the stored one reads as an edit on every first week deal.
+ */
+function shownPaymentStart(r) {
+  if ((r.manually_overridden_fields ?? []).includes('payment_start_on')) return r.payment_start_on;
+  const appointment = r.assigned_on ? new Date(r.assigned_on) : null;
+  if (!isRealDate(appointment) || !isWeekOneAppointment(appointment)) return r.payment_start_on;
+  return asDateString(startFromAppointment(appointment)) ?? r.payment_start_on;
 }
 
 /**
@@ -1350,7 +1381,7 @@ function buildSingleTab(wb, rows, chosen, { tintEmpty = false, includeTags = fal
   for (const groupName of sortGroupNames(groups.keys())) {
     for (const deals of byCompany(groups.get(groupName))) {
       for (const r of deals) {
-        const added = sheet.addRow({ group_name: r.group_name, ...toRow(r) });
+        const added = sheet.addRow(withExcelDates({ group_name: r.group_name, ...toRow(r) }));
         // THE FOUR DERIVED CELLS BECOME FORMULAS, so this file is one he
         // can work in rather than only read: typing an appointment date
         // moves the payment start, the end date, the payable days and the

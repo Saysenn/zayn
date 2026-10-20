@@ -119,10 +119,17 @@ function paymentBreakdown(rows, { methodLabels = {}, counts = null } = {}) {
   // method -> location -> currency -> { total, addon, crypto, fee }
   const byMethod = new Map();
   const currencies = new Set();
+  // ONE LINE PER PLACE, however it is capitalised. "South east" and
+  // "South East" were two lines of one place. Keyed by the folded name and
+  // shown as the first spelling met, so no value on any row changes; the
+  // same fold the Drivers sheet's placeKey uses. 2026-10-20.
+  const spelling = new Map();
 
   for (const r of live) {
     const method = methodLabels[r.payment_method] ?? r.payment_method ?? '(no method)';
-    const location = String(r.location ?? '').trim() || '(no location)';
+    const written = String(r.location ?? '').trim() || '(no location)';
+    const location = written.toLowerCase().replace(/\s+/g, ' ');
+    if (!spelling.has(location)) spelling.set(location, written);
     const currency = r.currency || 'GBP';
     const amount = Number(r.payable_amount) || 0;
 
@@ -181,7 +188,7 @@ function paymentBreakdown(rows, { methodLabels = {}, counts = null } = {}) {
       const locations = [...byLocation.entries()]
         .sort((a, b) => a[0].localeCompare(b[0]))
         .map(([location, byCurrency]) => ({
-          location,
+          location: spelling.get(location),
           lines: [...byCurrency.entries()]
             .sort((a, b) => a[0].localeCompare(b[0]))
             .map(([currency, cell]) => ({

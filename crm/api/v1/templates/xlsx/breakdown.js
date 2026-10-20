@@ -1,4 +1,5 @@
 const { buildBreakdownWorkbook } = require('../../masterSheet/buildBreakdown');
+const { withRates } = require('../../shared/rates.helper');
 
 // Past this many people, one tab each stops being navigable and the sheet
 // is better as one long sectioned page. Same threshold the export route
@@ -21,7 +22,13 @@ module.exports = {
   label: 'Breakdown',
   fileLabel: 'BREAKDOWN',
   description: 'Grouped by person, each company under them with the workings and a total. What you send to explain a figure.',
-  build: (rows) => buildBreakdownWorkbook(rows, {
-    splitByPerson: new Set(rows.map((r) => r.person_id)).size <= MAX_TABS,
-  }),
+  /**
+   * RATED FIRST, the same order buildDivisionSheet uses. `opts.rates` was
+   * never read here, so this file was short by every add on and crypto
+   * charge (Zayn 8,000 where the month sheet says 8,400). Found 2026-10-20.
+   */
+  build: (rows, opts = {}) => buildBreakdownWorkbook(
+    rows.map((r) => withRates(r, opts.rates, { cryptoPercent: opts.cryptoPercent })),
+    { splitByPerson: new Set(rows.map((r) => r.person_id)).size <= MAX_TABS },
+  ),
 };

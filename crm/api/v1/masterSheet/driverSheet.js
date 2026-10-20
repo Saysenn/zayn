@@ -434,11 +434,18 @@ function buildDriverWorkbook(rows, {
     }
     const totals = new Map();
     for (const r of mine) totals.set(r.currency || 'GBP', round2((totals.get(r.currency || 'GBP') ?? 0) + Number(r.payable_amount)));
-    const t = area.getRow(at);
-    t.getCell(1).value = `Total ${run.label}`;
-    t.getCell(2).value = [...totals].map(([c, n]) => `${c} ${n.toLocaleString('en-GB', { minimumFractionDigits: 2 })}`).join(' + ');
-    t.font = { bold: true };
-    at += 3;
+    // A NUMBER PER CURRENCY, never one sentence of them. "GBP 27,743.54 +
+    // AED 10,000.00" was text, so nothing could add it up. 2026-10-20.
+    for (const [currency, amount] of totals) {
+      const t = area.getRow(at);
+      t.getCell(1).value = `Total ${run.label}`;
+      t.getCell(2).value = amount;
+      t.getCell(2).numFmt = MONEY_FMT;
+      t.getCell(3).value = currency;
+      t.font = { bold: true };
+      at += 1;
+    }
+    at += 2;
   }
   moneyColumns(area, cols);
 

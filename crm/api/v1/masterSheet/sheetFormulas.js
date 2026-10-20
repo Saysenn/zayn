@@ -278,6 +278,17 @@ function applyFormulas(sheetRow, row, cellFor, { rawMonthly = false } = {}) {
      * for.
      */
     if (key === 'payable_amount' && rawMonthly && row.rate_parts) continue;
+    /**
+     * ===============================
+     * * A SPECIAL CASE KEEPS ITS DAYS AND ITS FIGURE
+     * ===============================
+     * "Make this deal Special Case" pays the whole month whatever the
+     * dates say, and no formula off the dates can know that. Mayah read
+     * 31 days / 1,000 on the tab per group file and 21 / 677.42 here, the
+     * same deal in two files. Found 2026-10-20. Skipped, the flat values
+     * already written stay, the same as a rated row's payable above.
+     */
+    if ((key === 'payable_days' || key === 'payable_amount') && row.special_case_deal) continue;
 
     const result = results[key];
     target.value = {
