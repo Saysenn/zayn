@@ -201,7 +201,38 @@ function layoutOptions(q) {
 async function rowsFor(query) {
   const all = await rowsRepo.findAllRows();
   const filtered = applyFilters(all, query).filter(presetFor(query.preset).filter);
-  return applyMonth(filtered, query.month);
+  // SWITCHED OFF, OUT OF EVERY PAYMENT DOCUMENT. Kept aside as `held` rather
+  // than dropped, so the preview can still say they were left out.
+  const held = isPaymentRun(query) ? filtered.filter(switchedOff) : [];
+  const sent = held.length > 0 ? filtered.filter((r) => !switchedOff(r)) : filtered;
+  return { ...(await applyMonth(sent, query.month)), held };
+}
+
+/**
+ * ===============================
+ * * "SHOULD BE PAID" DECIDES EVERY PAYMENT DOCUMENT (his call 2026-10-20)
+ * ===============================
+ * The People page's switch is saved on each of the person's deals. Only the
+ * Drivers sheet obeyed it, and the payout files counted the row out of the
+ * total; Generate for month, Division, the breakdown and the master sheet's
+ * Bank / Cash / Crypto runs paid the person anyway.
+ *
+ * A PAYMENT DOCUMENT leaves them out entirely: no row, no tint, no total.
+ * THE MASTER SHEET ITSELF KEEPS THEM. It is the list of active deals and the
+ * file that is edited and uploaded back, where a missing row reads as a
+ * deletion. Its runs are the ones that narrow to a method. The payout files
+ * keep their own rule (row marked "no", out of the total), and the Drivers
+ * sheet still filters itself.
+ */
+const switchedOff = (r) => r.override_should_be_paid === false;
+const PAYMENT_TEMPLATES = new Set(['monthly-sheet', 'division-sheet', 'breakdown']);
+
+function isPaymentRun(q) {
+  if (PAYMENT_TEMPLATES.has(q.template)) return true;
+  if (presetFor(q.preset).layout === 'breakdown') return true;
+  // One person with no template is forced into the breakdown by the route.
+  if (!q.template && String(q.personId ?? '').split(',').filter(Boolean).length === 1) return true;
+  return (!q.template || q.template === 'master-sheet') && Boolean(q.method);
 }
 
 /**
@@ -246,7 +277,7 @@ async function unansweredIn(rows) {
 }
 
 async function previewExport(query) {
-  const { rows, stats } = await rowsFor(query);
+  const { rows, stats, held } = await rowsFor(query);
   /**
    * THE DRIVERS SHEET COUNTS WHAT IT WILL HOLD, not every row it was
    * handed: UK cash and Outside UK, owed this month. Its checks are shown
@@ -283,13 +314,20 @@ async function previewExport(query) {
     currencies: currenciesByGroup(rows),
     // WITH THE ROW IDS, so a reader can fix them in place rather than going
     // to look for them.
-    warnings: exportWarnings(rows, {
-      month: monthValue(query.month),
-      template: query.template,
-      // THE REVIEW'S SECOND DOOR. Queried here rather than inside
-      // exportWarnings so that file stays pure over the rows it is given.
-      unanswered: await unansweredIn(rows),
-    }),
+    warnings: [
+      ...exportWarnings(rows, {
+        month: monthValue(query.month),
+        template: query.template,
+        // THE REVIEW'S SECOND DOOR. Queried here rather than inside
+        // exportWarnings so that file stays pure over the rows it is given.
+        unanswered: await unansweredIn(rows),
+      }),
+      // The switched off rows a payment document left out, still named, so
+      // a switch somebody forgot is seen before the file goes. Only this
+      // one warning: the others are about rows the file holds.
+      ...exportWarnings(held, { month: monthValue(query.month), template: query.template })
+        .filter((w) => w.kind === 'should-not-be-paid'),
+    ],
   };
 }
 

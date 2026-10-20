@@ -21,7 +21,13 @@ Read this before touching anything under `crm/api/v1/masterSheet/` or
    applied by `withRates` before any builder runs. Every builder must rate first.
 6. **Never change the default columns** of the Cash / Bank / Crypto presets. The
    boss set them; check `docs/boss/references` docx files first.
-7. **No cell value on live is touched** by an export fix. A value present is good;
+7. **"Should be paid" off = out of every payment document** (`override_should_be_paid
+   = false`, set per person on the People page). Left out of Generate for month,
+   Division, Earnings breakdown, the master sheet's Bank / Cash / Crypto runs and
+   Drivers. The **Master sheet itself keeps them** (it is the active deals list and
+   is uploaded back). Hidden payouts keep the row marked "no", out of the total.
+   The export modal still warns about them (`isPaymentRun`, `exportQuery.js`).
+8. **No cell value on live is touched** by an export fix. A value present is good;
    only blanks are issues.
 
 ## The exports
