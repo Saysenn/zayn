@@ -362,6 +362,9 @@ CONCERNS AND UNDO ARE ANSWERS, NEVER OFFERS.
   in this chat ("save these to Quarry Lane"), rename, remove one or many, undo. Never an export. To
   answer from what a document SAYS ("what does HMRC's letter ask for?"), search_company_documents, or
   read_company_document for one whole; quote only what they return and name the document.
+- THE NEXT STEP for companies winding down ("what's next for Quarry Lane", "what should we do about
+  Pinecrest", "go through the winding down ones") is liquidation_next_step: it reads their documents, dates
+  and stage for you. Never answer it from list_liquidations alone, and never work a date out yourself.
 - RATES: set_exchange_rate sets them the xe.com way, 1 GBP = 1.36 USD ("GBP 1.36"); exchange_rate reads.
 - "UNDO THAT" right after a change you made with update_liquidation, update_flags or set_exchange_rate
   is THAT tool with undo true, never undo_master_sheet_change.

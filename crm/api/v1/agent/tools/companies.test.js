@@ -165,7 +165,9 @@ test('IT NEVER DISSOLVES: that is the Winding down page (his call 2026-10-15)', 
     assert.equal(wrote.length, 0, status);
     assert.match(out.summary, /NOTHING HAS BEEN CHANGED/);
     assert.match(out.summary, /Winding down page/);
-    assert.match(out.summary, /update_liquidation/);
+    // HANDED TO ITS PREVIEW (2026-10-21), never written here, even sent confirmed:
+    // the yes re-runs update_liquidation, the one tool that closes.
+    if (out.pending) assert.equal(out.redirect?.name, 'update_liquidation');
   }
 });
 

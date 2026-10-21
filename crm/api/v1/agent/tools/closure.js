@@ -303,8 +303,20 @@ const resumeDeal = {
      */
     const asked = ` ${String(`${rawResumeArgs.said ?? ''} ${rawResumeArgs.person ?? ''} ${rawResumeArgs.company ?? ''}`).toLowerCase().replace(/[^a-z0-9 ]+/g, ' ')} `;
     const dissolved = ((await companiesRepo.findAll({ status: 'closed', pageSize: 200 }).catch(() => null))?.rows ?? [])
-      .filter((c) => asked.includes(` ${String(c.name).toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').trim()} `));
+      .filter((c) => {
+        const name = String(c.name).toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').trim();
+        // Its full name, or its first two words ("ackerman pearce", browser 2026-10-21).
+        const two = name.split(/\s+/).slice(0, 2).join(' ');
+        return asked.includes(` ${name} `) || (name.split(/\s+/).length > 2 && two.length >= 8 && asked.includes(` ${two} `));
+      });
     if (dissolved.length) {
+      // THE REOPEN'S OWN PREVIEW, handed over, so one yes brings it back (suite
+      // 2026-10-21: this asked, then the yes asked again).
+      // eslint-disable-next-line global-require
+      const { bulkCloseCompanies } = require('./companies');
+      const reopen = { companies: dissolved.map((c) => c.name), status: 'active' };
+      const preview = await bulkCloseCompanies.handler({ ...reopen, confirmed: false, said: rawResumeArgs.said, saidRecent: rawResumeArgs.saidRecent }).catch(() => null);
+      if (preview?.pending) return { ...preview, redirect: { name: 'bulk_close_companies', args: reopen } };
       return {
         summary: `NOTHING HAS BEEN CHANGED. ${dissolved.map((c) => c.name).join(', ')} ${dissolved.length === 1 ? 'is a dissolved company' : 'are dissolved companies'}. `
           + 'To bring one back, call bulk_close_companies with status "active" for it: it previews, and on yes it is active '

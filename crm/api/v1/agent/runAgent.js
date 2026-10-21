@@ -440,7 +440,7 @@ const READ_TOOLS = new Set([
   'list_dead_people', 'dead_person_details', 'list_monthly_review', 'list_companies',
   'active_companies', 'list_parked_work', 'recall_past_conversations', 'show_past_conversation',
   'say', 'state_claims', 'list_people', 'show_person', 'list_liquidations',
-  'search_company_documents', 'read_company_document',
+  'search_company_documents', 'read_company_document', 'liquidation_next_step',
 ]);
 const MORE_TOOLS = Object.freeze({
   type: 'function',
@@ -2309,6 +2309,14 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
     if (name === 'update_liquidation' && (args.where || args.undo || (Array.isArray(args.items) ? args.items.length : 0) !== 1)) {
       reachesMany = true;
     }
+    // CLOSING STOPS ITS DEALS, so it always shows first (his call 2026-10-21:
+    // closure is very important; "close competex" saved and stopped two
+    // deals with no look). autoConfirm.js rule 2, which this tool broke.
+    if (name === 'update_liquidation' && [...(args.items ?? []), args.set ?? {}]
+      .some((i) => /clos|dissolv|struck/i.test(`${i?.status ?? ''} ${i?.stage ?? ''}`))) {
+      reachesMany = true;
+      logger.info({ tool: name }, 'diane: a close, so it asks first');
+    }
     if (name === 'update_person' && ['addonPercent', 'feePercent', 'addonPercentDelta', 'feePercentDelta'].some((k) => args[k] != null)) {
       const who = [args.person, ...(Array.isArray(args.people) ? args.people : [])].filter(Boolean);
       try {
@@ -2538,7 +2546,10 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
     }
     if (result?.ambiguous && turn) turn.askedWho = true;
 
-    if (result?.pending && !tool.parameters?.properties?.confirmed) {
+    // A HAND OVER is confirmed through the tool it hands to (liquidation_next_step's
+    // stage preview is update_liquidation's, 2026-10-21).
+    const confirmsVia = result?.redirect ? tools.find((t) => t.name === result.redirect.name) : tool;
+    if (result?.pending && !confirmsVia?.parameters?.properties?.confirmed) {
       logger.error({ tool: name }, 'diane: tool returns pending but takes no confirmed argument');
       captureLog({
         source: 'agent',
@@ -3704,6 +3715,29 @@ async function runAgentTurn(history, contextName, onEvent) {
     }).catch(() => null)
     : null;
   if (liqRouted === 'search_company_documents') turnState.docQuestion = true;
+  /**
+   * "ACTUALLY JUST IRONLEAF" TO A WINDING DOWN PREVIEW narrows it, in code
+   * (suite 2026-10-21: she said "say yes and I'll do it" with nothing held,
+   * and the yes did nothing). The narrowed preview replaces the held one.
+   */
+  {
+    const held = onlyHeld();
+    if (held?.name === 'update_liquidation' && Array.isArray(held.args?.items) && context.tools.some((t) => t.name === 'update_liquidation')) {
+      // eslint-disable-next-line global-require
+      const items = require('./tools/liquidations').narrowItems(routeSaid, held.args.items);
+      if (items) {
+        forget(held);
+        turnState.model = 'code';
+        const result = await invokeTool(context.tools, 'update_liquidation', JSON.stringify({ items }), history, onEvent, turnState);
+        const lines = String(result?.summary ?? '').split('\n').filter((l) => /^\s*(?:•|⚠)/.test(l));
+        if (result?.pending && lines.length) {
+          logger.info({ kept: items.length }, 'diane: winding down preview narrowed in code');
+          return { reply: `Just ${items.length === 1 ? 'that one' : 'those'} then:\n\n${lines.join('\n')}\n\nShall I go ahead?`, changedRowIds: [], context: context.key, claims: [] };
+        }
+        if (result?.summary) return { reply: String(result.reply ?? result.summary).replace(/^NOTHING HAS BEEN CHANGED\.\s*/, ''), changedRowIds: [], context: context.key, claims: [] };
+      }
+    }
+  }
   /**
    * A SURE LIQUIDATIONS READ IS ANSWERED IN CODE (see liquidationPlan):
    * the tool's own reply, its file chips, and no model round. Anything it

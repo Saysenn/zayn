@@ -125,9 +125,9 @@ const HELD_UNTIL_NEEDED = Object.freeze([
  */
 const HELD_FOR_TOPIC = Object.freeze([
   'list_liquidations', 'update_liquidation', 'liquidation_document', 'update_flags', 'set_exchange_rate',
-  'search_company_documents', 'read_company_document',
+  'search_company_documents', 'read_company_document', 'liquidation_next_step',
 ]);
-const TOPIC_WORDS = /\b(?:liquidat\w*|liq|hmrc|winding|wound up|deadlines?|liquidators?|strike[\s-]?off|insolven\w*|stage|letters?|documents?|docs?|pdfs?|files?|attach\w*|uploads?|petition|notice|log|logged|flag\w*|flagged|concerns?|resolv\w*|in progress|reopen|exchange|rates?|fx|xe(?:\.com)?|usd|gbp|eur|euros?|aed|dirhams?|php|pull|conversion)\b/i;
+const TOPIC_WORDS = /\b(?:liquidat\w*|liq|hmrc|winding|clos(?:ure|ing|ed?)|dissolv\w*|struck|gazette|[cm]vl|next steps?|wound up|deadlines?|liquidators?|strike[\s-]?off|insolven\w*|stage|letters?|documents?|docs?|pdfs?|files?|attach\w*|uploads?|petition|notice|log|logged|flag\w*|flagged|concerns?|resolv\w*|in progress|reopen|exchange|rates?|fx|xe(?:\.com)?|usd|gbp|eur|euros?|aed|dirhams?|php|pull|conversion)\b/i;
 const topicIn = (text) => TOPIC_WORDS.test(String(text ?? ''));
 
 /** The first round's tools: everything that is not held back. */

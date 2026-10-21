@@ -1,4 +1,5 @@
 const { randomUUID } = require('node:crypto');
+const { sayDay } = require('../../shared/dayWords.helper');
 const companiesRepo = require('../../repos/companies.repo');
 const { applyCompanyStatus, wouldStop, wouldResume, defaultReviewIds } = require('../../shared/companyStatus.helper');
 const { confirmFirst } = require('./confirmFirst');
@@ -345,6 +346,14 @@ const bulkCloseCompanies = {
   },
   async handler(args = {}) {
     // "REOPEN X" IS STATUS ACTIVE, whatever she sent with it.
+    if (['closed', 'dissolved'].includes(args.status) && (args.companies ?? []).length) {
+      // THE CLOSE'S OWN PREVIEW, from the Winding down tool (2026-10-21).
+      // eslint-disable-next-line global-require
+      const { updateLiquidation } = require('./liquidations');
+      const items = args.companies.map((company) => ({ company, status: 'closed' }));
+      const preview = await updateLiquidation.handler({ items, said: args.said, saidRecent: args.saidRecent, confirmed: false });
+      return preview?.pending ? { ...preview, redirect: { name: 'update_liquidation', args: { items } } } : preview;
+    }
     if (['closed', 'dissolved'].includes(args.status)) {
       return {
         summary: 'NOTHING HAS BEEN CHANGED. A company is dissolved only on the Winding down page. For companies '
@@ -634,6 +643,23 @@ const listCompanies = {
       ? wanted.map((s) => READS_AS[s] ?? s).join(' or ')
       : 'on the sheet';
 
+    // A COMPANY WITH NO LIVE DEAL (closed, all stopped) is still a company:
+    // "is ackerman pearce closed" said there was none (browser 2026-10-21).
+    if (found.length === 0 && args.name) {
+      const want = fold(args.name).replace(/[.,]/g, '').replace(/\s+(?:ltd|limited|plc|llp)$/, '');
+      const plain = (await companiesRepo.findAllPlain().catch(() => []))
+        .filter((c) => { const n = fold(c.name); return n === want || n.startsWith(`${want} `); });
+      if (plain.length === 1) {
+        const c = await companiesRepo.findByKey(fold(plain[0].name)).catch(() => null);
+        if (c) {
+          const day = c.closed_on ? ` on ${sayDay(String(c.closed_on instanceof Date ? c.closed_on.toISOString() : c.closed_on).slice(0, 10))}` : '';
+          const reply = c.status === 'closed'
+            ? `${c.name} is closed (dissolved${day}). Its deals are stopped and in the Archive; it can be reopened, which brings back the deals its closure stopped.`
+            : `${c.name} is ${STATUS_LABEL[c.status] ?? c.status}, with no live deals on the sheet.`;
+          return { summary: reply, reply, computedReply: true };
+        }
+      }
+    }
     if (found.length === 0) {
       const reply = args.name
         ? `There is no company called "${args.name}"${where}.`

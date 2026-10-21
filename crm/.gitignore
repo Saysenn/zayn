@@ -25,3 +25,7 @@ web/_*.js
 # copies of. A second copy goes stale and gets tested against by mistake.
 **/master.xlsx
 !../master.xlsx
+
+# Diane suite scorecards. Each run saves one and the next run compares
+# against the last one on disk, so they stay local and are never committed.
+api/scripts/dianeSuite/runs/

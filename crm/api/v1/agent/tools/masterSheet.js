@@ -10128,6 +10128,10 @@ const updateCompany = {
     if (fields.status !== undefined && fields.status !== 'closed' && args.said) {
       const said = ` ${String(args.said).toLowerCase().replace(/[^a-z0-9 ]+/g, ' ')} `;
       const named = (await companiesRepo.names()).filter((c) => c.ckey && said.includes(` ${c.ckey.replace(/[^a-z0-9 ]+/g, ' ').trim()} `));
+      // WINDING DOWN IS THE WINDING DOWN TOOL'S: its preview, handed over (2026-10-21).
+      if (named.length > 1 && fields.status === 'liquidation') {
+        return handToWindingDown(named.map((c) => ({ company: c.name, status: 'winding down' })), args);
+      }
       if (named.length > 1) {
         return {
           summary: `NOTHING HAS BEEN CHANGED. They named ${named.length} companies (${named.map((c) => c.name).join(', ')}). `
@@ -10138,6 +10142,9 @@ const updateCompany = {
       }
     }
     // DISSOLVED ONLY THROUGH WINDING DOWN (his call 2026-10-15).
+    // "CLOSE X" CAME HERE AND WAS SENT AWAY; she then asked an either/or the
+    // yes could not answer (suite 2026-10-21). The close's own preview now.
+    if (fields.status === 'closed') return handToWindingDown([{ company: name, status: 'closed' }], args);
     if (fields.status === 'closed') {
       return {
         summary: `NOTHING HAS BEEN CHANGED. A company is dissolved only on the Winding down page. If ${name} `
@@ -11098,6 +11105,10 @@ const undoChange = {
       };
       if (mine && Date.now() - new Date(mine.created_at).getTime() < 15 * 60 * 1000
         && (!lastChange || new Date(mine.created_at) > new Date(lastChange))) {
+        // THE WINDING DOWN PAGE'S UNDO RUNS AT ONCE (its own rule), so it is
+        // done here: "undo that" was answered with an offer (suite 2026-10-21).
+        // eslint-disable-next-line global-require
+        if (mine.kind === 'liquidations') return require('./liquidations').updateLiquidation.handler({ undo: true });
         return {
           summary: `NOTHING HAS BEEN UNDONE. The last change was ${mine.summary}, not the master sheet. `
             + `Call ${UNDO_TOOL[mine.kind]} now. Do not offer to undo a sheet change.`,
@@ -11433,6 +11444,18 @@ const recentChanges = {
 // ORDERING, not filtering: the filter reads these itself and never hands
 // them to the repo. Pinned in knownArgs.test.js.
 const ORDERING_KEYS = Object.freeze(['sortBy', 'sortOrder', 'limit']);
+
+/**
+ * A STATUS ONLY THE WINDING DOWN PAGE MOVES, handed to its tool: the
+ * preview is update_liquidation's, and the yes re-runs that call. A company
+ * not winding down comes back refused, with the offer to wind it down first.
+ */
+async function handToWindingDown(items, args) {
+  // eslint-disable-next-line global-require
+  const { updateLiquidation } = require('./liquidations');
+  const preview = await updateLiquidation.handler({ items, said: args.said, saidRecent: args.saidRecent, confirmed: false });
+  return preview?.pending ? { ...preview, redirect: { name: 'update_liquidation', args: { items } } } : preview;
+}
 
 module.exports = {
   ORDERING_KEYS,

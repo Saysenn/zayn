@@ -435,6 +435,21 @@ function remember(name, args, confirming) {
   // change re-proposed as a bulk one); a different field is a second change.
   // The fields come from the CALL, which always carries them; the preview
   // text for one row reads "change this deal" and names none.
+  /**
+   * WINDING DOWN PREVIEWS MADE ONE PER COMPANY IN ONE TURN ARE ONE CHANGE
+   * (browser 2026-10-21): "close capilano and churchill knight" came as two
+   * calls, the yes made two undo entries ("undo that" put back one) and she
+   * said no deals were stopped. Their items join the first call.
+   */
+  if (name === 'update_liquidation' && Array.isArray(args?.items) && !args.undo && !args.where) {
+    const first = REMEMBERED.find((r) => r.turn === TURN && r.name === 'update_liquidation'
+      && Array.isArray(r.args?.items) && !r.args.undo && !r.args.where);
+    if (first) {
+      first.args = { ...first.args, items: [...first.args.items, ...args.items] };
+      first.confirming = `${first.confirming}\n${confirming}`;
+      return;
+    }
+  }
   const myFields = argFields(args);
   for (let i = REMEMBERED.length - 1; i >= 0; i -= 1) {
     const older = REMEMBERED[i];

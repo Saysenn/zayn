@@ -19,6 +19,7 @@ const valid = (y, m, d) => {
   return t.getUTCFullYear() === y && t.getUTCMonth() === m && t.getUTCDate() === d ? t : null;
 };
 const addDays = (d, n) => utc(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + n);
+const NUMBER_WORDS = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, fourteen: 14 };
 const monthOf = (word) => MONTHS.indexOf(String(word).slice(0, 3).toLowerCase());
 
 /**
@@ -38,8 +39,17 @@ function dayFrom(said, today) {
   if (text === 'today') return iso(now);
   if (text === 'tomorrow') return iso(addDays(now, 1));
 
-  m = /^in (\d{1,3}) (day|days|week|weeks)$/.exec(text);
-  if (m) return iso(addDays(now, +m[1] * (m[2].startsWith('week') ? 7 : 1)));
+  // "in 2 weeks", "in two weeks", "a week from today", "3 days time", "in a month".
+  m = /^(?:in )?(\d{1,3}|an?|one|two|three|four|five|six|seven|eight|nine|ten|fourteen) (day|days|week|weeks|month|months)(?:'? time| from (?:today|now))?$/.exec(text);
+  if (m && (/^in /.test(text) || /time$| from (?:today|now)$/.test(text))) {
+    const n = /^\d/.test(m[1]) ? +m[1] : NUMBER_WORDS[m[1]];
+    if (m[2].startsWith('month')) {
+      const d = valid(now.getUTCFullYear(), now.getUTCMonth() + n, now.getUTCDate())
+        ?? utc(now.getUTCFullYear(), now.getUTCMonth() + n + 1, 0);
+      return iso(d);
+    }
+    return iso(addDays(now, n * (m[2].startsWith('week') ? 7 : 1)));
+  }
 
   m = /^(?:the )?end of (?:the )?(this|next) month$|^(?:the )?end of month$|^month end$/.exec(text);
   if (m) {
