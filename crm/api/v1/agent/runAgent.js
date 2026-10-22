@@ -107,7 +107,7 @@ const SECOND_ASK = /\b(?:and|also|plus|then)\b[^.!?]*\b(?:what'?s?|how'?s? (?:mu
 const RESUME_ASK = /\b(?:resume|reinstate|un-?stop|bring\w* (?:[\w'’-]+ ){0,4}back|put (?:[\w'’-]+ ){0,4}deals? back|put (?:[\w'’-]+ ){1,3}back on\b(?!\s+(?:cash|bank|crypto|paypal|card|\d|£|\$|gbp|usd|aed|eur)))\b/i;
 // A YES TO HER OWN "shall I resume it?" is a resume. Live 2026-10-03 she
 // answered that yes with "it is back live" and called nothing.
-const BARE_YES = /^\s*(?:y|ya|yes|yep|yeah|yup|ok|okay|sure|go ahead|do it|please do)[.!\s]*$/i;
+const BARE_YES = /^\s*(?:y|ya|yes+|yep|yeah|yup|ye|yea|yeh|yh|aye|k|kk|ok|okay|sure|go|go on|go ahead|yh go|ye go|do it|please do|lets do it|let's do it)[.!\s]*$/i;
 // A DEAL put back, never a value: "put it back to 0%?" is an undo's offer.
 const RESUME_OFFERED = /(?:\bresum\w*|\bdeals?\b[^?]*\bback\b)[^?]*\?\s*$/i;
 // "no. set drew's fee on capilano associates to 3%" read the rates back
@@ -407,7 +407,10 @@ const FORCED_ROUTES = [
   // "actually" in front it was taken as a cancel, and the new date was lost.
   // DISSOLVING IS THE WINDING DOWN PAGE'S (his call 2026-10-15): its tool
   // dissolves one winding down, and offers winding down to any other.
-  [/^\s*(?:(?:ok|okay|actually|no|wait|sorry|please|can you|then)[\s,]+)*(?:close|shut(?:\s+down)?|dissolve|wind up)\b(?![^.?!]*\bdeals?\b)/i, 'update_liquidation'],
+  [/^\s*(?:(?:ok|okay|actually|no|wait|sorry|please|can you|then)[\s,]+)*(?:close|clsoe|cloes|colse|shut(?:\s+down)?|dissolve|wind up)\b(?![^.?!]*\bdeals?\b)/i, 'update_liquidation'],
+  // "PINECRST CAN BE CLOSED NOW", "PINECREST CAN GO NOW CLOSE IT": a close said
+  // after the name went to the company list and was refused (runs 2026-10-22).
+  [/^(?![\s\S]*\b(?:deals?|contracts?)\b)[\s\S]*(?:\b(?:can|should|needs? to|must|is to|ready to|good to) (?:be |get )?(?:closed|shut(?: down)?|dissolved|struck off)\b|\b(?:close|shut) (?:it|them|em|both|all of (?:em|them)) ?(?:now|down|off|pls|please)?\s*[.!]*$)/i, 'update_liquidation'],
   // "reopen relia pa" listed the company and reopened nothing. 2026-10-03.
   [/^\s*(?:ok\s+|okay\s+|please\s+|can you\s+)?(?:reopen|re-open|unclose)\b/i, 'bulk_close_companies'],
   // A PERSON'S DETAIL is looked up every time, never recalled. 2026-10-03.
@@ -2384,6 +2387,18 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
      * engagement letter, then a pay total said "say exactly this" and the
      * answer was what Quarry Lane is owed (overnight held-out run 2026-10-13).
      */
+    /**
+     * "WHAT DO I NEED TO DO NEXT, FROM THE DOCS" IS A QUESTION. She read the next
+     * steps, then put the documents' dates in as deadlines and asked them to
+     * confirm (held-out run 2026-10-22). Nothing is changed unless they asked.
+     */
+    if (turn?.nextStepQuestion && name === 'update_liquidation' && !args.undo) {
+      return {
+        summary: 'NOT CALLED. They asked what to do next, not for a change. Answer from liquidation_next_step: the next '
+          + 'step for each company, with the dates and facts its documents give, naming the document. If a document reads '
+          + 'further on than the page, say so in one line and add: say "update it from the docs".',
+      };
+    }
     if (turn?.docQuestion && ['total_master_sheet', 'breakdown_master_sheet', 'filter_master_sheet', 'audit_master_sheet'].includes(name)) {
       return {
         summary: 'NOT CALLED. They asked about a company\'s documents, not the master sheet: answer from the passages '
@@ -2425,7 +2440,8 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
      * preview stands for, through that tool's own handler and every guard.
      */
     const handed = result?.pending && result.redirect ? tools.find((t) => t.name === result.redirect.name) : null;
-    if (handed && !guessed && !wrote
+    // Its own tool handed back (a winding down `where` held by name) is the same preview, never skipped.
+    if (handed && handed.name !== name && !guessed && !wrote
       && spelledOut(handed.name, handed, result.redirect.args, answering ? recentSaid(history) : lastSaid(history))
       && await autoConfirmOn(turn)) {
       logger.info({ tool: handed.name }, 'diane: auto mode, a spelled out hand over, no confirmation asked');
@@ -2567,7 +2583,7 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
     // A pending another tool will carry out is remembered AS that call, so the
     // "yes" re-runs it and not this one. See handOverCall.
     if (result?.pending) {
-      remember(result.redirect?.name ?? name, result.redirect?.args ?? modelArgs, result.confirming);
+      remember(result.redirect?.name ?? name, result.redirect?.args ?? modelArgs, result.confirming, result.aimedAt);
       if (turn) turn.wrote.set('__pending', true);
     }
     /**
@@ -3603,7 +3619,9 @@ async function runAgentTurn(history, contextName, onEvent) {
    */
   const onlyApplied = heldCalls.length === 1 ? toolResults[toolResults.length - 1] : null;
   if (onlyApplied?.computedReply && onlyApplied.reply
-    && /^\s*(?:y|ya|yes|yep|yeah|yup|ok|okay|sure|go ahead|do it|confirm\w*)[.!\s]*$/i.test(lastSaid(history))) {
+    // Any plain agreement: "yep both", "yh go", "yes all good" took four more
+    // rounds and a claim check that refused the true figures (2026-10-22).
+    && (/^\s*(?:y|ya|yes|yep|yeah|yup|ok|okay|sure|go ahead|do it|confirm\w*)[.!\s]*$/i.test(lastSaid(history)) || agreed(lastSaid(history)))) {
     // The owed figure they asked for with the change, worked out in code
     // after the write: no model round, and never the old figure.
     let owedLine = '';
@@ -3715,6 +3733,9 @@ async function runAgentTurn(history, contextName, onEvent) {
     }).catch(() => null)
     : null;
   if (liqRouted === 'search_company_documents') turnState.docQuestion = true;
+  // A next step asked with no change in it: read only (see nextStepQuestion).
+  if (liqRouted === 'liquidation_next_step'
+    && !/\b(?:update|set|change|fix|correct|move|match|sync|put|save|mark|make|close|dissolve|wind (?:\w+ )?down|reopen)\b/i.test(routeSaid.replace(/\b(?:being |are being |is being )?wound up\b|\bwinding down\b/gi, ' '))) turnState.nextStepQuestion = true;
   /**
    * "ACTUALLY JUST IRONLEAF" TO A WINDING DOWN PREVIEW narrows it, in code
    * (suite 2026-10-21: she said "say yes and I'll do it" with nothing held,
@@ -3724,7 +3745,9 @@ async function runAgentTurn(history, contextName, onEvent) {
     const held = onlyHeld();
     if (held?.name === 'update_liquidation' && Array.isArray(held.args?.items) && context.tools.some((t) => t.name === 'update_liquidation')) {
       // eslint-disable-next-line global-require
-      const items = require('./tools/liquidations').narrowItems(routeSaid, held.args.items);
+      const liq = require('./tools/liquidations');
+      const swapped = await liq.swapItems(routeSaid, held.args.items).catch(() => null);
+      const items = swapped ?? liq.narrowItems(routeSaid, held.args.items);
       if (items) {
         forget(held);
         turnState.model = 'code';
@@ -3732,10 +3755,32 @@ async function runAgentTurn(history, contextName, onEvent) {
         const lines = String(result?.summary ?? '').split('\n').filter((l) => /^\s*(?:•|⚠)/.test(l));
         if (result?.pending && lines.length) {
           logger.info({ kept: items.length }, 'diane: winding down preview narrowed in code');
-          return { reply: `Just ${items.length === 1 ? 'that one' : 'those'} then:\n\n${lines.join('\n')}\n\nShall I go ahead?`, changedRowIds: [], context: context.key, claims: [] };
+          return { reply: `${swapped ? 'Got it, that one instead' : `Just ${items.length === 1 ? 'that one' : 'those'} then`}:\n\n${lines.join('\n')}\n\nShall I go ahead?`, changedRowIds: [], context: context.key, claims: [] };
         }
         if (result?.summary) return { reply: String(result.reply ?? result.summary).replace(/^NOTHING HAS BEEN CHANGED\.\s*/, ''), changedRowIds: [], context: context.key, claims: [] };
       }
+    }
+  }
+  /**
+   * "OK DO IT" TO HER OFFER TO UPDATE THE PAGE FROM THE DOCUMENTS. She offers
+   * in one line and holds nothing (a held preview swallowed the next ask), so
+   * the yes had nothing behind it: she described a close in her own words
+   * with no call, and the next yes only previewed it (blind run 2026-10-22).
+   * The real preview is built here; their next yes saves it.
+   */
+  if (heldCalls.length === 0 && !somethingHeld() && agreed(lastSaid(history).trim())
+    && /update it from the docs|\b(?:want|like) (?:the |its |their )?stages? (?:updated|changed|moved)|say the word and I.?ll show/i.test(String(lastAssistantAnswer(history) ?? ''))
+    && /\b(?:documents?|docs|paperwork|gazette|notice|letter)\b/i.test(String(lastAssistantAnswer(history) ?? ''))
+    && context.tools.some((t) => t.name === 'liquidation_next_step')) {
+    // eslint-disable-next-line global-require
+    const liq = require('./tools/liquidations');
+    const offeredFor = await liq.pageCompanyNamed(String(lastAssistantAnswer(history))).catch(() => null);
+    turnState.model = 'code';
+    const result = await invokeTool(context.tools, 'liquidation_next_step', JSON.stringify({ ...(offeredFor ? { company: offeredFor } : {}), update: true }), history, onEvent, turnState);
+    const lines = String(result?.summary ?? '').split('\n').filter((l) => /^\s*(?:•|⚠)/.test(l));
+    if (result?.pending && lines.length) {
+      logger.info({ company: offeredFor }, 'diane: offer to update from the documents previewed in code');
+      return { reply: `Here's the change from the documents:\n\n${lines.join('\n')}\n\nShall I go ahead?`, changedRowIds: [], context: context.key, claims: [] };
     }
   }
   /**

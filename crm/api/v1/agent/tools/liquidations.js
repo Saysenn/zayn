@@ -131,6 +131,9 @@ function clauseFor(name, text) {
   const key = bare(name).split(' ')[0];
   if (!key) return text;
   const parts = String(text ?? '').split(/[,.;!?]|\b(?:and|oh|also|then)\b/i).filter((p) => fold(p).includes(key));
+  // "QUARRY LANE AND PINECREST BOTH GOT PETITIONS": a part that is only its
+  // name shares what follows, and Quarry Lane lost its petition (regression run 2026-10-22).
+  if (parts.some((p) => !bare(p).replace(bare(name), '').trim())) return text;
   return parts.length ? parts.join(' ') : text;
 }
 
@@ -212,6 +215,14 @@ async function rowsFor(names, said) {
   if (unknown.length) {
     // A company with no deals is only in tb_companies: found by its key.
     for (const name of [...unknown]) {
+      // ONE LETTER FROM ONE PAGE COMPANY is that one, before any company off the
+      // page: "pincrest next step" said Pinecrest was not winding down (held-out run 2026-10-22).
+      const slip = rows.filter((r) => near(fold(r.company_name), fold(name)) || near(bare(r.company_name), bare(name)));
+      if (slip.length === 1 && !(await companiesRepo.findByKey(name).catch(() => null))) { // eslint-disable-line no-await-in-loop
+        if (!found.includes(slip[0])) found.push(slip[0]);
+        unknown.splice(unknown.indexOf(name), 1);
+        continue;
+      }
       // eslint-disable-next-line no-await-in-loop
       const company = await companiesRepo.findByKey(name).catch(() => null) ?? await companyByPart(name) ?? await companyNear(name);
       if (company) { notOnPage.push(company.name); offPage.push({ name: company.name, key: fold(company.name), said: name }); unknown.splice(unknown.indexOf(name), 1); }
@@ -226,8 +237,21 @@ async function rowsFor(names, said) {
       // ONE COMPANY ONE LETTER AWAY is that company: the preview names it in full
       // before anything is saved (suite 2026-10-21: "pinecrst" asked, then "ya" asked again).
       if (close.length === 1) { const hit = rows.find((r) => r.company_name === close[0]); if (!found.includes(hit)) found.push(hit); continue; }
-      if (close.length) corrections.push(`No company called "${name}" on the Winding down page. Did you mean ${close.join(' or ')}?`);
-      else missing.push(name);
+      if (close.length) { corrections.push(`No company called "${name}" on the Winding down page. Did you mean ${close.join(' or ')}?`); continue; }
+      /**
+       * A PERSON SENT AS THE COMPANY: "close the company kiran is at" arrived as
+       * company "Kiran" (held-out run 2026-10-22). Their one company is it;
+       * several are asked about by name.
+       */
+      // eslint-disable-next-line no-await-in-loop
+      const theirs = await personsCompanies(`${fold(name)}'s company`).catch(() => []);
+      if (theirs.length === 1) {
+        const hit = rows.find((r) => bare(r.company_name) === bare(theirs[0]));
+        if (hit) { if (!found.includes(hit)) found.push(hit); } else { notOnPage.push(theirs[0]); offPage.push({ name: theirs[0], key: fold(theirs[0]) }); }
+        continue;
+      }
+      if (theirs.length > 1) { corrections.push(`"${name}" is a person, not a company: they are at ${theirs.slice(0, -1).join(', ')} and ${theirs[theirs.length - 1]}. Which one?`); continue; }
+      missing.push(name);
     }
     if (!corrections.length && sheet.corrections.length && missing.length) corrections.push(...sheet.corrections);
   }
@@ -242,9 +266,10 @@ async function rowsFor(names, said) {
 async function companyByPart(name) {
   const want = bare(name);
   if (want.length < 4) return null;
-  const all = await companiesRepo.findAllPlain().catch(() => []);
-  const hits = all.filter((c) => bare(c.name).startsWith(`${want} `) || bare(c.name) === want);
-  return hits.length === 1 ? companiesRepo.findByKey(fold(hits[0].name)).catch(() => null) : null;
+  // Deal-only companies too (see everyCompany).
+  const all = await everyCompany();
+  const hits = all.filter((n) => bare(n).startsWith(`${want} `) || bare(n) === want);
+  return hits.length === 1 ? companiesRepo.findByKey(fold(hits[0])).catch(() => null) : null;
 }
 
 /**
@@ -254,9 +279,9 @@ async function companyByPart(name) {
 async function companyNear(name) {
   const want = bare(name);
   if (want.length < 5) return null;
-  const all = await companiesRepo.findAllPlain().catch(() => []);
-  const hits = all.filter((c) => near(bare(c.name), want));
-  return hits.length === 1 ? companiesRepo.findByKey(fold(hits[0].name)).catch(() => null) : null;
+  const all = await everyCompany();
+  const hits = all.filter((n) => near(bare(n), want));
+  return hits.length === 1 ? companiesRepo.findByKey(fold(hits[0])).catch(() => null) : null;
 }
 
 function problems({ missing, corrections, notOnPage }) {
@@ -312,9 +337,18 @@ const listLiquidations = {
     // SEVERAL NAMED ("closure status of quarry lane and pinecrest"): a line each.
     if ((args.companies ?? []).length > 1) {
       const { rows, ...rest } = await rowsFor(args.companies, args.said);
-      const stop = problems(rest);
       const lines = [];
       for (const r of rows) lines.push(`• ${line(r, today)}${await aheadNote(r)}`); // eslint-disable-line no-await-in-loop
+      // OFF THE PAGE, where each one IS, never the model's instructions (blind run 2026-10-22).
+      for (const o of rest.offPage) {
+        const c = await companiesRepo.findByKey(o.key).catch(() => null); // eslint-disable-line no-await-in-loop
+        if (!c) continue;
+        const on = c.closed_on ? ` on ${sayDay(String(c.closed_on instanceof Date ? c.closed_on.toISOString() : c.closed_on).slice(0, 10))}` : '';
+        lines.push(c.status === 'closed'
+          ? `• ${c.name}: closed (dissolved${on}), its deals stopped and in the Archive`
+          : `• ${c.name}: not winding down, its status is ${STATUS_LABEL[c.status] ?? c.status}`);
+      }
+      const stop = problems({ ...rest, notOnPage: [] });
       const reply = [lines.join('\n'), stop ? stop.replace('NOTHING HAS BEEN CHANGED. ', '') : null].filter(Boolean).join('\n');
       return { summary: reply, reply, computedReply: true };
     }
@@ -531,12 +565,50 @@ const updateLiquidation = {
     },
   },
   async handler(args = {}) {
-    if (args.undo) return undoLiquidations();
+    if (args.undo) return undoLiquidations(args.confirmed === true);
     const today = currentDay();
     const owners = await repo.owners();
 
     // Who, and what for each.
     let targets = [];
+    // "PINECREST N BRIGHTWELL" arrived as company "N Brightwell" (blind run 2026-10-22).
+    if (Array.isArray(args.items)) {
+      args = { ...args, items: args.items.map((i) => (typeof i?.company === 'string' ? { ...i, company: i.company.replace(/^\s*(?:n|and|&|\+|also|plus)\s+/i, '').replace(/\bln\b/i, 'lane').replace(/\brd\b/i, 'road') } : i)) };
+    }
+    /**
+     * EACH COMPANY'S OWN WORDS SAY CLOSE OR WIND DOWN. "pinecrest can be closed
+     * off and put brightwell into winding down" came as both winding down
+     * (held-out run 2026-10-22). Only before the yes, and the corrected call is
+     * the one held, so the yes saves what the preview showed.
+     */
+    /**
+     * AN OWNER THEY NEVER GAVE: "the OR handed it over, liquidator is Kroll" sent
+     * owner "OR" (the Official Receiver), was refused as no admin, and the
+     * liquidator was never saved (held-out run 2026-10-22). No owner word, no owner.
+     */
+    if (Array.isArray(args.items) && !/\b(?:owner|owned by|owns|assign\w*|give (?:it|them) to|hand (?:it|them) to|handled by|looks? after|looking after|in charge)\b/i.test(`${args.said ?? ''} ${args.saidRecent ?? ''}`)) {
+      args = { ...args, items: args.items.map((i) => (i?.owner && !owners.some((o) => fold(o) === fold(i.owner)) && !/^(?:none|nobody|no one|clear)$/i.test(String(i.owner).trim()) ? (({ owner, ...rest }) => rest)(i) : i)) };
+    }
+    let reworded = false;
+    if (Array.isArray(args.items) && args.confirmed !== true && args.said) {
+      const said = lazy(fold(args.said));
+      args = {
+        ...args,
+        items: args.items.map((i) => {
+          if (typeof i?.company !== 'string' || !['closed', 'liquidation'].includes(STATUS_WORD(i.status) ?? (stageFrom(i.stage) === 'dissolved' ? 'closed' : null))) return i;
+          const own = fold(clauseFor(i.company, said));
+          if (own === said && args.items.length > 1) return i;
+          const closes = /\b(?:close[ds]?|closing|shut|dissolv\w*|struck off)\b/.test(own.replace(/\bclos(?:ing|ed)? (?:down )?(?:status|stage)\b/g, ''));
+          const winds = /\bwind(?:ing)?(?: \w+){0,3}? down\b|\bwinding down\b|\bgoing under\b|\binto liquidation\b|\bgoing bust\b/.test(own);
+          const want = closes && !winds ? 'closed' : winds && !closes ? 'liquidation' : null;
+          const has = STATUS_WORD(i.status) ?? 'closed';
+          if (!want || want === has) return i;
+          reworded = true;
+          const { stage, stageKind, ...rest } = i;
+          return want === 'closed' ? { ...rest, status: 'closed' } : { ...rest, status: 'winding down', ...(stageFrom(stage) && stageFrom(stage) !== 'dissolved' ? { stage, stageKind } : {}) };
+        }),
+      };
+    }
     // "EVERY COMPANY" said as one item with no name, or "all": the same as where {}.
     // "companies in liquidation", "all the companies on the page" too: it was
     // passed as a company name and refused as unknown (suite 2026-10-14).
@@ -716,7 +788,19 @@ const updateLiquidation = {
       return {
         ...pending,
         ...(also ? { summary: `${pending.summary}\n\nTHEY ALSO ASKED, answer it after the preview, word for word: ${also}` } : {}),
+        // "STRIKE OFF IS BACK ON" was asked "compulsory or voluntary?" though the
+        // preview was ready (regression run 2026-10-22): a kind not said stays not set.
+        ...(plan.some((p) => p.set?.stage && STAGE_KINDS[p.set.stage] && !p.set.stageKind && !p.row.stage_kind)
+          ? { summary: `${also ? `${pending.summary}\n\nTHEY ALSO ASKED, answer it after the preview, word for word: ${also}` : pending.summary}\n\nA kind they did not say stays Not set: show the preview as it is, do not ask for the kind.` } : {}),
         aimedAt: plan.map((p) => p.row.company_name),
+        /**
+         * "ALL THE WINDING DOWN ONES" HELD AS THE COMPANIES SHOWN, by name: "not
+         * quarry lane" then had no list to take it out of, and the yes was asked
+         * again (blind run 2026-10-22). The yes also lands on exactly these.
+         */
+        ...(args.where ? { redirect: { name: 'update_liquidation', args: { items: targets.filter((t) => plan.some((p) => p.row.id === t.row.id)).map((t) => t.item) } } } : {}),
+        // Held as corrected (see `reworded`).
+        ...(reworded && !args.where ? { redirect: { name: 'update_liquidation', args: { items: args.items } } } : {}),
       };
     }
 
@@ -863,12 +947,18 @@ async function docsSayKind(rowId, stage, kind) {
  * here, in code, from the page.
  */
 async function alsoAsked(said, changing, today) {
-  const parts = lazy(fold(said)).split(/[.?!;]|\b(?:oh and|and also|also|plus|btw)\b/).filter((p) => /\b(?:whats|what is|status|where are we|how is|hows|stage|is \w+ (?:closed|dissolved|winding))\b/.test(p));
+  const parts = lazy(fold(said)).split(/[.?!;]|\b(?:oh and|and also|also|plus|btw)\b/).filter((p) => /\b(?:whats|what is|status|where are we|where is|how is|hows|how much|who|stage|is \w+ (?:closed|dissolved|winding))\b/.test(p));
   if (!parts.length) return null;
   await loadNames();
   const rows = await repo.list();
   const out = [];
   for (const p of parts) {
+    // A PERSON'S PAY OR A DEAL asked beside the close is the sheet's question:
+    // "whats kiran vale on at brightwell" was answered with Brightwell's stage (blind run 2026-10-22).
+    if (!/\b(?:status|stage|where|happening|going on|closed|closing|dissolved|winding|liquidat\w*|deadline|next)\b/.test(p)) {
+      out.push(`Their other question, "${p.trim()}", is not about winding down: look it up now with the right tool and answer it under the preview.`);
+      continue;
+    }
     const name = pageCompanyIn(p);
     const r = name ? rows.find((x) => bare(x.company_name) === name) : null;
     if (r && !changing.includes(r.company_name)) out.push(`${line(r, today)}${await aheadNote(r)}`); // eslint-disable-line no-await-in-loop
@@ -876,16 +966,37 @@ async function alsoAsked(said, changing, today) {
   return out.length ? out.join('\n') : null;
 }
 
-async function undoLiquidations() {
+async function undoLiquidations(confirmed) {
   const last = await undoRepo.latest('liquidations');
   if (!last) {
     const reply = 'There is no change of mine on the Winding down page to undo.';
     return { summary: reply, reply, computedReply: true };
   }
-  // AT ONCE: "undo that" is the instruction, and it only puts back what she
-  // herself changed. A preview of "back as it was" had nothing in it a yes
-  // could be matched to, so the yes undid nothing (suite, 2026-10-13).
   const { rows = [], comms = [], statuses = [] } = last.restore;
+  /**
+   * SHOWN FIRST, like every undo (his rule; blind run 2026-10-22: "undo that"
+   * reopened a closed company's deals with no word). The held call is this
+   * one with `undo`, so their yes replays it; the 2026-10-13 preview had no
+   * call behind it and the yes undid nothing.
+   */
+  if (!confirmed) {
+    const back = statuses.map((s) => `• ${s.name}: status back to ${STATUS_LABEL[s.status] ?? s.status}${s.status === 'closed' ? '' : s.status === 'liquidation' || s.status === 'active' ? ', its stopped deals live again' : ''}`);
+    const summary = `NOTHING HAS BEEN CHANGED YET. Undo puts back: ${last.summary}.${back.length ? `\n${back.join('\n')}` : ''}`
+      + `${comms.length ? `\n• ${comms.length} contact log ${comms.length === 1 ? 'line' : 'lines'} taken out` : ''}\nShow this and ask "Shall I undo it?"; call again with confirmed true only after their yes.`;
+    // What her words are matched to, so the yes finds this held call (blind run
+    // 2026-10-22: with neither, the yes said "that confirmation has expired").
+    // A fields only undo names its companies through their page rows (regression run 2026-10-22).
+    const page = rows.length ? await repo.list().catch(() => []) : [];
+    const aimedAt = [...new Set([...statuses.map((s) => s.name), ...rows.map((r) => page.find((p) => p.id === r.id)?.company_name).filter(Boolean)])];
+    return {
+      pending: true, summary, confirming: `${last.summary} ${back.join(' ')}`,
+      // The companies named, which is what her words are matched on (confirmReplay remember).
+      aimedAt,
+      // Held as THIS undo, whichever tool showed it: replaying the master sheet's
+      // undo put back a review flag instead (regression run 2026-10-22).
+      redirect: { name: 'update_liquidation', args: { undo: true } },
+    };
+  }
   // The statuses first, newest last undone first: a dissolve reopens its deals.
   for (const s of [...statuses].reverse()) {
     // eslint-disable-next-line no-await-in-loop
@@ -1310,7 +1421,10 @@ const liquidationNextStep = {
     + 'out for every company on the page. Read only.',
   parameters: {
     type: 'object',
-    properties: { company: { type: 'string', description: 'One company as they named it; leave out for all.' } },
+    properties: {
+      company: { type: 'string', description: 'One company as they named it; leave out for all.' },
+      update: { type: 'boolean', description: 'Code only: their yes to your offer to update the page from the documents.' },
+    },
   },
   async handler(args = {}) {
     const today = currentDay();
@@ -1347,7 +1461,7 @@ const liquidationNextStep = {
     // ONLY WHEN THEY ASKED whether the page is right or to update it from the
     // paper: a held preview swallowed a page-wide rundown and the next edit
     // asked after it (suite 2026-10-21).
-    const askedForIt = /\b(?:right|correct|accurate|up to date|wrong|match\w*|sync|update|fix|set)\b|\bcheck\b[^.?!]*\b(?:docs?|documents?|paperwork|papers|files?)\b|\b(?:docs?|documents?|paperwork) say\b/i.test(String(args.said ?? ''));
+    const askedForIt = args.update === true || /\b(?:right|correct|accurate|up to date|wrong|match\w*|sync|update|fix|set)\b|\bcheck\b[^.?!]*\b(?:docs?|documents?|paperwork|papers|files?)\b|\b(?:docs?|documents?|paperwork) say\b/i.test(String(args.said ?? ''));
     const preview = offers.length && askedForIt
       ? await updateLiquidation.handler({ items: offers, said: args.said, saidRecent: args.saidRecent, confirmed: false }).catch(() => null)
       : null;
@@ -1374,6 +1488,8 @@ const liquidationNextStep = {
         + (rows.length > MAX_ROWS ? `\n\n…and ${rows.length - MAX_ROWS} more on the Winding down page.` : ''),
     };
     if (!preview?.pending) return body;
+    // THEIR YES TO THE OFFER: the preview alone, nothing to answer around it.
+    if (args.update === true) return { ...preview, redirect: { name: 'update_liquidation', args: { items: offers } } };
     // THE YES RE-RUNS THE UPDATE, not this read (runAgent `redirect`).
     return { ...preview, summary: `${body.summary}\n\n${preview.summary}`, redirect: { name: 'update_liquidation', args: { items: offers } } };
   },
@@ -1401,7 +1517,7 @@ async function namesADocument(said) {
 }
 
 // What is on the Winding down page, by name, for routing: its companies,
-// their liquidators and their documents. Looked up once a 30 seconds.
+// their liquidators and their documents. Looked up once every 5 seconds.
 let pageNames = { at: 0, companies: [], liquidators: [] };
 async function loadNames() {
   if (Date.now() - docNames.at > 30_000) {
@@ -1409,16 +1525,74 @@ async function loadNames() {
     const { rows } = await pool.query('SELECT DISTINCT file_name FROM tb_liquidation_docs WHERE removed_at IS NULL').catch(() => ({ rows: [] }));
     docNames = { at: Date.now(), names: rows.map((r) => fold(r.file_name).replace(/\.[a-z0-9]+$/, '')).filter((n) => n.length >= 4) };
   }
-  if (Date.now() - pageNames.at > 30_000) {
+  // Five seconds, not thirty: a company put on the page or added a moment ago
+  // was not known by name yet (blind run 2026-10-22). Two small local queries.
+  if (Date.now() - pageNames.at > 5_000) {
     const rows = await repo.list().catch(() => []);
     pageNames = {
       at: Date.now(),
       companies: rows.map((r) => bare(r.company_name)).filter((n) => n.length >= 3),
       // "Begbies Traynor" is said "begbies": its first word is enough.
       liquidators: [...new Set(rows.map((r) => fold(r.liquidator).split(' ')[0]).filter((n) => n.length >= 4))],
+      // EVERY COMPANY, whatever its status: "is ironleaf closing" asks about one off the page.
+      every: (await everyCompany()).map((n) => bare(n)).filter((n) => n.length >= 3),
     };
   }
 }
+
+/**
+ * EVERY COMPANY, AS WRITTEN: those with a record of their own and those only
+ * on their deals (the suite's Ironleaf has no tb_companies row, and "quarry
+ * lane ironleaf harbor nine any of em closing" answered Quarry Lane alone).
+ */
+async function everyCompany() {
+  const [own, onDeals] = await Promise.all([
+    companiesRepo.findAllPlain().catch(() => []), companiesRepo.names().catch(() => []),
+  ]);
+  const out = new Map();
+  for (const n of [...own.map((c) => c.name), ...onDeals.map((c) => c.name)]) if (n && !out.has(bare(n))) out.set(bare(n), n);
+  return [...out.values()];
+}
+
+/**
+ * EVERY COMPANY NAME, read now: a company added seconds before was not in
+ * the cached list, and "is harbour closing" listed the whole page instead of
+ * asking which (blind run 2026-10-22, twice). One small local query.
+ */
+async function freshNames() {
+  await loadNames();
+  pageNames.every = (await everyCompany()).map((n) => bare(n)).filter((n) => n.length >= 3);
+  pageNames.companies = (await repo.list().catch(() => [])).map((r) => bare(r.company_name)).filter((n) => n.length >= 3);
+}
+
+// "harbour" is "harbor": one spelling either side, for matching only.
+const spelt = (t) => t.replace(/our\b/g, 'or');
+
+/**
+ * EVERY COMPANY THEIR WORDS NAME, on the page or not (blind run 2026-10-22:
+ * "quarry lane ironleaf harbor nine any of em closing" answered Quarry Lane
+ * alone). A first word that starts two companies ("is harbour closing" with
+ * Harbor Nine and Harbor View) is `ambiguous`, to be asked about.
+ */
+function companiesNamedIn(text) {
+  const names = pageCompaniesIn(text);
+  let rest = spelt(text);
+  for (const n of names) rest = rest.replace(new RegExp(`\\b${escapeRe(spelt(n))}\\b|\\b${escapeRe(spelt(n).split(' ')[0])}s?\\b`, 'g'), ' ');
+  const others = pageNames.every.filter((n) => !names.includes(n));
+  for (const n of others.filter((x) => new RegExp(`\\b${escapeRe(spelt(x))}(?:'?s)?\\b`).test(rest))) {
+    names.push(n);
+    rest = rest.replace(new RegExp(`\\b${escapeRe(spelt(n))}\\b`, 'g'), ' ');
+  }
+  const ambiguous = [];
+  const words = rest.split(/[^a-z0-9]+/).filter((w) => w.length >= 4);
+  for (const w of [...new Set(words)]) {
+    const starts = others.filter((n) => !names.includes(n) && spelt(n).split(' ')[0] === w);
+    if (starts.length === 1 && w.length >= 5 && !['quarry', 'harbor', 'north', 'south', 'social', 'global'].includes(w)) names.push(starts[0]);
+    else if (starts.length > 1) ambiguous.push(w);
+  }
+  return { names, ambiguous };
+}
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /** The page row holding a document their words name, when exactly one does. */
 async function companyOfNamedDoc(said, rows) {
@@ -1449,12 +1623,17 @@ const ASK_START = /\?\s*$|^\s*(?:what|whats|what's|which|who|whos|who's|how|hows
 const CHANGE = /\b(?:set|change|move|push|bring forward|update|make|mark|rename|remove|delete|add|log|note that|put|save|file|upload|attach)\b/;
 // A CHANGE OF STATUS said anywhere in the message: never answered by a read in code.
 const MOVES = /\b(?:close|closing|closed? (?:it|them|em)|wind(?:ing)? (?:\w+ ){0,3}?down|dissolve|strike (?:\w+ )?off|archive|stop|reopen|resume|put (?:\w+ ){0,3}?(?:in|into|on)|move|take (?:\w+ ){0,3}?off)\b/;
+/** A change ordered in the words, "closing" and "winding down" as where it is taken out (see liquidationRoute). */
+const ordered0 = (text) => MOVES.test(text.replace(/\bclos(?:ing|ed)\b(?! (?:it|them|em|down|off|up)\b)/g, ' ')
+  .replace(/\b(?:is|are|be|being|been|thats|that is|that are|ones|still|currently|already|which|any)(?: \w+){0,3}? winding down\b|\bwinding down (?:ones|companies|page|stage|list)\b/g, ' '));
 /** Lazy spellings to their words: "wats up w/ the winding down ones" (browser 2026-10-21). */
 const lazy = (t) => t.replace(/\bwh?at'?s\b/g, 'whats').replace(/\bwat\b/g, 'what').replace(/\bw\/\s*|\bw (?=the|them|it|our|that|this)/g, 'with ')
-  .replace(/\bpls\b|\bplz\b/g, 'please').replace(/\bu\b/g, 'you').replace(/\br\b/g, 'are').replace(/\bthx\b/g, '');
+  .replace(/\bpls\b|\bplz\b/g, 'please').replace(/\bu\b/g, 'you').replace(/\br\b/g, 'are').replace(/\bthx\b/g, '')
+  // "wheres quarry lane at", "pinecrest n brightwell", "how many rn" (blind run 2026-10-22).
+  .replace(/\bwhere'?s\b/g, 'where is').replace(/\b(?:clsoe|cloes|colse)\b/g, 'close').replace(/\bln\b/g, 'lane').replace(/\bn\b/g, 'and').replace(/\brn\b/g, 'right now');
 const asksAtAll = (text) => ASK_START.test(text) || /\b(?:what|whats|what's|which|who|how|when|whens)\b/.test(text);
 // ASKING WHAT TO DO NEXT, however it is said.
-const NEXT_STEP = /\b(?:next steps?|whats? next|what'?s next|what now|what do (?:we|i) do|what (?:should|shall|must|can) (?:we|i)|what (?:do|does) (?:we|i|it) need|what needs (?:doing|to happen|to be done)|where (?:are|do) we (?:at|go|stand)|where we (?:are|stand)|how do we (?:proceed|close|finish|wrap)|game ?plan|action plan|to ?do list|todos?|advise|advice|recommend\w*|outstanding|what'?s left|whats left|what is left|left to do|what to do|nxt|wat now|wats nxt|what happens (?:next|now|if|when)|if we do nothing|most urgent|urgent|priorit\w*|deal with first|(?:is|are) (?:the )?(?:page|stage|stages|it|they|everything) (?:right|correct|up to date|accurate)|up to date with the (?:docs|documents|paperwork)|(?:check|go through|read|look at|review) (?:the |their |its |all (?:the )?|every )?(?:docs|documents|paperwork|papers|files)|where are we)\b/;
+const NEXT_STEP = /\b(?:next steps?|whats? next|what'?s next|what now|what do (?:we|i) do|what (?:should|shall|must|can) (?:we|i)|what (?:do|does) (?:we|i|it) need|what needs (?:doing|to happen|to be done)|where (?:are|do) we (?:at|go|stand)|where we (?:are|stand)|how do we (?:proceed|close|finish|wrap)|game ?plan|action plan|to ?do list|todos?|advise|advice|recommend\w*|outstanding|what'?s left|whats left|what is left|left to do|what to do|nxt|wat now|wats nxt|what happens (?:next|now|if|when)|(?:gotta|got to|have to|need to|needs to|should|must) (?:do|happen|be done)(?: next)?|(?:do|doing|happen\w*) next|run me (?:thru|through)|walk me (?:thru|through)|if we do nothing|most urgent|urgent|priorit\w*|deal with first|(?:is|are) (?:the )?(?:page|stage|stages|it|they|everything) (?:right|correct|up to date|accurate)|up to date with the (?:docs|documents|paperwork)|(?:check|go through|read|look at|review) (?:the |their |its |all (?:the )?|every )?(?:docs|documents|paperwork|papers|files)|where are we)\b/;
 // "UPDATE THE STAGES FROM THE DOCS": read them first, then the change.
 const FROM_DOCS = /\b(?:from|per|according to|based on|going by|match(?:ing)?|in line with|off) (?:the |their |its |what the )?(?:docs|documents|paperwork|papers|letters|files)\b|\b(?:docs|documents|paperwork|papers) say\b/;
 // A CHANGE SAID WITH IT stays a change: "set the next action to …".
@@ -1485,6 +1664,37 @@ function pageCompanyIn(text) {
   const one = firsts.filter(([, f]) => at(f) < Infinity && firsts.filter(([, g]) => g === f).length === 1)
     .sort((a, b) => at(a[1]) - at(b[1]));
   return one[0]?.[0];
+}
+
+/**
+ * A COMPANY NAMED THROUGH ITS PERSON: "where are we with nell ardens company",
+ * "what about theo brandts one", "the one kiran's at" (held-out run 2026-10-22:
+ * each searched for a company called "Nell Ardens"). Their companies, as the
+ * deals write them; none when the person has none or is not one person.
+ */
+async function personsCompanies(text) {
+  const said = [
+    text.match(/\b(?:the one|the company|the place|the firm|where) ([a-z]+(?: [a-z]+)?)(?:'s| is| are)? (?:at|in|with|works? (?:at|for))\b/),
+    text.match(/\b([a-z]+(?: [a-z]+)?)(?:'s|s'|s)? (?:company|companies|one|firm|place|business|lot)\b/),
+  ].filter(Boolean).map((m) => m[1].replace(/^(?:with|about|on|for|of|and|is|are|the) /, '').replace(/ (?:works?|is|are|was)$/, ''))
+    .find((x) => x.length >= 3 && !/^(?:the|that|this|which|other|same|first|last|next|winding|closed|active|one)\b/.test(x));
+  if (!said) return [];
+  const pool = require('../../../configs/db'); // eslint-disable-line global-require
+  const { rows } = await pool.query(
+    `SELECT DISTINCT person_name, btrim(company) AS company FROM tb_mastersheet
+     WHERE company IS NOT NULL AND btrim(company) <> '' AND (lower(person_name) = $1 OR lower(person_name) = $2 OR split_part(lower(person_name), ' ', 1) = $1)`,
+    [said, said.replace(/s$/, '')],
+  ).catch(() => ({ rows: [] }));
+  if (new Set(rows.map((r) => fold(r.person_name))).size !== 1) return [];
+  return [...new Set(rows.map((r) => r.company))];
+}
+
+/** The page company a text names, as the page writes it, or null. */
+async function pageCompanyNamed(text) {
+  await loadNames();
+  const c = pageCompanyIn(lazy(fold(text)));
+  if (!c) return null;
+  return (await repo.list()).find((r) => bare(r.company_name) === c)?.company_name ?? null;
 }
 
 /** Every page company their words name, in their order. */
@@ -1521,9 +1731,33 @@ async function liquidationRoute(said, { hasFiles = false } = {}) {
   // "WHATS THE DEADLINE TO SORT HMRC OUT": the documents' dates as well as
   // the page's one (suite 2026-10-21: "no deadline" while HMRC's letter had one).
   if (company && asksAtAll(text) && /\b(?:deadlines?|due|by when|how long|time left|when (?:do|must|should|have) we)\b/.test(text) && !CHANGE.test(text.replace(ASK_START, ''))) return 'liquidation_next_step';
+  // "WHICH ONES ARE NEARLY DONE": the furthest along, from the documents (blind run 2026-10-22).
+  if (!company && /\b(?:nearly|almost|close to) (?:done|finished|closed|over|there|dissolved)\b|\bfurthest along\b|\bclosest to (?:closing|done|finish\w*|the end)\b/.test(text)
+    && !/\b(?:deals?|contracts?|people|staff|invoices?|payments?|expenses?)\b/.test(text)) return 'liquidation_next_step';
+  /**
+   * WHERE A COMPANY IS AT, asked any way: "wheres quarry lane at", "is
+   * pinecrest closed now", "status on everything thats closing", "how many r
+   * winding down rn" (blind run 2026-10-22: each went to the sheet or was
+   * asked back). "Closing" and "winding down" here are where it is, not an order.
+   */
+  // "WHAT ABOUT THEO BRANDTS ONE": a follow up through a person (held-out run 2026-10-22).
+  if (/^\s*(?:(?:and|so|ok|okay)\s+)?(?:what about|how about|hows|how is)\b/.test(text) && !ordered0(text) && (await personsCompanies(text)).length) return 'list_liquidations';
+  const asking = asksAtAll(text) || /^\s*(?:status|update|progress|where)\b|\bwhere (?:is|are)\b/.test(text)
+    || /\bany (?:of (?:em|them|these|those) )?(?:closing|closed|winding down|in liquidation|going under)\b/.test(text);
+  const ordered = ordered0(text);
+  if (asking && !ordered && !CHANGE.test(text.replace(ASK_START, ''))
+    && /\b(?:status|stages?|where (?:is|are)|how far|how many|closing|closed|shut|dissolved|wound up|winding down|in liquidation|going under|liquidated|finished|done|still (?:going|trading|open|running|active|alive|around|with us)|gone (?:under|bust))\b/.test(text)
+    && !NEXT_STEP.test(text.replace(/\bwhere (?:are|do) we (?:at|stand)\b|\bwhere (?:we are|are we)\b/g, ''))) {
+    await freshNames();
+    const named = companiesNamedIn(text);
+    if (named.names.length || named.ambiguous.length) return 'list_liquidations';
+    if ((await personsCompanies(text)).length) return 'list_liquidations';
+    if (pageWide || /\b(?:closing|winding down|in liquidation|going under)\b/.test(text)) return 'list_liquidations';
+  }
   // "WHATS HAPPENING WITH THE WINDING DOWN ONES": the whole page, with its next steps.
   // A STATUS QUESTION WITH A CHANGE IN IT is the model's whole request.
-  if (MOVES.test(text) && !/^\s*(?:what|whats|which|who|how|is|are|any|when)\b/.test(text)) return null;
+  // "the ones winding down" is where they are, not an order (see `ordered`).
+  if (ordered && !/^\s*(?:what|whats|which|who|how|is|are|any|when)\b/.test(text)) return null;
   // "WHATS THE CURRENT LIQUIDATION STATUS": every company, in code, at once.
   if (!company && (pageWide || liqWords || /\bliquidation\b/.test(text)) && asksAtAll(text) && /\b(?:status|stages?|where (?:are we|we are)|state)\b/.test(text)
     && !/\b(?:next|should|do we|to do|needs?)\b/.test(text) && !CHANGE.test(text.replace(ASK_START, ''))) return 'list_liquidations';
@@ -1595,9 +1829,20 @@ async function liquidationPlan(said, { hasFiles = false } = {}) {
   const rows = await repo.list();
   const row = company ? rows.find((r) => bare(r.company_name) === company) : null;
   if (tool === 'list_liquidations') {
-    const named = pageCompaniesIn(text);
+    await freshNames();
+    const { names: found, ambiguous } = companiesNamedIn(text);
+    // Through the person when no company is named ("nell ardens company").
+    const named = found.length ? found : (await personsCompanies(text)).map((n) => bare(n));
     if (named.length > 1) return { tool, args: { companies: named.map((n) => rows.find((r) => bare(r.company_name) === n)?.company_name ?? n) } };
     if (row) return { tool, args: { company: row.company_name } };
+    if (named.length === 1) return { tool, args: { company: named[0] } };
+    // "IS HARBOUR CLOSING" with two Harbors: which one, in code.
+    if (ambiguous.length) {
+      const which = pageNames.every.filter((n) => spelt(n).split(' ')[0] === ambiguous[0]);
+      const all = await everyCompany();
+      const full = which.map((n) => all.find((c) => bare(c) === n) ?? n);
+      return { reply: `Which one do you mean: ${full.slice(0, -1).join(', ')} or ${full[full.length - 1]}?` };
+    }
     return FILTER_WORDS.test(text) ? null : { tool, args: {} };
   }
   if (tool === 'liquidation_document' && row) {
@@ -1629,8 +1874,28 @@ function narrowItems(said, items) {
   return out.length && out.length < items.length ? out : null;
 }
 
+/**
+ * "WAIT NO NOT QUARRY LANE, PINECREST": the held change moved to the company
+ * they meant (held-out run 2026-10-22: she read Pinecrest out and the yes had
+ * nothing). One company named that is not held, and a no to one that is.
+ */
+async function swapItems(said, items) {
+  const text = lazy(fold(said));
+  if (!/^\s*(?:(?:wait|sorry|oops|ah|ugh|hang on)[\s,.!]*)*(?:no|nah|not|wrong one|i meant|meant|scratch that)\b/.test(text)) return null;
+  await freshNames();
+  const { names } = companiesNamedIn(text);
+  const held = new Set(items.map((i) => bare(i.company)));
+  const fresh = names.filter((n) => !held.has(n));
+  const dropped = items.filter((i) => names.includes(bare(i.company)));
+  if (fresh.length !== 1 || (items.length > 1 && dropped.length !== 1)) return null;
+  const from = items.length === 1 ? items[0] : dropped[0];
+  const all = await everyCompany();
+  const to = { ...from, company: all.find((n) => bare(n) === fresh[0]) ?? fresh[0] };
+  return items.map((i) => (i === from ? to : i));
+}
+
 module.exports = {
-  narrowItems,
+  narrowItems, pageCompanyNamed, swapItems,
   namesADocument, liquidationRoute, liquidationPlan, namesList, asNews, kindFrom, cleanItem,
   liquidationTools, listLiquidations, updateLiquidation, liquidationDocument, searchCompanyDocuments, readCompanyDocument, liquidationNextStep, stageFrom,
 };

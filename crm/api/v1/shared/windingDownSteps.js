@@ -203,7 +203,12 @@ const rankOf = (stage, kind) => (stage === 'hmrc_liq' && kind === 'winding_up_or
 
 /** The stage one document reads like, or null. */
 function stageInText(text) {
-  const t = String(text ?? '');
+  /**
+   * WHAT MAY HAPPEN IS NOT WHAT HAS: a petition hearing notice says "the court
+   * may make a winding-up order" and was read as the order itself (held-out run
+   * 2026-10-22). A step said as a possibility, a request or a threat is taken out.
+   */
+  const t = String(text ?? '').replace(/\b(?:may|might|could|can|will|would|shall|seek\w*|ask\w* for|appl\w* for|apply for|for|risk\w*|avoid|prevent|face|facing|unless|before)\s+(?:\w+\s+){0,3}?(?:a\s+|an\s+|the\s+)?(?:winding[\s-]?up order|compulsory liquidation|official receiver)\b/gi, ' ');
   for (const [re, stage, kind] of EVIDENCE) {
     if (re.test(t)) {
       // "voluntary" or "compulsory" said with the proposal.

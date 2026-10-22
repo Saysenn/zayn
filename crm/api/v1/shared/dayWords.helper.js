@@ -37,7 +37,9 @@ function dayFrom(said, today) {
   if (m) { const d = valid(+m[1], +m[2] - 1, +m[3]); return d ? iso(d) : null; }
 
   if (text === 'today') return iso(now);
-  if (text === 'tomorrow') return iso(addDays(now, 1));
+  if (text === 'tomorrow' || text === 'tmrw' || text === 'tmr') return iso(addDays(now, 1));
+  // "appointed yday": a log line's day is often the past (held-out run 2026-10-22).
+  if (text === 'yesterday' || text === 'yday' || text === 'yest') return iso(addDays(now, -1));
 
   // "in 2 weeks", "in two weeks", "a week from today", "3 days time", "in a month".
   m = /^(?:in )?(\d{1,3}|an?|one|two|three|four|five|six|seven|eight|nine|ten|fourteen) (day|days|week|weeks|month|months)(?:'? time| from (?:today|now))?$/.exec(text);

@@ -128,8 +128,11 @@ test('BULK: the same change to every company matching `where`', { skip: skip() }
 });
 
 test('UNDO puts the last change back, the contact line included', { skip: skip() }, async () => {
-  // At once: "undo that" is the instruction (no preview to match a yes to).
-  const out = await updateLiquidation.handler({ undo: true });
+  // Shown first, like every undo (his rule, 2026-10-22); the yes replays this call.
+  const shown = await updateLiquidation.handler({ undo: true });
+  assert.equal(shown.pending, true);
+  assert.match(shown.summary, /NOTHING HAS BEEN CHANGED YET/);
+  const out = await updateLiquidation.handler({ undo: true, confirmed: true });
   assert.match(out.reply, /^Undone/);
   const a = (await pool.query("SELECT * FROM tb_liquidations WHERE company_key = 'zz diane liq alpha'")).rows[0];
   assert.equal(a.stage, null);

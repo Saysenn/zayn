@@ -244,7 +244,9 @@ write('two companies struck off in one yes, and undo brings both back', [
     statusIs('quarry lane', 'closed'), stageIs('quarry lane', 'dissolved', 'struck_off'), liveIs('quarry lane', 0),
     statusIs('pinecrest', 'closed'), stageIs('pinecrest', 'dissolved', 'struck_off'), liveIs('pinecrest', 0),
   ) } },
-  { say: 'undo that', expect: { db: all(statusIs('quarry lane', 'liquidation'), statusIs('pinecrest', 'liquidation'), liveKept('quarry lane'), liveKept('pinecrest')) } },
+  // Undo shows first, like every undo (his rule, 2026-10-22).
+  { say: 'undo that', expect: { db: all(statusIs('quarry lane', 'closed'), statusIs('pinecrest', 'closed')) } },
+  { say: 'yes', expect: { db: all(statusIs('quarry lane', 'liquidation'), statusIs('pinecrest', 'liquidation'), liveKept('quarry lane'), liveKept('pinecrest')) } },
 ]);
 write('a messy status mix: one in with a petition, one dissolved after liquidation, one deadline', [
   { say: 'hmrc petitioned ironleaf so put it into winding down, pinecrest is dissolved after the liquidation finished, and quarry lane deadline is friday', expect: { db: unmoved('ironleaf', 'pinecrest', 'quarry lane') } },
@@ -282,7 +284,8 @@ write('back to active takes its deals off the review', [
 write('undo puts a company back out of winding down', [
   { say: 'harbor nine is going into a members voluntary liquidation', expect: { db: unmoved('harbor nine') } },
   { say: 'yes', expect: { db: all(statusIs('harbor nine', 'liquidation'), stageIs('harbor nine', 'own_liq', 'mvl')) } },
-  { say: 'undo that', expect: { db: statusIs('harbor nine', 'active') } },
+  { say: 'undo that', expect: { db: statusIs('harbor nine', 'liquidation') } },
+  { say: 'yes', expect: { db: statusIs('harbor nine', 'active') } },
 ]);
 write('a messy order: stage, deadline in words, a call, and another company\'s owner', [
   { say: 'quarry lane went hmrc liq, deadline friday, begbies rang asking for bank statements. oh and pinecrest owner is suite-admin', expect: { db: untouched } },

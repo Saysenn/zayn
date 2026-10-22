@@ -10145,6 +10145,21 @@ const updateCompany = {
     // "CLOSE X" CAME HERE AND WAS SENT AWAY; she then asked an either/or the
     // yes could not answer (suite 2026-10-21). The close's own preview now.
     if (fields.status === 'closed') return handToWindingDown([{ company: name, status: 'closed' }], args);
+    /**
+     * A CLOSED COMPANY BROUGHT BACK SHOWS FIRST. "quarry lane is trading again,
+     * can we reopen it" set it active and put its deals back with no word
+     * (held-out run 2026-10-22). Reopening is the close's own door, previewed.
+     */
+    if (fields.status && fields.status !== 'closed' && args.confirmed !== true) {
+      const was = await companiesRepo.findByKey(name).catch(() => null);
+      if (was?.status === 'closed') {
+        // eslint-disable-next-line global-require
+        const { bulkCloseCompanies } = require('./companies');
+        const reopen = { companies: [was.name], status: 'active' };
+        const preview = await bulkCloseCompanies.handler({ ...reopen, confirmed: false, said: args.said, saidRecent: args.saidRecent }).catch(() => null);
+        if (preview?.pending) return { ...preview, redirect: { name: 'bulk_close_companies', args: reopen } };
+      }
+    }
     if (fields.status === 'closed') {
       return {
         summary: `NOTHING HAS BEEN CHANGED. A company is dissolved only on the Winding down page. If ${name} `
@@ -11105,10 +11120,14 @@ const undoChange = {
       };
       if (mine && Date.now() - new Date(mine.created_at).getTime() < 15 * 60 * 1000
         && (!lastChange || new Date(mine.created_at) > new Date(lastChange))) {
-        // THE WINDING DOWN PAGE'S UNDO RUNS AT ONCE (its own rule), so it is
-        // done here: "undo that" was answered with an offer (suite 2026-10-21).
-        // eslint-disable-next-line global-require
-        if (mine.kind === 'liquidations') return require('./liquidations').updateLiquidation.handler({ undo: true });
+        // THE WINDING DOWN PAGE'S UNDO, shown here and replayed by their yes:
+        // "undo that" was answered with an offer (suite 2026-10-21), and ran
+        // with no word at all (blind run 2026-10-22).
+        if (mine.kind === 'liquidations') {
+          // eslint-disable-next-line global-require
+          const shown = await require('./liquidations').updateLiquidation.handler({ undo: true, confirmed: false });
+          return shown;
+        }
         return {
           summary: `NOTHING HAS BEEN UNDONE. The last change was ${mine.summary}, not the master sheet. `
             + `Call ${UNDO_TOOL[mine.kind]} now. Do not offer to undo a sheet change.`,

@@ -40,7 +40,8 @@
  */
 // "GO BACK TO WHAT IT WAS" is an undo, never a "go". It was refused as a yes
 // to nothing and the change stayed. 2026-10-04.
-const AGREED = /^(y|ya|yes|yep|yeah|yup|ok|okay|sure|go(?!\s+back\b)|go ahead|do it|confirm|confirmed|please do|proceed|correct|right|that's right|thats right|apply|save|send it)\b/i;
+// "ye", "yh go", "yea" are a yes too: each was a close never saved (blind run 2026-10-22).
+const AGREED = /^(y|ya|yes+|yep|yeah|yup|ye|yea|yeh|yh|aye|yas|k|kk|ok|okay|sure|go(?!\s+back\b)|go on|go ahead|do it|lets do it|let's do it|confirm|confirmed|please do|proceed|correct|right|that's right|thats right|apply|save|send it|sounds good|all good|deffo|defo)\b/i;
 
 // A "but" or a question turns agreement into a discussion.
 const NOT_PLAIN = /\b(but|except|although|instead|change|wait|hold|no)\b|\?/i;
@@ -405,7 +406,7 @@ function argFields(args) {
 const FIELD_NAMES = /\b(monthly amount|payable amount|payable days|should be paid|paid|currency|payment method|fee|add on|preset|end date|payment start|appointment|label|notes?|location|special case|postcode|door number|bank|account number|sort code|role|needs review|status)\b/gi;
 const fieldsIn = (text) => new Set((String(text ?? '').match(FIELD_NAMES) ?? []).map((f) => f.toLowerCase().replace(/^notes$/, 'note')));
 
-function remember(name, args, confirming) {
+function remember(name, args, confirming, named) {
   if (!confirming) return;
   /**
    * A GROUP CHANGE NAMES NOBODY. "set notes to \"checked\"" over CORVID has
@@ -424,6 +425,8 @@ function remember(name, args, confirming) {
     ]
       .filter((x) => typeof x === 'string' && x.trim())
       .map((x) => x.trim().replace(/^./, (c) => c.toUpperCase()));
+    // Who a result says it is aimed at, when its args name nobody (a winding down undo).
+    if (Array.isArray(named)) aimed.push(...named.filter((x) => typeof x === 'string' && x.trim()));
     if (aimed.length) aimedAt = aimed;
   }
   const mine = peopleIn(confirming);
@@ -445,7 +448,10 @@ function remember(name, args, confirming) {
     const first = REMEMBERED.find((r) => r.turn === TURN && r.name === 'update_liquidation'
       && Array.isArray(r.args?.items) && !r.args.undo && !r.args.where);
     if (first) {
-      first.args = { ...first.args, items: [...first.args.items, ...args.items] };
+      // The same company again replaces its line, never a second one (2026-10-22: Pinecrest held twice).
+      const key = (i) => String(i?.company ?? '').toLowerCase().trim();
+      const newer = new Set(args.items.map(key));
+      first.args = { ...first.args, items: [...first.args.items.filter((i) => !newer.has(key(i))), ...args.items] };
       first.confirming = `${first.confirming}\n${confirming}`;
       return;
     }
