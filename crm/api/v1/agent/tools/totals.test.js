@@ -139,7 +139,8 @@ test('the excluded row says WHY, and it is not "another month"', () => {
   // Its preset IS August. Saying "marked for another month" about it is
   // simply false, and it is the sentence she reached for.
   const { uncounted } = moneyTotals(NICOLA_LIVE, '2026-08');
-  assert.equal(uncounted[0].why, 'payment starts 3 November 2026, after August 2026');
+  // Said as a person says it (his call 2026-10-22).
+  assert.equal(uncounted[0].why, 'payment will only start in November');
   assert.ok(!/another month/.test(uncounted[0].why));
 });
 
@@ -147,12 +148,6 @@ test('the display answer puts paid deals first, uses no bullets, and ends with t
   const [year, part] = THIS_MONTH.split('-').map(Number);
   const futureDate = new Date(Date.UTC(year, part + 1, 3));
   const futureIso = futureDate.toISOString().slice(0, 10);
-  const futureWords = futureDate.toLocaleDateString('en-GB', {
-    day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC',
-  });
-  const currentWords = new Date(`${THIS_MONTH}-01T00:00:00Z`).toLocaleDateString('en-GB', {
-    month: 'long', year: 'numeric', timeZone: 'UTC',
-  });
   const rows = NICOLA_LIVE.map((row) => ({
     ...row,
     preset_on: `${THIS_MONTH}-01`,
@@ -181,7 +176,7 @@ test('the display answer puts paid deals first, uses no bullets, and ends with t
     assert.ok(out.reply.indexOf('Ackerman Pearce payroll: GBP 1,400') < out.reply.indexOf('Social work partners PR'));
     assert.match(
       out.reply,
-      new RegExp(`Social work partners PR is GBP 0 because payment starts ${futureWords}, after ${currentWords}\\.$`),
+      new RegExp(`Social work partners PR is GBP 0 since payment will only start in ${futureDate.toLocaleDateString('en-GB', { month: 'long', timeZone: 'UTC' })}${futureDate.getUTCFullYear() === year ? '' : ` ${futureDate.getUTCFullYear()}`}\\.$`),
     );
   } finally {
     repo.searchFuzzy = saved.searchFuzzy;

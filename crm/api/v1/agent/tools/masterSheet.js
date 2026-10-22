@@ -3820,8 +3820,15 @@ function paymentReason(row, month, { useEndDate = false, owed = null, forMonth =
   if (!isOwed) {
     const period = periodFor(row, { useEndDate });
     if (period === PERIOD.NOT_STARTED) {
-      const starts = dateInWords(row.payment_start_on);
-      return starts ? `payment starts ${starts}, after ${wanted}` : `payment has not started by ${wanted}`;
+      // SAID AS A PERSON SAYS IT (his call 2026-10-22): "payment will only start
+      // next month", not "payment starts 3 December 2026, after October 2026".
+      const startMonth = row.payment_start_on ? monthOf(row.payment_start_on) : null;
+      if (!startMonth) return `payment has not started by ${wanted}`;
+      const [wy, wm] = String(month ?? currentMonth()).split('-').map(Number);
+      const [sy, sm] = startMonth.split('-').map(Number);
+      const ahead = (sy - wy) * 12 + (sm - wm);
+      const sayStart = monthName(startMonth).replace(/ \d{4}$/, sy === wy ? '' : ` ${sy}`);
+      return ahead === 1 ? 'payment will only start next month' : `payment will only start in ${sayStart}`;
     }
     if (Array.isArray(row.manually_overridden_fields)
       && row.manually_overridden_fields.includes('status') && row.status === PERIOD.ENDED) {
@@ -4333,7 +4340,7 @@ async function totalReply(rows, month, args, whoLabel = null, plural = false, {
           part.excluded.push(`${listOf(entries.map((entry) => dealLabel(entry.row)))} are excluded because ${reason}.`);
         } else {
           const entry = entries[0];
-          part.excluded.push(`${dealLabel(entry.row)} is ${moneyText(entry.row.currency, 0)} because ${reason}.`);
+          part.excluded.push(`${dealLabel(entry.row)} is ${moneyText(entry.row.currency, 0)} since ${reason}.`);
         }
       }
     }
