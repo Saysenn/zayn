@@ -88,7 +88,6 @@ export const GREETINGS = Object.freeze([
   'Right on time. Let me walk you through what came up.',
   'Hey you. Before you dive in, a quick heads up.',
   'Missed you. Here is the short version of what is new.',
-  'Morning, noon or night, I have news. Here it is.',
   'Pull up a chair, darling. A few things need a look.',
   'I saved you the trouble of digging. This is what matters now.',
   'Back already? Good, because this is worth hearing.',

@@ -35,6 +35,38 @@ function getClient() {
 const MAX_CHARS = 4096;
 
 /**
+ * ===============================
+ * * MONEY SAID AS MONEY
+ * ===============================
+ * "AED 8,400" was read out as dollars (his screenshot 2026-10-22): the voice
+ * guesses a currency code, and guesses wrong. Every code and symbol becomes
+ * its word before it is spoken, the amount first, as a person says it. The
+ * screen keeps the code.
+ */
+const CURRENCY_WORDS = {
+  AED: ['dirham', 'dirhams'], GBP: ['pound', 'pounds'], USD: ['dollar', 'dollars'], EUR: ['euro', 'euros'],
+  USDT: ['tether', 'tether'], PHP: ['peso', 'pesos'], INR: ['rupee', 'rupees'],
+};
+const SYMBOLS = { '£': 'GBP', $: 'USD', '€': 'EUR' };
+const AMOUNT = '(-?\\d[\\d,]*(?:\\.\\d+)?)(\\s?(?:k|m|million|thousand)\\b)?';
+function sayMoney(text) {
+  const word = (code, amount) => {
+    const [one, many] = CURRENCY_WORDS[code];
+    return /^-?1(?:\.0+)?$/.test(amount.replace(/,/g, '')) ? one : many;
+  };
+  const codes = Object.keys(CURRENCY_WORDS).join('|');
+  return String(text ?? '')
+    // "AED 8,400", "GBP 2,900.00"
+    .replace(new RegExp(`\\b(${codes})\\s?${AMOUNT}`, 'g'), (m, code, n, unit = '') => `${n}${unit} ${word(code, n)}`)
+    // "8,400 AED"
+    .replace(new RegExp(`${AMOUNT}\\s?(${codes})\\b`, 'g'), (m, n, unit = '', code) => `${n}${unit} ${word(code, n)}`)
+    // "£500", "$1,200", "€30"
+    .replace(new RegExp(`([£$€])\\s?${AMOUNT}`, 'g'), (m, sym, n, unit = '') => `${n}${unit} ${word(SYMBOLS[sym], n)}`)
+    // A code alone ("paid in AED"): its word.
+    .replace(new RegExp(`\\b(${codes})\\b`, 'g'), (m, code) => CURRENCY_WORDS[code][1]);
+}
+
+/**
  * Text -> an mp3 Buffer. Throws AppError-shaped errors are the caller's
  * job to translate (route stays thin) — this just does the one call.
  */
@@ -59,7 +91,7 @@ async function synthesizeSpeech(text, { persona = null } = {}) {
    * Logged as the fault it is, and still spoken rather than refused: most
    * of the answer out loud beats silence.
    */
-  const trimmed = text.slice(0, MAX_CHARS);
+  const trimmed = sayMoney(text).slice(0, MAX_CHARS);
   if (text.length > MAX_CHARS) {
     logger.warn(
       { length: text.length, max: MAX_CHARS, lost: text.length - MAX_CHARS },
@@ -79,4 +111,4 @@ async function synthesizeSpeech(text, { persona = null } = {}) {
   return Buffer.from(await response.arrayBuffer());
 }
 
-module.exports = { synthesizeSpeech, isConfigured: () => env.canSpeak };
+module.exports = { synthesizeSpeech, sayMoney, isConfigured: () => env.canSpeak };
