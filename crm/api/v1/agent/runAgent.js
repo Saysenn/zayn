@@ -37,6 +37,18 @@ const { easeOffPetNames: easeOffNames } = require('./petNames');
  */
 const AUTO_CHECK = '[AUTOMATIC CHECK, not the admin speaking. Never thank, apologise or say "you\'re right" for it: just answer the admin\'s message correctly.] ';
 const FALSE_THANKS = /^\s*(?:(?:you(?:'re| are) (?:absolutely |quite )?right|good catch|great catch|thanks? (?:you )?(?:so much )?for (?:catching|pointing|spotting|flagging) (?:that|this)(?: out)?|my (?:apologies|mistake)|(?:i'?m )?sorry(?: about that)?|apologies)[,.!]*\s*(?:and\s+)?)+/i;
+/**
+ * THE PAPERS AHEAD OF THE PAGE, said in code when her answer left it out: told
+ * twice to end with it, she read the winding-up order out and asked "anything
+ * else?" (blind docs run 2026-10-22). See search_company_documents.
+ */
+function withBehindLine(reply, turn) {
+  const line = turn?.behindLine;
+  if (!line || /\b(?:behind|out of date|update the (?:page|stage)|page (?:still )?(?:says|shows))\b/i.test(String(reply))) return reply;
+  const body = String(reply).replace(/\n*[^\n.?!]*(?:anything else|check anything)[^\n]*\?\s*$/i, '').trim();
+  return `${body}\n\n${line} Want me to update the page from the documents?`;
+}
+
 function easeOffPetNames(reply, history = []) {
   const said = String([...history].reverse().find((m) => m.role === 'user')?.content ?? '');
   const doubted = /\b(?:wrong|not right|incorrect|mistake|you sure|are you sure|check|that'?s not|no,|nope|actually)\b/i.test(said);
@@ -364,7 +376,7 @@ const FORCED_ROUTES = [
   }, 'recent_master_sheet_changes'],
   // "WHAT HAVE WE GOT SCHEDULED?" is the parked list. Suite 2026-10-08: it
   // drew "could you clarify what type of schedule?". Not a cancel, below.
-  [/^(?![^.?!]*\b(?:cancel|scrap|call off|drop)\b)[^.?!]*\b(?:what(?:'s| is| have| has| do)?|anything|show|list)\b[^.?!]*\b(?:scheduled|parked|queued|lined up|coming up next month|planned for next month)\b/i, 'list_parked_work'],
+  [/^(?![^.?!]*\b(?:cancel|scrap|call off|drop)\b)[^.?!]*\b(?:what(?:'s| is| have| has| do)?|wot|wat|wots|wats|anything|show|list)\b[^.?!]*\b(?:scheduled|parked|queued|lined up|coming up next month|planned for next month|planned for the (?:next few|comin\w*) months)\b/i, 'list_parked_work'],
   // "WHO'S PAID IN EUROS" names them: it came back as a total with no
   // names. The filter lists who; a total can follow. 2026-10-04.
   [/^\s*who(?:'s|s| is| are| gets?)\s+paid\s+(?:in|by|with|via)\b/i, 'filter_master_sheet'],
@@ -1348,7 +1360,14 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
     // THEIR SENTENCE'S MONTH WINS: left off, she was sent back and asked
     // them which month; sent, she once wrote "August 2024" for "the end of
     // this month". Hers is used only when their words name none. 2026-10-03.
-    const when = (saysLater(said) ? whenIn(said) : null) ?? sentWhen;
+    // THE PART ASKED FOR NOW stays now: "1150 straight away and then 1250 from
+    // december" parked both (fresh park run 2026-10-22). Her value is the now one.
+    const nowFigure = require('../shared/when.helper').nowValueIn(said); // eslint-disable-line global-require
+    const isNowPart = nowFigure != null && !sentWhen
+      && ['monthlyAmount', 'payableAmount', 'monthlyAmountDelta'].some((f) => rest[f] != null && Number(rest[f]) === nowFigure);
+    const hints = [rest.monthlyAmount, rest.payableAmount, rest.feePercent, rest.addonPercent, rest.monthlyAmountDelta,
+      String(rest.targetPerson ?? rest.person ?? '').split(/\s+/)[0]];
+    const when = isNowPart ? null : (saysLater(said) ? require('../shared/when.helper').whenFor(said, hints) : null) ?? sentWhen; // eslint-disable-line global-require
     const at = when ? resolveWhen(when, forMonths) : { now: true };
     if (at.error) return { summary: `NOTHING WAS CHANGED. ${at.error}` };
     if (at.months) {
@@ -1421,7 +1440,7 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
         tool: name, args: parked, months: at.months, ...(confirmed ? { confirmed } : {}),
       }), history, onEvent, turn);
     }
-    if (saysLater(said)) {
+    if (saysLater(said) && !isNowPart) {
       return {
         summary: `NOTHING WAS CHANGED. They said a LATER month ("${said}"), and this change would land `
           + 'NOW. Call it again with `when` set to the month they said (and `forMonths` if they gave a '
@@ -1879,6 +1898,40 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
     });
   }
 
+  /**
+   * "JUNO PARK 700 IN JANUARY" IS A LATER CHANGE, NOT A PRESET. It became preset
+   * January plus 700, and the yes wrote both that minute (fresh park run
+   * 2026-10-22). A later month they said, sent as the preset beside a new value:
+   * the value is parked for that month instead, and nothing changes now.
+   */
+  if (['add_deal', 'update_master_sheet_row', 'bulk_update_master_sheet'].includes(name) && !turn?.planRun && !turn?.applyingHeld
+    && args.confirmed !== true && tools.some((t) => t.name === 'park_for_month') && saysLater(args.said ?? lastSaid(history))) {
+    const fields = args.set && typeof args.set === 'object' ? args.set : args;
+    const later = whenIn(args.said ?? lastSaid(history));
+    const at = later ? resolveWhen(later) : null;
+    const presetMonth = String(fields.presetOn ?? '').slice(0, 7);
+    const VALUES = ['monthlyAmount', 'payableAmount', 'feePercent', 'addonPercent', 'currency', 'paymentMethod', 'addonPercentDelta', 'feePercentDelta', 'monthlyAmountDelta'];
+    const change = Object.fromEntries(VALUES.filter((k) => fields[k] !== undefined).map((k) => [k, fields[k]]));
+    if (at?.months?.length && presetMonth && presetMonth === at.months[0] && Object.keys(change).length) {
+      // A raise is the monthly amount, never the payable (the payable follows from it).
+      if (change.payableAmount !== undefined && change.monthlyAmount === undefined) { change.monthlyAmount = change.payableAmount; delete change.payableAmount; }
+      logger.info({ tool: name, months: at.months }, 'diane: a later month sent as the preset, parked instead');
+      return invokeTool(tools, 'park_for_month', JSON.stringify({ tool: 'update_master_sheet_row', args: change, months: at.months }), history, onEvent, turn);
+    }
+  }
+  /**
+   * A BULK CHANGE WITH A `when` IS A PARK, done in code: "from next month all of
+   * kiran vale's deals get paid cash" sent when "next month" to the bulk tool,
+   * which has no `when`, and was refused as an unknown filter (blind park run
+   * 2026-10-22). park_for_month finds the person's deals from their words.
+   */
+  if (name === 'bulk_update_master_sheet' && args.when && !turn?.planRun && !turn?.applyingHeld
+    && args.set && typeof args.set === 'object' && Object.keys(args.set).length && tools.some((t) => t.name === 'park_for_month')) {
+    const at = resolveWhen(String(args.when), args.forMonths);
+    if (at?.months) {
+      return invokeTool(tools, 'park_for_month', JSON.stringify({ tool: 'update_master_sheet_row', args: args.set, months: at.months }), history, onEvent, turn);
+    }
+  }
   const refusal = unknownArgs(tool, args);
   if (refusal) {
     logger.warn({ tool: name, args: Object.keys(args) }, 'diane: called a tool with a filter that does not exist');
@@ -2399,6 +2452,30 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
           + 'further on than the page, say so in one line and add: say "update it from the docs".',
       };
     }
+    /**
+     * THE DOCUMENTS MATCH THE PAGE, SO NOTHING IS CHANGED FROM THEM. "wrenfeild
+     * tannery got the court thing, theyre being wound up. page is behind fix it":
+     * its only paper was a petition hearing notice, she was told so, and still set
+     * a winding-up order (blind docs run 2026-10-22). A stage they name themselves
+     * ("set it to winding up order") still goes through.
+     */
+    if (turn?.docsMatchPage && name === 'update_liquidation' && !args.undo && !args.confirmed
+      // Only a STAGE: a deadline or note they asked for still goes through.
+      && [...(args.items ?? []), args.set ?? {}].some((i) => i && (i.stage != null || i.stageKind != null || i.status != null))
+      && !/\b(?:set|change|move|put|mark|make)\b[^.?!]{0,40}\b(?:to|as|into)\b[^.?!]{0,8}\b(?:winding.?up order|petition|own liq|hmrc liq|cvl|mvl|dissolved|struck off|proposal|suspended|rejected|active|liquidation)\b/i.test(String(args.said ?? ''))) {
+      return {
+        summary: 'NOT CALLED. NOTHING HAS BEEN CHANGED. liquidation_next_step found NO document further on than the page, so '
+          + 'there is nothing to update from the documents. Say so in one or two lines, naming what the document IS (a petition '
+          + 'or hearing notice means the court MAY make an order, it is not an order) and its date. If they have the order or '
+          + 'a later paper, ask them to add it, or to say which stage to set.',
+      };
+    }
+    if (turn?.windingDownAsk && ['total_master_sheet', 'breakdown_master_sheet', 'filter_master_sheet', 'audit_master_sheet'].includes(name)) {
+      return {
+        summary: 'NOT CALLED. They asked about the winding down companies and their documents, not the master sheet. Answer '
+          + 'from liquidation_next_step; where it previewed a stage update, read those lines out and ask once.',
+      };
+    }
     if (turn?.docQuestion && ['total_master_sheet', 'breakdown_master_sheet', 'filter_master_sheet', 'audit_master_sheet'].includes(name)) {
       return {
         summary: 'NOT CALLED. They asked about a company\'s documents, not the master sheet: answer from the passages '
@@ -2424,6 +2501,19 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
     }
     if (name === 'bulk_update_master_sheet' && !turn?.planRun && !turn?.applyingHeld
       && require('./scheduled/parkable').LATER_TIMING.test(String(args.said ?? ''))) {
+      /**
+       * PARKED IN CODE, for the person their words name: "from next month all of
+       * kiran vale's deals get paid cash" was refused here, then she offered to do
+       * it now (blind park run 2026-10-22). park_for_month finds the deals.
+       */
+      const when = whenIn(args.said);
+      const at = when ? resolveWhen(when) : null;
+      // As she sent it: an earlier step may have turned `set` into per person entries.
+      const sent = [args.set, modelArgs?.set, ...(Array.isArray(args.perPerson) ? args.perPerson.map((e) => e?.set) : [])];
+      const set = sent.find((x) => x && typeof x === 'object' && Object.keys(x).length) ?? null;
+      if (at?.months && set && Object.keys(set).length && tools.some((t) => t.name === 'park_for_month')) {
+        return invokeTool(tools, 'park_for_month', JSON.stringify({ tool: 'update_master_sheet_row', args: set, months: at.months }), history, onEvent, turn);
+      }
       return {
         summary: 'NOTHING HAS BEEN CHANGED. They said a LATER MONTH, and a bulk change cannot be scheduled: it would '
           + 'change their deals NOW. Call update_master_sheet_row on each deal (or update_person for a person\'s add on or '
@@ -3644,6 +3734,22 @@ async function runAgentTurn(history, contextName, onEvent) {
       offer: turnState.wrote.get('__offer') ?? null,
     };
   }
+  // SEVERAL PARKS SAVED BY ONE YES, said in code, one line each, who first. The
+  // model said "already set... Nothing changed just now" over two new parks
+  // (blind park run 2026-10-22).
+  const parkedNow = toolResults.slice(-heldCalls.length);
+  if (heldCalls.length > 1 && heldCalls.every((c) => c.name === 'park_for_month')
+    && parkedNow.every((r) => r?.computedReply && /^Done\. Saved for /.test(String(r.reply ?? '')))
+    && agreed(lastSaid(history))) {
+    const lines = heldCalls.map((c, i) => `${(c.aimedAt ?? []).join(' and ') || 'Saved'}: ${String(parkedNow[i].reply)
+      .replace(/^Done\. /, '').replace(/\s*Nothing has changed on the sheet yet\.\s*$/, '')}`);
+    return {
+      reply: `Done.\n${[...new Set(lines)].join('\n')}\nNothing has changed on the sheet yet.`,
+      changedRowIds: [...changedRowIds],
+      context: context.key,
+      claims: [],
+    };
+  }
   // Set AFTER the held calls, so they themselves still run. See invokeTool.
   if (appliedSummaries.length > 0) turnState.wrote.set('__held', true);
   if (appliedSummaries.length > 0) {
@@ -3718,8 +3824,41 @@ async function runAgentTurn(history, contextName, onEvent) {
    * in nexus?" missed the yes or no route that "is zayn in nexus?" takes,
    * and the answer listed his deals with no yes or no. Clone 2026-10-05.
    */
-  const routeSaid = String(lastSaid(history))
+  let routeSaid = String(lastSaid(history))
     .replace(/^\s*(?:(?:hi|hey|hello|hiya|yo|morning|good (?:morning|afternoon|evening)|ok(?:ay)?|so|right|diane|babe|darling|quick (?:one|q(?:uestion)?)|question|sorry|pls|please)\b[\s,.!:;-]*)+(?=\S)/i, '');
+  /**
+   * A SHORT FOLLOW UP WITH NO COMPANY is about the one just named: "wait who got
+   * appointed" after a Marlowe question (fresh doc run 2026-10-22). Only when the
+   * message before named exactly one company on the Winding down page.
+   */
+  if (context.tools.some((t) => t.name === 'liquidation_document')
+    && routeSaid.split(/\s+/).length <= 12
+    && /^\s*(?:(?:wait|and|so|ok|oh|hmm|um|also|but)[\s,.]*)*(?:who|whos|who's|what|whats|what's|when|whens|which|where|is it|has it|did it|was it|how|(?:fix|update|sort|correct)\s+(?:it|that|the page|the stage))\b/i.test(routeSaid)) {
+    // eslint-disable-next-line global-require
+    const liq = require('./tools/liquidations');
+    if (!(await liq.pageCompanyNamed(routeSaid).catch(() => null))) {
+      const before = String(history.filter((m) => m.role === 'user').slice(-2, -1)[0]?.content ?? '');
+      const theOne = before ? await liq.pageCompanyNamed(before).catch(() => null) : null;
+      const twoNamed = before ? (await liq.pageCompaniesNamed?.(before).catch(() => []))?.length > 1 : false;
+      if (theOne && !twoNamed) routeSaid = `${routeSaid} for ${theOne}`;
+    }
+  }
+  /**
+   * MORE THAN 12 MONTHS AT ONCE, said in code. "add 1% every month for the next
+   * 15 months" was asked which month to start (held-out park run 2026-10-22);
+   * parked work is at most 12 months, so that is the answer.
+   */
+  {
+    const WORDS = { thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, eighteen: 18, twenty: 20, 'twenty four': 24, eighteenth: 18 };
+    const m = String(routeSaid).toLowerCase().match(/\b(?:next|for|over|every month for(?: the next)?)\s+(\d{2,3}|thirteen|fourteen|fifteen|sixteen|eighteen|twenty(?: four)?)\s+months\b/);
+    const n = m ? (Number(m[1]) || WORDS[m[1]]) : 0;
+    if (n > 12 && context.tools.some((t) => t.name === 'park_for_month')) {
+      return {
+        reply: `I can save a change for at most 12 months at a time, so I can't park ${n}. Say "the next 12 months" and I'll show you those, or split it into two.`,
+        changedRowIds: [], context: context.key, claims: [],
+      };
+    }
+  }
   // A DOCUMENT NAMED with a document verb: the document tool (see namesADocument).
   const docNamed = context.tools.some((t) => t.name === 'liquidation_document')
     && await require('./tools/liquidations').namesADocument(lastSaid(history)).catch(() => false);
@@ -3733,16 +3872,46 @@ async function runAgentTurn(history, contextName, onEvent) {
     }).catch(() => null)
     : null;
   if (liqRouted === 'search_company_documents') turnState.docQuestion = true;
+  // "CHECK THEM ALL AGAINST THE DOCS AND FIX": the winding down page, never the
+  // sheet's audit, which ran after it (blind docs run 2026-10-22).
+  if (liqRouted === 'liquidation_next_step') turnState.windingDownAsk = true;
   // A next step asked with no change in it: read only (see nextStepQuestion).
   if (liqRouted === 'liquidation_next_step'
     && !/\b(?:update|set|change|fix|correct|move|match|sync|put|save|mark|make|close|dissolve|wind (?:\w+ )?down|reopen)\b/i.test(routeSaid.replace(/\b(?:being |are being |is being )?wound up\b|\bwinding down\b/gi, ' '))) turnState.nextStepQuestion = true;
+  /**
+   * "ACTUALLY MAKE IT 4500 SORRY" TO A PARK PREVIEW is the parked value, still
+   * for that month. It went to the ordinary edit and changed her pay that
+   * minute (fresh park run 2026-10-22). The held park is re-shown with it.
+   */
+  {
+    const held = onlyHeld();
+    const text = routeSaid.toLowerCase().replace(/,(?=\d{3}\b)/g, '');
+    const figures = text.match(/\b\d+(?:\.\d+)?\b/g) ?? [];
+    if (held?.name === 'park_for_month' && held.args?.args && figures.length === 1
+      && /\b(?:actually|make it|change (?:it|that) to|should be|instead|i meant|meant|sorry|scratch that|no wait)\b/.test(text)
+      && !saysLater(routeSaid) && context.tools.some((t) => t.name === 'park_for_month')) {
+      const field = ['monthlyAmount', 'payableAmount', 'feePercent', 'addonPercent'].find((f) => held.args.args[f] != null);
+      if (field) {
+        forget(held);
+        turnState.model = 'code';
+        const args = { ...held.args, args: { ...held.args.args, [field]: Number(figures[0]) } };
+        const result = await invokeTool(context.tools, 'park_for_month', JSON.stringify(args), history, onEvent, turnState);
+        if (result?.pending && result.reply) {
+          logger.info({ field }, 'diane: a parked value corrected in code');
+          return { reply: result.reply, changedRowIds: [], context: context.key, claims: [] };
+        }
+      }
+    }
+  }
   /**
    * "ACTUALLY JUST IRONLEAF" TO A WINDING DOWN PREVIEW narrows it, in code
    * (suite 2026-10-21: she said "say yes and I'll do it" with nothing held,
    * and the yes did nothing). The narrowed preview replaces the held one.
    */
   {
-    const held = onlyHeld();
+    // The newest held WINDING DOWN change, even with another call held beside it
+    // (blind run 2026-10-22: "leave ironleaf, just harbor nine" found two and narrowed none).
+    const held = [...heldCalls].reverse().find((c) => c.name === 'update_liquidation') ?? onlyHeld();
     if (held?.name === 'update_liquidation' && Array.isArray(held.args?.items) && context.tools.some((t) => t.name === 'update_liquidation')) {
       // eslint-disable-next-line global-require
       const liq = require('./tools/liquidations');
@@ -3769,7 +3938,7 @@ async function runAgentTurn(history, contextName, onEvent) {
    * The real preview is built here; their next yes saves it.
    */
   if (heldCalls.length === 0 && !somethingHeld() && agreed(lastSaid(history).trim())
-    && /update it from the docs|\b(?:want|like) (?:the |its |their )?stages? (?:updated|changed|moved)|say the word and I.?ll show/i.test(String(lastAssistantAnswer(history) ?? ''))
+    && /update it from the docs|\b(?:want|like) (?:the |its |their )?stages? (?:updated|changed|moved)|say the word and I.?ll show|\b(?:update|change|move|correct|fix)\b[^.?!]{0,50}\bstages?\b[^.?!]{0,40}\b(?:match|from|to what)|\bupdate\b[^.?!]{0,40}\bto match\b/i.test(String(lastAssistantAnswer(history) ?? ''))
     && /\b(?:documents?|docs|paperwork|gazette|notice|letter)\b/i.test(String(lastAssistantAnswer(history) ?? ''))
     && context.tools.some((t) => t.name === 'liquidation_next_step')) {
     // eslint-disable-next-line global-require
@@ -5298,7 +5467,7 @@ async function runAgentTurn(history, contextName, onEvent) {
         // "mostly" still leaves literal asterisks in a chat bubble.
         reply: dealWords(withExportReminder(
           easeOffPetNames(raw
-            ? dropUnaskedApology(noDashes(stripMarkdown(withVerdict(raw, toolResults, { said: lastSaid(history) }))), lastSaid(history))
+            ? withBehindLine(dropUnaskedApology(noDashes(stripMarkdown(withVerdict(raw, toolResults, { said: lastSaid(history) }))), lastSaid(history)), turnState)
             : emptyReply, history),
           history,
           calledExport,
@@ -5698,8 +5867,32 @@ async function runAgentTurn(history, contextName, onEvent) {
      * given its round.
      */
     const secondAskOpen = calls.length === 1 && SECOND_ASK.test(lastSaid(history));
+    /**
+     * TWO CHANGES WAITING, ONE PREVIEW SAID. "from next month pay theo in AED, and
+     * juno to 650 right now" held both, showed only Theo's park, and "yes both"
+     * could not apply what was never shown (held-out park run 2026-10-22).
+     */
+    const pendingShown = new Set(toolResults.filter((r) => r?.pending).map((r) => String(r.summary ?? '').slice(0, 200)));
+    const morePending = pendingShown.size > 1;
+    /**
+     * SEVERAL PARKS WAITING ARE ONE PREVIEW, said in code. "baker jones n karin
+     * vole both +100 from november" held one park each, and the model read the
+     * tool's own wording out ("This would park this for ... touching 1 month").
+     * Blind park run 2026-10-22.
+     */
+    const pendingResults = toolResults.filter((r) => r?.pending);
+    if (morePending && !secondAskOpen && pendingResults.every((r) => r.computedReply && /Here's what I'd save for later/.test(String(r.reply ?? '')))) {
+      const blocks = [...new Set(pendingResults.map((r) => String(r.reply)
+        .replace(/\n*Nothing changes now\.[^\n]*$/, '').trim()))];
+      return {
+        reply: `${blocks.join('\n\n')}\n\nNothing changes now. Each is applied on the first sign-in of its month. Shall I save them?`,
+        changedRowIds: [...changedRowIds],
+        context: context.key,
+        claims: [],
+      };
+    }
 
-    if (terminalReply && !terminalPartial && !dodgedTheInstruction && !lookupSpokeForAWrite && !secondAskOpen
+    if (terminalReply && !terminalPartial && !dodgedTheInstruction && !lookupSpokeForAWrite && !secondAskOpen && !morePending
       && !(staleTotalPending && !staleTotalNudged)
       && (terminalComputed || calls.length - interimCount === 1)) {
       /**

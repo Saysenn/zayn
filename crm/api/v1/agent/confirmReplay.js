@@ -462,6 +462,11 @@ function remember(name, args, confirming, named) {
     if (![...peopleIn(older.confirming)].some((p) => mine.has(p))) continue;
     const theirs = argFields(older.args);
     const sameField = myFields.size === 0 || theirs.size === 0 || [...theirs].some((f) => myFields.has(f));
+    // TWO DEALS OF ONE PERSON PARKED IN ONE TURN are two changes, both kept: the
+    // yes saved only the last of Kiran's three (blind park run 2026-10-22).
+    const dealOf = (a) => a?.args?.id ?? a?.args?.deal ?? a?.id ?? a?.deal;
+    if (older.turn === TURN && older.name === name && ['park_for_month', 'update_master_sheet_row'].includes(name)
+      && dealOf(older.args) != null && dealOf(args) != null && String(dealOf(older.args)) !== String(dealOf(args))) continue;
     if (older.turn !== TURN || sameField) REMEMBERED.splice(i, 1);
   }
   REMEMBERED.push({ name, args, confirming, aimedAt, at: Date.now(), turn: TURN });

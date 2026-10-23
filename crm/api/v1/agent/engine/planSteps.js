@@ -173,7 +173,11 @@ function callsFor(step) {
         id, ...set, ...(Object.keys(add).length ? { add } : {}),
       }));
     case 'stop':
-      return (step.deals ?? []).map((d) => park('stop_deal', { person: d.person, company: d.company, group: d.group }));
+      // A PARKED STOP NAMES ITS DEAL by id: "stop kirans ironleaf deal in december" was
+      // refused as "a filter to run later" (blind park run 2026-10-22).
+      return (step.deals ?? []).map((d, i) => park('stop_deal', {
+        ...(step.when && (d.id ?? step.ids?.[i]) != null ? { deal: d.id ?? step.ids[i] } : {}), person: d.person, company: d.company, group: d.group,
+      }));
     case 'resume':
       return (step.deals ?? []).map((d) => ({ name: 'resume_deal', args: { person: d.person, company: d.company, group: d.group } }));
     case 'rate':

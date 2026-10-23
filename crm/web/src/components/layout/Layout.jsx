@@ -390,7 +390,9 @@ function LayoutBody() {
              * report.js), so it cannot describe a change that did not land.
              */
             const brief = ready?.briefing ?? { items: [] };
-            const did = ready?.scheduled?.report;
+            // SWITCHED OFF IN SETTINGS IS NO WELCOME PAGE AT ALL: the parked-work
+            // report still opened it. The work is still applied, and in History.
+            const did = brief.enabled === false ? null : ready?.scheduled?.report;
             // Already briefed today: only the parked-work report, which is new, still shows.
             const items = briefingShownToday(brief) ? [] : (brief.items ?? []);
             setBriefing({ ...brief, items: did ? [did, ...items] : items });

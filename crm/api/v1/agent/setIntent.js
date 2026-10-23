@@ -285,9 +285,20 @@ function isSpecialCaseInstruction(said) {
  * @param {boolean} wrote       whether any tool that CHANGES DATA ran
  * @param {object[]} toolResults every tool result this turn
  */
+/**
+ * "PARK KIRAN'S IRONLEAF AT 2700 FOR NEXT MONTH" is an instruction for later,
+ * and the card she drew to find the deal became the whole answer (blind park
+ * run 2026-10-22: 11 of 18 parks ended on a card). A park or a later month
+ * with something to change.
+ */
+const PARKS = /\b(?:park|schedule|queue|hold (?:it|that|this) (?:for|till|until))\b|\b(?:next|nxt) (?:\d+|two|three|four|five|six|few|couple of) months\b|\b(?:for|from|in|starting|as of|until|till|come|beginning) (?:next month|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*)\b|\bnxt month\b/i;
+const PARK_CHANGE = /\d|\b(?:stop|end|close|cash|bank|crypto|fee|add[\s-]?on|rate|monthly|amount|pay|paid|currency|gbp|aed|usd|eur)\b/i;
+const isParkInstruction = (said) => PARKS.test(String(said ?? '')) && PARK_CHANGE.test(String(said ?? ''))
+  && !/^\s*(?:what|whats|which|who|how|is|are|do|does|did|when|show|list)\b|\?\s*$/i.test(String(said ?? ''));
+
 function answeredWithoutWriting(said, wrote, toolResults = []) {
   if (wrote) return false;
-  if (!isSetInstruction(said) && !isSpecialCaseInstruction(said) && !KEEPS_REVIEW.test(String(said ?? ''))) return false;
+  if (!isSetInstruction(said) && !isSpecialCaseInstruction(said) && !KEEPS_REVIEW.test(String(said ?? '')) && !isParkInstruction(said)) return false;
   /**
    * A QUESTION SHE HAD TO ASK IS NOT A FAILURE TO ACT.
    *
@@ -325,6 +336,16 @@ function correctionFor(said) {
       + 'Call bulk_update_master_sheet with `people` and set: { overridePaid: true } (false for '
       + 'unpaid). Do not ask which deal. Only when they named ONE company is it update_master_sheet_row '
       + 'for that deal. It comes back pending: show it and wait for them to agree.';
+  }
+  if (isParkInstruction(said)) {
+    return 'THEY ASKED FOR A CHANGE IN A LATER MONTH AND YOU ONLY LOOKED THE DEAL UP. Call park_for_month '
+      + 'now with the deal you found: tool update_master_sheet_row (or update_person for every deal they '
+      + 'hold, or stop_deal for a stop), args with the deal id and the FINAL values, and the month(s). '
+      + 'It comes back pending with every month in full: show it and wait for their yes. A month that '
+      + 'is this month or past cannot be parked: say so and offer to do it now. If they ALSO asked for a '
+      + 'change NOW ("750 now, and from next month 800"), call the ordinary tool for that one as well, so '
+      + 'both previews are shown together. A close is never parked: it happens on the Winding down page. '
+      + 'More than 12 months at once cannot be parked: say at most 12, and offer the first 12.';
   }
   if (isSpecialCaseInstruction(said)) {
     return 'THEY TOLD YOU TO DO SOMETHING AND YOU LOOKED IT UP INSTEAD. "Make them a special '

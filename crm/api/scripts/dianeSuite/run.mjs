@@ -26,7 +26,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 // SUITE_SET=eval runs the held-out questions in evalCases.mjs instead: wording
 // no rule was written for, so a change is judged on what she was never taught.
-const SETS = { eval: './evalCases.mjs', eval2: './evalCases2.mjs', eval3: './evalCases3.mjs', eval4: './evalCases4.mjs', eval5: './evalCases5.mjs', eval6: './evalCases6.mjs', wander: './wanderCases.mjs', bulk: './bulkCases.mjs', messy: './messyCases.mjs', library: './library/index.mjs', liq: './liqCases.mjs', wind: './windCases.mjs', close: './closeCases.mjs', blind: './blindCases.mjs', heldout: './heldoutCases.mjs', heldout2: './heldout2Cases.mjs', docs: './docCases.mjs', night: './nightCases.mjs' };
+const SETS = { eval: './evalCases.mjs', eval2: './evalCases2.mjs', eval3: './evalCases3.mjs', eval4: './evalCases4.mjs', eval5: './evalCases5.mjs', eval6: './evalCases6.mjs', wander: './wanderCases.mjs', bulk: './bulkCases.mjs', messy: './messyCases.mjs', library: './library/index.mjs', liq: './liqCases.mjs', wind: './windCases.mjs', close: './closeCases.mjs', blind: './blindCases.mjs', heldout: './heldoutCases.mjs', heldout2: './heldout2Cases.mjs', parkdev: './parkDevCases.mjs', parkheld: './parkHeldCases.mjs', docdev: './docStatusDevCases.mjs', docheld: './docStatusHeldCases.mjs', park3: './park3Cases.mjs', doc3: './doc3Cases.mjs', park4: './park4Cases.mjs', doc4: './doc4Cases.mjs', park5: './park5Cases.mjs', doc5: './doc5Cases.mjs', docs: './docCases.mjs', night: './nightCases.mjs' };
 const { READS, WRITES, PENDING, extraSeed } = await import(SETS[process.env.SUITE_SET] ?? './cases.mjs');
 import { seed } from './seed.mjs';
 import {

@@ -565,7 +565,7 @@ export default function SettingsPage() {
           {section === 'diane' && tab === 'general' && (
             <Card
               title="Diane's briefing at sign-in"
-              description="She says what needs doing when you sign in: the review queue, anything unpaid this month, open concerns and rows the last import flagged. She says nothing at all when there is nothing in any of them, and every line she says is a link to the data."
+              description="She says what needs doing when you sign in: the review queue, anything unpaid this month, open concerns and rows the last import flagged, and what parked work she applied. She says nothing at all when there is nothing in any of them, and every line she says is a link to the data. Off, she never opens it: parked work is still applied and shows in History."
             >
               {isLoading ? (
                 <Skeleton className="h-9 w-32" />

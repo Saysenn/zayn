@@ -312,7 +312,13 @@ function previewReply(plan) {
   const live = plan.steps.filter((s) => !s.skipped).length;
   // The hint uses THIS plan's numbers: "skip 2" on a one-step plan was wrong.
   const last = plan.steps.filter((s) => !s.skipped).at(-1)?.n;
-  return `Here's the plan, ${live} ${live === 1 ? 'change' : 'changes'}${stops ? `, ${stops} of them ending a deal` : ''}. `
+  // WHEN, said: a stop parked for December read only "1 of them ending a deal"
+  // and never named the month (blind park run 2026-10-22).
+  const NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const whens = [...new Set(plan.steps.filter((s) => !s.skipped && s.when).map((s) => s.when))]
+    .map((w) => { const m = /^(\d{4})-(\d{2})/.exec(String(w)); return m ? `${NAMES[Number(m[2]) - 1]} ${m[1]}` : String(w); });
+  const later = whens.length ? ` Saved for ${whens.join(' and ')}: nothing changes now, it applies at the start of that month.` : '';
+  return `Here's the plan, ${live} ${live === 1 ? 'change' : 'changes'}${stops ? `, ${stops} of them ending a deal` : ''}.${later} `
     + `Nothing has changed yet. Shall I do it?${live > 1 && last ? ` Say "skip ${last}" to leave one out.` : ''}`;
 }
 

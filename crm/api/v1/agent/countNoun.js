@@ -30,6 +30,8 @@
  * to whichever of them happened to share a digit with her answer.
  * 2026-09-24. One determiner is allowed between, and nothing else.
  */
-const FOLLOWED_BY_COUNT_NOUN = /^\s*\)?\s*(?:of\s+(?:their|the|these|those|his|her|its|them)\s+)?(deals?|rows?|people|persons?|handlers?|companies|company)\b/i;
+// AND MONTHS AND CHANGES: a park preview counts "1 month", she never says
+// it back, and "yep thats it" could not confirm it (blind park run 2026-10-22).
+const FOLLOWED_BY_COUNT_NOUN = /^\s*\)?\s*(?:of\s+(?:their|the|these|those|his|her|its|them)\s+)?(deals?|rows?|people|persons?|handlers?|companies|company|months?|changes?)\b/i;
 
 module.exports = { FOLLOWED_BY_COUNT_NOUN };

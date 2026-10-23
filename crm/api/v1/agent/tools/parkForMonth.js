@@ -68,7 +68,8 @@ const parkForMonth = {
     + 'off until next month". Nothing changes now. Work the change out FULLY first (find the deal, '
     + 'settle the final figures) and pass the finished call, because it is replayed exactly as '
     + 'given with nobody watching. Figures must be FINAL VALUES, never "+5". For something to do '
-    + 'NOW, call the ordinary tool instead.',
+    + 'NOW, call the ordinary tool instead. A month NAME that has passed this year ("july" said in October) is '
+    + 'NEXT year\'s: park it there, never refuse it as past; the preview says which year.',
   parameters: {
     type: 'object',
     properties: {
@@ -89,6 +90,7 @@ const parkForMonth = {
       from: { type: 'string', description: 'First month, YYYY-MM. Defaults to next month.' },
       count: { type: 'number', description: 'How many consecutive months from `from`. "The next 3 months" is 3.' },
       confirmed: { type: 'boolean', description: 'True only after the admin has agreed to the preview.' },
+      afterNow: { type: 'number', description: 'Code only: the value the deal will have after a change asked for now in the same message.' },
     },
     required: ['tool', 'args'],
   },
@@ -99,12 +101,55 @@ const parkForMonth = {
 
   async handler(rawArgs = {}) {
     const now = currentMonth();
-    const { tool, args = {} } = rawArgs;
+    const { tool } = rawArgs;
+    let { args = {} } = rawArgs;
+    // A RAISE IS THE MONTHLY AMOUNT; the payable follows from it ("ines 4200 for
+    // january" was parked as payable amount, fresh park run 2026-10-22).
+    if (tool === 'update_master_sheet_row' && args.payableAmount != null && args.monthlyAmount == null && !/\bpayable\b/i.test(String(rawArgs.said ?? ''))) {
+      const { payableAmount, ...restArgs } = args;
+      args = { ...restArgs, monthlyAmount: payableAmount };
+    }
+    /**
+     * THE DEAL THEIR WORDS NAME, CHECKED IN CODE, before anything else. "park
+     * juno at 650 for next month" was saved on Kiran Vale's Brightwell deal,
+     * and "kiran's ironleaf" went round seven rounds on ids (blind park run
+     * 2026-10-22). The person (and company) they said decides the deal; an id
+     * naming somebody else is replaced, and several of their deals are asked about.
+     */
+    if (tool === 'update_master_sheet_row' && rawArgs.said) {
+      const said = String(rawArgs.said);
+      const given = (Array.isArray(args.ids) && args.ids.length ? args.ids : [args.id]).map(Number).filter(Number.isInteger);
+      const fromWords = await dealsSaid(said);
+      // SEVERAL PEOPLE NAMED: their deals, never somebody else's. "baker jones n karin
+      // vole both up 100" was parked on Kiran Vale's (fresh park run 2026-10-22).
+      if (fromWords.people.length > 1 && fromWords.all.length && !(given.length && given.every((id) => fromWords.all.some((r) => r.id === id)))) {
+        const relative = Object.keys(args).some((k) => k.endsWith('Delta')) || (args.add && typeof args.add === 'object');
+        if (!relative) {
+          return { summary: `NOTHING WAS SAVED. They named ${fromWords.people.join(' and ')}, and those ids are not their deals. `
+            + `Their live deals: ${fromWords.all.map((r) => `#${r.id} ${r.person_name}, ${r.company}`).join('; ')}. Park each person's own deal.` };
+        }
+        const { id: _id, ids: _ids, ...rest } = args;
+        args = { ...rest, ids: fromWords.all.map((r) => r.id) };
+      }
+      if (fromWords.people.length === 1 && !(given.length && given.every((id) => fromWords.rows.some((r) => r.id === id)))) {
+        const { id: _id, ids: _ids, targetPerson: _p, targetCompany: _c, targetGroup: _g, person: _pp, ...rest } = args;
+        if (fromWords.rows.length === 1) args = { ...rest, id: fromWords.rows[0].id };
+        else if (/\b(?:all|every|each|both)\b/i.test(said)) args = { ...rest, ids: fromWords.rows.map((r) => r.id) };
+        else {
+          return { summary: `NOTHING WAS SAVED. ${fromWords.people[0]} has ${fromWords.rows.length} live deals `
+            + `(${fromWords.rows.map((r) => `#${r.id} ${r.company}, ${r.group_name}`).join('; ')}). Ask which one, or all of them.` };
+        }
+      }
+    }
 
     const check = checkParkable(tool, args);
     if (!check.ok) return { summary: check.why };
 
-    const months = monthsFor(rawArgs, now);
+    let months = monthsFor(rawArgs, now);
+    // "FROM NOVEMBER.. WAIT NO MAKE THAT DECEMBER" was parked for November, as
+    // she sent it (blind park run 2026-10-22). One month: the corrected one wins.
+    const corrected = rawArgs.confirmed === true ? null : require('../../shared/when.helper').correctedMonthIn(rawArgs.said, now); // eslint-disable-line global-require
+    if (corrected && months.length === 1 && months[0] !== corrected) months = [corrected];
     if (months.some((m) => !isMonth(m))) {
       return { summary: 'Every month has to be a real YYYY-MM. Ask which months they mean.' };
     }
@@ -228,6 +273,8 @@ const parkForMonth = {
      * change must carry the FINISHED value (see parkable.js). It came as
      * addonPercentDelta and was shown as "update master sheet deal".
      */
+    // Carried in the held call (afterNow), since the yes that replays it says no figure.
+    const nowValue = rawArgs.afterNow != null ? Number(rawArgs.afterNow) : require('../../shared/when.helper').nowValueIn(rawArgs.said); // eslint-disable-line global-require
     const plans = rowsNow.map((row) => {
       const { ids: _ids, ...base } = args;
       const one = { ...base, ...(check.spec.idField === 'id' ? { id: row.id } : {}) };
@@ -245,6 +292,14 @@ const parkForMonth = {
       for (const key of Object.keys(one)) {
         if (!key.endsWith('Delta')) continue;
         const field = key.slice(0, -'Delta'.length);
+        // "OTTO 1600 IN NOV" IS 1600, not 1500 + 1600: she sent it as an add and
+        // it was parked as 3100 (blind park run 2026-10-22). An amount is added
+        // only when their words add it; a percentage add stays as sent.
+        if (!/percent/i.test(field) && !saidAsAdded(`${rawArgs.said ?? ''}`, Number(one[key]))) {
+          one[field] = Number(one[key]);
+          delete one[key];
+          continue;
+        }
         const column = rowsRepo.COLUMN_FOR[field];
         if (column) one[field] = Math.round((Number(row[column] ?? 0) + Number(one[key])) * 100) / 100;
         delete one[key];
@@ -259,6 +314,19 @@ const parkForMonth = {
         const column = rowsRepo.COLUMN_FOR[field];
         if (column) expect[field] = row[column];
       }
+      /**
+       * A CHANGE SAID FOR NOW IN THE SAME BREATH. "felix to 1350 now and 1500 from
+       * november" parked 1350 for November too, and the November park was checked
+       * against today's 1300, so on the day it would find 1350 and be skipped
+       * (fresh park run 2026-10-22). The later park expects the value after now.
+       */
+      if (nowValue != null) {
+        for (const f of ['monthlyAmount', 'payableAmount']) {
+          if (one[f] === undefined) continue;
+          if (Number(one[f]) === nowValue) return { row, args: one, expect, who: '', what: '', same: false, isNow: true };
+          if (expect[f] !== undefined) expect[f] = nowValue;
+        }
+      }
       const who = [row.person_name, row.company, row.group_name].filter(Boolean).join(' · ');
       // WHAT changes, beside WHEN: "Monthly amount 3500 → 3800", not a bare month.
       // A PARKED STOP SAYS "stop the deal": it read "company Reliapay
@@ -272,10 +340,22 @@ const parkForMonth = {
           const shown = (v) => (v == null || v === '' ? 'empty' : pct ? `${Number(v)}%` : v);
           return `${label} ${shown(expect[f])} → ${shown(one[f])}`;
         }).join(', ');
-      return { row, args: one, expect, who, what: what || tool.replace(/_/g, ' ') };
-    });
+      // ALREADY SO: "cash → cash" was parked and called done (blind park run 2026-10-22).
+      const same = !check.spec.terminal && Object.keys(expect).length > 0
+        && Object.keys(expect).every((f) => String(expect[f] ?? '').toLowerCase() === String(one[f] ?? '').toLowerCase()
+          || (Number.isFinite(Number(expect[f])) && expect[f] !== null && expect[f] !== '' && Number(expect[f]) === Number(one[f])));
+      return { row, args: one, expect, who, what: what || tool.replace(/_/g, ' '), same };
+    }).filter((p, _i, all) => !p.same || all.every((x) => x.same));
+    if (plans.some((p) => p.isNow)) {
+      return { summary: `NOT PARKED. ${nowValue} was asked for NOW, not a later month: make that change now with `
+        + 'update_master_sheet_row (confirmed false, so it previews), and park only the later value for the later months.' };
+    }
+    if (plans.every((p) => p.same)) {
+      return { summary: `NOTHING TO PARK: ${plans.map((p) => `${p.who} is already ${p.what.replace(/ → .*$/, '').replace(/^[a-z ]+ /, '')}`).join('; ')}. Say so plainly.` };
+    }
     const single = plans.length === 1;
-    const who = single ? plans[0].who : `${plans[0].row.person_name}'s ${plans.length} deals`;
+    const people = [...new Set(plans.map((p) => p.row.person_name))];
+    const who = single ? plans[0].who : people.length > 1 ? people.join(' and ') : `${plans[0].row.person_name}'s ${plans.length} deals`;
     const what = single ? plans[0].what : plans.map((p) => `${p.who}: ${p.what}`).join('; ');
     const lines = months.flatMap((m) => (single
       ? [`  ${monthLabel(m)}: ${plans[0].what}`]
@@ -299,13 +379,31 @@ const parkForMonth = {
      * figure, so the "yes" matched nothing it had been shown and nothing was
      * saved. A finished sentence, read to them as is.
      */
+    /**
+     * A MONTH NAME ALREADY PASSED THIS YEAR is next year's, and it is ASKED
+     * (his call 2026-10-22): "put mara on 1150 for august", said in October,
+     * reads "August 2026 has passed, so this is for August 2027".
+     */
+    const passed = pastMonthNamed(rawArgs.said, now, months);
     if (needs) {
       return {
         ...needs,
-        reply: `Here's what I'd save for later, for ${who}:\n\n${lines.map((l) => l.trim()).join('\n')}\n\n`
+        ...(passed ? { summary: `${needs.summary}\n\nSAY FIRST: ${passed}` } : {}),
+        reply: `${passed ? `${passed}\n\n` : ''}Here's what I'd save for later, for ${who}:\n\n${lines.map((l) => l.trim()).join('\n')}\n\n`
           + `Nothing changes now. ${check.spec.terminal ? 'The deal stops' : 'It is applied'} on the first `
           + 'sign-in of that month. Shall I save it?',
         computedReply: true,
+        // WHO IT IS FOR, so a yes matches it when she words the preview herself
+        // ("ok do it" re-previewed it, blind park run 2026-10-22).
+        aimedAt: [...new Set(plans.map((p) => p.row.person_name).filter(Boolean))],
+        // HELD AS SHOWN: the deal their words named, never the id she first sent.
+        // The preview said Juno and the yes saved it on Kiran's deal (blind park run 2026-10-22).
+        redirect: {
+          name: 'park_for_month',
+          args: {
+            tool, months, ...(nowValue != null ? { afterNow: nowValue } : {}), args: plans.length === 1 ? { ...args, id: plans[0].row.id, ids: undefined } : { ...args, id: undefined, ids: plans.map((p) => p.row.id) },
+          },
+        },
       };
     }
 
@@ -316,7 +414,11 @@ const parkForMonth = {
         const entry = await queue.park({
           dueMonth: month,
           tool,
-          args: plan.args,
+          // ONE DEAL, BY ITS ID: Karin's row was saved naming Baker Jones as the
+          // person when both were parked at once (blind park run 2026-10-22).
+          args: plan.args?.id != null
+            ? Object.fromEntries(Object.entries(plan.args).filter(([k]) => !['targetPerson', 'targetCompany', 'targetGroup', 'person'].includes(k)))
+            : plan.args,
           expect: plan.expect,
           targetIds: [plan.row.id],
           // WHAT IT DOES, never their sentence: confirmed by "yes", the sentence was "yes".
@@ -433,6 +535,70 @@ async function dealIdFor(args, said) {
     && (has(r.company, args.targetCompany) || has(r.group_name, args.targetCompany))
     && has(r.group_name, args.targetGroup) && has(r.role_label, args.targetRole));
   return rows.length === 1 ? rows[0].id : null;
+}
+
+/** "August 2026 has passed, so this is for August 2027." when a bare month name rolled to next year; else null. */
+/** Did their words ADD this figure ("+100", "up by 100", "100 more", "raise 100")? */
+function saidAsAdded(said, n) {
+  if (!Number.isFinite(n)) return true;
+  const text = String(said ?? '').toLowerCase().replace(/,(?=\d{3}\b)/g, '');
+  const num = String(Math.abs(n)).replace('.', '\\.');
+  if (!new RegExp(`(?<![\\d.])${num}(?![\\d.])`).test(text)) return true;
+  return new RegExp(`[+-]\\s*(?:gbp|aed|usd|eur|£|\\$)?\\s*${num}(?![\\d.])`
+    + `|\\b(?:up|down|add|adds|adding|raise\\w*|increase\\w*|bump\\w*|plus|extra|another|drop\\w*|cut|lower\\w*|reduce\\w*)\\s+(?:it\\s+|him\\s+|her\\s+|them\\s+)?(?:by\\s+)?(?:an?\\s+)?(?:extra\\s+)?(?:gbp|aed|usd|eur|£|\\$)?\\s*${num}(?![\\d.])`
+    + `|\\bby\\s+(?:an?\\s+)?(?:extra\\s+)?(?:gbp|aed|usd|eur|£|\\$)?\\s*${num}(?![\\d.])`
+    + `|(?<![\\d.])${num}\\s+(?:more|extra|on top|up|less)\\b`).test(text);
+}
+
+function pastMonthNamed(said, now, months) {
+  const text = String(said ?? '').toLowerCase();
+  if (/\b20\d\d\b|\bnext year\b/.test(text)) return null;
+  const [ny] = String(now).split('-').map(Number);
+  for (const m of months) {
+    const [y, mm] = String(m).split('-').map(Number);
+    const name = MONTH_NAMES[mm - 1];
+    const [, nm] = String(now).split('-').map(Number);
+    // Only a month just gone is unclear: "january" said in October is plainly next year's.
+    if (y > ny && nm - mm >= 1 && nm - mm <= 6 && new RegExp(`\\b${name.slice(0, 3).toLowerCase()}[a-z]*\\b`).test(text) && `${ny}-${String(mm).padStart(2, '0')}` < now) {
+      return `${name} ${ny} has passed, so this is for ${name} ${y}.`;
+    }
+  }
+  return null;
+}
+
+/**
+ * The live deals of the ONE person their words name, narrowed by a company or
+ * group also named. A first name, a full name, or a name one letter short
+ * ("otto fen") counts; two people named gives none (the model's id stands).
+ */
+async function dealsSaid(said) {
+  // Spaces kept: resolvePerson's fold joins the words ("junopark").
+  const fold = (v) => String(v ?? '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+  const pool = require('../../../configs/db');
+  const text = ` ${fold(said).replace(/'s\b/g, '').replace(/[^a-z0-9 ]+/g, ' ')} `;
+  const words = text.trim().split(/\s+/);
+  const { rows } = await pool.query('SELECT id, person_name, company, group_name FROM tb_mastersheet WHERE stopped_on IS NULL').catch(() => ({ rows: [] }));
+  const nameHit = (name) => {
+    const parts = fold(name).split(/\s+/).filter(Boolean);
+    if (text.includes(` ${parts.join(' ')} `)) return 2;
+    const first = parts[0];
+    if (!first || first.length < 3) return 0;
+    return words.some((w) => w === first || w === `${first}s` || (w.length >= 3 && first.startsWith(w) && first.length - w.length <= 1)) ? 1 : 0;
+  };
+  const scored = rows.map((r) => ({ r, s: nameHit(r.person_name) })).filter((x) => x.s > 0);
+  const best = Math.max(0, ...scored.map((x) => x.s));
+  const people = [...new Set(scored.filter((x) => x.s === best).map((x) => x.r.person_name))];
+  if (people.length !== 1) {
+    // Every named person's live deals, narrowed by a company or group named.
+    let all = rows.filter((r) => people.includes(r.person_name));
+    const namedAll = all.filter((r) => [r.company, r.group_name].some((v) => v && text.includes(` ${fold(v).split(/\s+/)[0]} `)));
+    if (namedAll.length) all = namedAll;
+    return { people, rows: [], all };
+  }
+  let mine = rows.filter((r) => r.person_name === people[0]);
+  const named = mine.filter((r) => [r.company, r.group_name].some((v) => v && text.includes(` ${fold(v).split(/\s+/)[0]} `)));
+  if (named.length) mine = named;
+  return { people, rows: mine, all: mine };
 }
 
 function withWhen(tools) {
@@ -579,5 +745,5 @@ function whatItDoes(row) {
 }
 
 module.exports = {
-  parkForMonth, listParked, cancelParked, monthsFor, monthLabel, withWhen, dealIdFor, whatItDoes, scheduledTools: [parkForMonth, listParked, cancelParked],
+  parkForMonth, listParked, cancelParked, monthsFor, monthLabel, withWhen, dealIdFor, dealsSaid, whatItDoes, scheduledTools: [parkForMonth, listParked, cancelParked],
 };

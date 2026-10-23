@@ -185,13 +185,22 @@ function byStart(rows, name) {
   return hits.length === 1 ? hits[0] : undefined;
 }
 
-/** One letter added, dropped or changed. */
+/**
+ * One letter added, dropped or changed; two in a long name ("wexcom glazing"
+ * for Wexcombe Glazing, fresh doc run 2026-10-22). Every caller still wants
+ * exactly one company that near, so two close names are asked about.
+ */
 function near(a, b) {
   if (a === b) return true;
-  if (Math.abs(a.length - b.length) > 1) return false;
-  let i = 0;
-  while (i < a.length && a[i] === b[i]) i += 1;
-  return a.slice(i + 1) === b.slice(i + 1) || a.slice(i) === b.slice(i + 1) || a.slice(i + 1) === b.slice(i);
+  const allowed = Math.min(a.length, b.length) >= 10 ? 2 : 1;
+  if (Math.abs(a.length - b.length) > allowed) return false;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i += 1) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j += 1) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[b.length] <= allowed;
 }
 
 /**
@@ -581,6 +590,57 @@ const updateLiquidation = {
      * (held-out run 2026-10-22). Only before the yes, and the corrected call is
      * the one held, so the yes saves what the preview showed.
      */
+    /**
+     * A CLOSE SAID FOR LATER IS NOT A CLOSE NOW. "close pinecrest at the end of
+     * the month" was previewed as "at the end of October" and the yes closed it
+     * that minute, stopping its deals (blind park run 2026-10-22). A close is never
+     * on a date (his call 2026-10-15), so the deadline carries the date instead.
+     */
+    const LATER = /\bend of (?:this|the|next) month\b|\b(?:at|by|on|in|from|for|after|come|until|till) (?:next month|the (?:1st|first|start|end) of (?:next|the) month|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)\b|\bnext month\b|\bnxt month\b/i;
+    const closing = [...(args.items ?? []), args.set ?? {}].some((i) => STATUS_WORD(i?.status) === 'closed' || stageFrom(i?.stage) === 'dissolved');
+    // The shared reading of a later time too: "at month end" got past LATER alone (held-out park run 2026-10-22).
+    // eslint-disable-next-line global-require
+    if (closing && args.confirmed !== true && (LATER.test(String(args.said ?? '')) || require('../../shared/when.helper').saysLater(args.said))) {
+      const names = (args.items ?? []).map((i) => i?.company).filter(Boolean).join(', ') || 'it';
+      return {
+        summary: `NOTHING HAS BEEN CHANGED. They want ${names} closed LATER ("${String(args.said).trim()}"). A close is never `
+          + 'scheduled on a date: it happens on the Winding down page when the company is dissolved. Say that in one line, '
+          + `and offer instead to set ${names}'s deadline to that date with next action "close it", or to close it now. `
+          + 'Do not close anything.',
+      };
+    }
+    /**
+     * NO CLOSE THAT NOBODY SAID AND NOTHING SHOWS. "wrenfeild tannery got the court
+     * thing, theyre being wound up. page is behind fix it" was previewed as
+     * Dissolved, and the yes closed it and stopped its deals, while its only
+     * document was a petition (blind docs run 2026-10-22). Being wound up is a
+     * winding-up order, not the end. A close needs their words (closed, dissolved,
+     * struck off) or a document on file that shows it.
+     */
+    if (closing && args.confirmed !== true && !args.undo) {
+      const words = lazy(fold(`${args.said ?? ''}`));
+      const theySaid = /\b(?:close[ds]?|closing|shut(?: down)?|dissolv\w*|struck off|final gazette|gone|finished|over)\b/.test(words.replace(/\bwound up\b|\bwinding up\b/g, ' '));
+      if (!theySaid) {
+        const all = await repo.list();
+        const unproven = [];
+        for (const i of [...(args.items ?? [])].filter((x) => STATUS_WORD(x?.status) === 'closed' || stageFrom(x?.stage) === 'dissolved')) {
+          const row = all.find((r) => sameCompany(r, i.company)) ?? byStart(all, i.company);
+          // eslint-disable-next-line no-await-in-loop
+          if (row && await closeCaution(row)) unproven.push(row);
+        }
+        if (unproven.length) {
+          const names = unproven.map((r) => r.company_name).join(', ');
+          const at = unproven.map((r) => `${r.company_name}: ${stageText(r.stage, r.stage_kind)}`).join('; ');
+          return {
+            summary: `NOTHING HAS BEEN CHANGED. Do NOT close or dissolve ${names}: they did not say it is closed, dissolved or struck off, `
+              + `and nothing on file shows it dissolved (no Final Gazette, no dissolution notice). The page says ${at}. `
+              + '"Being wound up" means a winding-up order (HMRC liq, kind winding-up order), never dissolved. If their words '
+              + 'only say what a document says, check it with liquidation_next_step first. Tell them in one or two lines what the '
+              + 'documents show and ask whether they have the winding-up order, or want the stage set to it. Change nothing.',
+          };
+        }
+      }
+    }
     /**
      * AN OWNER THEY NEVER GAVE: "the OR handed it over, liquidator is Kroll" sent
      * owner "OR" (the Official Receiver), was refused as no admin, and the
@@ -1299,11 +1359,21 @@ const searchCompanyDocuments = {
     // eslint-disable-next-line global-require
     const { search } = require('../../shared/liquidationDocIndex');
     let keys = null;
-    if (args.company) {
-      const { rows, ...rest } = await rowsFor([args.company], args.said);
+    let named = [];
+    // THE COMPANY THEIR WORDS NAME when she sent none: "whats the latest doc on
+    // quale & oddbody say" was answered with every company's papers (blind docs run 2026-10-22).
+    const company = args.company || (args.said ? await pageCompanyNamed(args.said).catch(() => null) : null);
+    if (company) {
+      let { rows, ...rest } = await rowsFor([company], args.said);
+      // HER NAME FOR IT MISSED, THEIRS MAY NOT: "Oddbody" for Quayle & Oddbody Haulage.
+      if (problems(rest) && args.company && args.said) {
+        const theirs = await pageCompanyNamed(args.said).catch(() => null);
+        if (theirs) ({ rows, ...rest } = await rowsFor([theirs], args.said));
+      }
       // NOT A COMPANY ON THE PAGE ("the hmrc petition" came as company "HMRC",
       // overnight suite 2026-10-13): every company's documents are searched.
       keys = problems(rest) ? null : rows.map((r) => r.company_key);
+      named = keys ? rows : [];
     }
     // An empty query is their own question (the embedding refuses an empty string).
     // HER WORDS AND THEIRS, the better of the two: her short query ("hearing")
@@ -1324,11 +1394,27 @@ const searchCompanyDocuments = {
     // (a short question, "the hearing?", scores low against a whole letter).
     const good = keys ? hits.slice(0, 4) : hits.filter((h) => h.score >= 0.2 && h.score >= best - 0.15);
     if (!good.length) return { summary: 'Nothing in their documents matches that. Say so; do not guess what a document says.' };
+    /**
+     * THE PAPERS AHEAD OF THE PAGE are said with the answer: "wat does the
+     * thistlecomb larder paperwork say" read the CVL notice out and never said the
+     * page still showed plain liquidation (blind docs run 2026-10-22).
+     */
+    const behind = [];
+    for (const r of named.length === 1 ? named : []) {
+      // eslint-disable-next-line no-await-in-loop
+      const note = await aheadNote(r).catch(() => '');
+      if (note) behind.push(`${r.company_name}: the page says ${stageText(r.stage, r.stage_kind)}, but${note.replace(/^ · ⚠/, '').replace(/: say "update it from the docs"$/, '')}.`);
+    }
+    if (behind.length && args.turn && typeof args.turn === 'object') args.turn.behindLine = behind.join(' ');
     return {
-      summary: 'FROM THEIR DOCUMENTS (quote only what is here, and name the document each fact came from). '
+      summary: (behind.length ? `THE PAGE IS BEHIND ITS DOCUMENTS. ${behind.join(' ')} After the answer, say that in one line and `
+        + 'offer to update the page from the documents (shown first, nothing changes until they say yes). Do not change it now.\n\n' : '')
+        + 'FROM THEIR DOCUMENTS (quote only what is here, and name the document each fact came from). '
         + 'Ranking, adding or comparing the figures below to answer them IS reading the document: do it, '
         + 'never say you cannot rank or total (that rule is the master sheet\'s, not a document\'s).\n\n'
-        + good.map((h) => `${h.company_name} · ${h.file_name}\n${h.text.slice(0, 1800)}`).join('\n\n'),
+        + good.map((h) => `${h.company_name} · ${h.file_name}\n${h.text.slice(0, 1800)}`).join('\n\n')
+        // Said again last, where it is not lost under the passages (it was, 2026-10-22).
+        + (behind.length ? `\n\nEND YOUR ANSWER WITH ONE LINE: ${behind.join(' ')} Then offer: "Want me to update the page from the documents?"` : ''),
     };
   },
 };
@@ -1461,7 +1547,7 @@ const liquidationNextStep = {
     // ONLY WHEN THEY ASKED whether the page is right or to update it from the
     // paper: a held preview swallowed a page-wide rundown and the next edit
     // asked after it (suite 2026-10-21).
-    const askedForIt = args.update === true || /\b(?:right|correct|accurate|up to date|wrong|match\w*|sync|update|fix|set)\b|\bcheck\b[^.?!]*\b(?:docs?|documents?|paperwork|papers|files?)\b|\b(?:docs?|documents?|paperwork) say\b/i.test(String(args.said ?? ''));
+    const askedForIt = args.update === true || /\b(?:right|correct|accurate|up to date|wrong|match\w*|sync|update|fix|set|sort)\b|\bcheck\b[^.?!]*\b(?:docs?|documents?|paperwork|papers|files?)\b|\b(?:docs?|documents?|paperwork) say\b/i.test(String(args.said ?? ''));
     const preview = offers.length && askedForIt
       ? await updateLiquidation.handler({ items: offers, said: args.said, saidRecent: args.saidRecent, confirmed: false }).catch(() => null)
       : null;
@@ -1473,13 +1559,24 @@ const liquidationNextStep = {
           + 'show the change. Do not ask "shall I" and do not call update_liquidation for it.'
         : '';
     // ASKED TO CHANGE THE PAGE FROM THE DOCUMENTS: the read was step one.
-    const change = !preview?.pending && /\b(?:update|set|change|fix|correct|move|match|sync|put)\b/i.test(String(args.said ?? ''))
+    // b, d: NOTHING FURTHER ON in the documents. "page correct vs the gazette?" got no
+    // yes, and "docs say its struck off? update it if so" ended in "nothing to change"
+    // (held-out doc run 2026-10-22). Said plainly, and nothing is called.
+    const asksRight = /\b(?:right|correct|accurate|up to date|match\w*|in line)\b/i.test(String(args.said ?? ''));
+    // Held for the turn, so an update sent after it is refused in code (see runAgent docsMatchPage).
+    if (!offers.length && args.turn && typeof args.turn === 'object') args.turn.docsMatchPage = true;
+    const nothingAhead = !offers.length
+      ? ` NO DOCUMENT READS FURTHER ON THAN THE PAGE. ${asksRight ? 'They asked whether the page is right: open with "Yes, the page matches the documents" (or say exactly what differs). ' : ''}`
+        + 'If they asked to change it from the documents, say plainly that nothing on file shows a later step, naming what the document IS '
+        + '(a First Gazette is a proposal, not dissolution; a petition is not an order). Do NOT call update_liquidation.'
+      : '';
+    const change = offers.length && !preview?.pending && /\b(?:update|set|change|fix|correct|move|match|sync|put|sort)\b/i.test(String(args.said ?? ''))
       ? ' THEY ASKED TO CHANGE THE PAGE FROM THIS: now call update_liquidation (confirmed false) with ONLY what '
         + 'the documents show (the "READ FURTHER ON" lines and anything they asked for), all companies in one call, so '
         + 'they see the preview. Change nothing the documents do not show.'
       : '';
     const body = {
-      summary: `TODAY ${sayDay(today)}. ${how}${change}${offer} The companies are listed MOST URGENT FIRST (nearest date): `
+      summary: `TODAY ${sayDay(today)}. ${how}${change}${offer}${nothingAhead} The companies are listed MOST URGENT FIRST (nearest date): `
         + 'asked which is most urgent, it is the first, and ranking them IS answering (the "cannot rank" rule is the master '
         + `sheet's, not this page's). Use ONLY the facts and dates below; never count days or invent a step, `
         + 'a date or a figure. Where a document and the usual process disagree, the document wins. Everything on the page '
@@ -1625,15 +1722,15 @@ const CHANGE = /\b(?:set|change|move|push|bring forward|update|make|mark|rename|
 const MOVES = /\b(?:close|closing|closed? (?:it|them|em)|wind(?:ing)? (?:\w+ ){0,3}?down|dissolve|strike (?:\w+ )?off|archive|stop|reopen|resume|put (?:\w+ ){0,3}?(?:in|into|on)|move|take (?:\w+ ){0,3}?off)\b/;
 /** A change ordered in the words, "closing" and "winding down" as where it is taken out (see liquidationRoute). */
 const ordered0 = (text) => MOVES.test(text.replace(/\bclos(?:ing|ed)\b(?! (?:it|them|em|down|off|up)\b)/g, ' ')
-  .replace(/\b(?:is|are|be|being|been|thats|that is|that are|ones|still|currently|already|which|any)(?: \w+){0,3}? winding down\b|\bwinding down (?:ones|companies|page|stage|list)\b/g, ' '));
+  .replace(/\b(?:is|are|be|being|been|thats|that is|that are|ones|still|currently|already|which|any)(?: \w+){0,3}? winding down\b|\bwinding down (?:ones|companies|page|stage|list|docs|documents|paperwork|papers|files)\b/g, ' '));
 /** Lazy spellings to their words: "wats up w/ the winding down ones" (browser 2026-10-21). */
 const lazy = (t) => t.replace(/\bwh?at'?s\b/g, 'whats').replace(/\bwat\b/g, 'what').replace(/\bw\/\s*|\bw (?=the|them|it|our|that|this)/g, 'with ')
   .replace(/\bpls\b|\bplz\b/g, 'please').replace(/\bu\b/g, 'you').replace(/\br\b/g, 'are').replace(/\bthx\b/g, '')
   // "wheres quarry lane at", "pinecrest n brightwell", "how many rn" (blind run 2026-10-22).
-  .replace(/\bwhere'?s\b/g, 'where is').replace(/\b(?:clsoe|cloes|colse)\b/g, 'close').replace(/\bln\b/g, 'lane').replace(/\bn\b/g, 'and').replace(/\brn\b/g, 'right now');
+  .replace(/\bwhere'?s\b/g, 'where is').replace(/\b(?:clsoe|cloes|colse)\b/g, 'close').replace(/\bln\b/g, 'lane').replace(/\bthru\b/g, 'through').replace(/\bcompanys\b/g, 'companies').replace(/\bn\b/g, 'and').replace(/\brn\b/g, 'right now');
 const asksAtAll = (text) => ASK_START.test(text) || /\b(?:what|whats|what's|which|who|how|when|whens)\b/.test(text);
 // ASKING WHAT TO DO NEXT, however it is said.
-const NEXT_STEP = /\b(?:next steps?|whats? next|what'?s next|what now|what do (?:we|i) do|what (?:should|shall|must|can) (?:we|i)|what (?:do|does) (?:we|i|it) need|what needs (?:doing|to happen|to be done)|where (?:are|do) we (?:at|go|stand)|where we (?:are|stand)|how do we (?:proceed|close|finish|wrap)|game ?plan|action plan|to ?do list|todos?|advise|advice|recommend\w*|outstanding|what'?s left|whats left|what is left|left to do|what to do|nxt|wat now|wats nxt|what happens (?:next|now|if|when)|(?:gotta|got to|have to|need to|needs to|should|must) (?:do|happen|be done)(?: next)?|(?:do|doing|happen\w*) next|run me (?:thru|through)|walk me (?:thru|through)|if we do nothing|most urgent|urgent|priorit\w*|deal with first|(?:is|are) (?:the )?(?:page|stage|stages|it|they|everything) (?:right|correct|up to date|accurate)|up to date with the (?:docs|documents|paperwork)|(?:check|go through|read|look at|review) (?:the |their |its |all (?:the )?|every )?(?:docs|documents|paperwork|papers|files)|where are we)\b/;
+const NEXT_STEP = /\b(?:next steps?|whats? next|what'?s next|what now|what do (?:we|i) do|what (?:should|shall|must|can) (?:we|i)|what (?:do|does) (?:we|i|it) need|what needs (?:doing|to happen|to be done)|where (?:are|do) we (?:at|go|stand)|where we (?:are|stand)|how do we (?:proceed|close|finish|wrap)|game ?plan|action plan|to ?do list|todos?|advise|advice|recommend\w*|outstanding|what'?s left|whats left|what is left|left to do|what to do|nxt|wat now|wats nxt|what happens (?:next|now|if|when)|(?:gotta|got to|have to|need to|needs to|should|must) (?:do|happen|be done)(?: next)?|(?:do|doing|happen\w*) next|run me (?:thru|through)|walk me (?:thru|through)|if we do nothing|most urgent|urgent|priorit\w*|deal with first|(?:is|are) (?:the )?(?:[a-z]+ ){0,3}(?:page|stage|stages|it|they|everything) (?:right|correct|up to date|accurate|wrong|out of date)|up to date with the (?:docs|documents|paperwork)|(?:check|go through|read|look at|review) (?:the |their |its |all (?:the )?|every )?(?:(?:company|companies|company'?s|one'?s|ones|winding down|liquidation|closing) )?(?:docs|documents|paperwork|papers|files)|\bpage (?:right|correct|accurate|up to date|wrong)\b|where are we)\b/;
 // "UPDATE THE STAGES FROM THE DOCS": read them first, then the change.
 const FROM_DOCS = /\b(?:from|per|according to|based on|going by|match(?:ing)?|in line with|off) (?:the |their |its |what the )?(?:docs|documents|paperwork|papers|letters|files)\b|\b(?:docs|documents|paperwork|papers) say\b/;
 // A CHANGE SAID WITH IT stays a change: "set the next action to …".
@@ -1653,6 +1750,17 @@ function pageCompanyIn(text) {
     return false;
   });
   if (hits.length === 1) return hits[0];
+  // ITS FIRST TWO WORDS SLIPPED: "otery mill" for Ottery Mill Foods, "halowdene print"
+  // (fresh doc run 2026-10-22). Only one company that near.
+  // "QUALE & ODDBODY" for Quayle & Oddbody Haulage: the "&" or "and" is no word
+  // of the name (blind docs run 2026-10-22).
+  const noAnd = words.filter((w) => w !== 'and');
+  const firstTwo = (n) => n.replace(/\s*&\s*|\s+and\s+/g, ' ').split(' ').slice(0, 2).join(' ');
+  const pairs = [];
+  for (let i = 0; i + 1 < noAnd.length; i += 1) pairs.push(`${noAnd[i]} ${noAnd[i + 1]}`);
+  const twoNear = pageNames.companies.filter((n) => firstTwo(n).split(' ').length >= 2 && firstTwo(n).length >= 8
+    && pairs.some((p) => near(p, firstTwo(n))));
+  if (twoNear.length === 1) return twoNear[0];
   // ITS FIRST TWO WORDS, when only one company starts so: "zz harbour".
   const two = pageNames.companies.filter((n) => n.split(' ').length >= 3 && text.includes(n.split(' ').slice(0, 2).join(' ')));
   if (two.length === 1) return two[0];
@@ -1663,7 +1771,11 @@ function pageCompanyIn(text) {
   const at = (f) => { const i = words.findIndex((w) => w === f || w === `${f}s`); return i < 0 ? Infinity : i; };
   const one = firsts.filter(([, f]) => at(f) < Infinity && firsts.filter(([, g]) => g === f).length === 1)
     .sort((a, b) => at(a[1]) - at(b[1]));
-  return one[0]?.[0];
+  if (one[0]) return one[0][0];
+  // ITS FIRST WORD ONE LETTER OUT, when only one company is that near: "fernhollw
+  // docs are in" (fresh doc run 2026-10-22). Long words only, so names stay apart.
+  const slipped = firsts.filter(([, f]) => f.length >= 6 && words.some((w) => w.length >= 6 && w !== f && near(w, f)));
+  return slipped.length === 1 ? slipped[0][0] : undefined;
 }
 
 /**
@@ -1687,6 +1799,13 @@ async function personsCompanies(text) {
   ).catch(() => ({ rows: [] }));
   if (new Set(rows.map((r) => fold(r.person_name))).size !== 1) return [];
   return [...new Set(rows.map((r) => r.company))];
+}
+
+/** Every page company a text names, as the page writes them. */
+async function pageCompaniesNamed(text) {
+  await loadNames();
+  const rows = await repo.list();
+  return pageCompaniesIn(lazy(fold(text))).map((c) => rows.find((r) => bare(r.company_name) === c)?.company_name).filter(Boolean);
 }
 
 /** The page company a text names, as the page writes it, or null. */
@@ -1726,8 +1845,37 @@ async function liquidationRoute(said, { hasFiles = false } = {}) {
   if (hasFiles && company && /\b(?:put|save|file|add|upload|attach|store|keep|stick|drop|this|these|them|it)\b/.test(text)) return 'liquidation_document';
   // "WHAT'S NEXT FOR QUARRY LANE", "GO THROUGH THE WINDING DOWN ONES AND TELL
   // ME WHAT NEEDS DOING": the next step, from the documents (2026-10-21).
-  const pageWide = /\b(?:winding down|liquidations?|closures?|strike offs?|wind downs?|struck off ones|all of them|all the stages|every (?:company|stage)|each (?:one|company)|all (?:the )?companies)\b/.test(text);
+  const pageWide = /\b(?:winding down|liquidations?|closures?|strike offs?|wind downs?|struck off ones|all of them|all the stages|every (?:compan\w*|stage)|each (?:one|compan\w*)|all (?:the )?compan\w*)\b/.test(text);
   if (FROM_DOCS.test(text) && (company || liqWords || pageWide)) return 'liquidation_next_step';
+  // "OK FIX IT THEN" after a question on its papers (the company carried over by
+  // runAgent): the stage from its documents, shown first (blind docs run 2026-10-22).
+  if (company && /^\s*(?:(?:ok|okay|right|so|yeah|yes|yep|go on|then|and)[\s,.]+)*(?:fix|update|sort|correct)\s+(?:it|that|the page|the stage)(?:\s+(?:out|then|up|please|pls))*\s+for\b/.test(text)) return 'liquidation_next_step';
+  // "CHECK THEM ALL AGAINST THE DOCS AND FIX WHATS OUT OF DATE": every company,
+  // from its papers (blind docs run 2026-10-22: the sheet audit ran instead).
+  if (/\b(?:check|go through|run through|look (?:at|through)|compare)\b/.test(text) && /\b(?:them all|all of (?:em|them)|the lot|everything|every one|each one)\b/.test(text)
+    && /\b(?:against|with|vs|versus|to|by)\s+(?:the |their |its )?(?:docs|documents|paperwork|papers|letters|files)\b/.test(text)) return 'liquidation_next_step';
+  // "WHOS PTOLMEY VARGA, HE KEEPS COMING UP IN THE GORSEBROOK STUFF": someone in
+  // their papers, never a search of the sheet's people (blind docs run 2026-10-22).
+  if (company && /\bwho(?:s|'s| is| was)\s+(?!the\b|our\b|in charge|on it|handling|dealing|looking|owns|responsible|it\b|that\b|this\b)[a-z]{3,}(?: [a-z]{3,})?\b/.test(text)
+    && /\b(?:stuff|docs?|documents?|paperwork|papers|letters?|notice|coming up|keeps|mentioned|named|signed|in the)\b/.test(text)
+    && !CHANGE.test(text.replace(ASK_START, ''))) return 'search_company_documents';
+  // "ANY WORD FROM COMPANIES HOUSE", "ANYTHING NEW IN THE DOCS": its papers, read (fresh doc run 2026-10-22).
+  if (company && /\bany (?:word|news|update|updates|letters?|post)\b|\banything new\b|\bheard (?:anything|back)\b|\bwhats? (?:new|goin(?:g)? on)\b/.test(text)) return 'liquidation_next_step';
+  // "COPPERBECK PAGE IS BEHIND I THINK. FIX IT": the documents decide (fresh doc run 2026-10-22).
+  if ((company || pageWide) && /\b(?:page|stage|stages)\b[^.?!]{0,20}\b(?:behind|out of date|outdated|old|wrong|not right)\b/.test(text)) return 'liquidation_next_step';
+  // "LIQUIDATOR LETTER CAME IN, SORT THE STAGE OUT": the stage from that paper (held-out doc run 2026-10-22).
+  if (company && /\b(?:sort|fix|update|correct|set)\b[^.?!]{0,25}\b(?:stage|page)\b/.test(text) && /\b(?:letter|docs?|documents?|notice|gazette|order|paperwork|came in|got)\b/.test(text)) return 'liquidation_next_step';
+  // "FIX THE PAGE IF ITS WRONG", "WAT KIND OF LIQ IS IT": checked against the
+  // documents, never their list (blind run 2026-10-22: the files were listed).
+  if (company && /\b(?:fix|correct|update|sort)\b[^.?!]{0,30}\b(?:page|stage|it)\b[^.?!]{0,20}\bif\b|\bif (?:it'?s|its|the page is|the stage is) wrong\b|\bwhat (?:kind|type|sort) of (?:liq|liquidation|strike off|winding up)\b/.test(text)) return 'liquidation_next_step';
+  // "WHAT DOES THE LETTER SAY": answered from it (fresh doc run 2026-10-22).
+  if (company && DOC_WORDS.test(text) && /\b(?:what|whats|wat)\b[^.?!]*\b(?:say|says|said|mean|tell)\b/.test(text) && !CHANGE.test(text.replace(ASK_START, ''))) return 'search_company_documents';
+  // "WHO GOT APPOINTED": a question about their papers, liquidator said or not (fresh doc run 2026-10-22).
+  if (company && /\bwho (?:got|was|has been|is|were|have been) (?:appointed|named|put in)\b/.test(text)) return 'search_company_documents';
+  // "WHOS THE ACTUAL LIQUIDATOR, THE PERSON NOT THE FIRM": the page holds the
+  // firm; the person is in their letters (blind run 2026-10-22).
+  if (company && /\bliquidators?\b/.test(text) && /\b(?:person|people|name of the|actual|named|individual|appointed|signed|insolvency practitioner|the ip|which one at|end(?:ed)? up with|go(?:ne)? with|who did)\b|\bnot the firm\b|\bwho(?:s|'s| is| was)? (?:the |their )?liquidators?\b/.test(text)
+    && !CHANGE.test(text.replace(ASK_START, ''))) return 'search_company_documents';
   // "WHATS THE DEADLINE TO SORT HMRC OUT": the documents' dates as well as
   // the page's one (suite 2026-10-21: "no deadline" while HMRC's letter had one).
   if (company && asksAtAll(text) && /\b(?:deadlines?|due|by when|how long|time left|when (?:do|must|should|have) we)\b/.test(text) && !CHANGE.test(text.replace(ASK_START, ''))) return 'liquidation_next_step';
@@ -1868,6 +2016,14 @@ function narrowItems(said, items) {
   const keep = /^\s*(?:(?:actually|no|nah|wait|ok|okay|oh|hmm|sorry|scratch that)[\s,.!]*)*(?:just|only)\b/.test(text);
   const drop = /^\s*(?:(?:actually|no|nah|wait|ok|okay|oh|hmm|sorry)[\s,.!]*)*(?:drop|remove|skip|not|leave|without|except|take out|minus)\b/.test(text);
   if (!keep && !drop) return null;
+  // "LEAVE IRONLEAF FOR NOW, JUST HARBOR NINE": both named, and the "just" part
+  // is what stays (blind run 2026-10-22: both were dropped and nothing was left).
+  const justPart = drop && text.match(/\b(?:just|only)\b(.*)$/)?.[1];
+  if (justPart) {
+    const b = (i) => bare(i.company);
+    const kept = items.filter((i) => justPart.includes(b(i)) || justPart.includes(b(i).split(' ')[0]));
+    return kept.length && kept.length < items.length ? kept : null;
+  }
   const hit = items.filter(named);
   if (!hit.length || hit.length === items.length && keep) return null;
   const out = keep ? hit : items.filter((i) => !hit.includes(i));
@@ -1895,7 +2051,7 @@ async function swapItems(said, items) {
 }
 
 module.exports = {
-  narrowItems, pageCompanyNamed, swapItems,
+  narrowItems, pageCompanyNamed, pageCompaniesNamed, swapItems,
   namesADocument, liquidationRoute, liquidationPlan, namesList, asNews, kindFrom, cleanItem,
   liquidationTools, listLiquidations, updateLiquidation, liquidationDocument, searchCompanyDocuments, readCompanyDocument, liquidationNextStep, stageFrom,
 };

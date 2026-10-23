@@ -186,11 +186,17 @@ function datesIn(text, today) {
 // petition presented on…" is in the winding up order).
 const EVIDENCE = [
   // Never "will be struck off … and dissolved": that is the First Gazette's own wording.
-  [/\b(?:final|second) gazette\b|\bnotice of dissolution\b|\bhas been (?:struck off|dissolved)\b|\bwas (?:struck off|dissolved)\b/i, 'dissolved', null],
+  // "was on 19 October 2026 struck off the register and is dissolved" (the Gazette's own wording, blind run 2026-10-22).
+  [/\b(?:final|second) gazette\b|\bnotice of (?:striking[\s-]off and )?dissolution\b|\bhas been (?:struck off|dissolved)\b|\bwas (?:on [^.;]{1,40}? )?(?:struck off|dissolved)\b|\bis (?:now )?dissolved\b/i, 'dissolved', null],
   [/\bwinding[\s-]?up order\b|\b(?:ordered|order) that (?:the )?(?:company|it) be wound up\b|\bofficial receiver\b/i, 'hmrc_liq', 'winding_up_order'],
   [/\bwinding[\s-]?up petition\b|\bpetition (?:to|for) wind\b|\bpetition will be heard\b/i, 'hmrc_liq', 'petition'],
-  [/\bdeclaration of solvency\b|\bmembers'? voluntary\b|\bMVL\b/, 'own_liq', 'mvl'],
-  [/\bcreditors'? voluntary\b|\bCVL\b|\bstatement of affairs\b|\bdecision procedure\b/, 'own_liq', 'cvl'],
+  // ANY CASE: "IN CREDITORS VOLUNTARY LIQUIDATION" in a letter heading was missed (held-out doc run 2026-10-22).
+  [/\bdeclaration of solvency\b|\bmembers'? voluntary\b|\bMVL\b/i, 'own_liq', 'mvl'],
+  [/\bcreditors'? voluntary\b|\bCVL\b|\bstatement of affairs\b|\bdecision procedure\b|\bcannot continue its business by reason of its liabilities\b|\bcannot pay its debts\b|\bdeemed consent\b/i, 'own_liq', 'cvl'],
+  // WITHDRAWN: "the Registrar has withdrawn the strike-off action. The company will remain on the register."
+  [/\b(?:withdrawn|discontinued|cancell?ed)\b[^.]{0,40}\bstrike[\s-]?off\b|\bstrike[\s-]?off\b[^.]{0,40}\b(?:withdrawn|discontinued|cancell?ed)\b|\bwill remain on the register\b/i, 'strike_off_rejected', null],
+  // THE OBJECTION WITHDRAWN puts the strike off back on: a proposal again, not suspended.
+  [/\bobjection\w*\b[^.]{0,60}\bwithdr[ae]w\w*|\bwithdr[ae]w\w*\b[^.]{0,30}\bobjection|\bstrike[\s-]?off (?:action )?(?:will )?(?:now )?(?:resume|proceed|go ahead)\w*/i, 'active_proposal', null],
   [/\bstrike[\s-]?off\b[^.]{0,80}\bsuspend\w*|\bsuspend\w*\b[^.]{0,80}\bstrike[\s-]?off\b|\bobjection\b[^.]{0,80}\bstrik/i, 'strike_off_suspended', null],
   [/\bfirst gazette\b|\bproposal to strike\b|\bnotice of (?:proposed |intended )?strik\w*[\s-]?off\b|\bDS01\b|\bunless cause is shown\b|\bwill be struck off\b/i, 'active_proposal', null],
 ];
@@ -208,8 +214,11 @@ function stageInText(text) {
    * may make a winding-up order" and was read as the order itself (held-out run
    * 2026-10-22). A step said as a possibility, a request or a threat is taken out.
    */
-  const t = String(text ?? '').replace(/\b(?:may|might|could|can|will|would|shall|seek\w*|ask\w* for|appl\w* for|apply for|for|risk\w*|avoid|prevent|face|facing|unless|before)\s+(?:\w+\s+){0,3}?(?:a\s+|an\s+|the\s+)?(?:winding[\s-]?up order|compulsory liquidation|official receiver)\b/gi, ' ');
+  // Curly quotes are the paper's own: "Creditors’ Voluntary" was missed (fresh doc run 2026-10-22).
+  const t = String(text ?? '').replace(/[\u2018\u2019\u02bc]/g, "'").replace(/\b(?:may|might|could|can|will|would|shall|seek\w*|ask\w* for|appl\w* for|apply for|for|risk\w*|avoid|prevent|face|facing|unless|before)\s+(?:\w+\s+){0,3}?(?:a\s+|an\s+|the\s+)?(?:winding[\s-]?up order|compulsory liquidation|official receiver)\b/gi, ' ');
   for (const [re, stage, kind] of EVIDENCE) {
+    // An OBJECTION withdrawn puts the strike off back on: it is not the strike off withdrawn.
+    if (stage === 'strike_off_rejected' && /\bobjection\w*\b[^.]{0,60}\bwithdr[ae]w\w*|\bwithdr[ae]w\w*\b[^.]{0,30}\bobjection/i.test(t) && !/\bwill remain on the register\b/i.test(t)) continue;
     if (re.test(t)) {
       // "voluntary" or "compulsory" said with the proposal.
       if (stage === 'active_proposal') {

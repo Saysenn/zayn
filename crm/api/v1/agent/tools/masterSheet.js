@@ -1582,9 +1582,13 @@ const findAndShow = {
           ? `${who} holds ONE deal and it is the one they mean: ${dealsWhere(rows)}, id ${rows[0].id}. `
             + 'THEY ASKED FOR A CHANGE, not for details, so nothing was drawn and nothing should be. '
             + `Make the change they asked for, on id ${rows[0].id}.`
-          : `${who} has ${rows.length} deals, listed on screen. THEY ASKED FOR A CHANGE, not for `
-            + 'details, so no cards were drawn and none should be. Ask WHICH ONE, in one short line.',
-        ...(one ? {} : { list: dealList(rows, `${who}'s ${rows.length} deals`) }),
+          // "ALL KIRAN VALE'S DEALS ON A 7% FEE" was asked "which one?" (held-out park run 2026-10-22).
+          : /\b(?:all|every|each|both)\b/i.test(String(args.said ?? ''))
+            ? `${who} has ${rows.length} deals (ids ${rows.map((r) => r.id).join(', ')}) and they said ALL of them: do not ask which. `
+              + 'Make the change on every one (a fee or add on is update_person; a later month goes through park_for_month or `when`).'
+            : `${who} has ${rows.length} deals, listed on screen. THEY ASKED FOR A CHANGE, not for `
+              + 'details, so no cards were drawn and none should be. Ask WHICH ONE, in one short line.',
+        ...(one || /\b(?:all|every|each|both)\b/i.test(String(args.said ?? '')) ? {} : { list: dealList(rows, `${who}'s ${rows.length} deals`) }),
         rows: rows.map(summarizeRow),
       };
     }
