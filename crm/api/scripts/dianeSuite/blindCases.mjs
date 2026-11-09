@@ -156,7 +156,9 @@ write('blind: shortest close', [
   { say: 'yep', expect: { db: closed('pinecrest') } },
 ]);
 write('blind: typo close of two', [
-  { say: 'clsoe pincrest n quary ln', expect: { db: untouched } },
+  // A close name is asked first, never picked (his rule 2026-11-04); the yes then shows the preview.
+  { say: 'clsoe pincrest n quary ln', expect: { db: untouched, reply: /did you mean|do you mean|exact name|is that|meant/i } },
+  { say: 'yes both', expect: { db: untouched } },
   { say: 'yh go', expect: { db: all(closed('pinecrest'), closed('quarry lane')) } },
 ]);
 write('blind: close all the winding down ones', [
@@ -245,7 +247,9 @@ write('blind: auto mode, a no after a close preview', [
 // Corrected 2026-10-22: auto mode still shows a change to SEVERAL companies
 // first (runAgent reachesMany); the brief this was written from said otherwise.
 write('blind: auto mode, winding down several shows first, british spelling', [
-  { say: 'harbour nine n ironleef r going bust stick both on winding down', expect: { db: untouched } },
+  // A close name is asked first, never picked (his rule 2026-11-04); the yes then shows the preview.
+  { say: 'harbour nine n ironleef r going bust stick both on winding down', expect: { db: untouched, reply: /did you mean|do you mean|exact name|is that|meant/i } },
+  { say: 'yes both', expect: { db: untouched } },
   { say: 'yes', expect: { db: all(winding('harbor nine'), winding('ironleaf'), statusIs('harbor view', 'active')) } },
 ], true);
 

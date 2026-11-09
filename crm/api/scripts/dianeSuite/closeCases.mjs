@@ -75,7 +75,9 @@ write('close several', [
   { say: 'yes', expect: { db: all(closed('quarry lane'), closed('pinecrest')) } },
 ]);
 write('close lazy, typo', [
-  { say: 'pinecrst can be closed now', expect: { db: untouched } },
+  // A close name is asked first, never picked (his rule 2026-11-04); the yes then shows the preview.
+  { say: 'pinecrst can be closed now', expect: { db: untouched, reply: /did you mean|do you mean|exact name|is that|meant/i } },
+  { say: 'ya', expect: { db: untouched } },
   { say: 'ya', expect: { db: closed('pinecrest') } },
 ]);
 write('close one, wind one down, close another', [
@@ -96,7 +98,9 @@ write('wind down several', [
   { say: 'yes', expect: { db: all(winding('ironleaf'), winding('harbor nine'), winding('brightwell')) } },
 ]);
 write('wind down, super messy', [
-  { say: 'ok so ironleaf n harbour nine r going under, put em in winding down. oh n brightwell too pls', expect: { db: untouched } },
+  // A close name is asked first, never picked (his rule 2026-11-04); the yes then shows the preview.
+  { say: 'ok so ironleaf n harbour nine r going under, put em in winding down. oh n brightwell too pls', expect: { db: untouched, reply: /did you mean|do you mean|exact name|is that|meant/i } },
+  { say: 'yes', expect: { db: untouched } },
   { say: 'go', expect: { db: all(winding('ironleaf'), winding('harbor nine'), winding('brightwell')) } },
 ]);
 write('wind down, then change mind on one', [

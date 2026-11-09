@@ -222,7 +222,8 @@ read('next step for one, from the hearing notice', [
   { say: 'wats next for quarry lane', expect: { reply: re('(?=[\\s\\S]*', said(13), ')(?=[\\s\\S]*(?:hearing|court|petition))'), db: untouched } },
 ]);
 read('next step, typo, from the liquidator letter', [
-  { say: 'pincrest next step??', expect: { reply: re('(?=[\\s\\S]*(?:', said(9), '|', said(10), '))(?=[\\s\\S]*(?:questionnaire|creditors|meeting|liquidator))'), db: untouched } },
+  { say: 'pincrest next step??', expect: { db: untouched, reply: /did you mean|do you mean|exact name|is that|meant/i } },
+  { say: 'yes', expect: { reply: re('(?=[\\s\\S]*(?:', said(9), '|', said(10), '))(?=[\\s\\S]*(?:questionnaire|creditors|meeting|liquidator))'), db: untouched } },
 ]);
 read('next steps for all of them', [
   { say: 'ok can u run me thru what we gotta do next on all the ones winding down, like each one', expect: {
@@ -296,7 +297,9 @@ write('auto mode: look-alike names must ask', [
   { say: 'wind down harbor', expect: { reply: re('(?=[\\s\\S]*Harbor Nine)(?=[\\s\\S]*Harbor Point)'), db: untouched } },
 ], true);
 write('auto mode: single wind down saves', [
-  { say: 'harbour nine is going under, wind it down', expect: { db: all(winding('harbor nine'), statusIs('harbor point', 'active'), othersUntouched('harbor nine')) } },
+  // A close name is asked first, never picked (his rule 2026-11-04); auto mode saves on the yes.
+  { say: 'harbour nine is going under, wind it down', expect: { db: untouched, reply: /did you mean|do you mean|exact name|is that|meant/i } },
+  { say: 'yes', expect: { db: all(winding('harbor nine'), statusIs('harbor point', 'active'), othersUntouched('harbor nine')) } },
 ], true);
 write('auto mode: a close still previews', [
   { say: 'close off quarry lane now pls', expect: { db: untouched } },

@@ -1990,6 +1990,23 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
     // name: a follow up like "double check" must not drop the conversion
     // they asked for one line earlier. See `recentSaid`.
     args.saidRecent = recentSaid(history);
+    // A COMPANY THEY DID NOT SPELL EXACTLY, on any tool: "iron leaf whats still
+    // outstanding" was answered as Ironleaf by a sheet tool (exact-name blind
+    // set 2026-11-04). The Winding down tools ask their own question.
+    if (!/liquidation|company_documents/.test(name) && args.confirmed !== true) {
+      const { saidClose } = require('./tools/liquidations');
+      const named = [modelArgs.company, modelArgs.companies].flat()
+        .filter((c) => typeof c === 'string' && c.trim());
+      const slips = [];
+      for (const c of named) {
+        const slip = saidClose(c, args.said);
+        // eslint-disable-next-line no-await-in-loop
+        if (slip && await exactCompany(c)) slips.push(c);
+      }
+      // THE QUESTION ITSELF, word for word: a read routed in code shows this
+      // text as the answer, so it must be the question, not a note to her.
+      if (slips.length) return { summary: `Did you mean ${slips.map((c) => `"${c}"`).join(' and ')}?`, computedReply: true };
+    }
     // THE FILES ATTACHED IN THIS CHAT, by id (the newest message's first), for
     // "save these to Quarry Lane": the files themselves, never what she read.
     if (name === 'liquidation_document') {
@@ -2372,6 +2389,12 @@ async function invokeToolInner(tools, name, rawArgs, history = [], onEvent = nul
       .some((i) => /clos|dissolv|struck/i.test(`${i?.status ?? ''} ${i?.stage ?? ''}`))) {
       reachesMany = true;
       logger.info({ tool: name }, 'diane: a close, so it asks first');
+    }
+    // TAKING SOMEONE OFF A COMPANY (an other party or a joint liquidator) always
+    // shows first; the closure sheet's new fields on one company do not (2026-11-04).
+    if (name === 'update_liquidation' && [...(args.items ?? []), args.set ?? {}].some((i) => i?.removeParty || i?.removeLiquidator)) {
+      reachesMany = true;
+      logger.info({ tool: name }, 'diane: someone taken off a company, so it asks first');
     }
     if (name === 'update_person' && ['addonPercent', 'feePercent', 'addonPercentDelta', 'feePercentDelta'].some((k) => args[k] != null)) {
       const who = [args.person, ...(Array.isArray(args.people) ? args.people : [])].filter(Boolean);
@@ -3877,7 +3900,8 @@ async function runAgentTurn(history, contextName, onEvent) {
   if (liqRouted === 'liquidation_next_step') turnState.windingDownAsk = true;
   // A next step asked with no change in it: read only (see nextStepQuestion).
   if (liqRouted === 'liquidation_next_step'
-    && !/\b(?:update|set|change|fix|correct|move|match|sync|put|save|mark|make|close|dissolve|wind (?:\w+ )?down|reopen)\b/i.test(routeSaid.replace(/\b(?:being |are being |is being )?wound up\b|\bwinding down\b/gi, ' '))) turnState.nextStepQuestion = true;
+    // "WHATS OUR NEXT MOVE" asks; "move" there is no order (held-out sheet run 2026-11-04).
+    && !/\b(?:update|set|change|fix|correct|move|match|sync|put|save|mark|make|close|dissolve|wind (?:\w+ )?down|reopen)\b/i.test(routeSaid.replace(/\b(?:being |are being |is being )?wound up\b|\bwinding down\b|\b(?:next|our|the) moves?\b/gi, ' '))) turnState.nextStepQuestion = true;
   /**
    * "ACTUALLY MAKE IT 4500 SORRY" TO A PARK PREVIEW is the parked value, still
    * for that month. It went to the ordinary edit and changed her pay that
@@ -5989,7 +6013,103 @@ async function runAgentTurn(history, contextName, onEvent) {
  * sent to the screen is recorded as it goes, and `spoken` is built from
  * that same data: she reads what is shown, all of it. See screenReading.js.
  */
+/**
+ * "DID YOU MEAN "HARBOR NINE"?" "YES" IS THEIR LAST REQUEST, WITH THE EXACT NAME.
+ * Only an exact name is a company (his rule 2026-11-04), so a close one is
+ * asked. The yes alone routed nowhere ("Nothing is waiting on a yes", or
+ * "there are 5 active companies"; wind and sheet runs 2026-11-04). So the yes is
+ * read as the request before it, their close words swapped for the name
+ * confirmed. A write still shows its preview.
+ */
+/** A company by its EXACT name, in the companies list or only on deals. */
+async function exactCompany(name) {
+  const key = String(name ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+  if (!key) return null;
+  const hit = await require('../repos/companies.repo').findByKey(key).catch(() => null);
+  if (hit) return hit;
+  const { rows: [row] } = await require('../../configs/db').query(
+    `SELECT btrim(company) AS name FROM tb_mastersheet WHERE lower(regexp_replace(btrim(company), '\\s+', ' ', 'g')) = $1 LIMIT 1`, [key],
+  ).catch(() => ({ rows: [] }));
+  return row ?? null;
+}
+
+async function yesToCompanyName(history) {
+  const users = history.filter((m) => m.role === 'user');
+  // "yes", and "yes both" / "yes brightwell" / "both": a yes with a few words
+  // after it (blind run 2026-11-04), never a new request.
+  const yes = String(users[users.length - 1]?.content ?? '').trim();
+  if (users.length < 2 || !(BARE_YES.test(yes) || /^(?:y|ya|yes+|yep|yeah|yup|ye|yh|yea|sure|correct|both)\b[\s,!.]*(?:\S+[\s,!.]*){0,3}$/i.test(yes))) return history;
+  // HER WORDING VARIES: "Did you mean "X"?", "The closest match is "X". If you
+  // meant X, just say so" (doc4 suite 2026-11-04: that yes was lost).
+  const ASKED = /\b(?:did|do) you mean\b|\bclosest match(?:es)?\b|\bif you meant\b/i;
+  const YES = (t) => BARE_YES.test(t) || /^(?:y|ya|yes+|yep|yeah|yup|ye|yh|yea|sure|correct|both)\b[\s,!.]*(?:\S+[\s,!.]*){0,3}$/i.test(t);
+  const askedIn = (question) => {
+    const tail = question.slice(question.search(ASKED));
+    const out = [...tail.matchAll(/["“]([^"”]{2,80})["”]/g)].map((m) => m[1].replace(/[.,!?;:]+$/, ''));
+    // NO QUOTES: "Did you mean Hallowdene Print?" (doc4 suite 2026-11-04).
+    if (!out.length) {
+      const bare = /\b(?:(?:did|do) you mean|closest match(?:es)? (?:is|are|I see is))\s+([^?.!\n]{2,80})/i.exec(tail);
+      if (bare) out.push(...bare[1].split(/\s+or\s+|\s+and\s+|,\s*/i).map((x) => x.trim()).filter(Boolean));
+    }
+    return out;
+  };
+  // A CHAIN OF YESES: "yes harbor nine", asked again about Pinecrest, "yes".
+  // Every yes answers a name question; the request is the message before them.
+  const idx = (m) => history.lastIndexOf(m);
+  const prevAnswer = (i) => { for (let j = i - 1; j >= 0; j -= 1) if (history[j].role === 'assistant') return String(history[j].content ?? ''); return ''; };
+  let u = users.length - 1;
+  const steps = [];
+  while (u >= 1) {
+    const text = String(users[u].content ?? '').trim();
+    const question = prevAnswer(idx(users[u]));
+    if (!YES(text) || !ASKED.test(question)) break;
+    steps.unshift({ yes: text, asked: askedIn(question) });
+    u -= 1;
+  }
+  if (!steps.length || u < 0) return history;
+  const before = String(users[u].content ?? '');
+  const { saidClose } = require('./tools/liquidations');
+  // THEIR WORDS AS TYPED, case and all: "whos the OR on harbr nine" lowercased
+  // to "or" and the official receiver question was lost (blind set 2026-11-04).
+  let request = before.trim();
+  let swapped = 0;
+  const added = [];
+  const leftOut = [];
+  const confirmed = new Set();
+  for (const step of steps) {
+    // "yes quarry lane": only the names their yes picked, when it picked any.
+    const extra = fold(step.yes.replace(/^\S+[\s,!.]*/, ''));
+    const some = extra && !/^(?:both|all|all of them|them both|both of them|please|pls|thanks|go|do it|go ahead)$/.test(extra);
+    const picked = some ? step.asked.filter((n) => fold(n).includes(extra) || extra.includes(fold(n)) || saidClose(n, extra)) : step.asked;
+    if (some && picked.length) leftOut.push(...step.asked.filter((n) => !picked.includes(n)));
+    for (const name of picked.length ? picked : step.asked) {
+      confirmed.add(name);
+      // eslint-disable-next-line no-await-in-loop
+      const real = await exactCompany(name);
+      const slip = real && saidClose(real.name, request);
+      if (slip) {
+        const pattern = new RegExp(`(^|[^\\p{L}\\p{N}])${slip.split(' ').map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[^\\p{L}\\p{N}]+')}(?:'s|’s|s)?(?=$|[^\\p{L}\\p{N}])`, 'iu');
+        const next = request.replace(pattern, (m, lead) => `${lead}${real.name}`);
+        if (next !== request) request = next; else added.push(real.name);
+        swapped += 1;
+      } else if (real) { added.push(real.name); swapped += 1; }
+    }
+  }
+  if (!swapped) return history;
+  // A SHORT FORM THE CODE CANNOT LINE UP is named beside it, as confirmed;
+  // a name their yes did not pick is said to be left out.
+  const others = [...new Set(leftOut)].filter((n) => !confirmed.has(n));
+  request = `${request}${added.length ? ` (the companies confirmed: ${added.map((n) => `"${n}"`).join(', ')})` : ''}`
+    + `${others.length ? ` (only the confirmed one: leave out ${others.map((n) => `"${n}"`).join(', ')})` : ''}`;
+  // THE MISSPELT TURN AND ITS QUESTION ARE DROPPED: the request stands as if
+  // typed with the exact name. Left in, "whos the liquidator on wexcom glazing"
+  // answered with an update preview instead of the liquidator (doc4 run 2026-11-04).
+  const first = idx(users[u]);
+  return [...history.slice(0, first), { ...users[users.length - 1], content: request }];
+}
+
 async function runAgent(history, contextName, onEvent) {
+  history = await yesToCompanyName(history); // eslint-disable-line no-param-reassign
   // "WHERE DID THAT COME FROM?" is answered in code from the deals behind
   // her last figure, with no search and no model. See agent/evidence.js.
   if (evidence.asked(history)) {
@@ -6023,7 +6143,7 @@ async function runAgentScreen(history, contextName, onEvent) {
 }
 
 module.exports = {
-  runAgent, lightTurn, streamCompletion, getClient, withExportReminder, turnsSinceReminder, REMINDER_GAP,
+  runAgent, yesToCompanyName, lightTurn, streamCompletion, getClient, withExportReminder, turnsSinceReminder, REMINDER_GAP,
   // Exported so the claim detectors can be pinned directly rather than
   // through a live model call.
   wantsPanelAct, asksWrongExportStep,

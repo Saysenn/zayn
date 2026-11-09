@@ -242,6 +242,13 @@ async function unknownScope(kind, name, said = '') {
       + 'names EXACTLY as written, and answer nothing until they say.';
   }
 
+  // A COMPANY WITH NOTHING CLOSE IS NOT ON FILE, and that is the answer: no
+  // "did you mean one of these" over every company (his exact-name rule,
+  // blind set 2026-11-04: "silverbirch" got a list of five to pick from).
+  if (kind === 'company' && !head.startsWith(`The ${kind} you passed`)) {
+    return `${head} Tell them there is no company called "${asked[0]}" on file, in one line. `
+      + 'Do NOT list other companies and do NOT ask "did you mean": nothing is close to it.';
+  }
   const shown = list.slice(0, NAMED_MAX);
   const cut = list.length > shown.length
     ? ` (${shown.length} of ${list.length} listed)`

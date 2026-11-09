@@ -119,7 +119,7 @@ const CKEY = `lower(regexp_replace(btrim(company), '\\s+', ' ', 'g'))`;
  * and its money already summed, per currency, never blended.
  */
 async function findAll({
-  q, group, status, oldGroup, page = 1, pageSize = 25, cryptoPercent = 0,
+  q, group, status, oldGroup, noDeals = false, page = 1, pageSize = 25, cryptoPercent = 0,
 } = {}) {
   const params = [];
   const where = [`company IS NOT NULL`, `btrim(company) <> ''`];
@@ -158,7 +158,9 @@ async function findAll({
    * Only for a status or old group question: the plain page lists what the
    * sheet holds, as before.
    */
-  const emptyToo = Boolean(status || oldGroup) && !group;
+  // "NO DEALS" (his call 2026-11-04): companies saved with no deal with us,
+  // the closure sheet's. Only they are asked for, so only the empty ones.
+  const emptyToo = Boolean(status || oldGroup || noDeals) && !group;
   const qParam = q ? params.findIndex((v) => v === `%${q}%`) + 1 : null;
 
   const limitParam = params.length + 1;
@@ -216,7 +218,10 @@ async function findAll({
          -- His own earlier name for the group. No COALESCE for the same
          -- reason tier has none: nobody has said is not the same as blank.
          c.old_group                             AS old_group,
-         COALESCE(c.notes, '')                   AS notes
+         COALESCE(c.notes, '')                   AS notes,
+         -- It has deals (stopped ones count): never tagged "No deals".
+         false                                   AS no_deals,
+         false                                   AS groups_from_sheet
        FROM agg a
        LEFT JOIN totals_json t ON t.ckey = a.ckey
        LEFT JOIN tb_companies c ON lower(c.name) = a.ckey
@@ -228,18 +233,23 @@ async function findAll({
          AND (EXISTS (SELECT 1 FROM deals l WHERE l.ckey = a.ckey AND l.stopped_on IS NULL)
               OR COALESCE(c.status, 'active') <> 'active')
        ${emptyToo ? `UNION ALL
-       SELECT ${keySql('c.name')}, c.name, ARRAY[]::text[], 0, 0, 0, false, false, 0,
+       -- NO DEALS: the group the closure sheet gave it (migration 093), shown
+       -- fainter as "from the closure sheet"; nothing else is invented.
+       SELECT ${keySql('c.name')}, c.name, array_remove(ARRAY[NULLIF(sl.sheet_group, '')]::text[], NULL), 0, 0, 0, false, false, 0,
               '{}'::jsonb, c.company_id, c.name, COALESCE(c.status, 'active'), c.closed_on,
-              c.liquidation_total::float, c.tier, c.old_group, COALESCE(c.notes, '')
+              c.liquidation_total::float, c.tier, c.old_group, COALESCE(c.notes, ''), true,
+              COALESCE(sl.sheet_group, '') <> ''
          FROM tb_companies c
+         LEFT JOIN tb_liquidations sl ON sl.company_key = ${keySql('c.name')}
         WHERE NOT EXISTS (SELECT 1 FROM agg a WHERE a.ckey = ${keySql('c.name')})
           ${q ? `AND c.name ILIKE $${qParam}` : ''} ${statusSql} ${oldGroupSql}` : ''}
      )
+     , shown AS (SELECT * FROM joined ${noDeals ? 'WHERE no_deals' : ''})
      SELECT
-       (SELECT COUNT(*)::int FROM joined) AS total,
+       (SELECT COUNT(*)::int FROM shown) AS total,
        COALESCE(
          (SELECT json_agg(j) FROM (
-            SELECT * FROM joined ORDER BY name LIMIT $${limitParam} OFFSET $${offsetParam}
+            SELECT * FROM shown ORDER BY name LIMIT $${limitParam} OFFSET $${offsetParam}
           ) j),
          '[]'
        ) AS rows`,

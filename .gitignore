@@ -57,3 +57,6 @@ yarn-error.log*
 Thumbs.db
 # expense receipts: kept on this machine only, never committed
 crm/api/storage/
+
+# Local database backups (live data, never committed)
+backups/

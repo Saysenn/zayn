@@ -186,7 +186,9 @@ read('next step, plain', [
   { say: 'whats next for quarry lane', expect: { tools: ['liquidation_next_step'], reply: said(17), db: untouched } },
 ]);
 read('next step, typos and slang', [
-  { say: 'wats nxt w/ quary lane??', expect: { tools: ['liquidation_next_step'], reply: /Quarry Lane/i, db: untouched } },
+  // A close name is asked first, never picked (his rule 2026-11-04).
+  { say: 'wats nxt w/ quary lane??', expect: { db: untouched, reply: /did you mean|do you mean|exact name|is that|meant/i } },
+  { say: 'yes', expect: { tools: ['liquidation_next_step'], reply: /Quarry Lane/i, db: untouched } },
 ]);
 read('what to do and by when, an objection', [
   { say: 'brightwell, hmrc objected to the strike off. what do we do and by when', expect: { tools: ['liquidation_next_step'], reply: /6,?200[\s\S]*|VAT/i, db: untouched } },

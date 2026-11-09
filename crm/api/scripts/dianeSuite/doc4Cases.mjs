@@ -248,45 +248,59 @@ const write = (name, turns, auto = false) => WRITES.push({ name, auto, turns: [r
 const read = (name, turns) => READS.push({ name, turns });
 
 const OFFER = /update|change|move|bring|want me|shall i|should i|fix/i;
+// A MISSPELT OR SHORT COMPANY NAME IS ASKED FIRST, never picked (his rule
+// 2026-11-04: only an exact name is a company). The yes then does the request.
+const ASK = { db: untouched, reply: /did you mean|do you mean|exact name|is that|meant|closest match/i };
 
 // ================= READS: answering from the documents =================
 read('paper further on than the page, she says so and offers', [
-  { say: 'whats goin on with halowdene print, anything new in the docs', expect: { reply: new RegExp(`(?=[\\s\\S]*(?:winding[- ]up order|wound up|official receiver))(?=[\\s\\S]*(?:${OFFER.source}))`, 'i'), db: untouched } },
+  { say: 'whats goin on with halowdene print, anything new in the docs', expect: ASK },
+  { say: 'yes', expect: { reply: new RegExp(`(?=[\\s\\S]*(?:winding[- ]up order|wound up|official receiver))(?=[\\s\\S]*(?:${OFFER.source}))`, 'i'), db: untouched } },
 ]);
 read('person name from the IP letter', [
-  { say: 'whos the liquidator on wexcom glazing', expect: { reply: /Tamsin Rook/i, db: untouched } },
+  // A close name is asked first, never picked (his rule 2026-11-04: only an exact name is a company).
+  { say: 'whos the liquidator on wexcom glazing', expect: { db: untouched, reply: /did you mean|do you mean|exact name|is that|meant/i } },
+  { say: 'yes', expect: { reply: /Tamsin Rook/i, db: untouched } },
 ]);
 read('follow-up with no company: the meeting', [
-  { say: 'wexcombe glazng - what does the letter from the insolvency lot say', expect: { reply: /CVL|creditors'? voluntary/i, db: untouched } },
+  { say: 'wexcombe glazng - what does the letter from the insolvency lot say', expect: ASK },
+  { say: 'yes', expect: { reply: /CVL|creditors'? voluntary/i, db: untouched } },
   { say: "and when's the meeting", expect: { reply: said(11), db: untouched } },
 ]);
 read('is the page right, and it is', [
-  { say: 'is the page right for brackenrige couriers or is it behind', expect: { reply: /\byes\b|right|correct|matches|up to date|still (?:at )?(?:the )?petition/i, noReply: /\b(?:page|it)(?:'s| is) (?:behind|out of date|wrong)\b|winding[- ]up order (?:was|has been) made/i, db: untouched } },
+  { say: 'is the page right for brackenrige couriers or is it behind', expect: ASK },
+  { say: 'yes', expect: { reply: /\byes\b|right|correct|matches|up to date|still (?:at )?(?:the )?petition/i, noReply: /\b(?:page|it)(?:'s| is) (?:behind|out of date|wrong)\b|winding[- ]up order (?:was|has been) made/i, db: untouched } },
 ]);
 read('next step quoting a date', [
   { say: 'brackenridge couriers whats next', expect: { reply: said(12, 19), db: untouched } },
 ]);
 read('follow-up with no company: who signed it', [
-  { say: 'gullsworh dental any word from companies house', expect: { reply: /withdrawn|discontinued|cancel+ed|remain on the register|no longer/i, db: untouched } },
+  { say: 'gullsworh dental any word from companies house', expect: ASK },
+  { say: 'yes', expect: { reply: /withdrawn|discontinued|cancel+ed|remain on the register|no longer/i, db: untouched } },
   { say: 'wait who signed it', expect: { reply: /Priya Lomax/i, db: untouched } },
 ]);
 
 // ================= WRITES: the stage from the documents =================
 write('page is behind: sort it previews, yes saves', [
-  { say: 'halowdene page is behind, sort it', expect: { db: untouched } },
+  { say: 'halowdene page is behind, sort it', expect: ASK },
+  { say: 'yes', expect: { db: untouched } },
   { say: 'yes', expect: { db: onlyMoved('hallowdene print', stageIs('hallowdene print', 'hmrc_liq', 'winding_up_order')) } },
 ]);
 write('a paper that only threatens a step changes nothing', [
-  { say: 'brackenridge got a court letter saying they could wind them up, update it', expect: { reply: /may|could|not (?:yet|been made|made)|hearing|already|no change|nothing to change/i, db: untouched } },
+  { say: 'brackenridge got a court letter saying they could wind them up, update it', expect: ASK },
+  { say: 'yes', expect: { reply: /may|could|not (?:yet|been made|made)|hearing|already|no change|nothing to change/i, db: untouched } },
   { say: 'yes', expect: { db: untouched } },
 ]);
 write('Final Gazette: dissolving previews, yes closes', [
-  { say: 'otery mill final gazette came thru, fix it', expect: { db: untouched } },
+  { say: 'otery mill final gazette came thru, fix it', expect: ASK },
+  { say: 'yes', expect: { db: untouched } },
   { say: 'yes', expect: { db: all(closed('ottery mill foods'), stageIs('brackenridge couriers', 'hmrc_liq', 'petition'), statusIs('hallowdene print', 'liquidation')) } },
 ]);
 write('question then "ok update it" on the company just discussed', [
-  { say: 'wexcombe - does the paperwork say mvl or cvl', expect: { reply: /CVL|creditors'? voluntary/i, db: untouched } },
-  { say: 'ok update it', expect: { db: untouched } },
+  { say: 'wexcombe - does the paperwork say mvl or cvl', expect: ASK },
+  { say: 'yes', expect: { reply: /CVL|creditors'? voluntary/i, db: untouched } },
+  // The answer may already show the CVL preview, so "ok update it" can be the yes.
+  { say: 'ok update it', expect: {} },
   { say: 'yes', expect: { db: onlyMoved('wexcombe glazing', stageIs('wexcombe glazing', 'own_liq', 'cvl')) } },
 ]);
 write('go through all of them and fix', [

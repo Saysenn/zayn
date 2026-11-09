@@ -95,9 +95,10 @@ const AREAS = Object.freeze([
   },
   {
     // His call 2026-10-13: the page is every company whose status is liquidation.
-    label: 'the Winding down page (strike offs and liquidations): every company winding down and at what stage, deadlines due or passed, one '
-      + 'company in full; change stage, deadline, owner, instructions, next action, liquidator, note or '
-      + 'blamed on one or many, log a contact; its documents: list, open, save files attached here, rename, '
+    label: 'the Winding down page (strike offs and liquidations): every company winding down and at what stage, deadlines due or passed, '
+      + 'by current play (wait, chase, leave, do not contact), no deals or unresolved matters, one company in full, and who changed what (its history); '
+      + 'change stage, stage date, deadline, owner, instructions, next action, joint liquidators, official receiver, other involved parties, '
+      + 'last action, unresolved matters, current play, prompts, note or blamed on one or many, log a contact; its documents: list, open, save files attached here, rename, '
       + 'remove one or many, and answer from what they say; the next step for one company or all of them, from their documents and deadlines; and undo',
     tools: ['list_liquidations', 'update_liquidation', 'liquidation_document', 'search_company_documents', 'read_company_document', 'liquidation_next_step'],
   },

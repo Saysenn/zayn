@@ -36,7 +36,7 @@ export default function FilterPanel({ children, active, activeCount, onClear }) 
             filtered page says so even with the panel shut. */}
         {activeCount > 0 && <span className="tabular-nums text-xs">{activeCount}</span>}
       </Button>
-      {open && children}
+      {open && <div className="toolbar-filters contents">{children}</div>}
       {/* The way back out. Clicking "Needs a check" from the counts above
           the table applied a filter with no visible control to undo it —
           you had to work out which dropdown had changed. */}

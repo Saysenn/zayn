@@ -99,7 +99,9 @@ function CompanyCard({ company, onView, selected, onToggle }) {
       interactive
       icon={BuildingIcon}
       title={company.name}
-      subtitle={(company.groups || []).join(', ')}
+      subtitle={company.no_deals
+        ? <span className="badge badge-no_deals" title="Saved from the closure sheet: no deal with us">No deals</span>
+        : (company.groups || []).join(', ')}
       lead={<MoneyTotals totals={company.monthly_totals} label="Monthly, every currency" />}
       leadLabel="Monthly"
       onOpen={() => onView(company.ckey)}
@@ -158,8 +160,14 @@ function CompanyRow({ company, onView, selected, onToggle }) {
       <td className="td w-8" onClick={(event) => event.stopPropagation()}>
         <input type="checkbox" checked={selected} onChange={onToggle} aria-label={`Select ${company.name}`} />
       </td>
-      <td className="px-3 py-2.5 font-medium text-text">{company.name}</td>
-      <td className="px-3 py-2.5 text-text-muted">{(company.groups || []).join(', ') || '—'}</td>
+      <td className="px-3 py-2.5 font-medium text-text">
+        {company.name}
+        {company.no_deals && <span className="badge badge-no_deals ml-2" title="Saved from the closure sheet: no deal with us">No deals</span>}
+      </td>
+      <td className={`px-3 py-2.5 ${company.groups_from_sheet ? 'text-text-muted/70' : 'text-text-muted'}`}
+        title={company.groups_from_sheet ? 'From the closure sheet' : undefined}>
+        {(company.groups || []).join(', ') || '—'}
+      </td>
       {/* The column has room, so the table prints every currency. Only the
           card hides them behind an icon. */}
       <td className="px-3 py-2.5 text-right tabular-nums">{formatTotalsWhole(company.monthly_totals)}</td>
@@ -274,7 +282,7 @@ export default function CompaniesPage() {
             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
           />
         }
-        filtersActive={Boolean(filters.group || filters.oldGroup || filters.status)}
+        filtersActive={Boolean(filters.group || filters.oldGroup || filters.status || filters.noDeals)}
         filtersCount={countFilters(filters)}
         storageKey="companies.panel"
         onClearFilters={() => { setFilters({}); setSearch(''); setPage(1); forgetFilters(); }}
@@ -290,6 +298,15 @@ export default function CompaniesPage() {
               onChange={(v) => { setFilters((f) => ({ ...f, status: v || undefined })); setPage(1); }}
               options={COMPANY_STATUS_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
               placeholder="Any status"
+            />
+            {/* COMPANIES WITH NO DEAL WITH US: the closure sheet's (2026-11-04). */}
+            <Select
+              size="sm"
+              className="w-44"
+              value={filters.noDeals ?? ''}
+              onChange={(v) => { setFilters((f) => ({ ...f, noDeals: v || undefined })); setPage(1); }}
+              options={[{ value: '1', label: 'No deals' }]}
+              placeholder="Any deals"
             />
             <Select
               size="sm"

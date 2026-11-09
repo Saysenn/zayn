@@ -553,7 +553,10 @@ function DissolvedCompaniesTab({ onTotal }) {
                   }}
                   className="cursor-pointer border-b border-border last:border-0 hover:bg-surface-sunken"
                 >
-                  <td className="td font-medium text-text">{c.name}</td>
+                  <td className="td font-medium text-text">
+                    {c.name}
+                    {c.deal_count === 0 && <span className="badge badge-no_deals ml-2" title="Never had a deal with us">No deals</span>}
+                  </td>
                   <td className="td whitespace-nowrap">{c.closed_on ? formatDate(c.closed_on) : NO_VALUE}</td>
                   <td className="td">
                     {c.stage === 'dissolved'

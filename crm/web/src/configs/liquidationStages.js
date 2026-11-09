@@ -33,7 +33,7 @@ export const LIQ_STAGES = Object.freeze([
       { value: 'voluntary', label: 'Voluntary', hint: 'The directors applied (DS01) and paid.' },
     ],
   },
-  { value: 'strike_off_suspended', group: 'Strike off', label: 'Strike off suspended', badge: 'badge badge-open', hint: 'Somebody objected: on hold for up to 6 months.' },
+  { value: 'strike_off_suspended', group: 'Strike off', label: 'Strike off suspended', badge: 'badge badge-open', hint: 'Somebody objected (a strike off objection): on hold for up to 6 months.' },
   { value: 'strike_off_rejected', group: 'Strike off', label: 'Strike off rejected / cancelled', badge: 'badge badge-settle_overdue', hint: 'Not going ahead: it stays on the register.' },
   { value: 'liquidation', group: 'Liquidation', label: 'Liquidation', badge: 'badge badge-liquidation', hint: 'In liquidation, which kind not said yet.' },
   {

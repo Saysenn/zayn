@@ -15,6 +15,7 @@ import WhatbotNumbers from '../components/settings/WhatbotNumbers';
 import HmrcKnowledge from '../components/settings/HmrcKnowledge';
 import OurPlaybook from '../components/settings/OurPlaybook';
 import ExpenseStyle from '../components/settings/ExpenseStyle';
+import ClosureImport from '../components/settings/ClosureImport';
 import Button, { FileButton, LinkButton } from '../components/buttons/Button';
 import Toggle from '../components/forms/Toggle';
 import Select from '../components/forms/Select';
@@ -94,6 +95,8 @@ const SECTIONS = [
       // doors that could drift. The account menu is the one.
     ],
   },
+  // THE BOSS'S CLOSURE SHEET, imported into Winding down (2026-11-04).
+  { key: 'winding', label: 'Winding down', icon: ImportIcon },
   // GLOBAL RATES, its own subject. Not a master sheet tab: these apply to
   // a payment rail, not to the sheet.
   { key: 'rates', label: 'Global rates', icon: ReceiptIcon },
@@ -436,6 +439,15 @@ export default function SettingsPage() {
                   <p className="text-xs text-text-faint">{historyWindow(historyMonths)}</p>
                 </div>
               )}
+            </Card>
+          )}
+
+          {section === 'winding' && (
+            <Card
+              title="Closure sheet import"
+              description="Brings the boss's closure spreadsheet into the Winding down page. You see a preview first and nothing is written until you import. Companies not in the CRM are saved and tagged No deals. Every change is on each company's History, and the whole import can be undone."
+            >
+              <ClosureImport />
             </Card>
           )}
 

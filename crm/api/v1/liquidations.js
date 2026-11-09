@@ -66,8 +66,22 @@ async function cleanFields(body) {
   // `proposalKind` is the name it had for a day; still read.
   const kind = body.stageKind !== undefined ? body.stageKind : body.proposalKind;
   if (kind !== undefined) out.stageKind = kind === null || kind === '' ? null : String(kind);
-  for (const f of ['instructions', 'nextAction', 'liquidator', 'note']) {
+  for (const f of ['instructions', 'nextAction', 'liquidator', 'note', 'officialReceiver', 'lastAction', 'unresolved', 'prompts', 'sheetDirector', 'sheetMid', 'sheetGroup']) {
     if (body[f] !== undefined) out[f] = text(body[f]);
+  }
+  // JOINT LIQUIDATORS, one a line (migration 092): a list sent is stored so.
+  if (Array.isArray(body.liquidators)) {
+    out.liquidator = body.liquidators.map((n) => text(n, 200)).filter(Boolean).join('\n').slice(0, 4000);
+  }
+  if (body.play !== undefined) {
+    if (body.play === null || body.play === '') out.play = null;
+    else if (repo.PLAYS.includes(body.play)) out.play = body.play;
+    else throw new AppError(400, 'Current play is Wait, Chase, Leave or Do not contact.');
+  }
+  if (body.stageDate !== undefined) {
+    if (body.stageDate === null || body.stageDate === '') out.stageDate = null;
+    else if (/^\d{4}-\d{2}-\d{2}$/.test(body.stageDate) && !Number.isNaN(Date.parse(body.stageDate))) out.stageDate = body.stageDate;
+    else throw new AppError(400, 'The stage date is a date, like 2026-08-19.');
   }
   if (body.deadline !== undefined) {
     if (body.deadline === null || body.deadline === '') out.deadline = null;
@@ -78,7 +92,7 @@ async function cleanFields(body) {
   if (body.owner !== undefined) {
     if (body.owner === null || body.owner === '') out.owner = null;
     else if ((await repo.owners()).includes(body.owner)) out.owner = body.owner;
-    else throw new AppError(400, 'The owner is one of the CRM\'s admins.');
+    else throw new AppError(400, 'The owner is one of the CRM\'s admins, or an owner already on the page.');
   }
   return out;
 }
@@ -88,7 +102,7 @@ const changed = (row) => broadcast(null, 'liquidations:changed', { id: row?.id ?
 router.get('/liquidations', async (req, res, next) => {
   try {
     const [rows, owners] = await Promise.all([repo.list(), repo.owners()]);
-    res.json({ rows, owners, stages: repo.STAGES });
+    res.json({ rows, owners, stages: repo.STAGES, plays: repo.PLAYS });
   } catch (err) {
     next(err);
   }
@@ -121,6 +135,74 @@ router.get('/liquidations/download', async (req, res, next) => {
     const columns = String(req.query.columns ?? '').split(',').map((c) => c.trim()).filter(Boolean);
     await buildLiquidationSheet(rows, { columns, palette: req.query.palette }).xlsx.write(res);
     res.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ===============================
+// * THE BOSS'S CLOSURE SHEET IMPORT (Settings, his call 2026-11-04)
+// ===============================
+// Upload → preview (nothing written) → ticks → commit, one batch, undoable.
+// The preview is held here for an hour under an id: the commit names it,
+// so what is written is exactly what was shown. Before /:id.
+const closureImport = require('./shared/closureImport.helper');
+const xlsxUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 1 } });
+const previews = new Map();
+const PREVIEW_MS = 60 * 60 * 1000;
+const sweepPreviews = () => { for (const [k, v] of previews) if (Date.now() - v.at > PREVIEW_MS) previews.delete(k); };
+
+router.post('/liquidations/import/preview', (req, res, next) => {
+  xlsxUpload.single('file')(req, res, async (uploadErr) => {
+    try {
+      if (uploadErr) return next(new AppError(400, uploadErr.code === 'LIMIT_FILE_SIZE' ? 'The file is over 25 MB.' : uploadErr.message));
+      if (!req.file) return next(new AppError(400, 'Pick the closure sheet to upload.'));
+      if (!/\.xlsx$/i.test(req.file.originalname)) return next(new AppError(400, 'The closure sheet is an Excel file (.xlsx).'));
+      const parsed = await closureImport.parseWorkbook(req.file.buffer).catch(() => null);
+      if (!parsed) return next(new AppError(400, 'That file could not be read as a spreadsheet.'));
+      if (!parsed.companies.length) return next(new AppError(400, 'No companies found: is this the closure sheet?'));
+      const plan = await closureImport.buildPlan(parsed);
+      sweepPreviews();
+      const previewId = require('node:crypto').randomUUID(); // eslint-disable-line global-require
+      previews.set(previewId, { plan, fileName: req.file.originalname, at: Date.now(), by: sessionUser(req) });
+      res.json({ previewId, fileName: req.file.originalname, ...plan });
+    } catch (err) {
+      next(err);
+    }
+  });
+});
+
+router.post('/liquidations/import/commit', async (req, res, next) => {
+  try {
+    const held = previews.get(String(req.body?.previewId ?? ''));
+    if (!held) return next(new AppError(410, 'That preview has expired. Upload the file again.'));
+    previews.delete(req.body.previewId);
+    const result = await closureImport.commit(held.plan, req.body?.choices ?? {}, { byUser: sessionUser(req), fileName: held.fileName });
+    broadcast(null, 'liquidations:changed', { action: 'import' });
+    broadcast(null, 'companies:changed', { action: 'updated' });
+    broadcast(null, 'master-sheet:changed', { action: 'company-status' });
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/liquidations/import/history', async (req, res, next) => {
+  try {
+    res.json({ imports: await closureImport.history() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/liquidations/import/:importId/undo', async (req, res, next) => {
+  try {
+    const out = await closureImport.undo(Number(req.params.importId), sessionUser(req));
+    if (out.error) return next(new AppError(400, out.error));
+    broadcast(null, 'liquidations:changed', { action: 'import-undo' });
+    broadcast(null, 'companies:changed', { action: 'updated' });
+    broadcast(null, 'master-sheet:changed', { action: 'company-status' });
+    res.json(out);
   } catch (err) {
     next(err);
   }
@@ -159,7 +241,7 @@ router.patch('/liquidations/:id', async (req, res, next) => {
     // DISSOLVED CLOSES IT: the stage is written first, so how it ended is kept.
     let closed = null;
     if (fields.stage === 'dissolved' && before?.pay_status === 'liquidation') {
-      const done = await applyCompanyStatus(before.company_name, { status: 'closed', via: 'admin' });
+      const done = await applyCompanyStatus(before.company_name, { status: 'closed', via: 'admin', byUser: sessionUser(req) });
       closed = { stopped: done.deals?.stopped?.length ?? 0 };
       broadcast(null, 'companies:changed', { action: 'updated' });
       broadcast(null, 'master-sheet:changed', { action: 'company-status' });
@@ -183,6 +265,31 @@ router.post('/liquidations/:id/comms', async (req, res, next) => {
     const comm = await repo.addComm(id(req), { saidOn, body }, sessionUser(req));
     changed({ id: id(req) });
     res.status(201).json({ comm });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** OTHER INVOLVED PARTIES (migration 092): added one at a time, name and position. */
+router.post('/liquidations/:id/parties', async (req, res, next) => {
+  try {
+    const name = text(req.body?.name, 200);
+    if (!name) return next(new AppError(400, 'Write their name.'));
+    if (!(await repo.findById(id(req)))) return next(new AppError(404, 'That company is not on the Winding down page.'));
+    const party = await repo.addParty(id(req), { name, position: text(req.body?.position, 200) }, sessionUser(req));
+    changed({ id: id(req) });
+    res.status(201).json({ party });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/liquidations/:id/parties/:partyId', async (req, res, next) => {
+  try {
+    const gone = await repo.removeParties(id(req), [Number(req.params.partyId)], sessionUser(req));
+    if (!gone.length) return next(new AppError(404, 'That person is not on this company.'));
+    changed({ id: id(req) });
+    res.json({ removed: gone[0].id });
   } catch (err) {
     next(err);
   }
@@ -245,7 +352,7 @@ router.patch('/liquidations/:id/docs/:docId', async (req, res, next) => {
   try {
     const name = String(req.body?.fileName ?? '').trim().slice(0, 200);
     if (!name) return next(new AppError(400, 'Give it a name.'));
-    const doc = await repo.renameDoc(id(req), Number(req.params.docId), name);
+    const doc = await repo.renameDoc(id(req), Number(req.params.docId), name, sessionUser(req));
     if (!doc) return next(new AppError(404, 'That document is not there.'));
     docIndex.forgetCache();
     changed({ id: id(req) });
@@ -266,7 +373,7 @@ router.post('/liquidations/:id/docs/remove', async (req, res, next) => {
       const doc = await repo.findDoc(id(req), docId);
       if (!doc) continue;
       // eslint-disable-next-line no-await-in-loop
-      await repo.removeDoc(doc.id, await moveAside(doc.stored_path));
+      await repo.removeDoc(doc.id, await moveAside(doc.stored_path), sessionUser(req));
       removed += 1;
     }
     docIndex.forgetCache();
@@ -385,7 +492,7 @@ router.delete('/liquidations/:id/docs/:docId', async (req, res, next) => {
     const doc = await repo.findDoc(id(req), Number(req.params.docId));
     const full = doc && onDisk(doc.stored_path);
     if (!full) return next(new AppError(404, 'That document is not there.'));
-    await repo.removeDoc(doc.id, await moveAside(doc.stored_path));
+    await repo.removeDoc(doc.id, await moveAside(doc.stored_path), sessionUser(req));
     docIndex.forgetCache();
     changed({ id: id(req) });
     res.json({ removed: doc.id });

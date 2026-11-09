@@ -103,7 +103,7 @@ async function applyCompanyStatus(key, fields = {}) {
    * the whole cascade logs.
    */
   const {
-    reviewMonthlyDealIds, stopDealIds, goingConcernDealIds, via = 'admin', ...companyFields
+    reviewMonthlyDealIds, stopDealIds, goingConcernDealIds, via = 'admin', byUser = null, source = null, auditVia = null, ...companyFields
   } = fields;
 
   /**
@@ -125,6 +125,16 @@ async function applyCompanyStatus(key, fields = {}) {
   }, stamp);
 
   const name = company?.name ?? before?.name ?? key;
+  /**
+   * INTO OR OUT OF WINDING DOWN, OR CLOSED, is on the company's winding down
+   * trail (migration 092, his call 2026-11-04: auditing is super important).
+   */
+  const from = before?.status ?? 'active';
+  if (asked && from !== fields.status && [from, fields.status].some((st) => st === 'liquidation' || st === 'closed')) {
+    // eslint-disable-next-line global-require
+    await require('../repos/liquidations.repo').auditStatus(name, from, fields.status, byUser ?? (via === 'diane' ? 'Diane' : null), { via: auditVia ?? via, source, batchId })
+      .catch(() => null);
+  }
   let deals = null;
   if (becameTerminal) {
     deals = {

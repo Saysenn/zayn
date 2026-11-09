@@ -179,7 +179,8 @@ const read = (name, turns) => READS.push({ name, turns });
 
 // ================= READS =================
 read('next step one, from the order', [
-  { say: 'whats next for harbour nine', expect: { reply: both(/questionnaire/, said(2)), db: untouched } },
+  { say: 'whats next for harbour nine', expect: { db: untouched, reply: /did you mean|do you mean|exact name|is that|meant/i } },
+  { say: 'yes', expect: { reply: both(/questionnaire/, said(2)), db: untouched } },
 ]);
 read('next steps for everything winding down', [
   {
@@ -259,7 +260,9 @@ write('liquidator and next step, rambling', [
   { say: 'yes go', expect: { db: all(fieldLike('harbor nine', 'liquidator', /Kroll/i), fieldLike('harbor nine', 'next_action', /asset/i), statusIs('harbor nine', 'liquidation')) } },
 ]);
 write('auto mode: one wind down saves at once', [
-  { say: 'brightwel is going under, wind it down', expect: { db: all(winding('brightwell'), keptAsSeeded('pinecrest')) } },
+  // A close name is asked first, never picked (his rule 2026-11-04); auto mode saves on the yes.
+  { say: 'brightwel is going under, wind it down', expect: { db: untouched, reply: /did you mean|do you mean|exact name|is that|meant/i } },
+  { say: 'yes', expect: { db: all(winding('brightwell'), keptAsSeeded('pinecrest')) } },
 ], true);
 write('auto mode: a close still shows first', [
   { say: 'close down ironleaf now the meeting is booked', expect: { db: untouched } },
@@ -271,6 +274,8 @@ write('auto mode: several at once still shows first', [
 ], true);
 write('the one kiran is at', [
   { say: 'close the company kiran is at', expect: { reply: /which|Brightwell|Ironleaf|Harbou?r Nine/i, db: untouched } },
+  // "harbor" is not a company name: asked "Did you mean "Harbor Nine"?" (his exact-name rule, 2026-11-04).
   { say: 'the harbor one', expect: { db: untouched } },
+  { say: 'yes', expect: { db: untouched } },
   { say: 'yes', expect: { db: all(closed('harbor nine'), keptAsSeeded('brightwell'), keptAsSeeded('ironleaf')) } },
 ]);

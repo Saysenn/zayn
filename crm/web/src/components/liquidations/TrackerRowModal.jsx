@@ -21,6 +21,9 @@ import { formatMoney } from '../../helpers/formatMoney';
 import {
   STAGE_PICK_OPTIONS, stageOf, stageLabel, deadlineTone, shortDate, todayIso,
 } from '../../configs/liquidationStages';
+import {
+  PLAY_OPTIONS, playOf, liquidatorsOf, partyText,
+} from '../../configs/liquidationPlays';
 
 /**
  * ONE COMPANY ON THE LIQUIDATION TRACKER: every field, the contact log, the
@@ -38,12 +41,25 @@ const INPUT = 'min-h-9 rounded border border-border-strong bg-surface px-2.5 tex
 const BOX = `w-full ${INPUT}`;
 const AREA = `${BOX} py-2 leading-relaxed`;
 
-const FIELDS = ['stage', 'stageKind', 'instructions', 'deadline', 'nextAction', 'owner', 'blamed', 'liquidator', 'note'];
+const FIELDS = [
+  'stage', 'stageKind', 'stageDate', 'instructions', 'deadline', 'nextAction', 'owner', 'blamed', 'liquidator', 'note',
+  'officialReceiver', 'lastAction', 'unresolved', 'play', 'prompts', 'sheetDirector', 'sheetMid', 'sheetGroup',
+];
+const day = (v) => (v ? String(v).slice(0, 10) : '');
 const fromRow = (r) => ({
+  stageDate: day(r.stage_date),
+  officialReceiver: r.official_receiver ?? '',
+  sheetDirector: r.sheet_director ?? '',
+  sheetMid: r.sheet_mid ?? '',
+  sheetGroup: r.sheet_group ?? '',
+  lastAction: r.last_action ?? '',
+  unresolved: r.unresolved ?? '',
+  play: r.play ?? '',
+  prompts: r.prompts ?? '',
   stage: r.stage ?? '',
   stageKind: r.stage_kind ?? '',
   instructions: r.instructions ?? '',
-  deadline: r.deadline ?? '',
+  deadline: day(r.deadline),
   nextAction: r.next_action ?? '',
   owner: r.owner ?? '',
   blamed: Boolean(r.blamed),
@@ -97,7 +113,8 @@ export default function TrackerRowModal({ id, owners, onClose }) {
     send();
   }
   function send() {
-    const changed = Object.fromEntries(FIELDS.filter((f) => draft[f] !== saved[f]).map((f) => [f, draft[f]]));
+    const changed = Object.fromEntries(FIELDS.filter((f) => draft[f] !== saved[f])
+      .map((f) => [f, ['play', 'stageDate', 'deadline', 'owner'].includes(f) && draft[f] === '' ? null : draft[f]]));
     // the server re-reads its own row after; the form follows it. Closed, it leaves the page.
     save.mutate(changed, { onSuccess: (res) => { if (res.closed) onClose(); else setDraft(fromRow(res.row)); } });
   }
@@ -125,21 +142,57 @@ export default function TrackerRowModal({ id, owners, onClose }) {
                   options={[{ value: '', label: 'Not set' }, ...STAGE_PICK_OPTIONS]} />
                 {stageOf(draft.stage).hint && <span className="block text-xs text-text-faint">{stageOf(draft.stage).hint}</span>}
               </Field>
+              <Field label="Stage date">
+                <input type="date" className={BOX} value={draft.stageDate} onChange={(e) => set('stageDate')(e.target.value)} />
+                <span className="block text-xs text-text-faint">The Companies House date: the gazette, the suspension.</span>
+              </Field>
               <Field label="Deadline">
                 <input type="date" className={BOX} value={draft.deadline} onChange={(e) => set('deadline')(e.target.value)} />
+              </Field>
+              <Field label="Current play">
+                <Select size="form" value={draft.play} onChange={(v) => set('play')(v || '')} placeholder="Not set"
+                  options={[{ value: '', label: 'Not set' }, ...PLAY_OPTIONS]} />
               </Field>
               <Field label="Owner">
                 <Select size="form" value={draft.owner} onChange={(v) => set('owner')(v || '')} placeholder="No owner"
                   options={[{ value: '', label: 'No owner' }, ...owners.map((o) => ({ value: o, label: o }))]} />
               </Field>
-              <Field label="Liquidator">
-                <input className={BOX} value={draft.liquidator} onChange={(e) => set('liquidator')(e.target.value)} placeholder="Firm or person" />
+              {/* NO DEALS WITH US: who runs it is the closure sheet's word, kept here
+                  (migration 093). A company with deals reads them from its deals. */}
+              {row.no_deals && (
+                <>
+                  <Field label="Director (closure sheet)">
+                    <input className={BOX} value={draft.sheetDirector} onChange={(e) => set('sheetDirector')(e.target.value)} />
+                  </Field>
+                  <Field label="Mid (closure sheet)">
+                    <input className={BOX} value={draft.sheetMid} onChange={(e) => set('sheetMid')(e.target.value)} />
+                  </Field>
+                  <Field label="Group (closure sheet)">
+                    <input className={BOX} value={draft.sheetGroup} onChange={(e) => set('sheetGroup')(e.target.value)} />
+                  </Field>
+                </>
+              )}
+              <Field label="Official receiver">
+                <input className={BOX} value={draft.officialReceiver} onChange={(e) => set('officialReceiver')(e.target.value)} placeholder="Name, or appointed as liquidator" />
+              </Field>
+              <Field label="Liquidators" wide>
+                <Liquidators value={draft.liquidator} onChange={set('liquidator')} />
+              </Field>
+              <Field label="Last action" wide>
+                <textarea rows={2} className={AREA} value={draft.lastAction} onChange={(e) => set('lastAction')(e.target.value)} />
               </Field>
               <Field label="Current instructions" wide>
                 <textarea rows={2} className={AREA} value={draft.instructions} onChange={(e) => set('instructions')(e.target.value)} />
               </Field>
               <Field label="Next action" wide>
                 <textarea rows={2} className={AREA} value={draft.nextAction} onChange={(e) => set('nextAction')(e.target.value)} />
+              </Field>
+              <Field label="Unresolved matters" wide>
+                <textarea rows={2} className={AREA} value={draft.unresolved} onChange={(e) => set('unresolved')(e.target.value)} />
+              </Field>
+              <Field label="Prompts" wide>
+                <textarea rows={4} className={AREA} value={draft.prompts} onChange={(e) => set('prompts')(e.target.value)}
+                  placeholder="What the director said, who was blamed and why, payments, links" />
               </Field>
               <Field label="Note" wide>
                 <textarea rows={2} className={AREA} value={draft.note} onChange={(e) => set('note')(e.target.value)} />
@@ -156,9 +209,11 @@ export default function TrackerRowModal({ id, owners, onClose }) {
             </div>
           </form>
 
+          <Parties id={id} parties={row.parties ?? []} detailKey={detailKey} />
           <Comms id={id} comms={data.comms} detailKey={detailKey} />
           <Docs id={id} docs={data.docs} detailKey={detailKey} company={row?.company_name} />
           <History history={data.history} />
+          <AuditTrail audit={data.audit ?? []} />
         </div>
       )}
       {closingAsk && row && (
@@ -190,6 +245,8 @@ function Summary({ row }) {
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <span className={stageOf(row.stage).badge}>{stageLabel(row.stage, row.stage_kind)}</span>
+        {playOf(row.play) && <span className={playOf(row.play).badge}>{playOf(row.play).label}</span>}
+        {row.no_deals && <span className="badge badge-no_deals" title="Saved from the closure sheet: no deal with us">No deals</span>}
         <Link to={`/companies/${encodeURIComponent(row.company_key)}`} className="text-sm font-semibold text-accent-strong hover:underline">
           Open company page →
         </Link>
@@ -436,6 +493,138 @@ function History({ history }) {
           </li>
         ))}
       </ul>
+    </Section>
+  );
+}
+
+/**
+ * JOINT LIQUIDATORS (migration 092): one a line in the stored text, a row
+ * each here, added and taken off one at a time. Saved with the form.
+ */
+function Liquidators({ value, onChange }) {
+  const names = liquidatorsOf(value);
+  const [adding, setAdding] = useState('');
+  const put = (list) => onChange(list.join('\n'));
+  return (
+    <div className="space-y-2">
+      {names.length > 0 && (
+        <ul className="divide-y divide-border rounded border border-border">
+          {names.map((n, i) => (
+            <li key={`${n}-${i}`} className="flex items-center gap-2 px-3 py-1.5 text-sm">
+              <span className="min-w-0 flex-1 truncate" title={n}>{n}</span>
+              <Button type="button" variant="secondary" size="sm" onClick={() => put(names.filter((_, j) => j !== i))}>Remove</Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex gap-2">
+        <input className={`${BOX} flex-1`} value={adding} onChange={(e) => setAdding(e.target.value)} placeholder={names.length ? 'Add a joint liquidator' : 'Firm or person'}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (adding.trim()) { put([...names, adding.trim()]); setAdding(''); } } }} />
+        <Button type="button" variant="secondary" size="sm" disabled={!adding.trim()} onClick={() => { put([...names, adding.trim()]); setAdding(''); }}>Add</Button>
+      </div>
+    </div>
+  );
+}
+
+/** OTHER INVOLVED PARTIES: everyone on the case besides the liquidator. Saved as added. */
+function Parties({ id, parties, detailKey }) {
+  const [name, setName] = useState('');
+  const [position, setPosition] = useState('');
+  const [removing, setRemoving] = useState(null);
+  const add = useReportingMutation((b) => apiService.liquidations.addParty(id, b), {
+    describe: (b) => b.name, verb: 'added', invalidates: [KEY, detailKey],
+  });
+  const remove = useReportingMutation((p) => apiService.liquidations.removeParty(id, p.id), {
+    describe: (p) => p.name, verb: 'removed', invalidates: [KEY, detailKey],
+  });
+  return (
+    <Section title="Other involved parties" count={parties.length}>
+      <form className="flex flex-wrap items-start gap-2"
+        onSubmit={(e) => { e.preventDefault(); if (name.trim()) add.mutate({ name, position }, { onSuccess: () => { setName(''); setPosition(''); } }); }}>
+        <input className={`${INPUT} min-w-[10rem] flex-1`} value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" aria-label="Name" />
+        <input className={`${INPUT} min-w-[10rem] flex-1`} value={position} onChange={(e) => setPosition(e.target.value)} placeholder="Position, e.g. Insolvency Examiner" aria-label="Position" />
+        <Button type="submit" variant="primary" size="sm" disabled={!name.trim() || add.isPending}>{add.isPending ? 'Adding…' : 'Add'}</Button>
+      </form>
+      {parties.length === 0 ? (
+        <p className="text-sm text-text-muted">Nobody added yet.</p>
+      ) : (
+        <ul className="divide-y divide-border rounded border border-border">
+          {parties.map((p) => (
+            <li key={p.id} className="flex items-center gap-3 px-3 py-2 text-sm">
+              <span className="min-w-0 flex-1"><span className="font-medium">{p.name}</span>{p.position && <span className="text-text-muted"> · {p.position}</span>}</span>
+              <Button variant="secondary" size="sm" onClick={() => setRemoving(p)}>Remove</Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {removing && (
+        <ConfirmDialog
+          title={`Remove ${removing.name}?`}
+          subject={partyText(removing)}
+          detail="They come off this company. The history keeps that they were on it."
+          confirmLabel="Remove"
+          onCancel={() => setRemoving(null)}
+          onConfirm={() => { remove.mutate(removing); setRemoving(null); }}
+        />
+      )}
+    </Section>
+  );
+}
+
+// THE AUDIT TRAIL's words: the page's names for its fields.
+const AUDIT_FIELD = {
+  stage: 'Stage', stage_kind: 'Stage kind', stage_date: 'Stage date', instructions: 'Current instructions', deadline: 'Deadline',
+  next_action: 'Next action', owner: 'Owner', blamed: 'Blamed', liquidator: 'Liquidators', note: 'Note',
+  official_receiver: 'Official receiver', last_action: 'Last action', unresolved: 'Unresolved matters', play: 'Current play',
+  prompts: 'Prompts', sheet_director: 'Director (closure sheet)', sheet_mid: 'Mid (closure sheet)', sheet_group: 'Group (closure sheet)', party: 'Other party', 'contact log': 'Contact log', document: 'Document', 'document name': 'Document name',
+  status: 'Company status', company: 'Company',
+};
+const STATUS_WORD = { active: 'Active', liquidation: 'Winding down', closed: 'Dissolved', review: 'Review', going_concern: 'Going concern' };
+const VIA_WORD = { admin: '', diane: 'Diane', import: 'import', undo: 'undo', system: 'system' };
+function auditValue(field, v) {
+  if (v === null || v === undefined || v === '') return null;
+  if (field === 'stage') return stageOf(v).label;
+  if (field === 'play') return playOf(v)?.label ?? v;
+  if (field === 'status') return STATUS_WORD[v] ?? v;
+  if (field === 'deadline' || field === 'stage_date') return shortDate(v);
+  if (field === 'liquidator') return liquidatorsOf(v).join(', ');
+  return v;
+}
+
+/**
+ * HISTORY (his call 2026-11-04: auditing is super important): every change
+ * to this company, newest first: what, from, to, who, how, when, and the
+ * file an import came from. Kept forever.
+ */
+function AuditTrail({ audit }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? audit : audit.slice(0, 15);
+  return (
+    <Section title="History" count={audit.length}>
+      {audit.length === 0 && <p className="text-sm text-text-muted">No changes yet.</p>}
+      <ul className="divide-y divide-border rounded border border-border text-sm">
+        {shown.map((a) => {
+          const from = auditValue(a.field, a.old_value);
+          const to = auditValue(a.field, a.new_value);
+          const how = [a.by_user, VIA_WORD[a.via] && a.by_user !== 'Diane' ? `via ${VIA_WORD[a.via]}` : null, a.source].filter(Boolean).join(' · ');
+          return (
+            <li key={a.id} className="space-y-0.5 px-3 py-2">
+              <div className="flex flex-wrap items-baseline gap-x-2">
+                <span className="font-semibold">{AUDIT_FIELD[a.field] ?? a.field}</span>
+                {from && to && <span className="min-w-0 break-words"><span className="text-text-muted line-through decoration-text-faint">{from}</span> <span className="text-text-faint">→</span> {to}</span>}
+                {!from && to && <span className="min-w-0 break-words"><span className="text-success-strong">added</span> {to}</span>}
+                {from && !to && <span className="min-w-0 break-words"><span className="text-danger">removed</span> {from}</span>}
+              </div>
+              <p className="text-xs tabular-nums text-text-muted">{when(a.changed_at)}{how ? ` · ${how}` : ''}</p>
+            </li>
+          );
+        })}
+      </ul>
+      {audit.length > 15 && (
+        <div className="flex justify-end">
+          <Button variant="secondary" size="sm" onClick={() => setAll((x) => !x)}>{all ? 'Show fewer' : `Show all ${audit.length}`}</Button>
+        </div>
+      )}
     </Section>
   );
 }

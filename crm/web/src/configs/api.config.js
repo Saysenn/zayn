@@ -228,6 +228,18 @@ export const apiService = {
     add: (body) => api.post(`${apiPath}/liquidations`, body),
     update: (id, fields) => api.patch(`${apiPath}/liquidations/${id}`, fields),
     addComm: (id, body) => api.post(`${apiPath}/liquidations/${id}/comms`, body),
+    // Other involved parties (migration 092): name and position.
+    addParty: (id, body) => api.post(`${apiPath}/liquidations/${id}/parties`, body),
+    removeParty: (id, partyId) => api.delete(`${apiPath}/liquidations/${id}/parties/${partyId}`),
+    // THE BOSS'S CLOSURE SHEET (Settings): preview, then commit the ticks; undoable.
+    importPreview: (file, onProgress) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      return api.upload(`${apiPath}/liquidations/import/preview`, formData, onProgress);
+    },
+    importCommit: (previewId, choices) => api.post(`${apiPath}/liquidations/import/commit`, { previewId, choices }),
+    importHistory: () => api.get(`${apiPath}/liquidations/import/history`),
+    importUndo: (importId) => api.post(`${apiPath}/liquidations/import/${importId}/undo`),
     addDoc: (id, file, onProgress) => {
       const formData = new FormData();
       formData.append('file', file);

@@ -55,12 +55,21 @@ const LIST_SQL = `
     COALESCE(c.name, (SELECT MAX(btrim(d.company)) FROM deals d WHERE d.ckey = l.company_key), l.company_key) AS company_name,
     COALESCE(c.status, 'active')  AS pay_status,
     c.liquidation_total::float     AS settlement,
-    (SELECT ARRAY_AGG(DISTINCT d.group_name ORDER BY d.group_name) FROM deals d WHERE d.ckey = l.company_key AND d.group_name IS NOT NULL) AS groups,
-    (SELECT string_agg(DISTINCT d.person_name, ', ') FROM deals d WHERE d.ckey = l.company_key AND d.stopped_on IS NULL AND lower(d.role) = 'director') AS director,
-    (SELECT string_agg(DISTINCT d.person_name, ', ') FROM deals d WHERE d.ckey = l.company_key AND d.stopped_on IS NULL AND lower(d.role) = 'mid') AS mid,
+    -- THE DEALS FIRST; the closure sheet's names only when the deals give none
+    -- (a company with no deals with us, migration 093). \`who_from_sheet\` says so.
+    COALESCE((SELECT ARRAY_AGG(DISTINCT d.group_name ORDER BY d.group_name) FROM deals d WHERE d.ckey = l.company_key AND d.group_name IS NOT NULL),
+             CASE WHEN l.sheet_group <> '' THEN ARRAY[l.sheet_group] END) AS groups,
+    COALESCE((SELECT string_agg(DISTINCT d.person_name, ', ') FROM deals d WHERE d.ckey = l.company_key AND d.stopped_on IS NULL AND lower(d.role) = 'director'), NULLIF(l.sheet_director, '')) AS director,
+    COALESCE((SELECT string_agg(DISTINCT d.person_name, ', ') FROM deals d WHERE d.ckey = l.company_key AND d.stopped_on IS NULL AND lower(d.role) = 'mid'), NULLIF(l.sheet_mid, '')) AS mid,
+    NOT EXISTS (SELECT 1 FROM deals d WHERE d.ckey = l.company_key) AND (l.sheet_director <> '' OR l.sheet_mid <> '' OR l.sheet_group <> '') AS who_from_sheet,
     (SELECT SUM(d.monthly_amount)::float FROM deals d WHERE d.ckey = l.company_key AND d.stopped_on IS NULL) AS allocated,
     -- How many deals closing it would stop: said before stage Dissolved closes it.
     (SELECT COUNT(*)::int FROM deals d WHERE d.ckey = l.company_key AND d.stopped_on IS NULL) AS live_deals,
+    -- NO DEALS WITH US AT ALL, stopped ones included (his call 2026-11-04): the
+    -- "No deals" tag. Worked out here, never stored, so a deal added later drops it.
+    NOT EXISTS (SELECT 1 FROM deals d WHERE d.ckey = l.company_key) AS no_deals,
+    COALESCE((SELECT json_agg(json_build_object('id', p.id, 'name', p.name, 'position', p.position) ORDER BY p.id)
+                FROM tb_liquidation_parties p WHERE p.liquidation_id = l.id), '[]'::json) AS parties,
     (SELECT MAX(d.currency) FROM deals d WHERE d.ckey = l.company_key) AS currency,
     (SELECT row_to_json(m) FROM (
        SELECT said_on, body FROM tb_liquidation_comms WHERE liquidation_id = l.id ORDER BY said_on DESC, id DESC LIMIT 1
@@ -108,16 +117,81 @@ async function findById(id) {
   return rows[0] ?? null;
 }
 
-/** The row's log, history and documents, for its panel. */
+/** The row's log, history, documents and audit trail, for its panel. */
 async function details(id) {
-  const [comms, history, docs] = await Promise.all([
+  const [comms, history, docs, audit] = await Promise.all([
     pool.query('SELECT id, said_on, body, by_user, created_at FROM tb_liquidation_comms WHERE liquidation_id = $1 ORDER BY said_on DESC, id DESC', [id]),
     pool.query('SELECT id, from_stage, to_stage, by_user, changed_at FROM tb_liquidation_history WHERE liquidation_id = $1 ORDER BY changed_at DESC, id DESC', [id]),
     pool.query(`SELECT id, file_name, mime, size_bytes, by_user, uploaded_at, read_status, read_how, read_error,
                        COALESCE(length(text), 0) AS text_chars
                   FROM tb_liquidation_docs WHERE liquidation_id = $1 AND removed_at IS NULL ORDER BY uploaded_at DESC, id DESC`, [id]),
+    auditTrail(id),
   ]);
-  return { comms: comms.rows, history: history.rows, docs: docs.rows };
+  return { comms: comms.rows, history: history.rows, docs: docs.rows, audit };
+}
+
+// ===============================
+// * THE AUDIT TRAIL (migration 092, his call 2026-11-04)
+// ===============================
+// Every change, kept forever: field, old, new, who, how, when, and the
+// file an import came from. Written in the same transaction as the change
+// wherever there is one, so the trail can never disagree with the row.
+
+const VIAS = ['admin', 'diane', 'import', 'undo', 'system'];
+/** How a change was made, from who made it when the caller did not say. */
+function viaOf(byUser, via) {
+  if (VIAS.includes(via)) return via;
+  const who = String(byUser ?? '');
+  if (/\(undo\)/i.test(who)) return 'undo';
+  if (/^diane\b/i.test(who)) return 'diane';
+  if (/^import\b/i.test(who)) return 'import';
+  return 'admin';
+}
+const auditText = (v) => {
+  if (v === undefined || v === null) return null;
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (typeof v === 'boolean') return v ? 'yes' : 'no';
+  return String(v);
+};
+
+/**
+ * One line of the trail. `q` is a client inside a transaction, or the pool.
+ * The company key is read off the row when only its id is given.
+ */
+async function audit(q, {
+  liquidationId = null, companyKey: key = null, field, from = null, to = null, byUser = null, via, source = null, batchId = null,
+}) {
+  await q.query(
+    `INSERT INTO tb_liquidation_audit (liquidation_id, company_key, field, old_value, new_value, by_user, via, source, batch_id)
+     VALUES ($1, COALESCE($2, (SELECT company_key FROM tb_liquidations WHERE id = $1)), $3, $4, $5, $6, $7, $8, $9)`,
+    [liquidationId, key ? companyKey(key) : null, field, auditText(from), auditText(to), byUser, viaOf(byUser, via), source, batchId],
+  );
+}
+
+/**
+ * A COMPANY'S STATUS MOVING IN OR OUT OF WINDING DOWN (or closed), from the
+ * company page, Diane or the import: on its trail too. Its row is found by
+ * name; one with no row yet is still kept, by its key.
+ */
+async function auditStatus(name, from, to, byUser, { via, source = null, batchId = null } = {}) {
+  if ((from ?? 'active') === (to ?? 'active')) return;
+  const key = companyKey(name);
+  const { rows } = await pool.query('SELECT id FROM tb_liquidations WHERE company_key = $1', [key]);
+  await audit(pool, {
+    liquidationId: rows[0]?.id ?? null, companyKey: key, field: 'status', from: from ?? 'active', to, byUser, via, source, batchId,
+  });
+}
+
+/** One company's whole trail, newest first. */
+async function auditTrail(id) {
+  const { rows } = await pool.query(
+    `SELECT a.id, a.field, a.old_value, a.new_value, a.by_user, a.via, a.source, a.changed_at
+       FROM tb_liquidation_audit a
+      WHERE a.liquidation_id = $1 OR a.company_key = (SELECT company_key FROM tb_liquidations WHERE id = $1)
+      ORDER BY a.changed_at DESC, a.id DESC`,
+    [id],
+  );
+  return rows;
 }
 
 // The fields the page edits, and their columns.
@@ -131,14 +205,28 @@ const COLUMNS = Object.freeze({
   blamed: 'blamed',
   liquidator: 'liquidator',
   note: 'note',
+  // The boss's closure sheet's columns (migration 092).
+  officialReceiver: 'official_receiver',
+  lastAction: 'last_action',
+  unresolved: 'unresolved',
+  play: 'play',
+  prompts: 'prompts',
+  stageDate: 'stage_date',
+  // Who runs a no-deals company, as the closure sheet says (migration 093).
+  sheetDirector: 'sheet_director',
+  sheetMid: 'sheet_mid',
+  sheetGroup: 'sheet_group',
 });
+
+/** Current play (migration 092), in the order offered. */
+const PLAYS = Object.freeze(['wait', 'chase', 'leave', 'do_not_contact']);
 
 /**
  * Writes the fields given. A stage change is logged in the same
  * transaction, so the history can never disagree with the row.
  * Returns { before, after } stages, or null when the row is gone.
  */
-async function update(id, fieldsIn, byUser) {
+async function update(id, fieldsIn, byUser, { via, source = null, batchId = null } = {}) {
   // A NEW STAGE STARTS WITH NO KIND unless one comes with it: a kind belongs
   // to its stage (an MVL is no kind of strike off).
   const fields = fieldsIn.stage !== undefined && fieldsIn.stageKind === undefined
@@ -146,14 +234,19 @@ async function update(id, fieldsIn, byUser) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const { rows: [was] } = await client.query('SELECT stage FROM tb_liquidations WHERE id = $1 FOR UPDATE', [id]);
+    const { rows: [was] } = await client.query('SELECT * FROM tb_liquidations WHERE id = $1 FOR UPDATE', [id]);
     if (!was) { await client.query('ROLLBACK'); return null; }
     const sets = [];
     const params = [id];
+    const trail = [];
     for (const [field, column] of Object.entries(COLUMNS)) {
       if (fields[field] === undefined) continue;
       params.push(fields[field]);
       sets.push(`${column} = $${params.length}`);
+      // ONLY WHAT MOVED goes on the trail: a save of the same value is no change.
+      const from = auditText(was[column]);
+      const to = auditText(fields[field]);
+      if ((from ?? '') !== (to ?? '')) trail.push({ field: column, from, to });
     }
     if (sets.length) {
       await client.query(`UPDATE tb_liquidations SET ${sets.join(', ')}, updated_at = now() WHERE id = $1`, params);
@@ -165,6 +258,10 @@ async function update(id, fieldsIn, byUser) {
         [id, was.stage, fields.stage, byUser],
       );
     }
+    for (const t of trail) {
+      // eslint-disable-next-line no-await-in-loop
+      await audit(client, { liquidationId: id, companyKey: was.company_key, ...t, byUser, via, source, batchId });
+    }
     await client.query('COMMIT');
     return { before: was.stage, after: stageChanged ? fields.stage : was.stage };
   } catch (err) {
@@ -175,21 +272,59 @@ async function update(id, fieldsIn, byUser) {
   }
 }
 
-async function addComm(id, { saidOn, body }, byUser) {
+const commText = (c) => `${auditText(c.said_on)}: ${c.body}`;
+
+async function addComm(id, { saidOn, body }, byUser, { via, source = null, batchId = null } = {}) {
   const { rows } = await pool.query(
     `INSERT INTO tb_liquidation_comms (liquidation_id, said_on, body, by_user)
      VALUES ($1, COALESCE($2::date, current_date), $3, $4) RETURNING *`,
     [id, saidOn || null, body, byUser],
   );
   await pool.query('UPDATE tb_liquidations SET updated_at = now() WHERE id = $1', [id]);
+  await audit(pool, { liquidationId: id, field: 'contact log', to: commText(rows[0]), byUser, via, source, batchId });
   return rows[0];
 }
 
-/** Takes contact lines back out (Diane's undo of lines she added). */
-async function removeComms(ids) {
+/** Takes contact lines back out (Diane's undo of lines she added). Each on the trail. */
+async function removeComms(ids, byUser = null, { via } = {}) {
   if (!ids?.length) return 0;
-  const { rowCount } = await pool.query('DELETE FROM tb_liquidation_comms WHERE id = ANY($1::int[])', [ids]);
-  return rowCount;
+  const { rows } = await pool.query('DELETE FROM tb_liquidation_comms WHERE id = ANY($1::int[]) RETURNING *', [ids]);
+  for (const c of rows) {
+    // eslint-disable-next-line no-await-in-loop
+    await audit(pool, { liquidationId: c.liquidation_id, field: 'contact log', from: commText(c), byUser, via });
+  }
+  return rows.length;
+}
+
+// ===============================
+// * OTHER INVOLVED PARTIES (migration 092)
+// ===============================
+
+async function addParty(id, { name, position = '' }, byUser, { via, source = null, batchId = null } = {}) {
+  const { rows } = await pool.query(
+    'INSERT INTO tb_liquidation_parties (liquidation_id, name, position, by_user) VALUES ($1, $2, $3, $4) RETURNING *',
+    [id, name, position ?? '', byUser],
+  );
+  await pool.query('UPDATE tb_liquidations SET updated_at = now() WHERE id = $1', [id]);
+  await audit(pool, {
+    liquidationId: id, field: 'party', to: [name, position].filter(Boolean).join(', '), byUser, via, source, batchId,
+  });
+  return rows[0];
+}
+
+/** Taken off; the trail keeps who they were. Returns what was removed (for undo). */
+async function removeParties(id, partyIds, byUser, { via } = {}) {
+  if (!partyIds?.length) return [];
+  const { rows } = await pool.query(
+    'DELETE FROM tb_liquidation_parties WHERE liquidation_id = $1 AND id = ANY($2::int[]) RETURNING *',
+    [id, partyIds],
+  );
+  for (const p of rows) {
+    // eslint-disable-next-line no-await-in-loop
+    await audit(pool, { liquidationId: id, field: 'party', from: [p.name, p.position].filter(Boolean).join(', '), byUser, via });
+  }
+  if (rows.length) await pool.query('UPDATE tb_liquidations SET updated_at = now() WHERE id = $1', [id]);
+  return rows;
 }
 
 async function addDoc(id, { fileName, storedPath, mime, size }, byUser) {
@@ -198,6 +333,7 @@ async function addDoc(id, { fileName, storedPath, mime, size }, byUser) {
      VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, file_name, mime, size_bytes, by_user, uploaded_at, read_status`,
     [id, fileName, storedPath, mime, size, byUser],
   );
+  await audit(pool, { liquidationId: id, field: 'document', to: fileName, byUser });
   return rows[0];
 }
 
@@ -210,8 +346,12 @@ async function findDoc(id, docId) {
 }
 
 /** Marks a doc removed and records where its file was moved to. */
-async function removeDoc(docId, movedTo) {
-  await pool.query('UPDATE tb_liquidation_docs SET removed_at = now(), stored_path = $2 WHERE id = $1', [docId, movedTo]);
+async function removeDoc(docId, movedTo, byUser = null) {
+  const { rows } = await pool.query(
+    'UPDATE tb_liquidation_docs SET removed_at = now(), stored_path = $2 WHERE id = $1 RETURNING liquidation_id, file_name',
+    [docId, movedTo],
+  );
+  if (rows[0]) await audit(pool, { liquidationId: rows[0].liquidation_id, field: 'document', from: rows[0].file_name, byUser });
 }
 
 // ===============================
@@ -298,23 +438,39 @@ async function unread() {
   return rows.map((r) => r.id);
 }
 
-async function renameDoc(id, docId, fileName) {
+async function renameDoc(id, docId, fileName, byUser = null) {
+  const { rows: [was] } = await pool.query('SELECT file_name FROM tb_liquidation_docs WHERE id = $2 AND liquidation_id = $1', [id, docId]);
   const { rows } = await pool.query(
     'UPDATE tb_liquidation_docs SET file_name = $3 WHERE id = $2 AND liquidation_id = $1 AND removed_at IS NULL RETURNING id, file_name',
     [id, docId, fileName],
   );
+  if (rows[0] && was && was.file_name !== fileName) {
+    await audit(pool, { liquidationId: id, field: 'document name', from: was.file_name, to: fileName, byUser });
+  }
   return rows[0] ?? null;
 }
 
 /** A removed document put back (Diane's undo): its file is moved back by the caller. */
-async function restoreDoc(docId, storedPath) {
-  await pool.query('UPDATE tb_liquidation_docs SET removed_at = NULL, stored_path = $2 WHERE id = $1', [docId, storedPath]);
+async function restoreDoc(docId, storedPath, byUser = null) {
+  const { rows } = await pool.query(
+    'UPDATE tb_liquidation_docs SET removed_at = NULL, stored_path = $2 WHERE id = $1 RETURNING liquidation_id, file_name',
+    [docId, storedPath],
+  );
+  if (rows[0]) await audit(pool, { liquidationId: rows[0].liquidation_id, field: 'document', to: rows[0].file_name, byUser });
 }
 
-/** Usernames an owner can be. */
+/**
+ * Who an owner can be: the CRM's admins, and every owner already on a row.
+ * The boss's sheet names Gloria and Pat, who have no account (his call
+ * 2026-11-04: kept as written), so a name the import brought stays pickable.
+ */
 async function owners() {
-  const { rows } = await pool.query('SELECT username FROM tb_accounts ORDER BY username');
-  return rows.map((r) => r.username);
+  const { rows } = await pool.query(
+    `SELECT username AS name FROM tb_accounts
+     UNION SELECT owner FROM tb_liquidations WHERE owner IS NOT NULL AND btrim(owner) <> ''
+     ORDER BY 1`,
+  );
+  return rows.map((r) => r.name);
 }
 
 /**
@@ -333,5 +489,6 @@ async function dueSoon(days = 7) {
 
 module.exports = {
   STAGE, STAGES, STAGE_KINDS, kindFits, companyKey, list, findById, details, syncFromCompanies, ensureRow, update, addComm, removeComms, addDoc, findDoc, removeDoc, owners, dueSoon,
+  PLAYS, COLUMNS, addParty, removeParties, audit, auditStatus, auditTrail, viaOf,
   setRead, saveChunks, allChunks, docNames, docWithText, unread, renameDoc, restoreDoc, docsVersion,
 };

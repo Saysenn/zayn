@@ -18,10 +18,12 @@ import { FilterIcon, CloseIcon } from '../icons';
  */
 export default function PageHeader({ title, subtitle, actions }) {
   return (
-    <div className="mb-4 flex flex-wrap items-start justify-between gap-3 sm:mb-5">
-      <div className="min-w-0">
+    // ONE LINE (his call 2026-11-04): the title, its count beside it, the
+    // actions on the right. The count under the title spent a whole row.
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+      <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
         <h1 className="text-lg font-bold tracking-tight text-text sm:text-xl md:text-2xl">{title}</h1>
-        {subtitle && <p className="mt-0.5 text-xs text-text-muted sm:mt-1 sm:text-sm">{subtitle}</p>}
+        {subtitle && <p className="text-xs text-text-muted sm:text-sm">{subtitle}</p>}
       </div>
       {actions && <div className="flex gap-2 items-center flex-wrap">{actions}</div>}
     </div>
@@ -133,8 +135,11 @@ export function Toolbar({
   }, [filtersActive]);
 
   return (
-    <div className="mb-4 flex flex-col gap-2 rounded-lg border border-border bg-surface p-2.5 shadow-sm">
-      <div className="flex gap-2 items-center flex-wrap">
+    // ONE ROW FIRST (his call 2026-11-04): search, the filter button, the
+    // open dropdowns, Clear, then the count and actions on the right. It
+    // wraps only when that line is full; the forced second row left most of
+    // the bar empty. `toolbar-filters` lets each dropdown size to its words.
+    <div className="toolbar-row mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface p-2 shadow-sm">
         {search}
 
         {/* Always green. See FilterPanel for the same call: a grey icon
@@ -156,6 +161,8 @@ export function Toolbar({
         )}
 
         {inline}
+
+        {(alwaysOpen || open) && filters && <div className="toolbar-filters contents">{filters}</div>}
 
         {/* The way back out. Applying a filter from a link elsewhere on
             the page used to leave no visible control to undo it, and a
@@ -189,11 +196,6 @@ export function Toolbar({
             {actions}
           </div>
         )}
-      </div>
-
-      {(alwaysOpen || open) && filters && (
-        <div className="flex gap-2 items-center flex-wrap">{filters}</div>
-      )}
     </div>
   );
 }
@@ -211,7 +213,7 @@ export function SearchInput({ value, onChange, placeholder = 'Search…', icon: 
       <input
         type="search"
         placeholder={placeholder}
-        className="h-8 min-h-0 w-full py-0 pl-7 pr-2 text-[16px] sm:w-64 sm:text-sm"
+        className="h-8 min-h-0 w-full py-0 pl-7 pr-2 text-[16px] sm:w-56 sm:text-sm lg:w-64"
         value={value}
         onChange={onChange}
       />

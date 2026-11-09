@@ -9,6 +9,7 @@ const { messages } = require('./shared/messages');
 const { COMPANY_TIERS } = require('./shared/companyTiers');
 // The status cascade, shared with Diane so one act has one answer.
 const { applyCompanyStatus } = require('./shared/companyStatus.helper');
+const { sessionUser } = require('./shared/session.helper');
 const { broadcast } = require('./sockets/index');
 
 /**
@@ -45,6 +46,8 @@ router.get('/companies', async (req, res, next) => {
         status: req.query.status || undefined,
         // HIS OWN EARLIER GROUP NAME, never one of ours.
         oldGroup: req.query.oldGroup || undefined,
+        // Only the companies with no deal with us (the closure sheet's).
+        noDeals: req.query.noDeals === '1' || req.query.noDeals === 'true',
         page,
         pageSize,
       }),
@@ -146,6 +149,7 @@ router.post('/companies/bulk', async (req, res, next) => {
       const out = await applyCompanyStatus(key, {
         tier,
         status,
+        byUser: sessionUser(req),
         ...(Array.isArray(reviewMonthlyDealIds) ? { reviewMonthlyDealIds } : {}),
         ...(Array.isArray(goingConcernDealIds) ? { goingConcernDealIds } : {}),
       });
@@ -210,7 +214,7 @@ router.patch('/companies/:key', async (req, res, next) => {
       company, deals, reviewed, goingConcern, reviewQueueChanged,
     } = await applyCompanyStatus(key, {
       status, notes, tier, oldGroup, liquidationTotal, reviewMonthlyDealIds, stopDealIds,
-      goingConcernDealIds,
+      goingConcernDealIds, byUser: sessionUser(req),
     });
 
     // Renaming changes what every page shows, not just this one, so both

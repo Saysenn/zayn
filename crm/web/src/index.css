@@ -586,6 +586,17 @@
   .badge-settle_unpaid { @apply bg-warning-tint text-warning; }
   .badge-settle_review { @apply bg-warning-tint text-warning; }
   .badge-settle_overdue { @apply bg-danger-tint text-danger; }
+  /* CURRENT PLAY on Winding down (migration 092): Chase is the one that asks
+     for action, so it alone takes a colour; Do not contact is a warning to
+     everyone, so red. Wait and Leave are both "nothing to do", grey, Leave
+     the quieter of the two. */
+  .badge-play_wait { @apply bg-surface-sunken text-text; }
+  .badge-play_chase { @apply bg-warning-tint text-warning; }
+  .badge-play_leave { @apply bg-surface-sunken text-text-faint; }
+  .badge-play_do_not_contact { @apply bg-danger-tint text-danger; }
+  /* A company saved with no deal with us (the closure sheet's): a fact, not a
+     state, so an outline rather than a fill. */
+  .badge-no_deals { @apply border border-border-strong bg-transparent text-text-muted; }
 
   .field-label {
     @apply text-sm font-semibold text-text-muted;
@@ -1192,3 +1203,13 @@
 .diane-editor i,
 .diane-editor em { font-style: italic; }
 .diane-editor u { text-decoration: underline; }
+
+/* FILTER DROPDOWNS SIZE TO THEIR WORDS (his call 2026-11-04): the fixed
+   w-44 / w-48 each page gives them left most of the bar empty. Wins over
+   those widths by specificity; floored so a short placeholder still reads,
+   capped so a long value cannot take the row. */
+.toolbar-filters > .relative {
+  width: auto;
+  min-width: 8rem;
+  max-width: 15rem;
+}

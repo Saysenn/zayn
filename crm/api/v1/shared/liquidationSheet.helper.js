@@ -14,6 +14,8 @@ const { PALETTE, DEFAULT_PALETTE, paletteFor } = require('../expenses/expenseCol
 const { STAGE_LABEL, stageText } = require('./liquidationStages');
 
 const MONEY_FMT = '#,##0.00';
+// Current play's words (migration 092).
+const PLAY_LABEL = Object.freeze({ wait: 'Wait', chase: 'Chase', leave: 'Leave', do_not_contact: 'Do not contact' });
 
 const COLUMNS = [
   { header: 'Company', key: 'company', width: 28 },
@@ -21,16 +23,24 @@ const COLUMNS = [
   { header: 'Mid', key: 'mid', width: 22 },
   { header: 'Group', key: 'group', width: 16 },
   { header: 'Status', key: 'stage', width: 18 },
+  { header: 'Stage date', key: 'stageDate', width: 12 },
+  { header: 'Official receiver', key: 'officialReceiver', width: 24 },
   { header: 'Current instructions', key: 'instructions', width: 40 },
   { header: 'Deadline', key: 'deadline', width: 12 },
   { header: 'Next action', key: 'nextAction', width: 36 },
   { header: 'Owner', key: 'owner', width: 16 },
   { header: 'Supporting docs', key: 'docs', width: 10 },
   { header: 'Blamed?', key: 'blamed', width: 9 },
-  { header: 'Liquidator', key: 'liquidator', width: 22 },
+  { header: 'Liquidator', key: 'liquidator', width: 26 },
+  { header: 'Other involved parties', key: 'parties', width: 34 },
+  { header: 'Last action', key: 'lastAction', width: 36 },
   { header: 'Last comm date', key: 'lastCommOn', width: 14 },
   { header: 'Last comm', key: 'lastComm', width: 40 },
+  { header: 'Unresolved matters', key: 'unresolved', width: 32 },
+  { header: 'Current play', key: 'play', width: 14 },
+  { header: 'Prompts', key: 'prompts', width: 40 },
   { header: 'Note', key: 'note', width: 36 },
+  { header: 'Deals with us', key: 'noDeals', width: 12 },
   { header: 'Currency', key: 'currency', width: 9 },
   { header: 'Settlement', key: 'settlement', width: 14 },
   { header: 'Allocated a month', key: 'allocated', width: 16 },
@@ -79,19 +89,28 @@ function buildLiquidationSheet(rows, { columns, palette } = {}) {
       lastCommOn: dateOf(r.last_comm?.said_on),
       lastComm: r.last_comm?.body ?? null,
       note: r.note ?? null,
+      stageDate: dateOf(r.stage_date),
+      officialReceiver: r.official_receiver || null,
+      // "Jason Ainge, Insolvency Examiner", a line each.
+      parties: (r.parties ?? []).map((p) => [p.name, p.position].filter(Boolean).join(', ')).join('\n') || null,
+      lastAction: r.last_action || null,
+      unresolved: r.unresolved || null,
+      play: PLAY_LABEL[r.play] ?? null,
+      prompts: r.prompts || null,
+      noDeals: r.no_deals ? 'No deals' : 'Yes',
       currency: r.currency ?? null,
       settlement: r.settlement != null ? Number(r.settlement) : null,
       allocated: r.settlement != null ? Number(r.allocated ?? 0) : null,
     });
   }
   const has = (key) => used.some((c) => c.key === key);
-  for (const key of ['deadline', 'lastCommOn'].filter(has)) sheet.getColumn(key).numFmt = 'dd/mm/yyyy';
+  for (const key of ['deadline', 'lastCommOn', 'stageDate'].filter(has)) sheet.getColumn(key).numFmt = 'dd/mm/yyyy';
   for (const key of ['settlement', 'allocated'].filter(has)) sheet.getColumn(key).numFmt = MONEY_FMT;
-  for (const key of ['instructions', 'nextAction', 'lastComm', 'note'].filter(has)) sheet.getColumn(key).alignment = { wrapText: true, vertical: 'top' };
+  for (const key of ['instructions', 'nextAction', 'lastComm', 'note', 'liquidator', 'parties', 'lastAction', 'unresolved', 'prompts', 'officialReceiver'].filter(has)) sheet.getColumn(key).alignment = { wrapText: true, vertical: 'top' };
   sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: used.length } };
   return workbook;
 }
 
 module.exports = {
-  buildLiquidationSheet, STAGE_LABEL, PICKABLE, PALETTE, DEFAULT_PALETTE,
+  buildLiquidationSheet, STAGE_LABEL, PICKABLE, PALETTE, DEFAULT_PALETTE, PLAY_LABEL,
 };

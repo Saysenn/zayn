@@ -1808,8 +1808,51 @@ export default function MasterSheetPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between gap-3 mb-1 flex-wrap">
+      {/* ONE LINE (his call 2026-11-04): the counts sit beside the title,
+          like every other page's subtitle, not on a row of their own. */}
+      <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
         <h1 className="text-lg font-bold tracking-tight sm:text-xl">Master sheet</h1>
+        {/* NO RESULT BANNER. It repeated, after the decision, the three
+            things the diff modal had already shown before it: where the
+            group came from, which columns were not read, which were left
+            alone. What actually happened is the commit's toast, and "N need
+            a check" is the line below this one, which is always current
+            rather than only right after an upload. */}
+        <div className="flex gap-3 text-sm flex-wrap">
+          {/* THE COUNTS ARE THE FILTER. They were a static line above a
+              dropdown that said the same two things, so the number you read
+              and the control that acted on it were two separate objects.
+              Clicking a count narrows to it; clicking it again clears.
+              Underlined on hover so it reads as clickable, and while it IS
+              the filter it stays underlined and takes the text colour. */}
+          {[
+            { key: 'synced', n: counts.synced ?? 0, label: 'from the sheet' },
+            { key: 'manual', n: counts.manual ?? 0, label: 'added by hand' },
+          ].map((s) => (
+            <Button
+              key={s.key}
+              size="xs"
+              aria-pressed={source === s.key}
+              className={`px-0 hover:bg-transparent hover:underline ${
+                source === s.key ? 'font-semibold text-text underline' : 'text-text-faint'
+              }`}
+              onClick={() => { setSource(source === s.key ? '' : s.key); setPage(1); }}
+            >
+              {s.n} {s.label}
+            </Button>
+          ))}
+          {counts.needs_review > 0 && (
+            <Button
+              size="xs"
+              className="px-0 font-semibold text-warning underline hover:bg-transparent hover:text-warning"
+              onClick={() => setReview('true')}
+            >
+              {counts.needs_review} need a check
+            </Button>
+          )}
+        </div>
+        </div>
         {/* ONE ROW, the same shape the Expenses page uses: take a copy out,
             bring a file in, add one by hand. Add deal used to sit alone in
             the toolbar, which split three actions of the same kind across
@@ -1873,46 +1916,6 @@ export default function MasterSheetPage() {
             Add deal
           </Button>
         </div>
-      </div>
-
-      {/* NO RESULT BANNER. It repeated, after the decision, the three
-          things the diff modal had already shown before it: where the
-          group came from, which columns were not read, which were left
-          alone. What actually happened is the commit's toast, and "N need
-          a check" is the line below this one, which is always current
-          rather than only right after an upload. */}
-      <div className="flex gap-3 text-sm mb-4 flex-wrap">
-        {/* THE COUNTS ARE THE FILTER. They were a static line above a
-            dropdown that said the same two things, so the number you read
-            and the control that acted on it were two separate objects.
-            Clicking a count narrows to it; clicking it again clears.
-            Underlined on hover so it reads as clickable, and while it IS
-            the filter it stays underlined and takes the text colour. */}
-        {[
-          { key: 'synced', n: counts.synced ?? 0, label: 'from the sheet' },
-          { key: 'manual', n: counts.manual ?? 0, label: 'added by hand' },
-        ].map((s) => (
-          <Button
-            key={s.key}
-            size="xs"
-            aria-pressed={source === s.key}
-            className={`px-0 hover:bg-transparent hover:underline ${
-              source === s.key ? 'font-semibold text-text underline' : 'text-text-faint'
-            }`}
-            onClick={() => { setSource(source === s.key ? '' : s.key); setPage(1); }}
-          >
-            {s.n} {s.label}
-          </Button>
-        ))}
-        {counts.needs_review > 0 && (
-          <Button
-            size="xs"
-            className="px-0 font-semibold text-warning underline hover:bg-transparent hover:text-warning"
-            onClick={() => setReview('true')}
-          >
-            {counts.needs_review} need a check
-          </Button>
-        )}
       </div>
 
       {/* Phones shared by more than one person. Here rather than on

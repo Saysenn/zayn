@@ -259,7 +259,9 @@ write('update from the docs, said straight', [
   { say: 'yes', expect: { db: all(movedTo('harbor nine', 'hmrc_liq', 'winding_up_order'), asSeeded('quarry lane'), asSeeded('ironleaf')) } },
 ]);
 write('lazy: brightwell docs say which liquidation', [
-  { say: 'brightwel got a letter from leonard curtis, wat kind of liq is it. fix the page if its wrong', expect: { reply: /MVL|members'? voluntary/i, db: untouched } },
+  // A close name is asked first, never picked (his rule 2026-11-04).
+  { say: 'brightwel got a letter from leonard curtis, wat kind of liq is it. fix the page if its wrong', expect: { db: untouched, reply: /did you mean|do you mean|exact name|is that|meant/i } },
+  { say: 'yes brightwell', expect: { reply: /MVL|members'? voluntary/i, db: untouched } },
   { say: 'go ahead', expect: { db: movedTo('brightwell', 'own_liq', 'mvl') } },
 ]);
 
@@ -293,7 +295,8 @@ read('next step quotes the hearing date', [
   { say: 'whats next on quarry lane n by when', expect: { reply: said(12), noReply: /\b(?:has been|was) wound up\b/i, db: untouched } },
 ]);
 read('hearing date and court, typos', [
-  { say: 'wen is the quary lane hearing n which court', expect: { reply: new RegExp(`(?=[\\s\\S]*(?:${said(12).source}))(?=[\\s\\S]*Leeds)`, 'i'), db: untouched } },
+  { say: 'wen is the quary lane hearing n which court', expect: { db: untouched, reply: /did you mean|do you mean|exact name|is that|meant/i } },
+  { say: 'yes', expect: { reply: new RegExp(`(?=[\\s\\S]*(?:${said(12).source}))(?=[\\s\\S]*Leeds)`, 'i'), db: untouched } },
 ]);
 read('page is right: says so', [
   { say: 'is the pinecrest page right according to the docs?', expect: {

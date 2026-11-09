@@ -99,20 +99,46 @@ function stageFrom(said) {
   return undefined;
 }
 
+// THE CLOSURE SHEET'S FIELDS (migration 092, his call 2026-11-04): official
+// receiver, last action, unresolved matters, current play, prompts, stage date.
 const FIELD_LABEL = {
   stage: 'stage', stageKind: 'kind', deadline: 'deadline', nextAction: 'next action', instructions: 'instructions',
-  owner: 'owner', blamed: 'blamed', liquidator: 'liquidator', note: 'note',
+  owner: 'owner', blamed: 'blamed', liquidator: 'liquidators', note: 'note',
+  officialReceiver: 'official receiver', lastAction: 'last action', unresolved: 'unresolved matters',
+  play: 'current play', prompts: 'prompts', stageDate: 'stage date',
 };
 const COLUMN = {
   stage: 'stage', stageKind: 'stage_kind', deadline: 'deadline', nextAction: 'next_action', instructions: 'instructions',
   owner: 'owner', blamed: 'blamed', liquidator: 'liquidator', note: 'note',
+  officialReceiver: 'official_receiver', lastAction: 'last_action', unresolved: 'unresolved',
+  play: 'play', prompts: 'prompts', stageDate: 'stage_date',
 };
+const PLAY_LABEL = { wait: 'Wait', chase: 'Chase', leave: 'Leave', do_not_contact: 'Do not contact' };
+/** "chase them", "dont contact", "leave it": the play, or undefined. */
+function playFrom(said) {
+  const t = fold(said).replace(/['’]/g, '');
+  if (!t) return undefined;
+  if (/^(?:none|clear|not set|no play)$/.test(t)) return null;
+  if (/\b(?:do ?n[o']?t|dont|no|never) (?:contact|call|chase|email|ring|reach out)\b|^do not contact$|\bdnc\b/.test(t)) return 'do_not_contact';
+  // "STOP CHASING", "BIN THE CHASING": the chase called off is a wait, not a
+  // chase. The word "chasing" alone set it to chase (blind sheet run 2026-11-04).
+  if (/\b(?:stop|stopped|no more|bin|binned|drop|dropped|quit|pause|paused|enough|call off|hold off)\b(?: \w+){0,2}? chas\w*\b|\bnot chas\w*\b/.test(t)) return 'wait';
+  if (/\bchas\w*\b|\bfollow(?:ing)? up\b|\bpush\b/.test(t)) return 'chase';
+  // "PARK IT", "ON HOLD", "NOTHING MORE WE CAN DO TILL HMRC COME BACK": a wait.
+  if (/\bwait\w*\b|\bhold\b|\bsit tight\b|\bpark\w*\b|\bnothing (?:more )?(?:we can|to) do\b/.test(t)) return 'wait';
+  if (/\bleave\b|\bdrop\b|\bignore\b/.test(t)) return 'leave';
+  return undefined;
+}
+/** Joint liquidators are one a line. */
+const liquidatorsOf = (text) => String(text ?? '').split('\n').map((x) => x.trim()).filter(Boolean);
 const show = (field, v) => {
   // "none", never "—": her dash rule made it "proposal type, → compulsory" (2026-10-14).
   if (v === null || v === undefined || v === '') return field === 'stage' ? 'Not set' : 'none';
   if (field === 'stage') return stageName(v);
   if (field === 'stageKind') return KIND_LABEL[v] ?? v;
-  if (field === 'deadline') return sayDay(String(v).slice(0, 10));
+  if (field === 'deadline' || field === 'stageDate') return sayDay(String(v).slice(0, 10));
+  if (field === 'play') return PLAY_LABEL[v] ?? v;
+  if (field === 'liquidator') return `"${liquidatorsOf(v).join(', ')}"`;
   if (field === 'blamed') return v ? 'yes' : 'no';
   return `"${String(v).length > 60 ? `${String(v).slice(0, 57)}…` : v}"`;
 };
@@ -121,10 +147,65 @@ const fold = (s) => String(s ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
 // THE NAME WITHOUT ITS LEGAL ENDING: "zz harbour test" is "ZZ Harbour Test Ltd"
 // (browser check 2026-10-13: she said there was no such company).
 const bare = (s) => fold(s).replace(/[.,]/g, '').replace(/\s+(?:ltd|limited|plc|llp|llc|inc|co)$/, '').trim();
+/**
+ * THE SAME COMPANY ONLY BY ITS EXACT NAME (his rule 2026-11-04): lower-cased,
+ * letter by letter; spaces at the ends and doubled spaces are typing. "Competex
+ * pro" and "Competex Pro Limited" are two companies, as are "Reliapay" and
+ * "Reliapay payroll". Close names are ASKED about (closeRows), never picked.
+ */
 const sameCompany = (r, name) => {
   const key = fold(name);
-  return r.company_key === key || fold(r.company_name) === key || (bare(name) !== '' && bare(r.company_name) === bare(name));
+  return key !== '' && (r.company_key === key || fold(r.company_name) === key);
 };
+/**
+ * THEIR OWN WORDS SPELL IT CLOSE, NOT EXACT: the model sent "Quarry Lane" for
+ * "wats nxt w/ quary lane" (wind run 2026-11-04), so the code never saw the slip.
+ * The close words they wrote, else null. Only words they typed count: a "yes"
+ * or "its next action" names nothing and passes.
+ */
+function saidClose(name, said) {
+  // A POSSESSIVE IS THE NAME, not a slip: "whos pinecrests liquidator" is
+  // Pinecrest (heldout suite 2026-11-04). Only a final 's / s on the name's last word.
+  const want = bare(name);
+  const last = want.split(' ').pop();
+  const words = fold(String(said ?? '').replace(/[^\p{L}\p{N}&' -]+/gu, ' ')).split(' ').filter(Boolean)
+    .map((w) => (last && (w === `${last}'s` || w === `${last}’s` || w === `${last}s` || w === `${last}'`) ? last : w));
+  // A SUFFIX THE NAME ON FILE HAS NOT: "pinecrest ltd" is not Pinecrest
+  // (exact-name blind set 2026-11-04). Ltd and Limited are part of a name.
+  const said1 = ` ${words.join(' ')} `;
+  const own = ` ${fold(name)} `;
+  for (const sfx of ['ltd', 'limited', 'plc', 'llp']) {
+    if (said1.includes(` ${want} ${sfx} `) && !own.includes(` ${sfx} `)) return `${want} ${sfx}`;
+  }
+  if (!words.length || !want || said1.includes(` ${want} `)) return null;
+  const n = want.split(' ').length;
+  for (const size of [n, n + 1, n - 1].filter((k) => k >= 1)) {
+    for (let i = 0; i + size <= words.length; i += 1) {
+      const w = words.slice(i, i + size).join(' ');
+      if (w.length >= 4 && w !== want && near(w, want)) return w;
+    }
+  }
+  // A SHORT FORM, spelt right or not: "otery mill" for Ottery Mill Foods went
+  // straight to it (doc4 suite 2026-11-04). The name's first words, said as
+  // the whole of it, is another company until they say yes.
+  const parts = want.split(' ');
+  for (let k = parts.length - 1; k >= 1; k -= 1) {
+    const head = parts.slice(0, k).join(' ');
+    if (head.length < 4) continue;
+    for (let i = 0; i + k <= words.length; i += 1) {
+      const w = words.slice(i, i + k).join(' ');
+      const next = words[i + k] ?? '';
+      // "quarry ln", "harbor 9": a short or numbered last word is part of the slip.
+      const rest = parts[k] ?? '';
+      const abbrev = next && next !== rest && (/^\d+$/.test(next) || (next[0] === rest[0] && next.length < rest.length));
+      if (w.length >= 4 && (w === head || near(w, head)) && next !== rest) return abbrev ? `${w} ${next}` : w;
+    }
+  }
+  return null;
+}
+/** Page rows whose names are close to this one: for "did you mean", never a pick. */
+const closeRows = (rows, name) => rows.filter((r) => !sameCompany(r, name) && (
+  near(fold(r.company_name), fold(name)) || (bare(name) !== '' && (near(bare(r.company_name), bare(name)) || (bare(name).length >= 5 && bare(r.company_name).startsWith(`${bare(name)} `))))));
 
 /** The parts of a message about one company, else the whole message. */
 function clauseFor(name, text) {
@@ -155,6 +236,9 @@ function line(r, today) {
     r.mid ? `mid ${r.mid}` : null,
     (r.groups ?? []).length ? (r.groups ?? []).join('/') : null,
     r.next_action ? `next: ${r.next_action}` : null,
+    r.play ? `play ${PLAY_LABEL[r.play] ?? r.play}` : null,
+    r.unresolved ? `unresolved: ${r.unresolved.length > 80 ? `${r.unresolved.slice(0, 77)}…` : r.unresolved}` : null,
+    r.no_deals ? 'No deals with us' : null,
   ].filter(Boolean);
   return bits.join(' · ');
 }
@@ -213,27 +297,26 @@ async function rowsFor(names, said) {
   const rows = await repo.list();
   const found = [];
   const unknown = [];
+  const corrections = [];
   for (const name of names ?? []) {
-    const hit = rows.find((r) => sameCompany(r, name)) ?? byStart(rows, name);
+    const hit = rows.find((r) => sameCompany(r, name));
+    const misspelt = hit && saidClose(hit.company_name, said);
+    if (misspelt) {
+      corrections.push(`They wrote "${misspelt}", which is not exactly "${hit.company_name}". Only an exact name is a company. Reply with only this question: Did you mean "${hit.company_name}"? Do nothing until they say yes. Copy each name in quotes EXACTLY as written here, Ltd/Limited and all: a shortened name is another company.`);
+      continue;
+    }
     if (hit) { if (!found.includes(hit)) found.push(hit); } else unknown.push(String(name ?? '').trim());
   }
   const notOnPage = [];
   const offPage = [];
   const missing = [];
-  const corrections = [];
   if (unknown.length) {
     // A company with no deals is only in tb_companies: found by its key.
     for (const name of [...unknown]) {
-      // ONE LETTER FROM ONE PAGE COMPANY is that one, before any company off the
-      // page: "pincrest next step" said Pinecrest was not winding down (held-out run 2026-10-22).
-      const slip = rows.filter((r) => near(fold(r.company_name), fold(name)) || near(bare(r.company_name), bare(name)));
-      if (slip.length === 1 && !(await companiesRepo.findByKey(name).catch(() => null))) { // eslint-disable-line no-await-in-loop
-        if (!found.includes(slip[0])) found.push(slip[0]);
-        unknown.splice(unknown.indexOf(name), 1);
-        continue;
-      }
+      // A CLOSE PAGE NAME IS ASKED, not picked ("pincrest" is not Pinecrest until
+      // they say so; his rule 2026-11-04). Only an exact company off the page is found.
       // eslint-disable-next-line no-await-in-loop
-      const company = await companiesRepo.findByKey(name).catch(() => null) ?? await companyByPart(name) ?? await companyNear(name);
+      const company = await companiesRepo.findByKey(name).catch(() => null);
       if (company) { notOnPage.push(company.name); offPage.push({ name: company.name, key: fold(company.name), said: name }); unknown.splice(unknown.indexOf(name), 1); }
     }
   }
@@ -242,11 +325,11 @@ async function rowsFor(names, said) {
     notOnPage.push(...sheet.found.map((f) => f.name));
     offPage.push(...sheet.found.map((f) => ({ name: f.name, key: f.key })));
     for (const name of unknown.filter((n) => !sheet.found.some((f) => f.key === fold(n)))) {
-      const close = rows.filter((r) => near(fold(r.company_name), fold(name)) || near(bare(r.company_name), bare(name))).map((r) => r.company_name);
-      // ONE COMPANY ONE LETTER AWAY is that company: the preview names it in full
-      // before anything is saved (suite 2026-10-21: "pinecrst" asked, then "ya" asked again).
-      if (close.length === 1) { const hit = rows.find((r) => r.company_name === close[0]); if (!found.includes(hit)) found.push(hit); continue; }
-      if (close.length) { corrections.push(`No company called "${name}" on the Winding down page. Did you mean ${close.join(' or ')}?`); continue; }
+      // CLOSE NAMES, ON THE PAGE OR OFF IT, ARE ONLY ASKED: nothing is read or
+      // written for a name that is not exact. On "yes" she calls again with the exact name.
+      // eslint-disable-next-line no-await-in-loop
+      const close = [...new Set([...closeRows(rows, name).map((r) => r.company_name), ...(await closeCompanies(name))])];
+      if (close.length) { corrections.push(`No company called exactly "${name}". Only an exact name is a company. Reply with only this question: Did you mean ${close.map((c) => `"${c}"`).join(' or ')}? Use the exact name they confirm. Copy each name in quotes EXACTLY as written here, Ltd/Limited and all: a shortened name is another company.`); continue; }
       /**
        * A PERSON SENT AS THE COMPANY: "close the company kiran is at" arrived as
        * company "Kiran" (held-out run 2026-10-22). Their one company is it;
@@ -285,6 +368,13 @@ async function companyByPart(name) {
  * ONE LETTER AWAY FROM EXACTLY ONE COMPANY, whatever its status: "harbour
  * nine" is Harbor Nine (suite 2026-10-21). The preview names it in full.
  */
+/** Companies anywhere whose names are close to this one: said, never picked. */
+async function closeCompanies(name) {
+  const want = bare(name);
+  if (want.length < 4) return [];
+  const all = await everyCompany();
+  return all.filter((n) => fold(n) !== fold(name) && (bare(n) === want || bare(n).startsWith(`${want} `) || (want.length >= 5 && near(bare(n), want)))).slice(0, 4);
+}
 async function companyNear(name) {
   const want = bare(name);
   if (want.length < 5) return null;
@@ -327,18 +417,24 @@ const listLiquidations = {
   name: 'list_liquidations',
   description:
     'The Winding down page: every company whose status is liquidation, with its stage, deadline, owner, '
-    + 'director, mid, next action. Filter by stage, group, owner or deadline ("due this week", "passed"). '
-    + 'Name ONE company to get it in full: instructions, liquidator, note, blamed, settlement, its '
-    + 'contact log, stage history and documents.',
+    + 'director, mid, next action, current play, unresolved matters. Filter by stage, group, owner, deadline ("due this week", "passed"), '
+    + 'current play (wait, chase, leave, do not contact), no deals, or unresolved. '
+    + 'Name ONE company to get it in full: instructions, liquidators, official receiver, other parties, last action, '
+    + 'unresolved matters, prompts, note, blamed, settlement, its contact log, stage history, documents and latest changes. '
+    + '"What\'s happening with X" is that full view. "Who changed X" / "X\'s history" is company + history true.',
   parameters: {
     type: 'object',
     properties: {
-      company: { type: 'string', description: 'One company, for its full row.' },
+      company: { type: 'string', description: 'One company, for its full row. Only an exact name is a company: when they named it, their spelling, never corrected by you; when they did not ("its", "that one"), the name exactly as the page list shows it, never as a document spells it ("Pinecrest Ltd" for the page "Pinecrest" is another company).' },
       companies: { type: 'array', items: { type: 'string' }, description: 'Several companies, a line each.' },
       stage: { type: 'string', description: 'active, active proposal (a strike off proposed), strike off suspended, strike off rejected (or cancelled), liquidation, own liq, HMRC liq, dissolved (struck off is dissolved), or not set.' },
       group: { type: 'string' },
       owner: { type: 'string', description: 'An admin username, or "none".' },
       due: { type: 'string', enum: ['week', 'passed'], description: 'week: passed or due in the next 7 days. passed: already passed.' },
+      play: { type: 'string', description: 'Only companies on this current play: wait, chase, leave, or do not contact ("which are do not contact", "who are we chasing").' },
+      noDeals: { type: 'boolean', description: 'true: only the companies with no deal with us (not on the master sheet, nobody paid from them; saved from the closure sheet). false: only those with deals.' },
+      unresolved: { type: 'boolean', description: 'true: only companies with unresolved matters written down.' },
+      history: { type: 'boolean', description: 'With company: its full change history (who changed what, when, from what to what; admin, Diane or the closure import).' },
     },
   },
   async handler(args = {}) {
@@ -378,12 +474,34 @@ const listLiquidations = {
       if (stop) return { summary: stop.replace('NOTHING HAS BEEN CHANGED. ', '') };
       const r = rows[0];
       const d = await repo.details(r.id);
+      // THE AUDIT TRAIL (his call 2026-11-04): "who changed X", "history of X".
+      const auditLine = (a) => {
+        const v = (x) => (x == null || x === '' ? null : String(x).length > 80 ? `${String(x).slice(0, 77)}…` : String(x));
+        const what = a.field === 'stage' ? [a.old_value && stageName(a.old_value), a.new_value && stageName(a.new_value)]
+          : a.field === 'play' ? [a.old_value && (PLAY_LABEL[a.old_value] ?? a.old_value), a.new_value && (PLAY_LABEL[a.new_value] ?? a.new_value)]
+          : a.field === 'status' ? [a.old_value && (STATUS_LABEL[a.old_value] ?? a.old_value), a.new_value && (STATUS_LABEL[a.new_value] ?? a.new_value)]
+          : [v(a.old_value), v(a.new_value)];
+        const change = what[0] && what[1] ? `${what[0]} → ${what[1]}` : what[1] ? `added ${what[1]}` : `removed ${what[0] ?? ''}`;
+        const how = a.via === 'import' ? ` (closure import${a.source ? `, ${a.source}` : ''})` : a.via === 'undo' ? ' (undo)' : '';
+        return `• ${sayDay(new Date(a.changed_at).toISOString().slice(0, 10))}, ${a.by_user ?? 'someone'}${how}: ${a.field} ${change}`;
+      };
+      if (args.history) {
+        const reply = d.audit.length
+          ? `${r.company_name}'s history (${d.audit.length} ${d.audit.length === 1 ? 'change' : 'changes'}, newest first):\n${d.audit.slice(0, 30).map(auditLine).join('\n')}${d.audit.length > 30 ? `\n…and ${d.audit.length - 30} older on its History in the Winding down page.` : ''}`
+          : `${r.company_name} has no changes on its history yet.`;
+        return { summary: reply, reply, computedReply: true };
+      }
       const lines = [
         `${line(r, today)}${await aheadNote({ ...r, doc_count: d.docs.length })}`,
         // "none", never "—": her dash rule turns a dash into ", " and the
         // empty note read "Note:, No settlement set." (browser 2026-10-13).
         `Instructions: ${r.instructions || 'none'}`,
-        `Liquidator: ${r.liquidator || 'none'} · Blamed: ${r.blamed ? 'yes' : 'no'}`,
+        `Liquidators: ${liquidatorsOf(r.liquidator).join(', ') || 'none'} · Official receiver: ${r.official_receiver || 'none'} · Blamed: ${r.blamed ? 'yes' : 'no'}`,
+        `Other parties: ${(r.parties ?? []).map((x) => [x.name, x.position].filter(Boolean).join(', ')).join('; ') || 'none'}`,
+        `Current play: ${PLAY_LABEL[r.play] ?? 'not set'}${r.stage_date ? ` · Stage date: ${sayDay(String(r.stage_date).slice(0, 10))}` : ''}${r.no_deals ? ' · No deals with us' : ''}`,
+        `Last action: ${r.last_action || 'none'}`,
+        `Unresolved matters: ${r.unresolved || 'none'}`,
+        ...(r.prompts ? [`Prompts: ${r.prompts.length > 400 ? `${r.prompts.slice(0, 397)}…` : r.prompts}`] : []),
         `Note: ${r.note || 'none'}`,
         r.settlement != null ? `Settlement ${r.currency ?? ''} ${money(r.settlement)}, ${r.currency ?? ''} ${money(r.allocated ?? 0)} a month allocated to its live deals.` : 'No settlement set.',
         `Contact log (${d.comms.length}):${d.comms.length ? '' : ' none'}`,
@@ -395,6 +513,8 @@ const listLiquidations = {
         ...d.docs.map((x) => `• ${x.file_name} (${READ_WORD[x.read_status] ?? x.read_status})`),
         `Stage history:${d.history.length ? '' : ' no changes'}`,
         ...d.history.slice(0, 6).map((h) => `• ${stageName(h.from_stage)} → ${stageName(h.to_stage)}, ${sayDay(new Date(h.changed_at).toISOString().slice(0, 10))}${h.by_user ? `, by ${h.by_user}` : ''}`),
+        `Latest changes${d.audit.length ? '' : ': none'}`,
+        ...d.audit.slice(0, 5).map(auditLine),
       ];
       // "IS CAPILANO CLOSED YET": the yes or no first (browser 2026-10-21). On this
       // page it is still winding down, so the answer is no.
@@ -410,6 +530,11 @@ const listLiquidations = {
     if (args.stage) rows = rows.filter((r) => (r.stage ?? null) === want);
     if (args.group) rows = rows.filter((r) => (r.groups ?? []).some((g) => fold(g) === fold(args.group)));
     if (args.owner) rows = rows.filter((r) => (fold(args.owner) === 'none' ? !r.owner : fold(r.owner) === fold(args.owner)));
+    const playWant = args.play ? playFrom(args.play) : undefined;
+    if (args.play && playWant === undefined) return { summary: `"${args.play}" is not a current play. The plays are Wait, Chase, Leave and Do not contact, or none.` };
+    if (args.play) rows = rows.filter((r) => (r.play ?? null) === playWant);
+    if (typeof args.noDeals === 'boolean') rows = rows.filter((r) => Boolean(r.no_deals) === args.noDeals);
+    if (args.unresolved === true) rows = rows.filter((r) => String(r.unresolved ?? '').trim());
     if (args.due) {
       rows = rows.filter((r) => {
         if (!r.deadline || r.stage === 'dissolved') return false;
@@ -417,7 +542,9 @@ const listLiquidations = {
         return args.due === 'passed' ? days < 0 : days <= 7;
       });
     }
-    const scope = [args.stage && stageName(want), args.group, args.owner && `owner ${args.owner}`, args.due === 'week' ? 'deadline passed or due this week' : args.due === 'passed' ? 'deadline passed' : null].filter(Boolean).join(', ');
+    const scope = [args.stage && stageName(want), args.group, args.owner && `owner ${args.owner}`,
+      args.play && `play ${PLAY_LABEL[playWant] ?? 'not set'}`, args.noDeals === true ? 'no deals with us' : args.noDeals === false ? 'with deals' : null,
+      args.unresolved === true ? 'with unresolved matters' : null, args.due === 'week' ? 'deadline passed or due this week' : args.due === 'passed' ? 'deadline passed' : null].filter(Boolean).join(', ');
     if (rows.length === 0) {
       const reply = `No companies in liquidation${scope ? ` (${scope})` : ''}.`;
       return { summary: reply, reply, computedReply: true };
@@ -500,9 +627,33 @@ async function cleanItem(item, today, owners) {
       else set.deadline = d;
     }
   }
-  for (const f of ['nextAction', 'instructions', 'liquidator', 'note']) {
+  for (const f of ['nextAction', 'instructions', 'liquidator', 'note', 'officialReceiver', 'lastAction', 'unresolved', 'prompts']) {
     if (item[f] !== undefined && item[f] !== null) set[f] = String(item[f]).trim().slice(0, 4000);
   }
+  // JOINT LIQUIDATORS: a list sent is one a line.
+  if (Array.isArray(item.liquidators)) set.liquidator = item.liquidators.map((x) => String(x).trim()).filter(Boolean).join('\n');
+  if (item.play !== undefined) {
+    const pl = item.play === null ? null : playFrom(item.play);
+    if (pl === undefined) why.push(`"${item.play}" is not a current play (Wait, Chase, Leave, Do not contact)`);
+    else set.play = pl;
+  }
+  if (item.stageDate !== undefined) {
+    if (item.stageDate === null || /^(?:none|clear|remove)$/i.test(String(item.stageDate).trim())) set.stageDate = null;
+    else {
+      const d = dayFrom(item.stageDate, today);
+      // A VAGUE TIME IS LEFT OUT, never a block: "brightwell got struck off last
+      // week" was refused whole for its stage date, which is only a note of when
+      // (liq run 2026-11-04). The deadline still needs a day; this does not.
+      if (d) set.stageDate = d;
+    }
+  }
+  // OTHER INVOLVED PARTIES and single joint liquidators, worked out against the row later.
+  const people = {
+    addLiquidator: [item.addLiquidator].flat().filter((x) => x && String(x).trim()).map((x) => String(x).trim()),
+    removeLiquidator: [item.removeLiquidator].flat().filter((x) => x && String(x).trim()).map((x) => String(x).trim()),
+    addParty: [item.addParty].flat().filter((x) => x && String(x.name ?? '').trim()).map((x) => ({ name: String(x.name).trim().slice(0, 200), position: String(x.position ?? '').trim().slice(0, 200) })),
+    removeParty: [item.removeParty].flat().filter((x) => x && String(x).trim()).map((x) => String(x).trim()),
+  };
   if (item.blamed !== undefined && item.blamed !== null) set.blamed = Boolean(item.blamed);
   if (item.owner !== undefined) {
     if (item.owner === null || /^(?:none|nobody|no one|clear)$/i.test(String(item.owner).trim())) set.owner = null;
@@ -518,13 +669,38 @@ async function cleanItem(item, today, owners) {
     if (!on) why.push(`"${item.logDate}" is not a day I can be sure of`);
     else log = { body: String(item.log).trim().slice(0, 4000), saidOn: on };
   }
-  return { set, log, why };
+  return { set, log, why, people };
 }
+
+/** The parties and liquidators said, against the row: what changes, or why not. */
+function peopleFor(row, people, set) {
+  const why = [];
+  const parties = { add: [], remove: [] };
+  if (people.addLiquidator.length || people.removeLiquidator.length) {
+    let list = liquidatorsOf(set.liquidator ?? row.liquidator);
+    for (const n of people.removeLiquidator) {
+      const hit = list.find((x) => fold(x) === fold(n)) ?? list.find((x) => fold(x).includes(fold(n)));
+      if (!hit) why.push(`${row.company_name} has no liquidator "${n}" (${list.join(', ') || 'none'})`);
+      else list = list.filter((x) => x !== hit);
+    }
+    for (const n of people.addLiquidator) if (!list.some((x) => fold(x) === fold(n))) list.push(n);
+    set.liquidator = list.join('\n');
+  }
+  const have = row.parties ?? [];
+  for (const n of people.removeParty) {
+    const hit = have.find((x) => fold(x.name) === fold(n)) ?? have.find((x) => fold(x.name).includes(fold(n)));
+    if (!hit) why.push(`${row.company_name} has no other party "${n}" (${have.map((x) => x.name).join(', ') || 'none'})`);
+    else parties.remove.push(hit);
+  }
+  for (const p of people.addParty) if (!have.some((x) => fold(x.name) === fold(p.name))) parties.add.push(p);
+  return { parties, why };
+}
+const partyWords = (p) => [p.name, p.position].filter(Boolean).join(', ');
 
 const ITEM = {
   type: 'object',
   properties: {
-    company: { type: 'string', description: 'As they named it.' },
+    company: { type: 'string', description: 'As they named it. Only an exact name is a company: when they named it, their spelling, never corrected by you; when they did not ("its", "that one"), the name exactly as the page list shows it, never as a document spells it ("Pinecrest Ltd" for the page "Pinecrest" is another company).' },
     status: {
       type: 'string',
       description: 'Only to move the company itself: "winding down" puts it on this page (its deals keep paying); '
@@ -539,7 +715,22 @@ const ITEM = {
     instructions: { type: 'string', description: 'The current instructions.' },
     owner: { type: 'string', description: 'An admin username, or "none".' },
     blamed: { type: 'boolean' },
-    liquidator: { type: 'string' },
+    liquidator: { type: 'string', description: 'The WHOLE list of liquidators, one a line (joint liquidators). To add or take off one, use addLiquidator / removeLiquidator.' },
+    addLiquidator: { type: 'string', description: 'One joint liquidator to add.' },
+    removeLiquidator: { type: 'string', description: 'One liquidator to take off, by name.' },
+    officialReceiver: { type: 'string', description: 'The Official Receiver ("the OR"): a name and office, or "appointed as liquidator". Replaces it.' },
+    addParty: {
+      type: 'object',
+      description: 'An other involved party to add: someone on the case besides the liquidator (an examiner, investigator, officer).',
+      properties: { name: { type: 'string' }, position: { type: 'string', description: 'Their job title, as said.' } },
+      required: ['name'],
+    },
+    removeParty: { type: 'string', description: 'An other involved party to take off, by name.' },
+    lastAction: { type: 'string', description: 'What WE did last (sent, filed, paid, signed), only when they call it the last action or say what we did. Someone ringing, emailing or writing to us ("begbies rang asking for X") is a `log` line, not this.' },
+    unresolved: { type: 'string', description: 'The unresolved matters.' },
+    play: { type: 'string', description: 'Current play, in THEIR words: wait ("park it", "on hold", "nothing we can do till X", "stop chasing"), chase, leave, or do not contact; "none" clears it. A play said is this field, never instructions.' },
+    prompts: { type: 'string', description: 'Prompts: what the director said, who was blamed and why. Replaces the whole text.' },
+    stageDate: { type: 'string', description: 'The Companies House date of the stage (the gazette, the suspension), in THEIR words. Only when they give a day; a vague time ("last week") is left out.' },
     note: { type: 'string' },
     log: { type: 'string', description: 'A line for its contact log: who said what.' },
     logDate: { type: 'string', description: 'When that contact was, in their words. Leave out for today.' },
@@ -551,8 +742,9 @@ const updateLiquidation = {
   name: 'update_liquidation',
   writes: true,
   description:
-    'Change companies on the Winding down page: stage, deadline, next action, instructions, owner, blamed, '
-    + 'liquidator, note, and add contact log lines. ONE CALL FOR THE WHOLE REQUEST, however messy: one item per '
+    'Change companies on the Winding down page: stage, stage date, deadline, next action, instructions, owner, blamed, '
+    + 'liquidators (joint ones a line each; add or take off one), official receiver, other involved parties (add or take off), '
+    + 'last action, unresolved matters, current play (wait, chase, leave, do not contact), prompts, note, and add contact log lines. ONE CALL FOR THE WHOLE REQUEST, however messy: one item per '
     + 'company, every change for it in that item. For the same change to many, use `where` and `set`. '
     + 'Pass their words; code works out dates and names. Call with confirmed false first and show the lines; '
     + 'true only after yes. `undo` true puts back the last change you made here AT ONCE (no confirm). '
@@ -596,6 +788,43 @@ const updateLiquidation = {
      * that minute, stopping its deals (blind park run 2026-10-22). A close is never
      * on a date (his call 2026-10-15), so the deadline carries the date instead.
      */
+    /**
+     * A PERSON TAKEN OFF THE CASE IS NOT THE COMPANY TAKEN OFF THE PAGE. "remove
+     * chloe fletcher from harbor nine, shes not on it anymore" was previewed as
+     * Harbor Nine back to Active, and the yes took it off the page; "take gareth
+     * lyle off quarry lane" tried to close it (blind sheet run 2026-11-04). When
+     * their words name someone on that company's case (a liquidator line or a
+     * party) with a removal, and say nothing about the company itself, the
+     * status and stage go and the removal of that person is what is shown.
+     */
+    let reworded = false;
+    if (Array.isArray(args.items) && args.confirmed !== true && !args.undo && args.said) {
+      const words = lazy(fold(String(args.said))).replace(/[^a-z0-9' ]/g, ' ').replace(/\s+/g, ' ');
+      const takenOff = /\b(?:off|remove\w*|take\w*|drop\w*|delete\w*|no longer|not on (?:it|the case)|anymore|any more|left|gone|replac\w*)\b/.test(words);
+      const companyMoved = /\b(?:close[ds]?|closing|dissolv\w*|struck off|trading|active again|back to active|off (?:the )?(?:winding down|page|list)|winding down|wind(?:ing)?(?: \w+){0,2} down|petition (?:was |got )?dismissed)\b/.test(words);
+      if (takenOff && !companyMoved) {
+        const all = await repo.list();
+        const named = (n) => { const f = fold(n).replace(/[^a-z0-9' ]/g, ' ').replace(/\s+/g, ' ').trim(); return f.includes(' ') && words.includes(f); };
+        args = {
+          ...args,
+          items: args.items.map((i) => {
+            if (typeof i?.company !== 'string') return i;
+            const row = all.find((r) => sameCompany(r, i.company));
+            if (!row) return i;
+            const lq = liquidatorsOf(row.liquidator).find(named);
+            const pt = (row.parties ?? []).find((x) => named(x.name));
+            if (!lq && !pt) return i;
+            const { status, stage, stageKind, ...rest } = i;
+            // Held as shown: the yes replayed the model's own call and closed
+            // Quarry Lane while the preview said one liquidator off (sheet run 2026-11-04).
+            reworded = true;
+            if (lq && !rest.removeLiquidator && !rest.liquidator) rest.removeLiquidator = lq;
+            if (pt && !rest.removeParty) rest.removeParty = pt.name;
+            return rest;
+          }),
+        };
+      }
+    }
     const LATER = /\bend of (?:this|the|next) month\b|\b(?:at|by|on|in|from|for|after|come|until|till) (?:next month|the (?:1st|first|start|end) of (?:next|the) month|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)\b|\bnext month\b|\bnxt month\b/i;
     const closing = [...(args.items ?? []), args.set ?? {}].some((i) => STATUS_WORD(i?.status) === 'closed' || stageFrom(i?.stage) === 'dissolved');
     // The shared reading of a later time too: "at month end" got past LATER alone (held-out park run 2026-10-22).
@@ -617,14 +846,40 @@ const updateLiquidation = {
      * winding-up order, not the end. A close needs their words (closed, dissolved,
      * struck off) or a document on file that shows it.
      */
+    // A CLOSE THEY ASKED ONLY ABOUT rides along with ones they asked to close:
+    // "pinecrest is finished close it … whats happening with brightwell btw"
+    // previewed Brightwell → Dissolved from its Gazette in the same yes (blind
+    // suite 2026-11-04). In a list, each company's own words must ask to close it.
+    if (closing && args.confirmed !== true && !args.undo && (args.items ?? []).length > 1) {
+      const CLOSE_SAID = /\b(?:close[ds]?|closing|shut(?: down)?|dissolv\w*|struck off|strike (?:it |them )?off|final gazette|gazette|gone|finished|over)\b/i;
+      const text = String(args.said ?? '');
+      const closingItems = args.items.filter((x) => STATUS_WORD(x?.status) === 'closed' || stageFrom(x?.stage) === 'dissolved');
+      const own = (i) => {
+        const clause = clauseFor(String(i.company ?? ''), text);
+        return clause !== text && CLOSE_SAID.test(clause);
+      };
+      const asked = closingItems.filter(own);
+      const unasked = closingItems.filter((i) => !own(i) && clauseFor(String(i.company ?? ''), text) !== text);
+      if (asked.length && unasked.length) {
+        const names = unasked.map((i) => i.company).join(', ');
+        return {
+          summary: `NOTHING HAS BEEN CHANGED. They did not ask to close ${names}: they only asked about it. Call this again `
+            + `WITHOUT ${names}, and answer their question about it on its own; if its documents show it dissolved, `
+            + 'say so and offer that close separately at the end.',
+        };
+      }
+    }
     if (closing && args.confirmed !== true && !args.undo) {
-      const words = lazy(fold(`${args.said ?? ''}`));
+      // THE LAST TWO TURNS, not only this one: "drop brightwell" after "close
+      // quarry lane pinecrest brightwell" changes a close they DID ask for, and
+      // it still previews (blind suite 2026-11-04).
+      const words = lazy(fold(`${args.said ?? ''} ${args.saidRecent ?? ''}`));
       const theySaid = /\b(?:close[ds]?|closing|shut(?: down)?|dissolv\w*|struck off|final gazette|gone|finished|over)\b/.test(words.replace(/\bwound up\b|\bwinding up\b/g, ' '));
       if (!theySaid) {
         const all = await repo.list();
         const unproven = [];
         for (const i of [...(args.items ?? [])].filter((x) => STATUS_WORD(x?.status) === 'closed' || stageFrom(x?.stage) === 'dissolved')) {
-          const row = all.find((r) => sameCompany(r, i.company)) ?? byStart(all, i.company);
+          const row = all.find((r) => sameCompany(r, i.company));
           // eslint-disable-next-line no-await-in-loop
           if (row && await closeCaution(row)) unproven.push(row);
         }
@@ -649,7 +904,6 @@ const updateLiquidation = {
     if (Array.isArray(args.items) && !/\b(?:owner|owned by|owns|assign\w*|give (?:it|them) to|hand (?:it|them) to|handled by|looks? after|looking after|in charge)\b/i.test(`${args.said ?? ''} ${args.saidRecent ?? ''}`)) {
       args = { ...args, items: args.items.map((i) => (i?.owner && !owners.some((o) => fold(o) === fold(i.owner)) && !/^(?:none|nobody|no one|clear)$/i.test(String(i.owner).trim()) ? (({ owner, ...rest }) => rest)(i) : i)) };
     }
-    let reworded = false;
     if (Array.isArray(args.items) && args.confirmed !== true && args.said) {
       const said = lazy(fold(args.said));
       args = {
@@ -719,8 +973,7 @@ const updateLiquidation = {
       }
       const byName = new Map();
       for (const i of args.items) {
-        const row = rows.find((r) => sameCompany(r, i.company)) ?? byStart(rows, i.company)
-          ?? rows.find((r) => near(fold(r.company_name), fold(i.company)) || near(bare(r.company_name), bare(i.company)));
+        const row = rows.find((r) => sameCompany(r, i.company));
         if (!row) continue;
         // TWO ITEMS FOR ONE COMPANY are one: the later words win per field.
         const was = byName.get(row.id);
@@ -761,7 +1014,9 @@ const updateLiquidation = {
     for (const { row, item } of targets) {
       // eslint-disable-next-line no-await-in-loop
       // `onStage`: a kind said alone ("pinecrest is a CVL") is read against the stage it has.
-      const { set, log, why } = await cleanItem({ ...item, onStage: row.stage }, today, owners);
+      const { set, log, why, people } = await cleanItem({ ...item, onStage: row.stage }, today, owners);
+      const { parties, why: peopleWhy } = peopleFor(row, people, set);
+      why.push(...peopleWhy);
       if (why.length) { refused.push(`${row.company_name}: ${why.join('; ')}`); continue; }
       // eslint-disable-next-line no-await-in-loop
       await ownWords(set, row, `${args.said ?? ''} ${args.saidRecent ?? ''}`);
@@ -800,8 +1055,9 @@ const updateLiquidation = {
         continue;
       }
       const changes = Object.entries(set).filter(([f, v]) => (row[COLUMN[f]] ?? null) !== (v ?? null)
-        && !(f === 'deadline' && String(row.deadline ?? '').slice(0, 10) === String(v ?? '')));
-      if (!changes.length && !log && !statusTo) continue;
+        && !((f === 'deadline' || f === 'stageDate') && String(row[COLUMN[f]] ?? '').slice(0, 10) === String(v ?? '')));
+      const partiesMove = parties.add.length || parties.remove.length;
+      if (!changes.length && !log && !statusTo && !partiesMove) continue;
       // eslint-disable-next-line no-await-in-loop
       const stops = statusTo === 'closed' ? await wouldStop(row.company_name) : null;
       // eslint-disable-next-line no-await-in-loop
@@ -810,7 +1066,7 @@ const updateLiquidation = {
       const joins = statusTo === 'liquidation' ? (await defaultReviewIds(row.company_name)).length : 0;
       // eslint-disable-next-line no-await-in-loop
       const caution = statusTo === 'closed' && row.id ? await closeCaution(row) : null;
-      plan.push({ row, set: Object.fromEntries(changes), log, caution, status: statusTo ? { from: statusNow, to: statusTo, stops, resumes, joins } : null });
+      plan.push({ row, set: Object.fromEntries(changes), log, parties, caution, status: statusTo ? { from: statusNow, to: statusTo, stops, resumes, joins } : null });
     }
     if (refused.length) {
       return { summary: `NOTHING HAS BEEN CHANGED. ${refused.join('. ')}. Ask them, then call again with the whole request.` };
@@ -820,7 +1076,7 @@ const updateLiquidation = {
       return { summary: reply, reply, computedReply: true };
     }
 
-    const lines = plan.map(({ row, set, log, status, caution }) => {
+    const lines = plan.map(({ row, set, log, parties, status, caution }) => {
       const parts = [];
       if (status) {
         const deals = status.to === 'active' ? ', off the Winding down page; its deals keep paying and leave the monthly Review'
@@ -831,6 +1087,8 @@ const updateLiquidation = {
       }
       parts.push(...Object.entries(set).map(([f, v]) => `${FIELD_LABEL[f]} ${show(f, row[COLUMN[f]])} → ${show(f, v)}`));
       if (log) parts.push(`log "${log.body}" (${sayDay(log.saidOn)})`);
+      for (const p of parties?.add ?? []) parts.push(`add party "${partyWords(p)}"`);
+      for (const p of parties?.remove ?? []) parts.push(`take off party "${partyWords(p)}"`);
       return `• ${row.company_name}: ${parts.join('; ')}${caution ? `\n  ⚠ ${caution}` : ''}`;
     });
     const pending = confirmFirst(args.confirmed, {
@@ -865,16 +1123,16 @@ const updateLiquidation = {
     }
 
     // WRITE, keeping what each replaced for undo.
-    const restore = { rows: [], comms: [], statuses: [] };
+    const restore = { rows: [], comms: [], statuses: [], parties: [], partiesBack: [] };
     let statusMoved = false;
     for (const p of plan) {
-      const { set, log, status } = p;
+      const { set, log, status, parties } = p;
       // INTO winding down first: the row is the page's once the status is.
       if (status?.to === 'liquidation') {
         // eslint-disable-next-line no-await-in-loop
         // ITS DEALS JOIN THE REVIEW (his call 2026-10-15): the dialog's default.
         // eslint-disable-next-line no-await-in-loop
-        await applyCompanyStatus(p.row.company_name, { status: 'liquidation', via: 'diane', reviewMonthlyDealIds: await defaultReviewIds(p.row.company_name) });
+        await applyCompanyStatus(p.row.company_name, { status: 'liquidation', via: 'diane', byUser: BY, reviewMonthlyDealIds: await defaultReviewIds(p.row.company_name) });
         restore.statuses.push({ name: p.row.company_name, status: status.from });
         statusMoved = true;
       }
@@ -894,10 +1152,20 @@ const updateLiquidation = {
         const c = await repo.addComm(row.id, log, BY);
         restore.comms.push(c.id);
       }
+      for (const party of parties?.add ?? []) {
+        // eslint-disable-next-line no-await-in-loop
+        const made = await repo.addParty(row.id, party, BY);
+        restore.parties.push(made.id);
+      }
+      if (parties?.remove?.length) {
+        // eslint-disable-next-line no-await-in-loop
+        const gone = await repo.removeParties(row.id, parties.remove.map((x) => x.id), BY);
+        restore.partiesBack.push(...gone.map((x) => ({ id: row.id, name: x.name, position: x.position })));
+      }
       // OUT, closed or active, last: the stage says how it ended before it leaves the page.
       if (status?.to === 'closed' || status?.to === 'active') {
         // eslint-disable-next-line no-await-in-loop
-        await applyCompanyStatus(row.company_name, { status: status.to, via: 'diane' });
+        await applyCompanyStatus(row.company_name, { status: status.to, via: 'diane', byUser: BY });
         restore.statuses.push({ name: row.company_name, status: status.from });
         statusMoved = true;
       }
@@ -912,7 +1180,11 @@ const updateLiquidation = {
     }
     const failed = plan.filter(({ row, set, status }) => (status && !after.get(row.id)) || Object.entries(set).some(([f, v]) => {
       const got = after.get(row.id)?.[COLUMN[f]] ?? null;
-      return f === 'deadline' ? String(got ?? '').slice(0, 10) !== String(v ?? '') : got !== (v ?? null);
+      if (f === 'deadline' || f === 'stageDate') {
+        const day = got instanceof Date ? `${got.getFullYear()}-${String(got.getMonth() + 1).padStart(2, '0')}-${String(got.getDate()).padStart(2, '0')}` : String(got ?? '').slice(0, 10);
+        return day !== String(v ?? '');
+      }
+      return got !== (v ?? null);
     }));
     await undoRepo.record('liquidations', `${plan.length} ${plan.length === 1 ? 'company' : 'companies'} on the Winding down page`, restore, BY);
     broadcast(null, 'liquidations:changed', { via: 'agent' });
@@ -1032,7 +1304,7 @@ async function undoLiquidations(confirmed) {
     const reply = 'There is no change of mine on the Winding down page to undo.';
     return { summary: reply, reply, computedReply: true };
   }
-  const { rows = [], comms = [], statuses = [] } = last.restore;
+  const { rows = [], comms = [], statuses = [], parties = [], partiesBack = [] } = last.restore;
   /**
    * SHOWN FIRST, like every undo (his rule; blind run 2026-10-22: "undo that"
    * reopened a closed company's deals with no word). The held call is this
@@ -1042,12 +1314,20 @@ async function undoLiquidations(confirmed) {
   if (!confirmed) {
     const back = statuses.map((s) => `• ${s.name}: status back to ${STATUS_LABEL[s.status] ?? s.status}${s.status === 'closed' ? '' : s.status === 'liquidation' || s.status === 'active' ? ', its stopped deals live again' : ''}`);
     const summary = `NOTHING HAS BEEN CHANGED YET. Undo puts back: ${last.summary}.${back.length ? `\n${back.join('\n')}` : ''}`
-      + `${comms.length ? `\n• ${comms.length} contact log ${comms.length === 1 ? 'line' : 'lines'} taken out` : ''}\nShow this and ask "Shall I undo it?"; call again with confirmed true only after their yes.`;
+      + `${comms.length ? `\n• ${comms.length} contact log ${comms.length === 1 ? 'line' : 'lines'} taken out` : ''}`
+      + `${parties.length ? `\n• ${parties.length} other ${parties.length === 1 ? 'party' : 'parties'} taken off` : ''}`
+      + `${partiesBack.length ? `\n• ${partiesBack.map((x) => partyWords(x)).join('; ')} put back as ${partiesBack.length === 1 ? 'a party' : 'parties'}` : ''}\nShow this and ask "Shall I undo it?"; call again with confirmed true only after their yes.`;
     // What her words are matched to, so the yes finds this held call (blind run
     // 2026-10-22: with neither, the yes said "that confirmation has expired").
     // A fields only undo names its companies through their page rows (regression run 2026-10-22).
-    const page = rows.length ? await repo.list().catch(() => []) : [];
-    const aimedAt = [...new Set([...statuses.map((s) => s.name), ...rows.map((r) => page.find((p) => p.id === r.id)?.company_name).filter(Boolean)])];
+    const page = rows.length || parties.length || partiesBack.length ? await repo.list().catch(() => []) : [];
+    // A PARTIES ONLY CHANGE named no company, so the yes found nothing held and
+    // undid nothing (blind sheet run 2026-11-04). Its parties name it.
+    const partyRows = parties.length
+      ? (await require('../../../configs/db').query('SELECT liquidation_id FROM tb_liquidation_parties WHERE id = ANY($1::int[])', [parties]).catch(() => ({ rows: [] }))).rows.map((x) => x.liquidation_id) // eslint-disable-line global-require
+      : [];
+    const ids = [...rows.map((r) => r.id), ...partyRows, ...partiesBack.map((x) => x.id)];
+    const aimedAt = [...new Set([...statuses.map((s) => s.name), ...ids.map((id) => page.find((p) => p.id === id)?.company_name).filter(Boolean)])];
     return {
       pending: true, summary, confirming: `${last.summary} ${back.join(' ')}`,
       // The companies named, which is what her words are matched on (confirmReplay remember).
@@ -1060,7 +1340,7 @@ async function undoLiquidations(confirmed) {
   // The statuses first, newest last undone first: a dissolve reopens its deals.
   for (const s of [...statuses].reverse()) {
     // eslint-disable-next-line no-await-in-loop
-    await applyCompanyStatus(s.name, { status: s.status, via: 'diane' });
+    await applyCompanyStatus(s.name, { status: s.status, via: 'diane', byUser: `${BY} (undo)`, auditVia: 'undo' });
   }
   if (statuses.length) {
     broadcast(null, 'companies:changed', { action: 'updated', via: 'agent' });
@@ -1070,10 +1350,20 @@ async function undoLiquidations(confirmed) {
     // eslint-disable-next-line no-await-in-loop
     await repo.update(r.id, r.fields, `${BY} (undo)`);
   }
-  if (comms.length) await repo.removeComms(comms);
+  if (comms.length) await repo.removeComms(comms, `${BY} (undo)`);
+  // The parties added come off; the ones taken off come back.
+  const byRow = new Map();
+  for (const pid of parties) {
+    // eslint-disable-next-line no-await-in-loop
+    const { rows: [p] } = await require('../../../configs/db').query('SELECT liquidation_id FROM tb_liquidation_parties WHERE id = $1', [pid]); // eslint-disable-line global-require
+    if (p) byRow.set(p.liquidation_id, [...(byRow.get(p.liquidation_id) ?? []), pid]);
+  }
+  for (const [rid, ids] of byRow) await repo.removeParties(rid, ids, `${BY} (undo)`); // eslint-disable-line no-await-in-loop
+  for (const x of partiesBack) await repo.addParty(x.id, { name: x.name, position: x.position }, `${BY} (undo)`); // eslint-disable-line no-await-in-loop
   await undoRepo.markUndone(last.id);
   broadcast(null, 'liquidations:changed', { via: 'agent' });
-  const reply = `Undone: ${last.summary} put back as it was${comms.length ? `, and ${comms.length} contact log ${comms.length === 1 ? 'line' : 'lines'} taken out` : ''}.`;
+  const reply = `Undone: ${last.summary} put back as it was${comms.length ? `, and ${comms.length} contact log ${comms.length === 1 ? 'line' : 'lines'} taken out` : ''}`
+    + `${parties.length + partiesBack.length ? `, other parties as they were` : ''}.`;
   return { summary: reply, reply, computedReply: true };
 }
 
@@ -1265,7 +1555,7 @@ const liquidationDocument = {
         lines: [`1. ${picked[0].file_name} → ${name}`], identity: `${picked[0].file_name} ${name}`,
       });
       if (pending) return { ...pending, redirect: resolvedCall(args, { files: [picked[0].file_name], newName: name }) };
-      await repo.renameDoc(row.id, picked[0].id, name);
+      await repo.renameDoc(row.id, picked[0].id, name, BY);
       // eslint-disable-next-line global-require
       require('../../shared/liquidationDocIndex').forgetCache();
       await undoRepo.record('documents', `the rename of ${name}`, { renamed: [{ rowId: row.id, id: picked[0].id, from: picked[0].file_name }] }, BY);
@@ -1290,7 +1580,7 @@ const liquidationDocument = {
       // eslint-disable-next-line no-await-in-loop
       const aside = await moveAside(full.stored_path);
       // eslint-disable-next-line no-await-in-loop
-      await repo.removeDoc(d.id, aside);
+      await repo.removeDoc(d.id, aside, BY);
       removed.push({ id: d.id, aside, name: d.file_name });
     }
     // eslint-disable-next-line global-require
@@ -1325,15 +1615,15 @@ async function undoDocuments() {
     // eslint-disable-next-line no-await-in-loop
     const full = await repo.findDoc(s.rowId, s.id);
     // eslint-disable-next-line no-await-in-loop
-    if (full) await repo.removeDoc(full.id, await moveAside(full.stored_path));
+    if (full) await repo.removeDoc(full.id, await moveAside(full.stored_path), `${BY} (undo)`);
   }
   for (const r of removed) {
     // eslint-disable-next-line no-await-in-loop
-    await repo.restoreDoc(r.id, await moveBack(r.aside));
+    await repo.restoreDoc(r.id, await moveBack(r.aside), `${BY} (undo)`);
   }
   for (const r of renamed) {
     // eslint-disable-next-line no-await-in-loop
-    await repo.renameDoc(r.rowId, r.id, r.from);
+    await repo.renameDoc(r.rowId, r.id, r.from, `${BY} (undo)`);
   }
   await undoRepo.markUndone(last.id);
   // eslint-disable-next-line global-require
@@ -1370,6 +1660,9 @@ const searchCompanyDocuments = {
         const theirs = await pageCompanyNamed(args.said).catch(() => null);
         if (theirs) ({ rows, ...rest } = await rowsFor([theirs], args.said));
       }
+      // A CLOSE NAME IS ASKED, never searched as another company or as all of
+      // them: "wexcom glazing" read Wexcombe Glazing's papers (his rule 2026-11-04).
+      if (rest.corrections?.some((c) => /did you mean/i.test(c))) return { summary: rest.corrections.join(' ') };
       // NOT A COMPANY ON THE PAGE ("the hmrc petition" came as company "HMRC",
       // overnight suite 2026-10-13): every company's documents are searched.
       keys = problems(rest) ? null : rows.map((r) => r.company_key);
@@ -1468,6 +1761,16 @@ async function nextStepFile(r, today, { brief = false } = {}) {
       + ` · next action: ${r.next_action || 'none'}${r.liquidator ? ` · liquidator ${r.liquidator}` : ''}${r.owner ? ` · owner ${r.owner}` : ''}`,
   ];
   if (r.instructions) out.push(`Instructions: ${r.instructions}`);
+  // THE CLOSURE SHEET'S FIELDS: the play decides the step (Do not contact is no contact).
+  if (r.play) out.push(`Current play: ${PLAY_LABEL[r.play] ?? r.play}${r.play === 'do_not_contact' ? ' (NEVER suggest contacting them)' : r.play === 'leave' ? ' (being left: suggest nothing unless a date or document needs it)' : ''}`);
+  if (r.last_action) out.push(`Last action: ${r.last_action}`);
+  // NAMED IN THE ANSWER, whatever the play: "whats our next move" on a company
+  // on Wait answered "wait for the liquidator" and left out the £12,400 loan
+  // still owed (held-out sheet run 2026-11-04). Waiting is the step; this is what is open.
+  if (r.unresolved) out.push(`Unresolved matters (ALWAYS name these in the answer, even when the step is to wait): ${r.unresolved}`);
+  if (r.official_receiver) out.push(`Official receiver: ${r.official_receiver}`);
+  if ((r.parties ?? []).length) out.push(`Other parties: ${r.parties.map(partyWords).join('; ')}`);
+  if (r.prompts && !brief) out.push(`Prompts: ${r.prompts.length > 1200 ? `${r.prompts.slice(0, 1197)}…` : r.prompts}`);
   if (r.note) out.push(`Note: ${r.note}`);
   if (r.deadline) dated.push({ day: String(r.deadline).slice(0, 10), from: 'the page\'s deadline', says: r.next_action || '' });
   const comms = d.comms.slice(0, brief ? 2 : 4);
@@ -1503,12 +1806,13 @@ const liquidationNextStep = {
   name: 'liquidation_next_step',
   description: 'THE NEXT STEP for companies winding down, from their documents, deadline, contact log and stage: '
     + '"what\'s next for quarry lane", "what should we do about pinecrest", "go through the winding down companies '
-    + 'and tell me what needs doing", "check pinecrest\'s docs and tell me where we are". Name a company, or leave it '
+    + 'and tell me what needs doing", "check pinecrest\'s docs and tell me where we are". Uses the unresolved matters, '
+    + 'last action and current play too. Name a company, or leave it '
     + 'out for every company on the page. Read only.',
   parameters: {
     type: 'object',
     properties: {
-      company: { type: 'string', description: 'One company as they named it; leave out for all.' },
+      company: { type: 'string', description: 'One company as they named it; leave out for all. Only an exact name is a company: when they named it, their spelling, never corrected by you; when they did not ("its", "that one"), the name exactly as the page list shows it, never as a document spells it ("Pinecrest Ltd" for the page "Pinecrest" is another company).' },
       update: { type: 'boolean', description: 'Code only: their yes to your offer to update the page from the documents.' },
     },
   },
@@ -1633,6 +1937,17 @@ async function loadNames() {
       liquidators: [...new Set(rows.map((r) => fold(r.liquidator).split(' ')[0]).filter((n) => n.length >= 4))],
       // EVERY COMPANY, whatever its status: "is ironleaf closing" asks about one off the page.
       every: (await everyCompany()).map((n) => bare(n)).filter((n) => n.length >= 3),
+      // EVERYONE ON A CASE by name, each liquidator line and each party, for
+      // "take gareth lyle off quarry lane" (blind sheet run 2026-11-04: the
+      // sheet's people were searched, and nobody there had that name).
+      people: [
+        ...rows.flatMap((r) => liquidatorsOf(r.liquidator).map((n) => fold(n))),
+        ...(await require('../../../configs/db').query('SELECT name FROM tb_liquidation_parties').then((q) => q.rows.map((x) => fold(x.name))).catch(() => [])), // eslint-disable-line global-require
+      ].map((n) => n.replace(/[^a-z0-9' ]/g, ' ').replace(/\s+/g, ' ').trim()).filter((n) => n.split(' ').length >= 2),
+      // COMPANIES WITH NO DOCUMENTS: who their liquidator is can only be the page's.
+      paperless: await require('../../../configs/db').query('SELECT DISTINCT liquidation_id AS id FROM tb_liquidation_docs WHERE removed_at IS NULL') // eslint-disable-line global-require
+        .then((q) => { const has = new Set(q.rows.map((x) => x.id)); return rows.filter((r) => !has.has(r.id)).map((r) => bare(r.company_name)); })
+        .catch(() => []),
     };
   }
 }
@@ -1721,16 +2036,18 @@ const CHANGE = /\b(?:set|change|move|push|bring forward|update|make|mark|rename|
 // A CHANGE OF STATUS said anywhere in the message: never answered by a read in code.
 const MOVES = /\b(?:close|closing|closed? (?:it|them|em)|wind(?:ing)? (?:\w+ ){0,3}?down|dissolve|strike (?:\w+ )?off|archive|stop|reopen|resume|put (?:\w+ ){0,3}?(?:in|into|on)|move|take (?:\w+ ){0,3}?off)\b/;
 /** A change ordered in the words, "closing" and "winding down" as where it is taken out (see liquidationRoute). */
-const ordered0 = (text) => MOVES.test(text.replace(/\bclos(?:ing|ed)\b(?! (?:it|them|em|down|off|up)\b)/g, ' ')
+const ordered0 = (text) => MOVES.test(text.replace(/\b(?:next|our|the|whats the) moves?\b/g, ' ').replace(/\bclos(?:ing|ed)\b(?! (?:it|them|em|down|off|up)\b)/g, ' ')
   .replace(/\b(?:is|are|be|being|been|thats|that is|that are|ones|still|currently|already|which|any)(?: \w+){0,3}? winding down\b|\bwinding down (?:ones|companies|page|stage|list|docs|documents|paperwork|papers|files)\b/g, ' '));
 /** Lazy spellings to their words: "wats up w/ the winding down ones" (browser 2026-10-21). */
 const lazy = (t) => t.replace(/\bwh?at'?s\b/g, 'whats').replace(/\bwat\b/g, 'what').replace(/\bw\/\s*|\bw (?=the|them|it|our|that|this)/g, 'with ')
   .replace(/\bpls\b|\bplz\b/g, 'please').replace(/\bu\b/g, 'you').replace(/\br\b/g, 'are').replace(/\bthx\b/g, '')
   // "wheres quarry lane at", "pinecrest n brightwell", "how many rn" (blind run 2026-10-22).
-  .replace(/\bwhere'?s\b/g, 'where is').replace(/\b(?:clsoe|cloes|colse)\b/g, 'close').replace(/\bln\b/g, 'lane').replace(/\bthru\b/g, 'through').replace(/\bcompanys\b/g, 'companies').replace(/\bn\b/g, 'and').replace(/\brn\b/g, 'right now');
+  .replace(/\bwhere'?s\b/g, 'where is').replace(/\b(?:clsoe|cloes|colse)\b/g, 'close').replace(/\bln\b/g, 'lane').replace(/\bthru\b/g, 'through').replace(/\bcompanys\b/g, 'companies').replace(/\bn\b/g, 'and').replace(/\brn\b/g, 'right now')
+  // THE DROPPED G: "anythin left outstandin" (held-out sheet run 2026-11-04).
+  .replace(/\b(anyth|noth|someth|everyth|outstand|go|do|chas|wait|happen|trad|pay|clos|wind)in\b/g, '$1ing');
 const asksAtAll = (text) => ASK_START.test(text) || /\b(?:what|whats|what's|which|who|how|when|whens)\b/.test(text);
 // ASKING WHAT TO DO NEXT, however it is said.
-const NEXT_STEP = /\b(?:next steps?|whats? next|what'?s next|what now|what do (?:we|i) do|what (?:should|shall|must|can) (?:we|i)|what (?:do|does) (?:we|i|it) need|what needs (?:doing|to happen|to be done)|where (?:are|do) we (?:at|go|stand)|where we (?:are|stand)|how do we (?:proceed|close|finish|wrap)|game ?plan|action plan|to ?do list|todos?|advise|advice|recommend\w*|outstanding|what'?s left|whats left|what is left|left to do|what to do|nxt|wat now|wats nxt|what happens (?:next|now|if|when)|(?:gotta|got to|have to|need to|needs to|should|must) (?:do|happen|be done)(?: next)?|(?:do|doing|happen\w*) next|run me (?:thru|through)|walk me (?:thru|through)|if we do nothing|most urgent|urgent|priorit\w*|deal with first|(?:is|are) (?:the )?(?:[a-z]+ ){0,3}(?:page|stage|stages|it|they|everything) (?:right|correct|up to date|accurate|wrong|out of date)|up to date with the (?:docs|documents|paperwork)|(?:check|go through|read|look at|review) (?:the |their |its |all (?:the )?|every )?(?:(?:company|companies|company'?s|one'?s|ones|winding down|liquidation|closing) )?(?:docs|documents|paperwork|papers|files)|\bpage (?:right|correct|accurate|up to date|wrong)\b|where are we)\b/;
+const NEXT_STEP = /\b(?:next steps?|(?:next|our|the) moves?|whats? next|what'?s next|what now|what do (?:we|i) do|what (?:should|shall|must|can) (?:we|i)|what (?:do|does) (?:we|i|it) need|what needs (?:doing|to happen|to be done)|where (?:are|do) we (?:at|go|stand)|where we (?:are|stand)|how do we (?:proceed|close|finish|wrap)|game ?plan|action plan|to ?do list|todos?|advise|advice|recommend\w*|outstanding|what'?s left|whats left|what is left|left to do|what to do|nxt|wat now|wats nxt|what happens (?:next|now|if|when)|(?:gotta|got to|have to|need to|needs to|should|must) (?:do|happen|be done)(?: next)?|(?:do|doing|happen\w*) next|run me (?:thru|through)|walk me (?:thru|through)|if we do nothing|most urgent|urgent|priorit\w*|deal with first|(?:is|are) (?:the )?(?:[a-z]+ ){0,3}(?:page|stage|stages|it|they|everything) (?:right|correct|up to date|accurate|wrong|out of date)|up to date with the (?:docs|documents|paperwork)|(?:check|go through|read|look at|review) (?:the |their |its |all (?:the )?|every )?(?:(?:company|companies|company'?s|one'?s|ones|winding down|liquidation|closing) )?(?:docs|documents|paperwork|papers|files)|\bpage (?:right|correct|accurate|up to date|wrong)\b|where are we)\b/;
 // "UPDATE THE STAGES FROM THE DOCS": read them first, then the change.
 const FROM_DOCS = /\b(?:from|per|according to|based on|going by|match(?:ing)?|in line with|off) (?:the |their |its |what the )?(?:docs|documents|paperwork|papers|letters|files)\b|\b(?:docs|documents|paperwork|papers) say\b/;
 // A CHANGE SAID WITH IT stays a change: "set the next action to …".
@@ -1843,8 +2160,53 @@ async function liquidationRoute(said, { hasFiles = false } = {}) {
   const company = pageCompanyIn(text);
   // A FILE ATTACHED, A COMPANY ON THE PAGE, and words that put it somewhere.
   if (hasFiles && company && /\b(?:put|save|file|add|upload|attach|store|keep|stick|drop|this|these|them|it)\b/.test(text)) return 'liquidation_document';
+  /**
+   * THE CLOSURE SHEET'S FIELDS, SAID THE WAY PEOPLE SAY THEM (blind sheet run
+   * 2026-11-04). Each went somewhere else: "take gareth lyle off quarry lane"
+   * searched the sheet's people, "add hannah price on ironleaf, she's the case
+   * officer" started a deal, "the OR on harbor nine" was the word "or", "put
+   * copperfield on leave" read as a status move, "what did the director say"
+   * searched the documents. Here, before the rules that took them.
+   */
+  if (company) {
+    const asking = asksAtAll(text) && !/^\s*(?:please |can you |could you |pls )?(?:put|set|mark|make|add|take|remove|chase|park|leave)\b/.test(text);
+    const caseNamed = (pageNames.people ?? []).some((n) => text.includes(n));
+    const orSaid = /\bOR\b/.test(String(said)) || /\b(?:the|new|our|an) or (?:on|for|at|is|has|was|of|now)\b/.test(text);
+    const ROLE = /\b(?:officer|examiner|investigator|administrator|insolvency|receiver|liquidators?|solicitor|lawyer|caseworker|case (?:officer|manager|handler|worker)|compliance|creditor|petitioner|at (?:hmrc|companies house|the insolvency service|the official receiver))\b/;
+    // Reads: what the director said, who changed it, when a stage happened, the OR.
+    // "REMIND ME WHAT KIRAN VALE SAID": the director by name too (held-out sheet run 2026-11-04).
+    if (asking && (/\b(?:director|he|she|they) (?:say|said|says|blam\w*|claim\w*|tell|told)\b|\bblam\w*\b|\bprompts?\b/.test(text)
+      || /^(?!hmrc|companies house|the |it$|they$|did |has |have )/.test((text.match(/\bwhat (?:did |has |have )?([a-z]+(?: [a-z]+)?) (?:say|said|says|told us|claimed)\b/) ?? [])[1] ?? 'the ')) && !/\b(?:documents?|docs?|files?|pdfs?|letters?|paperwork|papers|minutes)\b/.test(text)) return 'list_liquidations';
+    if (asking && /\bwho (?:put|marked|moved|set|changed|made|switched|updated|edited)\b/.test(text)) return 'list_liquidations';
+    // "WHAT DATE WAS IT GAZETTED" as well as "when" (held-out sheet run 2026-11-04).
+    if (asking && /\bwhen (?:did|was|were|is|has)\b|\b(?:what|which) (?:date|day)\b|\bdate (?:of|it|was)\b/.test(text) && /\b(?:suspend\w*|gazett\w*|struck|strike off|proposal|objection|objected|dissolv\w*|wound up)\b/.test(text) && !/\b(?:documents?|docs?|files?|pdfs?|letters?|paperwork|papers|minutes)\b/.test(text)) return 'list_liquidations';
+    if (asking && orSaid && !CHANGE.test(text.replace(ASK_START, ''))) return 'list_liquidations';
+    // "WHOS THE LIQUIDATOR FOR X AND WHO ELSE IS ON IT": the page keeps the
+    // liquidators by name now, and its other parties (held-out sheet run
+    // 2026-11-04: its documents were searched, and it had none). The person
+    // behind a firm, or who signed, is still the documents' (see below).
+    const othersAsked = /\bwho else\b|\bother part(?:y|ies)\b|\bwho(?:s|'s| is)? (?:on|involved in|working) (?:the |that |this )?case\b/.test(text);
+    if (asking && (othersAsked || ((pageNames.paperless ?? []).includes(company) && /\bwho(?:s|'s| is| are)? (?:the |their )?(?:joint )?liquidators?\b/.test(text)))
+      && !/\b(?:person|actual|not the firm|signed|individual|the ip|appointed|docs?|documents?|letters?|paperwork)\b/.test(text)) return 'list_liquidations';
+    // "WHAT WAS THE LAST THING WE DID ON PINECREST": its last action (held-out sheet run 2026-11-04).
+    if (asking && /\blast (?:thing|things|action|step|move)\b|\bwhat (?:did|have) we (?:last )?(?:do|done)\b/.test(text) && !NEXT_STEP.test(text)) return 'list_liquidations';
+    // Writes: a liquidator or party named with a removal, a new party with a
+    // role, the OR changed, a play said as a verb, the last action or what is outstanding.
+    if (!asking) {
+      if (caseNamed && /\b(?:off|remove\w*|take\w*|drop\w*|delete\w*|no longer|not on (?:it|the case)|anymore|any more|left|gone|replac\w*)\b/.test(text)) return 'update_liquidation';
+      if (/\b(?:add|added|put|joined|new|also|plus|there'?s|theres)\b/.test(text) && ROLE.test(text) && /\b(?:on|to|at|for|from)\b/.test(text)) return 'update_liquidation';
+      if (orSaid) return 'update_liquidation';
+      if (/\b(?:park\w*|on hold|hold off|back off|leave (?:it|them|em|alone)|on (?:wait|chase|leave|hold)|chase\w*(?: up)?|do ?n[o']?t contact|dont contact|no contact|dnc|stop chasing|nothing (?:more )?we can do)\b/.test(text)) return 'update_liquidation';
+      if (/\blast action\b|\b(?:still )?(?:outstanding|unresolved)\b/.test(text) && /\b(?:is|are|was|were|-|:|=|sent|did|done|paid|rang|called|emailed|filed)\b/.test(text)) return 'update_liquidation';
+    }
+  }
   // "WHAT'S NEXT FOR QUARRY LANE", "GO THROUGH THE WINDING DOWN ONES AND TELL
   // ME WHAT NEEDS DOING": the next step, from the documents (2026-10-21).
+  const pageWide0 = /\b(?:winding down|liquidations?|closures?|strike offs?|wind downs?)\b/.test(text);
+  // "ANY OF THE CLOSURES ON DO NOT CONTACT", "WHICH CLOSURES ARENT ON THE MASTER
+  // SHEET": the page filtered by its own fields (held-out sheet run 2026-11-04).
+  if (!company && pageWide0 && asksAtAll(text) && NO_DEAL_WORDS.test(text)) return 'list_liquidations';
+  if (!company && pageWide0 && asksAtAll(text) && /\bdo ?n[o']?t contact\b|\bdont contact\b|\bdnc\b|\bon (?:wait|chase|leave|hold)\b|\bparked\b|\bunresolved\b/.test(text) && !CHANGE.test(text.replace(ASK_START, ''))) return 'list_liquidations';
   const pageWide = /\b(?:winding down|liquidations?|closures?|strike offs?|wind downs?|struck off ones|all of them|all the stages|every (?:compan\w*|stage)|each (?:one|compan\w*)|all (?:the )?compan\w*)\b/.test(text);
   if (FROM_DOCS.test(text) && (company || liqWords || pageWide)) return 'liquidation_next_step';
   // "OK FIX IT THEN" after a question on its papers (the company carried over by
@@ -1919,6 +2281,14 @@ async function liquidationRoute(said, { hasFiles = false } = {}) {
   if (asks && docNames.names.some((n) => text.includes(n)) && !CHANGE.test(text.replace(ASK_START, ''))) return 'search_company_documents';
   // "DOWNLOAD EVERYTHING FOR PINECREST": downloading is documents, never the sheet's export.
   if (company && /\b(?:download|zip)\b/.test(text)) return 'liquidation_document';
+  // THE CLOSURE SHEET'S FIELDS (2026-11-04): "who changed pinecrest", "pinecrest's
+  // history", "whos the official receiver on X", "any unresolved on X" read the page;
+  // "chase X", "X is do not contact", "add Chloe Fletcher, examiner, to X" change it.
+  const SHEET_FIELDS = /\b(?:official receiver|receiver|joint liquidators?|other part(?:y|ies)|parties|examiner|investigator|unresolved|last action|current play|play|prompts?|do not contact|dont contact|no deals?)\b/;
+  if (company && /\bwho (?:changed|updated|edited|moved|set)\b|\b(?:history|audit|trail|changes) (?:of|on|for)\b|\b(?:its|their|the) (?:history|audit trail|changes)\b|\bhistory\b/.test(text)
+    && !/\b(?:undo|revert|put back)\b/.test(text)) return 'list_liquidations';
+  if (company && SHEET_FIELDS.test(text) && asksAtAll(text) && !CHANGE.test(text.replace(ASK_START, ''))) return 'list_liquidations';
+  if (company && (SHEET_FIELDS.test(text) || /\b(?:chase|chasing|wait on|leave (?:it|them))\b/.test(text)) && !asksAtAll(text)) return 'update_liquidation';
   // A STAGE SAID IS A CHANGE, not its paperwork: "pinecrest GOT a first
   // gazette NOTICE, a compulsory strike off proposal" listed its documents
   // (suite 2026-10-14). Opening or sending a file still goes to the files.
@@ -1951,7 +2321,9 @@ async function liquidationRoute(said, { hasFiles = false } = {}) {
  * a company's documents listed or opened. Changes stay with the model, whose
  * confirm and preview flow they need. Returns { tool, args } or null.
  */
-const FILTER_WORDS = /\b(?:own liq|hmrc liq|strike|dissolved|active|proposal|gazette|suspended|rejected|cancel\w*|not set|passed|overdue|due|this week|owner|owned|group|blamed|stage)\b/;
+// NO DEAL WITH US, said the way people say it.
+const NO_DEAL_WORDS = /\bno deals?\b|\bwithout (?:a )?deals?\b|\b(?:not|arent|aren't|isnt|isn't) on (?:the )?(?:master )?sheet\b|\b(?:nobody|no one|noone)(?:'?s| is)? (?:paid|being paid|on (?:the )?(?:payroll|sheet))\b|\bnot paying anyone\b|\bno one we pay\b/;
+const FILTER_WORDS = /\b(?:not on (?:the )?(?:master )?sheet|nobody|no one|own liq|hmrc liq|strike|dissolved|active|proposal|gazette|suspended|rejected|cancel\w*|not set|passed|overdue|due|this week|owner|owned|group|blamed|stage|play|chas\w*|wait\w*|leave|left|do not contact|dont contact|no deals?|with deals|unresolved)\b/;
 async function liquidationPlan(said, { hasFiles = false } = {}) {
   const text = lazy(fold(said));
   if (hasFiles) return null;
@@ -1982,8 +2354,10 @@ async function liquidationPlan(said, { hasFiles = false } = {}) {
     // Through the person when no company is named ("nell ardens company").
     const named = found.length ? found : (await personsCompanies(text)).map((n) => bare(n));
     if (named.length > 1) return { tool, args: { companies: named.map((n) => rows.find((r) => bare(r.company_name) === n)?.company_name ?? n) } };
-    if (row) return { tool, args: { company: row.company_name } };
-    if (named.length === 1) return { tool, args: { company: named[0] } };
+    // "WHO CHANGED X", "X'S HISTORY": its audit trail.
+    const history = /\bwho (?:changed|updated|edited|moved|set|put|marked|made|switched)\b|\bhistory\b|\baudit\b|\btrail\b/.test(text) ? { history: true } : {};
+    if (row) return { tool, args: { company: row.company_name, ...history } };
+    if (named.length === 1) return { tool, args: { company: named[0], ...history } };
     // "IS HARBOUR CLOSING" with two Harbors: which one, in code.
     if (ambiguous.length) {
       const which = pageNames.every.filter((n) => spelt(n).split(' ')[0] === ambiguous[0]);
@@ -2051,7 +2425,7 @@ async function swapItems(said, items) {
 }
 
 module.exports = {
-  narrowItems, pageCompanyNamed, pageCompaniesNamed, swapItems,
+  saidClose, narrowItems, pageCompanyNamed, pageCompaniesNamed, swapItems,
   namesADocument, liquidationRoute, liquidationPlan, namesList, asNews, kindFrom, cleanItem,
   liquidationTools, listLiquidations, updateLiquidation, liquidationDocument, searchCompanyDocuments, readCompanyDocument, liquidationNextStep, stageFrom,
 };

@@ -21,6 +21,9 @@ import { confirm } from '../configs/confirms.config';
 import {
   STAGE_PICK_OPTIONS, stagePickOptions, stageOf, stageLabel, deadlineTone, shortDate,
 } from '../configs/liquidationStages';
+import {
+  PLAY_OPTIONS, playOf, liquidatorsOf, partyText,
+} from '../configs/liquidationPlays';
 
 /**
  * ***************************************************
@@ -116,11 +119,15 @@ export default function LiquidationsPage() {
     return rows.filter((r) => (!filters.stage || (filters.stage === '__none' ? !r.stage : r.stage === filters.stage))
       && (!filters.group || (r.groups ?? []).includes(filters.group))
       && (!filters.owner || (filters.owner === '__none' ? !r.owner : r.owner === filters.owner))
-      && (!q || [r.company_name, r.director, r.mid, r.liquidator].some((v) => String(v ?? '').toLowerCase().includes(q))));
+      && (!filters.play || (filters.play === '__none' ? !r.play : r.play === filters.play))
+      && (!filters.deals || (filters.deals === 'none' ? r.no_deals : !r.no_deals))
+      && (!q || [r.company_name, r.director, r.mid, r.liquidator, r.official_receiver, r.note, ...(r.parties ?? []).map((p) => p.name)]
+        .some((v) => String(v ?? '').toLowerCase().includes(q))));
   }, [rows, filters, search]);
   const passed = rows.filter((r) => deadlineTone(r.deadline, r.stage) === 'passed').length;
   const soon = rows.filter((r) => deadlineTone(r.deadline, r.stage) === 'soon').length;
-  const filtersOn = Boolean(filters.stage || filters.group || filters.owner);
+  const filtersOn = Boolean(filters.stage || filters.group || filters.owner || filters.play || filters.deals);
+  const noDeals = rows.filter((r) => r.no_deals).length;
 
   // THE ROWS ON SCREEN as an Excel file, filters and search applied.
   // THE EXPORT: columns, companies and colour picked in its modal, as on Expenses.
@@ -142,6 +149,7 @@ export default function LiquidationsPage() {
           `${rows.length} ${rows.length === 1 ? 'company' : 'companies'}`,
           passed ? `${passed} past deadline` : null,
           soon ? `${soon} due within a week` : null,
+          noDeals ? `${noDeals} with no deals` : null,
         ].filter(Boolean).join(' · ')}
         actions={(
           <Button variant="quiet" disabled={isLoading || rows.length === 0} onClick={() => setExportOpen(true)}>
@@ -155,13 +163,13 @@ export default function LiquidationsPage() {
         search={(
           <SearchInput
             icon={SearchIcon}
-            placeholder="Search company, people, liquidator…"
+            placeholder="Search company, people, liquidator, parties…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         )}
         filtersActive={filtersOn}
-        filtersCount={[filters.stage, filters.group, filters.owner].filter(Boolean).length}
+        filtersCount={[filters.stage, filters.group, filters.owner, filters.play, filters.deals].filter(Boolean).length}
         storageKey="liquidations.panel"
         onClearFilters={() => { setFilters({}); setSearch(''); }}
         filters={(
@@ -175,6 +183,12 @@ export default function LiquidationsPage() {
             <Select size="sm" className="w-44" value={filters.owner ?? ''} placeholder="Any owner"
               options={[{ value: '__none', label: 'No owner' }, ...owners.map((o) => ({ value: o, label: o }))]}
               onChange={(v) => setFilters((f) => ({ ...f, owner: v || undefined }))} />
+            <Select size="sm" className="w-44" value={filters.play ?? ''} placeholder="Any play"
+              options={[{ value: '__none', label: 'No play set' }, ...PLAY_OPTIONS]}
+              onChange={(v) => setFilters((f) => ({ ...f, play: v || undefined }))} />
+            <Select size="sm" className="w-44" value={filters.deals ?? ''} placeholder="Any deals"
+              options={[{ value: 'none', label: 'No deals' }, { value: 'some', label: 'Has deals' }]}
+              onChange={(v) => setFilters((f) => ({ ...f, deals: v || undefined }))} />
           </>
         )}
       />
@@ -193,7 +207,7 @@ export default function LiquidationsPage() {
         />
       ) : (
       <div className="table-wrap">
-        <table className="w-full min-w-[1700px] text-sm">
+        <table className="w-full min-w-[2400px] text-sm">
           <thead>
             <tr>
               {/* Pinned, so a row scrolled sideways still says whose it is. */}
@@ -202,6 +216,7 @@ export default function LiquidationsPage() {
               <th className="th">Mid</th>
               <th className="th">Group</th>
               <th className="th">Status</th>
+              <th className="th">Current play</th>
               <th className="th">Current instructions</th>
               <th className="th">Deadline</th>
               <th className="th">Next action</th>
@@ -209,17 +224,21 @@ export default function LiquidationsPage() {
               <th className="th">Supporting docs</th>
               <th className="th">Blamed?</th>
               <th className="th">Liquidator</th>
+              <th className="th">Official receiver</th>
+              <th className="th">Other parties</th>
+              <th className="th">Last action</th>
+              <th className="th">Unresolved matters</th>
               <th className="th">Last comm</th>
               <th className="th">Note</th>
               <th className="th text-right">Settlement</th>
             </tr>
           </thead>
           <tbody>
-            {isLoading && <TableSkeleton rows={6} columns={15} />}
+            {isLoading && <TableSkeleton rows={6} columns={21} />}
             {!isLoading && shown.length === 0 && (
               <EmptyState
                 asRow
-                colSpan={15}
+                colSpan={21}
                 icon={HourglassIcon}
                 title="No companies match"
                 hint="Try another search or clear the filters."
@@ -235,13 +254,19 @@ export default function LiquidationsPage() {
                       onClick={(e) => { e.stopPropagation(); setOpenId(r.id); }}>
                       {r.company_name}
                     </button>
+                    {r.no_deals && <span className="badge badge-no_deals ml-2" title="Saved from the closure sheet: no deal with us">No deals</span>}
                   </td>
-                  <td className="td"><Clip width="max-w-[10rem]">{r.director}</Clip></td>
-                  <td className="td"><Clip width="max-w-[10rem]">{r.mid}</Clip></td>
-                  <td className="td">{(r.groups ?? []).join(', ') || <span className="text-text-faint">—</span>}</td>
+                  {/* A NO-DEALS COMPANY'S NAMES are the closure sheet's (migration 093),
+                      said on hover and in a fainter colour than names from its deals. */}
+                  <td className={`td ${r.who_from_sheet ? 'text-text-muted' : ''}`} title={r.who_from_sheet ? 'From the closure sheet' : undefined}><Clip width="max-w-[10rem]">{r.director}</Clip></td>
+                  <td className={`td ${r.who_from_sheet ? 'text-text-muted' : ''}`} title={r.who_from_sheet ? 'From the closure sheet' : undefined}><Clip width="max-w-[10rem]">{r.mid}</Clip></td>
+                  <td className={`td ${r.who_from_sheet ? 'text-text-muted' : ''}`} title={r.who_from_sheet ? 'From the closure sheet' : undefined}>{(r.groups ?? []).join(', ') || <span className="text-text-faint">—</span>}</td>
                   <EditableCell type="select" options={STAGE_PICK_OPTIONS} value={r.stage ?? ''} subValue={r.stage_kind} onEditingChange={onEditingChange}
                     display={<span className={stage.badge}>{stageLabel(r.stage, r.stage_kind)}</span>}
                     onSave={(v, extra) => pickStage(r, v || null, extra?.sub ?? null)} />
+                  <EditableCell type="select" options={PLAY_OPTIONS} value={r.play ?? ''} onEditingChange={onEditingChange}
+                    display={playOf(r.play) ? <span className={playOf(r.play).badge}>{playOf(r.play).label}</span> : <span className="text-text-faint">—</span>}
+                    onSave={(v) => saveCell(r, 'play', 'play', 'current play', v || null)} />
                   <EditableCell className="max-w-[16rem]" value={r.instructions ?? ''} onEditingChange={onEditingChange}
                     onSave={(v) => saveCell(r, 'instructions', 'instructions', 'instructions', v ?? '')} />
                   <EditableCell type="date" value={r.deadline} onEditingChange={onEditingChange}
@@ -260,8 +285,15 @@ export default function LiquidationsPage() {
                   <EditableCell type="select" clearable={false} options={BLAMED_OPTIONS} value={r.blamed ? 'yes' : 'no'} onEditingChange={onEditingChange}
                     display={r.blamed ? <span className="badge badge-open">Yes</span> : <span className="text-text-muted">No</span>}
                     onSave={(v) => saveCell(r, 'blamed', 'blamed', 'blamed', v === 'yes')} />
-                  <EditableCell className="max-w-[12rem]" value={r.liquidator ?? ''} onEditingChange={onEditingChange}
-                    onSave={(v) => saveCell(r, 'liquidator', 'liquidator', 'liquidator', v ?? '')} />
+                  {/* JOINT LIQUIDATORS, one a line: edited in the company's panel. */}
+                  <td className="td"><Clip width="max-w-[14rem]">{liquidatorsOf(r.liquidator).join(', ')}</Clip></td>
+                  <EditableCell className="max-w-[12rem]" value={r.official_receiver ?? ''} onEditingChange={onEditingChange}
+                    onSave={(v) => saveCell(r, 'officialReceiver', 'official_receiver', 'official receiver', v ?? '')} />
+                  <td className="td"><Clip width="max-w-[14rem]">{(r.parties ?? []).map(partyText).join('; ')}</Clip></td>
+                  <EditableCell className="max-w-[16rem]" value={r.last_action ?? ''} onEditingChange={onEditingChange}
+                    onSave={(v) => saveCell(r, 'lastAction', 'last_action', 'last action', v ?? '')} />
+                  <EditableCell className="max-w-[16rem]" value={r.unresolved ?? ''} onEditingChange={onEditingChange}
+                    onSave={(v) => saveCell(r, 'unresolved', 'unresolved', 'unresolved matters', v ?? '')} />
                   <td className="td">
                     {r.last_comm
                       ? <Clip><span className="tabular-nums text-text-muted">{shortDate(r.last_comm.said_on)}</span> · {r.last_comm.body}</Clip>

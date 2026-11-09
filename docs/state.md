@@ -1,6 +1,6 @@
 # State
 
-How the CRM works and connects, as of 2026-10-20. Every line was checked in the
+How the CRM works and connects, as of 2026-11-04. Every line was checked in the
 code. Short on purpose; deeper docs are linked at the end. Update this file
 when any of it changes.
 
@@ -17,10 +17,15 @@ Local only, never deployed.
 
 ## Databases and running
 
-- **Live:** Supabase (`aws-0-ap-south-1` pooler), migrated to **091**.
+- **Live:** Supabase (`aws-0-ap-south-1` pooler), migrated to **093**.
+  Backup taken before the closure import: `backups/live-before-closure-import-2026-11-04.dump`
+  (`backups/` is git-ignored; restore with `pg_restore`).
   **Clone:** Docker `crm-clone`, `127.0.0.1:54329/crm_clone`, a copy of live
   with test leftovers (four deals stopped 14 Oct). Test on the clone first.
-- `crm/api/.env` points at **live** now; the clone line is kept as `# CLONE:`.
+- `crm/api/.env` points at **live** (since 2026-11-04). To test on the clone:
+  comment the `DATABASE_URL` line, uncomment the two `# CLONE:` lines, restart
+  the API.
+- Diane test suite: only ever with `SUITE_DB_URL=…/crm_suite` (it drops its DB).
 - API: `cd crm/api && PORT=3001 npm run dev` (3000 is taken by another app).
   Web: `cd crm/web && VITE_API_URL=http://localhost:3001 npm run dev` → :5173.
 - Login: username + password → a 2 minute ticket → secret code → 12 h session
@@ -69,15 +74,15 @@ SQL, giving **Active / Not yet paying / Ended**.
 | **Dashboard** | Deals, people, companies, monthly payable, splits, recent changes. | Live month and forecast through `isOwedThisMonth`; past months from snapshots. |
 | **Master sheet** | Live deals, 50 a page, every cell editable. Payment start colour, Status badge, bulk Edit / Special case / Stop / Delete, Review button, Export, Import. | Stop archives (`stopped_by_hand`). Import below. |
 | **People** / person | People with a live deal. **Should be paid**, **Paid** (set on all their live deals), Payment received (from WhatBot's payday), add on / fee %. | Should be paid decides payment files. Payment received comes from WhatBot. |
-| **Companies** / company | Status: active, going concern, review, **winding down** (`liquidation`), **closed** (shown "Dissolved"). Tiers. | Review, going concern and winding down open a checklist that ticks deals `review_monthly`. Closing stops the deals (`company_closed`); reopening resumes only those. |
-| **Winding down** | One row per company in `liquidation`: stage, deadline, owner, liquidator, contact log, docs. | Stage "Dissolved" closes the company and stops its deals. Diane reads the docs and deadlines. |
+| **Companies** / company | Status: active, going concern, review, **winding down** (`liquidation`), **closed** (shown "Dissolved"). Tiers. Groups/Monthly/Handlers come from deals; a **No deals** company shows its closure sheet group, fainter ("From the closure sheet"). Filter "No deals". | Review, going concern and winding down open a checklist that ticks deals `review_monthly`. Closing stops the deals (`company_closed`); reopening resumes only those. |
+| **Winding down** | One row per company in `liquidation` (and dissolved ones from the sheet): stage + kind, stage date, deadline, owner, official receiver, liquidators, other parties, last action, instructions, next action, unresolved, current play (wait / chase / leave / do not contact), prompts, contact log, docs, full History. Director / Mid / Group come from deals, or for **No deals** companies from the closure sheet (`sheet_director/mid/group`, editable, shown fainter). | Stage "Dissolved" closes the company and stops its deals. Diane reads the docs and deadlines. |
 | **Review** | This month's queue: deals with a passed end date or a `review_monthly` tick. | **Still running** = paid. **Final month** = stopped at month end. **Already ended** = stopped at last month end. Unanswered = paid, warned on export. |
 | **Archive** | Stopped deals, dead people, dissolved companies. Resume / Restore. | A `company_closed` row comes back only by reopening its company. |
 | **Expenses** | Separate ledger (`tb_expenses`), its own rates. | WhatBot and Diane add expenses through one brain (`expenseBot.js`). |
 | **Chat** | WhatsApp threads from `tb_messages`; admin replies. | Replies go to WhatBot's webhook (`localhost:3002`). |
 | **Flagged** | WhatBot concerns (dispute, distress, legal…). | WhatBot posts them. |
 | **Logs** / **History** | Logs (developer mode only); History = last 7 days of changes with Undo. | |
-| **Settings** | End date decides, crypto %, local locations, FX rates (set + Pull now), WhatBot writes on/off, briefing, Diane auto confirm, expense admins, WhatBot numbers, upload, BURN THIS MONTH, reset. | Driver runs are on the Export modal's Drivers tab, not here. |
+| **Settings** | **Closure sheet import** (preview, then save; undo per import), End date decides, crypto %, local locations, FX rates (set + Pull now), WhatBot writes on/off, briefing, Diane auto confirm, expense admins, WhatBot numbers, upload, BURN THIS MONTH, reset. | Driver runs are on the Export modal's Drivers tab, not here. |
 
 ## Import (upload)
 
@@ -142,6 +147,50 @@ Export button. Full detail: `exports.md`.
   `tb_agent_undo`. Diane can park an action for a later month (it runs on the
   first sign in that month).
 - HMRC mode searches GOV.UK and HMRC manuals and works out CIS in code.
+- **Closures live in the Master sheet context** (no separate Closures context;
+  decided 2026-11-04). She reads and updates every closure sheet field, parties,
+  plays, contact log and history; next step names unresolved matters.
+- **Company names are exact** (see below): a close name gets "Did you mean
+  "X"?"; the yes re-runs the request with the exact name (a change still
+  previews). Typos in people's names are unchanged.
+
+## Company names: exact only
+
+Two names are the same company only if they match letter by letter,
+lower-cased (end and double spaces ignored). "Reliapay", "Reliapay Payroll",
+"Reliapay employment" are different companies. The closure import, the
+Companies page and Diane all follow it; a close name is only ever a question.
+Look-alike names for the boss to confirm: `to-check/crosscheck-company.md`.
+
+## Closure sheet (WR CLOSURE SPREADSHEET NEW 1-3.xlsx)
+
+Imported to **live** on 2026-11-04 (import #1, by admin; undo from Settings).
+
+- 104 companies: 78 winding down, 26 closed as dissolved. Checked field by
+  field against the file: everything matched (Capilano Associates has deals,
+  so its director/group come from the deals).
+- "Supporting docs" went into the contact log, "Links" into Prompts.
+- Matched only on exact names. "Nuvanta Resourcing Limited", "Competex Pro
+  Limited" and "Yellow Stone Associates Limited" were added as their own
+  No-deals companies; the paying "Nuvanta Resourcing", "Competex pro" and
+  "Yellowstone Associates" stay Active. If the boss says they are the same,
+  fix the name in the file, undo the import and run it again.
+- The 6 NEXUS-tab companies with a blank group (Black Diamond, Hansards,
+  Integro, Ordis Management Ltd, Salaris, Zartech) were set to group "Nexus"
+  (history: "NEXUS tab, group cell blank").
+- **Not imported:** the Template tab (old copy of Tawin), the "Other 2" tab
+  (active paying companies, not closures), Tawin row 8 (no name, director
+  Thomas Richardson), "RV Effect Ltd ???", "AJR ???". Listed in
+  `to-check/crosscheck-company.md`.
+- **Tiers from "Other 2"** written on live (logged): KP = Top, Kryptonia =
+  Bottom, Red Horizon Resourcing = Brokerage, Fostabam = T2 (now has a company
+  row); TBC replaced: Monument Marketing = Marketing, RP Contractor management =
+  T2, Reliapay employment = T2. "Unknown" and more detailed CRM tiers were kept.
+- 5 "Other 2" names not in the CRM (True North Umbrella, Education first
+  payroll, Social work first payroll, Social work partners payroll, Reliapay
+  Payroll) were **not added**; waiting on the boss.
+- 15 Active "No deals" companies (Bench, CKAssociates, CKU, Churchill knight
+  emplyment, Reli PA, Red Horizon, …) are left as they are.
 
 ## WhatBot ↔ CRM
 
@@ -181,8 +230,21 @@ Export button. Full detail: `exports.md`.
    (Black country) needs a run on the Drivers tab.
 10. `closure.md` is partly stale: it still lists "dissolved" as a status and
     "Yes / No" review buttons (now Still running / Already ended).
+11. **Boss to check** `to-check/crosscheck-company.md`: look-alike company
+    names, the 5 "Other 2" names, and the 3 skipped rows. Any "same company"
+    answer means fixing names at the source (and redoing the closure import).
+12. **Admin password** was shared in chat; change it.
+13. **Not committed:** all of the 2026-11-04 work (migrations 092/093, closure
+    import, Winding down fields, exact names, Diane, filter bars, tiers).
+14. **Diane, exact names (2026-11-04):** blind sets `exactdev` 9/12, `exactheld`
+    5/8, doc4 8–10/12. Left: after "Did you mean" she sometimes offers an update
+    instead of answering; "Did you mean one of these" for a name nowhere close;
+    a person checked before the company name; "add X on <unknown company>" read
+    as a new deal; a ramble's "what's happening with X" can add "X → Dissolved"
+    to the same preview. Full liq/wind/close/blind/heldout regression not rerun
+    after the last fixes.
 
 ## Docs
 
-`exports.md` · `closure.md` · `flow.md` · `whatbot-crm-expenses.md` ·
+`to-check/crosscheck-company.md` · `exports.md` · `closure.md` · `flow.md` · `whatbot-crm-expenses.md` ·
 `expense.md` · `diane.md` · `run-it.md` · `todo.md`
