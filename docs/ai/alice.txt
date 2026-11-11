@@ -1,0 +1,357 @@
+THINKER AI SETUP
+Updated 2026-11-11
+
+
+1. THE PLAN
+
+Websites  ->  Gateway VPS  ->  RunPod Pod
+
+Pod: runs the model. Only thinks, stores nothing, nothing public.
+Gateway VPS: the backend. Talks to the Pod, holds the database and files,
+  gives each website its own API key.
+Websites: call the gateway with their key. Never call the Pod.
+
+
+2. THE MODEL
+
+Use this one:
+https://huggingface.co/DavidAU/Qwen3.8-27B-Ultimate-Heretic-Uncensored-Turbo-Brilliance-50x-AGI-NEO-GGUF
+
+File: Qwen3.8-27B-Ultimate-Heretic-Uncn-Turbo-Brilli-50x-AGI-NEO-Q8_0.gguf (28.6 GB)
+Q8 is the best quality for tool calling. Fits on 48 GB (testing) and 96 GB (live).
+
+Backup if it gives bad results (older, well tested):
+https://huggingface.co/DavidAU/Qwen3.8-27B-TURBO-Fable-Cold-Fusion-735-882-Heretic-Uncensored-NEO-CODER-MAX-MTP-GGUF
+
+Skip (too small, maths only):
+https://huggingface.co/xtools-at/DeepSeek-V4-Pro-Qwen3.5-9B-UNCENSORED-heretic
+
+Notes:
+The model is 1 week old, not tested by others yet.
+Modes: start a question with {REASON:matlock} for legal and fraud thinking.
+It does not learn by itself. Memory comes from the database (step 6).
+
+
+3. RUNPOD POD TO RENT
+
+Secure Cloud
+Testing: RTX A6000, 48 GB VRAM (9 vCPU, 50 GB RAM included)
+Live later: RTX PRO 6000, 96 GB VRAM (about 2.3 times faster answers)
+Template: RunPod PyTorch 2.8.0
+Container disk: 20 to 50 GB (erased on stop)
+Network Volume: "Thinker", 100 GB, data centre EU-SE-1, mounted at /workspace
+  EU-SE-1 has the A6000 but no RTX PRO 6000. To go live, make a new
+  volume where the PRO 6000 is, and run step 4 again.
+Expose TCP port 22. Do NOT expose port 11434.
+Stop the Pod every evening (Stop, not Terminate).
+
+Price (RunPod Secure Cloud, checked 2026-11-11):
+RTX A6000: 0.59 USD an hour, about 105 USD a month for working hours
+RTX PRO 6000:
+  2.49 USD an hour
+  About 440 USD a month for working hours (8 hours, 22 days)
+  About 1,820 USD a month for 24/7
+  Network Volume 100 GB: about 7 USD a month
+
+
+4. SET UP THE POD (after SSH in)
+
+Check the GPU:
+  nvidia-smi
+
+Install:
+  apt-get update && apt-get install -y curl zstd pciutils lshw
+  curl -fsSL https://ollama.com/install.sh | sh
+  pip install -U huggingface_hub
+
+Make the start script:
+  cat > /workspace/start.sh <<'EOF'
+  export OLLAMA_MODELS=/workspace/ollama
+  export OLLAMA_KEEP_ALIVE=-1
+  export OLLAMA_CONTEXT_LENGTH=32768
+  export OLLAMA_NUM_PARALLEL=3
+  nohup ollama serve > /workspace/ollama.log 2>&1 &
+  cat /workspace/tunnel_key.pub >> /root/.ssh/authorized_keys 2>/dev/null
+  EOF
+  chmod +x /workspace/start.sh
+  (A6000 values. On the RTX PRO 6000 use 65536 and 4.
+   If "ollama ps" shows less than 100% GPU, lower NUM_PARALLEL.)
+  /workspace/start.sh
+
+Download the model (28.6 GB):
+  hf download DavidAU/Qwen3.8-27B-Ultimate-Heretic-Uncensored-Turbo-Brilliance-50x-AGI-NEO-GGUF Qwen3.8-27B-Ultimate-Heretic-Uncn-Turbo-Brilli-50x-AGI-NEO-Q8_0.gguf --local-dir /workspace/models
+
+Add it to Ollama as "thinker":
+  cat > /workspace/Modelfile <<'EOF'
+  FROM /workspace/models/Qwen3.8-27B-Ultimate-Heretic-Uncn-Turbo-Brilli-50x-AGI-NEO-Q8_0.gguf
+  PARAMETER temperature 0.6
+  PARAMETER top_k 64
+  PARAMETER top_p 0.95
+  PARAMETER min_p 0.05
+  PARAMETER repeat_penalty 1
+  EOF
+  ollama create thinker -f /workspace/Modelfile
+  rm /workspace/models/*.gguf     (Ollama keeps its own copy, frees 29 GB)
+
+If it says "unknown architecture", stop and ask. Ollama may not support it yet.
+
+Add the embedding model (for document search):
+  ollama pull bge-m3
+
+Test:
+  ollama run thinker "Say hello in one line"
+  ollama ps        (must say 100% GPU)
+
+After every Pod restart:
+  curl -fsSL https://ollama.com/install.sh | sh
+  /workspace/start.sh
+
+
+5. CONNECT THE GATEWAY VPS TO THE POD (SSH tunnel)
+
+Gateway VPS: Hetzner Cloud, Helsinki, Ubuntu 24.04. No GPU.
+  Testing: CPX32, 4 vCPU, 8 GB RAM, 160 GB, 30.49 EUR a month
+  Live: CPX42, 8 vCPU, 16 GB RAM, 320 GB, 59.49 EUR a month
+  Add Backups (+20%) and the Hetzner Firewall (open 22, 80, 443 only).
+Files: Hetzner Object Storage, Helsinki, 6.49 EUR a month (1 TB stored, 1 TB out).
+  Not a disk on the VPS. The backend reaches it over S3 with keys:
+  S3_ENDPOINT=https://hel1.your-objectstorage.com
+  S3_BUCKET, S3_ACCESS_KEY, S3_SECRET_KEY in the gateway .env
+  Bucket stays private.
+
+Get the Pod IP and port: RunPod, Connect, "SSH over exposed TCP".
+
+On the VPS, make a key:
+  ssh-keygen -t ed25519 -f ~/.ssh/runpod_tunnel -N ""
+  cat ~/.ssh/runpod_tunnel.pub
+
+On the Pod, allow that key to reach the model only (paste your key):
+  echo 'restrict,port-forwarding,permitopen="localhost:11434" ssh-ed25519 PASTE_KEY_HERE' > /workspace/tunnel_key.pub
+  /workspace/start.sh
+
+On the VPS, test:
+  ssh -i ~/.ssh/runpod_tunnel -p POD_PORT -N -L 172.17.0.1:11434:localhost:11434 root@POD_IP
+  curl http://172.17.0.1:11434/api/tags     (in a second window, should show thinker)
+
+On the VPS, keep it running:
+  apt-get install -y autossh
+  cat > /etc/systemd/system/runpod-tunnel.service <<'EOF'
+  [Unit]
+  Description=Tunnel to RunPod
+  After=network-online.target docker.service
+  [Service]
+  ExecStart=/usr/bin/autossh -M 0 -N -i /root/.ssh/runpod_tunnel -p POD_PORT -o ServerAliveInterval=30 -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=accept-new -L 172.17.0.1:11434:localhost:11434 root@POD_IP
+  Restart=always
+  RestartSec=10
+  [Install]
+  WantedBy=multi-user.target
+  EOF
+  systemctl daemon-reload
+  systemctl enable --now runpod-tunnel
+
+If the Pod IP or port changes: edit that file, then
+  systemctl daemon-reload
+  systemctl restart runpod-tunnel
+
+Gateway .env:
+  OLLAMA_BASE_URL=http://host.docker.internal:11434/v1
+(in Docker Compose add: extra_hosts: "host.docker.internal:host-gateway")
+
+Each website .env:
+  AI_BASE_URL=https://ai.yourdomain.com/v1
+  AI_API_KEY=this_sites_key
+Keep the key on the website's server, never in the browser.
+
+
+6. WHAT RUNS ON THE GATEWAY
+
+FastAPI: the API websites call (keys, limits, logs)
+LangGraph: the agent (plans, uses tools, checks, retries)
+Postgres with pgvector: text, transactions, search vectors, memory
+Redis with Celery or RQ: background jobs (reading PDFs)
+Hetzner Object Storage: the original PDFs and spreadsheets
+Open WebUI: chat screen for Alice
+
+How a PDF is handled:
+  1. Save the original file
+  2. Pull out the text (OCR for scanned pages)
+  3. Put transactions into database tables
+  4. Split text into chunks and save them as vectors
+  5. When Alice asks, search the chunks and send the best ones to the model
+
+Rules:
+  Numbers go in the database, text goes in vectors.
+  Every finding must say which file, page or row it came from.
+  Save Alice's corrections so the system improves.
+
+
+TWO THINKERS, ONE POD
+  One Pod, one model. Each Thinker is a profile on the gateway:
+    its own instructions (who it is, how we work)
+    its own memory and playbooks (saved rules, corrections)
+    its own files and document search
+  "How we do things" is saved in the database as playbooks and added
+  to every request. Files go to Object Storage through the gateway.
+  Adding a third Thinker later is a new profile, not a new Pod.
+
+MANY USERS AT ONCE
+  Each request is separate. The model keeps no memory between requests,
+  so two people's questions never mix inside the model.
+  NUM_PARALLEL requests run at the same time, the rest wait in line.
+  Mixing can only happen in our own gateway code, so:
+    Every chat has its own session id. History is loaded by that id only.
+    Every document search is filtered by user and case.
+    Saved corrections belong to the user or case they came from.
+
+
+7. ALSO NEEDED (from the boss's plan)
+
+Web research (required, not optional):
+  Find company directors, shared addresses, ultimate owners.
+  Companies House API (free): officers and PSC (owners) register.
+  SearXNG (free, self hosted) for web search, plus a page fetcher.
+
+Code sandbox:
+  The agent writes and reruns its own Python scripts (scraping, cleaning).
+  Run that code in a locked Docker container: no secrets, no database
+  password, time and memory limits. Never on the gateway itself.
+
+Spreadsheets as input, not only PDFs:
+  Clean raw transaction CSV and Excel files into the database.
+
+Long jobs overnight:
+  Tasks like "audit Folder_B" run in the background and report in the morning.
+  The Pod must stay on for those nights. Decide: stop every evening,
+  or keep it on 24/7 (the boss's 245 pounds a month tier).
+
+Mode tags added automatically:
+  The agent puts {REASON:agi-brainstorm-matlock} or {REASON:agi-brainstorm-007}
+  in front of its prompts, so users don't have to.
+
+Reports:
+  Each finished task produces a report. Ask the boss: dashboard or CSV/Excel?
+
+Stress test before handing over:
+  Feed it broken PDFs, broken links and messy shell company data.
+  It must recover, not crash or loop forever (set a step limit).
+
+Open questions for the boss:
+  Report format: dashboard or CSV/Excel?
+  Pod on 24/7 or only working hours?
+  Only Alice uses it, or other websites too?
+
+
+8. BUILD ORDER
+
+1. Pod with the model
+2. Tunnel to the VPS
+3. Gateway with API keys
+4. PDF reading into the database
+5. Agent with tools
+6. Memory and Alice's corrections
+
+Nothing here has been tested on a real Pod or VPS yet.
+
+
+9. ESTIMATE (checked 2026-11-11, per month, before VAT)
+
+Paid:
+  [ ] RunPod credits: load them first
+  [ ] RunPod Pod, RTX A6000 48 GB, EU-SE-1: 0.59 USD an hour,
+      about 104 USD working hours, about 431 USD 24/7
+  [ ] RunPod container disk 20 GB: about 0.50 USD working hours, about 2 USD 24/7
+  [ ] RunPod Network Volume "Thinker" 100 GB, EU-SE-1: 7 USD
+  [ ] Hetzner VPS CPX42, 8 vCPU, 16 GB RAM, 320 GB, Helsinki: 59.49 EUR
+  [ ] Hetzner Backups: 11.90 EUR
+  [ ] Hetzner Object Storage, Helsinki, 1 TB: 6.49 EUR
+  [ ] Domain: free with a subdomain we already own
+  [ ] Later, if needed: RTX PRO 6000 for faster answers, a paid search API
+
+TOTAL PER MONTH:
+  Working hours: about 175 EUR
+    (RunPod about 112 USD, Hetzner about 78 EUR)
+  24/7: about 455 EUR
+    (RunPod about 440 USD, Hetzner about 78 EUR)
+  Plus VAT. USD to EUR converted roughly.
+
+Working hours = 8 hours a day, 22 days a month. 24/7 = 730 hours.
+
+Free:
+  [ ] Model: Ollama, Ultimate Heretic (Q8), bge-m3
+  [ ] Server: Ubuntu 24.04, Docker, Caddy, autossh, Hetzner Firewall
+  [ ] Backend: Python, FastAPI, LangGraph, boto3
+  [ ] Data: Postgres with pgvector, Redis, Celery or RQ
+  [ ] Files: PyMuPDF, pdfplumber, Tesseract, pandas, openpyxl
+  [ ] Research: Companies House API (free key), SearXNG, Playwright
+  [ ] Safety: locked Docker container for the agent's code
+  [ ] Screens and monitoring: Open WebUI, Langfuse (later)
+  [ ] Deploys: GitHub, GitHub Actions, GHCR
+  [ ] DNS: Cloudflare (grey cloud)
+
+
+10. REVIEW (2026-11-11)
+
+Is it a good plan?
+  Yes. The model only thinks, the gateway holds the data, nothing taught
+  is used until approved, and numbers come from SQL. Weak spot: the
+  untested model. Keep official Qwen 3.8 27B on the Pod as a backup and
+  run the 30 saved questions through both. Use the winner.
+
+Done in 10 days? Only a basic first version, not the whole plan.
+  1. Days 1-2: Pod, model, VPS, tunnel, bucket, domain.
+  2. Days 3-4: gateway with API keys, chat history, the two Thinker profiles.
+  3. Days 5-7: reading PDFs and spreadsheets into the database, plus
+     document search.
+  4. Days 8-9: teaching (memory, corrections, approval list) and the SQL
+     and document search tools.
+  5. Day 10: the tests in thinker-smarter.txt 7J.
+  6. After the 10 days: Companies House, web search, code sandbox,
+     overnight jobs, Open WebUI thumbs, fine-tuning. About 1-2 weeks more.
+
+Order to buy and set up:
+  1. Rent the A6000 first, not the PRO 6000.
+  2. Set up Ollama and the model, then "ollama ps" must say 100% GPU.
+  3. Then buy the Hetzner VPS. Start with CPX32 (testing), CPX42 when live.
+  4. Stop the Pod every night. Its IP and port usually change on restart,
+     so the tunnel needs updating each morning (step 5).
+
+Diane today vs the Thinker plan:
+  Model
+    Diane:   gpt-4.1 (stronger)
+    Thinker: Qwen 27B community model (weaker, untested)
+  Accuracy guards
+    Diane:   many code checks (checkFigures, checkCounts, checkClaims...),
+             a router, a preview before changes, one undo
+    Thinker: only "cite the source" and "numbers from SQL" so far
+  Tested
+    Diane:   yes, full test suites
+    Thinker: nothing tested yet
+  Memory
+    Diane:   conversation summaries she reads back (tools/recall.js):
+             decisions only, never figures, newest first
+    Thinker: memories, playbooks, corrections, good examples, all
+             approved first
+  Learns from mistakes
+    Diane:   no saved corrections loop
+    Thinker: yes, corrections and thumbs up examples
+  Documents
+    Diane:   uploaded sheets, HMRC search with embeddings
+    Thinker: PDF/OCR library, transactions table, document search
+  Data stays private
+    Diane:   no, it goes to OpenAI
+    Thinker: yes, EU servers only
+  Job
+    Diane:   changes CRM data safely
+    Thinker: reads and investigates (forensic accounting)
+
+Verdict:
+  1. Diane is smarter and more accurate today: stronger model and many
+     tested code checks.
+  2. Thinker's plan is better at learning over time. Approved corrections,
+     playbooks and examples are something Diane does not have.
+  3. Thinker's real advantage is privacy: client data never leaves our
+     own EU servers.
+  4. Build Thinker the way Diane is built: code handles what it can first,
+     every figure is checked against the database, and a preview is shown
+     before anything is saved. Without those checks a 27B model will be
+     clearly less accurate than Diane.

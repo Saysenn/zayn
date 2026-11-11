@@ -1,0 +1,270 @@
+THINKER: HOW IT GETS SMARTER, SERVICES AND SETUP
+Updated 2026-11-11
+Goes with alice.txt (Pod setup, tunnel, costs).
+
+
+1. THE IDEA IN ONE PARAGRAPH
+
+The model on the Pod never changes by talking to it. What changes is
+everything around it. The gateway saves what people teach it (rules,
+facts, corrections, files, good answers) and sends the right pieces
+with every new question. So each answer carries more of our own
+knowledge than the last. Later, the saved corrections and good answers
+can be used to retrain the model itself (fine-tuning).
+
+
+2. THE SIX THINGS THAT MAKE IT SMARTER
+
+1. Profile (who it is)
+   Each Thinker has its own instructions: its job, its tone, what it
+   must never do. Example: "You help Alice with forensic accounting.
+   Every number must cite file, page or row."
+
+2. Playbooks (how we do things)
+   Step by step methods, written once, used every time.
+   Example: "Duplicate payment check: 1. same amount and payee within
+   30 days, 2. same invoice number, 3. list them with file and row."
+   Picked by topic and sent with matching questions.
+
+3. Memory (facts it is told)
+   Short facts: "Client Acme banks with Barclays", "Alice wants
+   amounts in GBP with two decimals". Saved with a vector so they are
+   found when relevant.
+
+4. Corrections (mistakes it must not repeat)
+   When someone says "wrong, it is like this", the question, the wrong
+   answer and the fix are saved. Similar questions later get the fix
+   included: "Last time you did X, the right way is Y."
+
+5. Documents (what it has read)
+   Every PDF and spreadsheet is saved, read, split and searchable.
+   Numbers go to the transactions table, text goes to vector search.
+
+6. Good examples (what a great answer looks like)
+   Answers marked thumbs up are saved and shown as examples for
+   similar questions, so the style and depth match what people want.
+
+Later, step 7: Fine-tuning (section 8). Uses items 4 and 6 to train
+the model itself.
+
+
+3. WHAT HAPPENS ON EVERY QUESTION
+
+1. The website or chat screen sends the question with its API key,
+   user, Thinker and chat id.
+2. The gateway checks the key and the limits.
+3. It loads, for that Thinker only:
+     the profile
+     the last messages of this chat
+     playbooks that match the topic
+     memories that match (vector search)
+     past corrections on similar questions
+     2 or 3 good examples
+     document chunks and SQL results for this case
+4. It builds one prompt from all of that and sends it to the model.
+5. The agent may use tools (SQL, document search, Companies House,
+   web search, code sandbox) and loop until done, with a step limit.
+6. The answer goes back with sources (file, page, row).
+7. The question, answer, sources and timings are logged.
+
+
+4. HOW PEOPLE TEACH IT
+
+In the chat:
+  "Remember: ..."        saves a memory (waits for approval)
+  "Playbook: <name> ..." saves or updates a playbook
+  Thumbs up              saves the answer as a good example
+  Thumbs down + fix      saves a correction
+  Upload a file          added to the document library
+
+Approval (important):
+  New memories, playbooks and corrections start as "pending".
+  Alice (or the owner of that Thinker) approves them in a review list.
+  Only approved items are used in answers. This stops a wrong
+  sentence from quietly becoming a "fact".
+
+Every saved item keeps: who taught it, when, from which chat, and
+which Thinker it belongs to. Anything can be edited or switched off.
+
+
+5. WHAT IS SAVED (database tables, Postgres with pgvector)
+
+thinkers       one row per Thinker: name, profile text, settings
+users          who can use which Thinker, role (user or approver)
+api_keys       one per website, stored hashed, with limits
+chats          one per conversation, belongs to a user and Thinker
+messages       every question and answer, with sources
+playbooks      name, steps, topic, status, version, owner
+memories       short fact, vector, Thinker, status, source chat
+corrections    question, wrong answer, fix, vector, status
+examples       question, good answer, vector, Thinker
+documents      file name, storage key, case, Thinker, status, hash
+chunks         text piece, page, vector, document
+transactions   date, description, amount, balance, account, file, row
+jobs           background work and its status (reading files)
+audit_log      who did what and when
+
+Rule: every search is filtered by Thinker (and case). One Thinker
+never sees another Thinker's memories, playbooks or files.
+
+
+6. SERVICES
+
+Paid (checked 2026-11-11, before VAT):
+  RunPod Pod, RTX A6000 48 GB, EU-SE-1: 0.59 USD an hour
+  RunPod container disk 20 GB: about 0.50 USD a month (working hours)
+  RunPod Network Volume "Thinker" 100 GB: 7 USD a month
+  Hetzner VPS CPX42, 8 vCPU, 16 GB RAM, 320 GB, Helsinki: 59.49 EUR
+  Hetzner Backups: 11.90 EUR
+  Hetzner Object Storage, Helsinki, 1 TB: 6.49 EUR
+  Total: about 175 EUR a month (working hours), about 455 EUR (24/7)
+  Later: fine-tuning runs, a few hours of GPU every month or two
+
+Free:
+  Ollama, the Ultimate Heretic model (Q8), bge-m3 (embeddings)
+  Ubuntu 24.04, Docker, Caddy (HTTPS), autossh
+  Python, FastAPI (the API), LangGraph (the agent), boto3 (files)
+  Postgres with pgvector, Redis, Celery or RQ (background jobs)
+  PyMuPDF, pdfplumber, Tesseract, pandas, openpyxl (reading files)
+  Companies House API, SearXNG, Playwright (research)
+  Open WebUI (chat screen), Langfuse (tracing, later)
+  Unsloth (fine-tuning, later)
+  GitHub, GitHub Actions, GHCR (deploys)
+  Cloudflare DNS (grey cloud)
+
+
+7. SETUP
+
+A. RunPod Pod
+  Follow alice.txt step 4. Result: Ollama running "thinker" and
+  "bge-m3" on the Pod, nothing public, port 22 only.
+
+B. Hetzner VPS
+  1. Create CPX42 in Helsinki, Ubuntu 24.04, your SSH key, Backups on.
+  2. Hetzner Firewall: allow 22, 80, 443 in. Nothing else.
+  3. On the server:
+       apt-get update && apt-get upgrade -y
+       apt-get install -y docker.io docker-compose-v2 autossh ufw fail2ban
+       ufw allow 22 && ufw allow 80 && ufw allow 443 && ufw enable
+  4. Turn off password login: in /etc/ssh/sshd_config set
+       PasswordAuthentication no
+     then: systemctl restart ssh
+
+C. Tunnel to the Pod
+  Follow alice.txt step 5. Test:
+    curl http://172.17.0.1:11434/api/tags     (shows thinker and bge-m3)
+
+D. Hetzner Object Storage
+  1. Hetzner Console, Object Storage, create bucket "thinker-files"
+     in Helsinki. Visibility: private.
+  2. Create S3 credentials. Copy the access key and secret key once.
+
+E. Domain
+  Cloudflare DNS: A record ai.yourdomain.com -> VPS IP, grey cloud.
+  Optional second record chat.yourdomain.com for Open WebUI.
+
+F. Gateway project (one GitHub repo, deployed with Docker Compose)
+  Services in docker-compose.yml:
+    caddy       HTTPS, sends ai.* to api and chat.* to openwebui
+    api         FastAPI: keys, limits, chats, uploads, teach, review
+    worker      Celery or RQ: reads files, embeds, nightly jobs
+    postgres    pgvector/pgvector image, data on a named volume
+    redis       job queue and rate limits
+    openwebui   chat screen, talks to api (not to Ollama directly)
+    searxng     private web search for the agent
+    sandbox     locked container for code the agent writes:
+                no network to postgres, no secrets, CPU and memory
+                limits, time limit per run
+  Every service that calls the model gets:
+    extra_hosts: "host.docker.internal:host-gateway"
+
+  Gateway .env (never committed):
+    OLLAMA_BASE_URL=http://host.docker.internal:11434/v1
+    CHAT_MODEL=thinker
+    EMBED_MODEL=bge-m3
+    DATABASE_URL=postgresql://thinker:STRONG_PASSWORD@postgres:5432/thinker
+    DATABASE_READONLY_URL=postgresql://reader:STRONG_PASSWORD@postgres:5432/thinker
+    REDIS_URL=redis://redis:6379/0
+    S3_ENDPOINT=https://hel1.your-objectstorage.com
+    S3_BUCKET=thinker-files
+    S3_ACCESS_KEY=...
+    S3_SECRET_KEY=...
+    COMPANIES_HOUSE_KEY=...
+    MAX_AGENT_STEPS=15
+
+  Caddyfile:
+    ai.yourdomain.com {
+      reverse_proxy api:8000
+    }
+    chat.yourdomain.com {
+      reverse_proxy openwebui:8080
+    }
+
+G. Database
+  1. Turn on pgvector: CREATE EXTENSION IF NOT EXISTS vector;
+  2. Create the tables in section 5 with a migration script.
+  3. bge-m3 vectors have 1024 numbers: use vector(1024).
+  4. A read only user "reader" for the agent's SQL tool.
+
+H. The two Thinkers
+  Insert two rows in thinkers, each with its own profile text.
+  Give each user access to their Thinker. Mark Alice as approver
+  for hers.
+
+I. Deploys
+  GitHub Actions builds the api and worker images, pushes them to
+  GHCR, then SSHes to the VPS and runs:
+    docker compose pull && docker compose up -d
+  Secrets live in GitHub secrets and the server .env, never in code.
+
+J. Test before handing over
+  Two people ask at the same time: answers do not mix.
+  "Remember" -> pending -> approve -> used in the next answer.
+  Thumbs down with a fix -> similar question uses the fix.
+  Broken PDF, broken link, messy spreadsheet: it recovers, no loop.
+  Pod stopped: the gateway says "model offline", nothing crashes.
+
+
+8. FINE-TUNING (LATER, OPTIONAL)
+
+When: after a few hundred approved corrections and good examples.
+
+How:
+  1. Export approved corrections and good examples to a JSONL file
+     (question, best answer). Remove client names and account numbers.
+  2. Rent a GPU Pod for a few hours (separate from the live Pod).
+  3. Train a LoRA on the base model with Unsloth.
+  4. Merge it, convert to GGUF Q8, copy to the live Pod's volume.
+  5. ollama create thinker-v2 -f Modelfile
+  6. Test thinker-v2 against thinker on 30 saved questions.
+  7. Switch CHAT_MODEL=thinker-v2 only if it wins. Keep the old one.
+
+Fine-tuning bakes in habits and style. Facts still come from memory
+and documents, so keep sections 2 to 6 running.
+
+
+9. RULES
+
+  Numbers come from SQL, never from the model's memory.
+  Every finding cites file, page or row.
+  Nothing taught is used until it is approved.
+  Each Thinker only sees its own data.
+  Client data stays in the EU (Hetzner Helsinki, RunPod EU-SE-1).
+  Port 11434 is never public.
+  Daily backups: Hetzner Backups plus a nightly pg_dump to the bucket.
+
+
+10. BUILD ORDER
+
+  1. Pod with the model (alice.txt step 4)
+  2. VPS, firewall, tunnel (7B, 7C)
+  3. Bucket and domain (7D, 7E)
+  4. Gateway: api, postgres, redis, caddy, one API key (7F, 7G)
+  5. Chat with history, two Thinker profiles (7H)
+  6. File reading: PDFs and spreadsheets into the database
+  7. Teaching: memories, playbooks, corrections, examples, review list
+  8. Agent tools: SQL, document search, Companies House, web, sandbox
+  9. Open WebUI, logging, tests (7J)
+  10. Fine-tuning, once enough approved data exists (section 8)
+
+Nothing here has been tested on a real Pod or VPS yet.
