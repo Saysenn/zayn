@@ -1,6 +1,7 @@
 const { randomUUID } = require('node:crypto');
 const { sayDay } = require('../../shared/dayWords.helper');
 const companiesRepo = require('../../repos/companies.repo');
+const { companyKey } = require('../../shared/companyKey');
 const { applyCompanyStatus, wouldStop, wouldResume, defaultReviewIds } = require('../../shared/companyStatus.helper');
 const { confirmFirst } = require('./confirmFirst');
 const { broadcast } = require('../../sockets/index');
@@ -83,7 +84,7 @@ async function resolveCompanies(names, said = '') {
   // what they typed rather than its lowercased shadow.
   const spelled = new Map();
   for (const name of names ?? []) {
-    const key = fold(name);
+    const key = companyKey(name);
     if (key && !spelled.has(key)) spelled.set(key, String(name).trim());
   }
   const wanted = [...spelled.keys()];
@@ -91,7 +92,7 @@ async function resolveCompanies(names, said = '') {
   const known = new Map(
     (Array.isArray(all) ? all : []).map((entry) => {
       const name = entry?.name ?? entry;
-      return [fold(name), name];
+      return [companyKey(name), name];
     }),
   );
 
@@ -99,7 +100,7 @@ async function resolveCompanies(names, said = '') {
   const missing = [];
   for (const key of wanted) {
     if (known.has(key)) found.push({ key, name: known.get(key) });
-    else missing.push(key);
+    else missing.push(fold(spelled.get(key)));
   }
   const corrections = [];
   for (const key of missing) {
@@ -584,7 +585,7 @@ function companyRow(c) {
     amount,
     tier: c.tier ?? '',
     oldGroup: c.old_group ?? '',
-    href: `/companies/${encodeURIComponent(c.ckey ?? fold(c.name))}`,
+    href: `/companies/${encodeURIComponent(c.ckey ?? companyKey(c.name))}`,
   };
 }
 

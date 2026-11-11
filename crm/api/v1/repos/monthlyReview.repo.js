@@ -51,8 +51,7 @@ const { STOPPED_REASON, invalidateCache } = require('./masterSheetRows.repo');
  */
 const COMPANY_STATUS_SQL = `
   (SELECT c.status FROM tb_companies c
-    WHERE lower(regexp_replace(btrim(c.name), '\\s+', ' ', 'g'))
-        = lower(regexp_replace(btrim(m.company), '\\s+', ' ', 'g'))
+    WHERE company_match_key(c.name) = company_match_key(m.company)
     LIMIT 1)
 `;
 
@@ -147,7 +146,7 @@ async function queue(period = currentMonth(), { group, personId, company, answer
   }
   if (company) {
     params.push(company);
-    where.push(`lower(btrim(m.company)) = lower(btrim($${params.length}))`);
+    where.push(`company_match_key(m.company) = company_match_key($${params.length})`);
   }
   // Three states, and the default is ALL of them: the panel shows what has
   // been decided beside what has not, or answering something makes it

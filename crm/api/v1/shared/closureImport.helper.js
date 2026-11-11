@@ -1,6 +1,7 @@
 const ExcelJS = require('exceljs');
 const { randomUUID } = require('node:crypto');
 const pool = require('../../configs/db');
+const { companyKey } = require('./companyKey');
 const repo = require('../repos/liquidations.repo');
 const { applyCompanyStatus } = require('./companyStatus.helper');
 const { currentDay } = require('./presetMonth.helper');
@@ -289,11 +290,11 @@ const asText = (v) => (v === null || v === undefined ? '' : v instanceof Date ? 
 async function crmCompanies() {
   const { rows } = await pool.query(
     `WITH deals AS (
-       SELECT lower(regexp_replace(btrim(company), '\\s+', ' ', 'g')) AS ckey, btrim(company) AS name, stopped_on
+       SELECT company_match_key(company) AS ckey, btrim(company) AS name, stopped_on
          FROM tb_mastersheet WHERE company IS NOT NULL AND btrim(company) <> ''
      ),
      keys AS (
-       SELECT lower(regexp_replace(btrim(name), '\\s+', ' ', 'g')) AS ckey FROM tb_companies WHERE btrim(name) <> ''
+       SELECT company_match_key(name) AS ckey FROM tb_companies WHERE btrim(name) <> ''
        UNION SELECT ckey FROM deals
      )
      SELECT k.ckey,
@@ -302,7 +303,7 @@ async function crmCompanies() {
             (SELECT COUNT(*)::int FROM deals d WHERE d.ckey = k.ckey AND d.stopped_on IS NULL) AS live_deals,
             (SELECT COUNT(*)::int FROM deals d WHERE d.ckey = k.ckey) AS all_deals
        FROM keys k
-       LEFT JOIN tb_companies c ON lower(regexp_replace(btrim(c.name), '\\s+', ' ', 'g')) = k.ckey`,
+       LEFT JOIN tb_companies c ON company_match_key(c.name) = k.ckey`,
   );
   return rows;
 }
@@ -316,7 +317,7 @@ async function crmCompanies() {
  * A near name is returned as `near`, shown as a question, NEVER applied.
  */
 function matchCompany(name, crm) {
-  const key = fold(name);
+  const key = companyKey(name);
   const exact = crm.find((c) => c.ckey === key);
   if (exact) return { company: exact, how: 'exact' };
   return null;
@@ -324,7 +325,7 @@ function matchCompany(name, crm) {
 /** CRM companies whose names are close to this one: said, never matched. */
 function nearNames(name, crm) {
   const parts = name.includes('/') ? name.split('/').map((p) => p.trim()).filter(Boolean) : [];
-  return crm.filter((c) => bare(c.name) === bare(name) || parts.some((p) => fold(p) === c.ckey || bare(p) === bare(c.name))).map((c) => c.name);
+  return crm.filter((c) => bare(c.name) === bare(name) || parts.some((p) => companyKey(p) === c.ckey || bare(p) === bare(c.name))).map((c) => c.name);
 }
 
 /**
@@ -343,7 +344,7 @@ async function buildPlan(parsed) {
 
   for (const c of parsed.companies) {
     const m = matchCompany(c.name, crm);
-    const key = m ? m.company.ckey : fold(c.name);
+    const key = m ? m.company.ckey : companyKey(c.name);
     // THE SAME COMPANY ON TWO TABS: the later tab wins, and it is said.
     if (seen.has(key)) {
       const was = entries.findIndex((e) => e.key === key);
@@ -464,7 +465,7 @@ async function commit(plan, choices, { byUser, fileName }) {
       // eslint-disable-next-line no-await-in-loop
       const { rows } = await pool.query(
         `INSERT INTO tb_companies (name, status, closed_on) VALUES ($1, $2, $3)
-         ON CONFLICT (lower(name)) DO NOTHING RETURNING company_id`,
+         ON CONFLICT (company_match_key(name)) DO NOTHING RETURNING company_id`,
         [e.name, closedNow ? 'closed' : 'liquidation', closedNow ? (e.fields.stageDate ?? currentDay()) : null],
       );
       if (rows[0]) {
@@ -563,7 +564,7 @@ async function undo(importId, byUser) {
   for (const key of r.created ?? []) {
     // eslint-disable-next-line no-await-in-loop
     const { rows: deals } = await pool.query(
-      "SELECT 1 FROM tb_mastersheet WHERE lower(regexp_replace(btrim(company), '\\s+', ' ', 'g')) = $1 LIMIT 1", [key],
+      'SELECT 1 FROM tb_mastersheet WHERE company_match_key(company) = $1 LIMIT 1', [key],
     );
     if (deals.length) continue;
     // eslint-disable-next-line no-await-in-loop
@@ -573,7 +574,7 @@ async function undo(importId, byUser) {
     // eslint-disable-next-line no-await-in-loop
     await pool.query('DELETE FROM tb_liquidations WHERE company_key = $1', [key]);
     // eslint-disable-next-line no-await-in-loop
-    await pool.query("DELETE FROM tb_companies WHERE lower(regexp_replace(btrim(name), '\\s+', ' ', 'g')) = $1", [key]);
+    await pool.query('DELETE FROM tb_companies WHERE company_match_key(name) = $1', [key]);
     removed += 1;
   }
   await pool.query('UPDATE tb_closure_imports SET undone_at = now(), undone_by = $2 WHERE id = $1', [importId, byUser]);

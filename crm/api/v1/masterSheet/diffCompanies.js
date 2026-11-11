@@ -17,8 +17,9 @@
  */
 
 /** Match on a folded name, the same way tb_companies' unique index does. */
+// The one company key (shared/companyKey.js): spaces and dots are typing.
 function fold(name) {
-  return String(name ?? '').trim().toLowerCase();
+  return require('../shared/companyKey').companyKey(name); // eslint-disable-line global-require
 }
 
 /** Letters and digits only, so "Relia PA" and "Relia Pa." are one name. */

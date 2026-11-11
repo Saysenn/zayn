@@ -28,7 +28,7 @@ function loadRepo(answers = []) {
   return { repo, ran };
 }
 
-const HELD = /FROM tb_companies WHERE lower\(name\) = \$1 FOR UPDATE/;
+const HELD = /FROM tb_companies WHERE company_match_key\(name\) = \$1 FOR UPDATE/;
 const UPSERT = /INSERT INTO tb_companies \(name, status, notes/;
 const LOG = /INSERT INTO tb_mastersheet_changes/;
 const logs = (ran) => ran.filter((r) => LOG.test(r.sql)).map((r) => r.params);
@@ -53,7 +53,7 @@ test('NOTHING THAT DID NOT MOVE IS LOGGED, and a numeric reads the same both way
 });
 
 const CHANGE = { id: 11, row_id: 4, field: 'companyTier', old_value: 'T2', new_value: 'T3' };
-const OWNER = /SELECT lower\(regexp_replace.*AS ckey FROM tb_mastersheet WHERE id = \$1/;
+const OWNER = /SELECT company_match_key\(company\) AS ckey FROM tb_mastersheet WHERE id = \$1/;
 const NOW = /AS value FROM tb_companies/;
 
 test('UNDO PUTS THE COMPANY BACK and closes every entry of that act', async () => {
@@ -90,7 +90,7 @@ test('A TIER THAT WAS NOTHING GOES BACK TO NOTHING, through the clear', async ()
 test('AN UPLOADED TIER IS LOGGED AS THE UPLOAD', async () => {
   const { repo, ran } = loadRepo([
     [/FOR UPDATE$/, [{ ckey: 'workforce', tier: 'T2' }]],
-    [/WHERE lower\(regexp_replace\(btrim\(name\).*ANY\(\$1::text\[\]\)$/, [{ ckey: 'workforce', tier: 'Visa co' }]],
+    [/WHERE company_match_key\(name\) = ANY\(\$1::text\[\]\)$/, [{ ckey: 'workforce', tier: 'Visa co' }]],
   ]);
   await repo.setTiers([{ company: 'Workforce', tier: 'Visa co' }]);
   assert.deepEqual(logs(ran), [['workforce', 'companyTier', 'T2', 'Visa co', 'upload', null]]);

@@ -190,7 +190,7 @@ function normalizeGroupName(v) {
  * Bunting Rowe" are how those names are written, and upper/lower-casing
  * everything would make the page look wrong to the person reading it.
  * Case-insensitivity is handled where it matters instead: the company
- * table's unique index is on lower(name) (migration 026).
+ * table's unique index is on company_match_key(name) (migration 094).
  */
 function tidyText(v) {
   if (typeof v !== 'string') return v ?? null;

@@ -197,8 +197,8 @@ test('THE COMPANY IS MATCHED ON ITS FOLDED NAME', async () => {
   // "Relia PA" and "Relia Pa" are one company and both spellings are live.
   const { repo, ran } = load();
   await repo.queue('2026-09');
-  assert.match(ran[0].sql, /lower\(regexp_replace\(btrim\(c\.name\)/);
-  assert.match(ran[0].sql, /lower\(regexp_replace\(btrim\(m\.company\)/);
+  assert.match(ran[0].sql, /company_match_key\(c\.name\)/);
+  assert.match(ran[0].sql, /company_match_key\(m\.company\)/);
 });
 
 test('EVERY ROW SAYS WHICH TAB IT BELONGS TO', async () => {

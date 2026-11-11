@@ -2,6 +2,7 @@ const pool = require('../../configs/db');
 const { paymentPeriodSql } = require('../shared/paymentPeriod.helper');
 const { personRatesSql } = require('../shared/personRates.helper');
 const { ratedMonthlyTotals } = require('../shared/rates.helper');
+const { companyKey, companyKeySql } = require('../shared/companyKey');
 const {
   COMPANY_LOGGED_FIELD, COMPANY_COLUMN_FOR_LOG, COMPANY_PROP_FOR_LOG, loggedText,
 } = require('../shared/companyFieldLog.helper');
@@ -112,7 +113,7 @@ const isReviewedMonthly = (status) => REVIEWED_MONTHLY.includes(status);
 // The one normalization rule, written once. Any query that groups deals
 // by company must use exactly this or two views of the same page will
 // disagree about how many companies there are.
-const CKEY = `lower(regexp_replace(btrim(company), '\\s+', ' ', 'g'))`;
+const CKEY = companyKeySql('company');
 
 /**
  * The Companies page. One row per company with its team already counted
@@ -224,7 +225,7 @@ async function findAll({
          false                                   AS groups_from_sheet
        FROM agg a
        LEFT JOIN totals_json t ON t.ckey = a.ckey
-       LEFT JOIN tb_companies c ON lower(c.name) = a.ckey
+       LEFT JOIN tb_companies c ON ${keySql('c.name')} = a.ckey
        WHERE true ${statusSql} ${oldGroupSql}
          -- LIVE DEALS ONLY, like the dashboard's count: a company whose every
          -- deal is stopped by hand is not listed (it showed 32 against the
@@ -268,7 +269,7 @@ async function findAll({
  * only exists in the deals has no tb_companies row yet.
  */
 async function findByKey(key) {
-  const ckey = String(key ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const ckey = companyKey(key);
   const result = await pool.query(
     `WITH deals AS (
        -- The HANDLER's own two rates, carried so the page can rate the
@@ -302,7 +303,7 @@ async function findByKey(key) {
        -- Its Winding down stage, for how a dissolved one ended (his call 2026-10-15).
        (SELECT row_to_json(w) FROM (SELECT stage, stage_kind FROM tb_liquidations WHERE company_key = $1) w) AS winding
      FROM (SELECT 1) _
-     LEFT JOIN tb_companies c ON lower(c.name) = $1`,
+     LEFT JOIN tb_companies c ON ${keySql('c.name')} = $1`,
     [ckey],
   );
 
@@ -323,7 +324,7 @@ async function findByKey(key) {
  * would leave a company nothing points at.
  */
 async function rename(ckey, newName) {
-  const from = String(ckey ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const from = companyKey(ckey);
   const to = String(newName ?? '').trim().replace(/\s+/g, ' ');
   if (!to) throw new Error('A company name cannot be empty');
 
@@ -415,9 +416,8 @@ async function rename(ckey, newName) {
  * spelling, NOT from the lowercased grouping key, which would write
  * "relia pa" into the page as the company's name.
  */
-// The key every company is matched on: trimmed, spaces collapsed, lowercased. In SQL, CKEY on any column.
-const keySql = (column) => CKEY.replace('company', column);
-const companyKey = (value) => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+// The key every company is matched on (shared/companyKey.js). In SQL, keySql on any column.
+const keySql = (column) => companyKeySql(column);
 
 // The logged columns as they stand, read with the write so the log and it agree.
 const LOGGED_COLUMNS = Object.values(COMPANY_LOGGED_FIELD).map(({ column }) => column).join(', ');
@@ -466,7 +466,7 @@ async function writeCompany(client, key, {
   status, notes, tier, oldGroup, liquidationTotal, closedOn,
 }, stamp = {}) {
   const { rows: held } = await client.query(
-    `SELECT ${LOGGED_COLUMNS} FROM tb_companies WHERE lower(name) = $1 FOR UPDATE`,
+    `SELECT ${LOGGED_COLUMNS} FROM tb_companies WHERE ${keySql('name')} = $1 FOR UPDATE`,
     [key],
   );
   const { rows } = await client.query(
@@ -482,7 +482,7 @@ async function writeCompany(client, key, {
        $5::text,
        NULLIF($6::text, '')::numeric,
        NULLIF($7::text, '')::date
-     ON CONFLICT (lower(name)) DO UPDATE SET
+     ON CONFLICT (company_match_key(name)) DO UPDATE SET
        status = COALESCE($2::text, tb_companies.status),
        notes  = COALESCE($3::text, tb_companies.notes),
        -- THE SAME THREE STATES tier and old_group have, and passed as text
@@ -537,7 +537,7 @@ async function revertCompanyField(change, { via = 'admin' } = {}) {
     const key = owner[0]?.ckey;
     if (!key) return { ok: false, reason: 'The deal it belonged to has no company any more.' };
     const { rows: held } = await client.query(
-      `SELECT ${column} AS value FROM tb_companies WHERE lower(name) = $1 FOR UPDATE`,
+      `SELECT ${column} AS value FROM tb_companies WHERE ${keySql('name')} = $1 FOR UPDATE`,
       [key],
     );
     const now = loggedText(column, held[0]?.value);
@@ -582,7 +582,7 @@ async function revertCompanyField(change, { via = 'admin' } = {}) {
  */
 async function tierMap() {
   const { rows } = await pool.query(
-    "SELECT lower(btrim(name)) AS ckey, tier FROM tb_companies WHERE tier IS NOT NULL AND tier <> ''",
+    `SELECT ${keySql('name')} AS ckey, tier FROM tb_companies WHERE tier IS NOT NULL AND tier <> ''`,
   );
   return new Map(rows.map((r) => [r.ckey, r.tier]));
 }
@@ -639,13 +639,13 @@ async function writeTiers(client, clean, stamp) {
               old_group = COALESCE(i.old_group, c.old_group),
               updated_at = now()
          FROM incoming i
-        WHERE lower(btrim(c.name)) = lower(btrim(i.name))
-        RETURNING lower(btrim(c.name)) AS ckey
+        WHERE ${keySql('c.name')} = ${keySql('i.name')}
+        RETURNING ${keySql('c.name')} AS ckey
      )
      INSERT INTO tb_companies (name, status, tier, old_group)
      SELECT i.name, 'active', i.tier, i.old_group
        FROM incoming i
-      WHERE lower(btrim(i.name)) NOT IN (SELECT ckey FROM updated)
+      WHERE ${keySql('i.name')} NOT IN (SELECT ckey FROM updated)
      ON CONFLICT DO NOTHING`,
     [names, tiers, oldGroupValues],
   );

@@ -173,6 +173,8 @@ export default function CompanyDetailPage() {
     );
   }
 
+  // AN OLD LINK ("leadstone solutions") moves to the company's one key (2026-11-11).
+  if (company.ckey && company.ckey !== key) return <Navigate replace to={`/companies/${encodeURIComponent(company.ckey)}`} />;
   // A DISSOLVED COMPANY LIVES IN THE ARCHIVE (his call 2026-10-15): its own read-only page.
   if (isTerminalStatus(company.status)) return <Navigate replace to={`/archive/companies/${encodeURIComponent(key)}`} />;
 

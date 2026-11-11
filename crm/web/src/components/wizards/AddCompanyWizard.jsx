@@ -13,6 +13,7 @@ import FloatingField from '../forms/FloatingField';
 import HandlerRows from '../forms/HandlerRows';
 import DealPreview from '../display/DealPreview';
 import { ChevronIcon, CheckCircleIcon } from '../icons';
+import { companyKey } from '../../helpers/companyKey';
 
 /**
  * Adding a company, step by step, the same shape as adding a person.
@@ -93,7 +94,7 @@ export default function AddCompanyWizard({ onClose }) {
       });
       drafting.clear();
       onClose();
-      navigate(`/companies/${encodeURIComponent(name.toLowerCase())}`);
+      navigate(`/companies/${encodeURIComponent(companyKey(name))}`);
     } catch (err) {
       setError(err.message);
     } finally {

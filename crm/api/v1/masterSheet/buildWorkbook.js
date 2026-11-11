@@ -1,6 +1,7 @@
 const ExcelJS = require('exceljs');
 const { DATE_FMT, MONEY_FMT, withExcelDates } = require('../shared/sheetFormats');
 const { scrubWorkbook } = require('../shared/scrubWorkbook.helper');
+const { companyKey } = require('../shared/companyKey');
 const { activeCompanies, paymentBreakdown } = require('./groupTables');
 const { breakdownDesignFor, forcesPercentagesTable, NONE_ID } = require('./breakdowns');
 const { fillsFor } = require('./breakdowns/palette');
@@ -779,7 +780,7 @@ function roleRank(r) {
 }
 
 /** Folded, so one company written two ways is one block. */
-const companyKeyOf = (r) => String(r.company ?? '').trim().toLowerCase();
+const companyKeyOf = (r) => companyKey(r.company);
 
 /**
  * Rows regrouped into one array per company, companies alphabetical, and
@@ -797,7 +798,9 @@ function byCompany(rows) {
     groups.get(key).push(r);
   }
   return [...groups.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
+    // A to Z by the name as written, as before the one key (2026-11-11).
+    .sort(([, x], [, y]) => String(x[0].company ?? '').trim().toLowerCase()
+      .localeCompare(String(y[0].company ?? '').trim().toLowerCase()))
     .map(([, deals]) => deals.sort(
       (x, y) => roleRank(x) - roleRank(y)
         || (x.seat ?? 0) - (y.seat ?? 0)

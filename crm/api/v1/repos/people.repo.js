@@ -1,4 +1,5 @@
 const pool = require('../../configs/db');
+const { companyKeySql: matchKeySql } = require('../shared/companyKey');
 const { paymentPeriodSql, payStatusSql } = require('../shared/paymentPeriod.helper');
 const { personRatesSql } = require('../shared/personRates.helper');
 const { ratedMonthlyTotals } = require('../shared/rates.helper');
@@ -55,7 +56,7 @@ const PERSON_COLUMNS = `
  * the distinct count was for in the first place.
  */
 const companyKeySql = (prefix = 'd.') =>
-  `(lower(btrim(COALESCE(${prefix}group_name, ''))), lower(btrim(COALESCE(${prefix}company, ''))))`;
+  `(lower(btrim(COALESCE(${prefix}group_name, ''))), ${matchKeySql(`${prefix}company`)})`;
 
 /**
  * Builds the WHERE clause every listing shares.
@@ -88,7 +89,7 @@ function dealFilters({ role, group, company, method, currency, status, needsRevi
   }
   if (company) {
     params.push(company);
-    where.push(`lower(btrim(company)) = lower(btrim($${params.length}))`);
+    where.push(`${matchKeySql('company')} = ${matchKeySql(`$${params.length}`)}`);
   }
   if (method) {
     params.push(method);

@@ -575,9 +575,9 @@ async function hmrcTurn(history, send, { user = null } = {}) {
 
 /** One company's documents listed, or one read whole. Read only. */
 async function readCompanyDocument({ company, file = '' } = {}) {
-  const key = String(company ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const key = liquidationsRepo.companyKey(company);
   const rows = await liquidationsRepo.list().catch(() => []);
-  const row = rows.find((r) => r.company_key === key || r.company_name.toLowerCase() === key)
+  const row = rows.find((r) => r.company_key === key)
     ?? rows.find((r) => r.company_key.includes(key) || key.includes(r.company_key));
   if (!row) return `No company called "${company}" is in liquidation. Ours are: ${rows.map((r) => r.company_name).join(', ') || 'none'}.`;
   const { docs } = await liquidationsRepo.details(row.id);

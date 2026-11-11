@@ -129,8 +129,7 @@ const COLUMNS = `id, sync_key, source, person_id, person_name, phone,
   -- question (is payment running this month) and in liquidation it is,
   -- just for less. Same subselect shape as the person's rates above.
   (SELECT c.status FROM tb_companies c
-    WHERE lower(regexp_replace(btrim(c.name), '\\s+', ' ', 'g'))
-        = lower(regexp_replace(btrim(tb_mastersheet.company), '\\s+', ' ', 'g'))
+    WHERE company_match_key(c.name) = company_match_key(tb_mastersheet.company)
   ) AS company_status,
   -- status above is the STORED value, still written and still filtered on.
   -- payment_period is the one the pages show: the same fact worked out
@@ -301,9 +300,8 @@ const ORDER_STOPPED = 'ORDER BY stopped_on DESC, group_name, person_name, compan
 // How far ahead "ending soon" reaches. Long enough to act on a notice
 // period, short enough that the answer is a shortlist and not the sheet.
 const ENDING_SOON_MONTHS = 3;
-const COMPANY_KEY_SQL = (value = 'company') => (
-  `lower(regexp_replace(btrim(${value}), '\\s+', ' ', 'g'))`
-);
+// The one company key (shared/companyKey.js, migration 094).
+const COMPANY_KEY_SQL = (value = 'company') => `company_match_key(${value})`;
 
 // A scalar is the browser contract; an array is Diane asking one wider
 // question. Empty and invalid array entries narrow nothing.
@@ -418,7 +416,7 @@ async function findAll({
     params.push(group);
     where.push(`upper(group_name) = upper($${params.length})`);
   }
-  const companies = listValues(company)?.map((value) => value.replace(/\s+/g, ' ').toLowerCase());
+  const companies = listValues(company)?.map((value) => require('../shared/companyKey').companyKey(value)); // eslint-disable-line global-require
   if (companies?.length) {
     params.push(companies);
     where.push(`${COMPANY_KEY_SQL()} = ANY($${params.length}::text[])`);
@@ -1184,7 +1182,7 @@ function findMatchingDeals({ groupName, company, role, seat, personId }) {
     .query(
       `SELECT ${COLUMNS} FROM tb_mastersheet
        WHERE regexp_replace(lower(group_name), '[^a-z0-9]', '', 'g') = regexp_replace(lower($1), '[^a-z0-9]', '', 'g')
-         AND regexp_replace(lower(coalesce(company, '')), '[^a-z0-9]', '', 'g') = regexp_replace(lower(coalesce($2, '')), '[^a-z0-9]', '', 'g')
+         AND company_match_key(company) = company_match_key($2)
          AND regexp_replace(lower(role), '[^a-z0-9]', '', 'g') = regexp_replace(lower($3), '[^a-z0-9]', '', 'g')
          AND coalesce(seat, -1) = coalesce($4::int, -1)
          AND regexp_replace(lower(person_id), '[^a-z0-9]', '', 'g') = regexp_replace(lower($5), '[^a-z0-9]', '', 'g')
@@ -1330,8 +1328,7 @@ function findFieldChanges({
          AND ($4::boolean OR c.reverted_at IS NULL)
           AND ($5::text IS NULL OR m.person_id = $5::text)
           AND ($6::text IS NULL OR
-            regexp_replace(lower(coalesce(m.company, '')), '[^a-z0-9]', '', 'g') =
-            regexp_replace(lower($6), '[^a-z0-9]', '', 'g'))
+            company_match_key(m.company) = company_match_key($6))
           AND (($7::text IS NULL AND $8::text[] IS NULL)
             OR ($7::text IS NOT NULL AND
               regexp_replace(lower(coalesce(c.person_name, m.person_name, '')), '[^a-z0-9]', '', 'g') =
@@ -3261,7 +3258,7 @@ function upsertValuesByColumn(row) {
  */
 async function companiesInSeveralGroups() {
   const { rows } = await pool.query(
-    `SELECT lower(btrim(company)) AS ckey FROM tb_mastersheet
+    `SELECT company_match_key(company) AS ckey FROM tb_mastersheet
       WHERE company IS NOT NULL AND btrim(company) <> ''
       GROUP BY 1 HAVING count(DISTINCT group_name) > 1`,
   );

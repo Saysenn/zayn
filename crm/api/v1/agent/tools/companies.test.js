@@ -83,7 +83,7 @@ test('CONFIRMED, it writes each one through the same update the page uses', asyn
   const out = await tools.bulkUpdateCompanies.handler({
     companies: ['Northstar Care', 'Acqua'], tier: 'T2', confirmed: true,
   });
-  assert.deepEqual(wrote.map((w) => w.update), ['northstar care', 'acqua']);
+  assert.deepEqual(wrote.map((w) => w.update), ['northstarcare', 'acqua']);
   assert.deepEqual(wrote[0].fields, { tier: 'T2' });
   assert.match(out.reply, /Nothing stopped/);
 });
@@ -139,7 +139,7 @@ test('A NAME IS MATCHED ON ITS FOLDED SPELLING', async () => {
   await tools.bulkUpdateCompanies.handler({
     companies: ['relia  pa'], tier: 'T2', confirmed: true,
   });
-  assert.deepEqual(wrote.map((w) => w.update), ['relia pa']);
+  assert.deepEqual(wrote.map((w) => w.update), ['reliapa']);
 });
 
 test('TOO MANY IS REFUSED, not silently capped', async () => {

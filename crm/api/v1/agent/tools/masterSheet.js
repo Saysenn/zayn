@@ -9496,7 +9496,7 @@ const activeCompaniesFor = {
      * ONE LIST, in the sheet check's format (his call 2026-09-30), rather
      * than a card per company, and past twelve rather than nothing drawn.
      */
-    const ckey = (name) => String(name ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+    const ckey = (name) => require('../../shared/companyKey').companyKey(name); // eslint-disable-line global-require
     const groupsOf = new Map();
     for (const r of rows) {
       const key = ckey(r.company);
@@ -10138,7 +10138,7 @@ const updateCompany = {
     // before any yes. This tool writes at once, so it hands them over.
     if (fields.status !== undefined && fields.status !== 'closed' && args.said) {
       const said = ` ${String(args.said).toLowerCase().replace(/[^a-z0-9 ]+/g, ' ')} `;
-      const named = (await companiesRepo.names()).filter((c) => c.ckey && said.includes(` ${c.ckey.replace(/[^a-z0-9 ]+/g, ' ').trim()} `));
+      const named = (await companiesRepo.names()).filter((c) => c.ckey && said.includes(` ${String(c.name ?? '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim()} `));
       // WINDING DOWN IS THE WINDING DOWN TOOL'S: its preview, handed over (2026-10-21).
       if (named.length > 1 && fields.status === 'liquidation') {
         return handToWindingDown(named.map((c) => ({ company: c.name, status: 'winding down' })), args);

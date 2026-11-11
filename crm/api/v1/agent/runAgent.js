@@ -6023,12 +6023,12 @@ async function runAgentTurn(history, contextName, onEvent) {
  */
 /** A company by its EXACT name, in the companies list or only on deals. */
 async function exactCompany(name) {
-  const key = String(name ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const key = require('../shared/companyKey').companyKey(name);
   if (!key) return null;
   const hit = await require('../repos/companies.repo').findByKey(key).catch(() => null);
   if (hit) return hit;
   const { rows: [row] } = await require('../../configs/db').query(
-    `SELECT btrim(company) AS name FROM tb_mastersheet WHERE lower(regexp_replace(btrim(company), '\\s+', ' ', 'g')) = $1 LIMIT 1`, [key],
+    `SELECT btrim(company) AS name FROM tb_mastersheet WHERE company_match_key(company) = $1 LIMIT 1`, [key],
   ).catch(() => ({ rows: [] }));
   return row ?? null;
 }

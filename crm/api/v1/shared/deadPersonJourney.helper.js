@@ -30,7 +30,7 @@ function monthsBetween(from, to) {
 }
 
 // A company IN A GROUP is one engagement, as everywhere else (companyKeySql).
-const companyKey = (d) => `${String(d.group_name ?? '').trim().toLowerCase()}|${String(d.company ?? '').trim().toLowerCase()}`;
+const companyKey = (d) => `${String(d.group_name ?? '').trim().toLowerCase()}|${require('./companyKey').companyKey(d.company)}`; // eslint-disable-line global-require
 
 /**
  * One deal as the journey shows it: what it was owed a month, rated, and

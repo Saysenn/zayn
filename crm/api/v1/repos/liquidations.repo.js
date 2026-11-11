@@ -1,7 +1,8 @@
 const pool = require('../../configs/db');
-// The company key in SQL, as companies.repo.js has it (its own copy: requiring
-// that file here would be a cycle, since its rename carries this table along).
-const CKEY = `lower(regexp_replace(btrim(company), '\\s+', ' ', 'g'))`;
+// The one company key (shared/companyKey.js), in SQL and in JS.
+const { companyKey, companyKeySql } = require('../shared/companyKey');
+
+const CKEY = companyKeySql('company');
 
 // ***************************************************
 // * THE LIQUIDATION TRACKER (migration 084)
@@ -36,7 +37,6 @@ const STAGES = Object.freeze(Object.values(STAGE));
 // Which kinds each stage may carry (Active proposal, Own liq, HMRC liq, Dissolved).
 const { STAGE_KINDS, kindFits } = require('../shared/liquidationStages');
 
-const companyKey = (value) => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
 
 /**
  * Every tracked company, with what the deals and the company say about it.
@@ -76,7 +76,7 @@ const LIST_SQL = `
      ) m) AS last_comm,
     (SELECT COUNT(*)::int FROM tb_liquidation_docs WHERE liquidation_id = l.id AND removed_at IS NULL) AS doc_count
   FROM tb_liquidations l
-  LEFT JOIN tb_companies c ON lower(regexp_replace(btrim(c.name), '\\s+', ' ', 'g')) = l.company_key`;
+  LEFT JOIN tb_companies c ON ${companyKeySql('c.name')} = l.company_key`;
 
 // Only the companies whose status is liquidation now.
 const IN_LIQUIDATION = "c.status = 'liquidation'";
@@ -85,7 +85,7 @@ const IN_LIQUIDATION = "c.status = 'liquidation'";
 async function syncFromCompanies() {
   await pool.query(
     `INSERT INTO tb_liquidations (company_key)
-     SELECT lower(regexp_replace(btrim(name), '\\s+', ' ', 'g')) FROM tb_companies
+     SELECT ${companyKeySql('name')} FROM tb_companies
       WHERE status = 'liquidation' AND btrim(name) <> ''
      ON CONFLICT (company_key) DO NOTHING`,
   );
@@ -393,7 +393,7 @@ async function docNames() {
     `SELECT d.id, d.liquidation_id, d.file_name, d.mime, COALESCE(c.name, l.company_key) AS company_name
        FROM tb_liquidation_docs d
        JOIN tb_liquidations l ON l.id = d.liquidation_id
-       LEFT JOIN tb_companies c ON lower(regexp_replace(btrim(c.name), '\\s+', ' ', 'g')) = l.company_key
+       LEFT JOIN tb_companies c ON ${companyKeySql('c.name')} = l.company_key
       WHERE d.removed_at IS NULL`,
   );
   return rows;
@@ -407,7 +407,7 @@ async function allChunks() {
        FROM tb_liquidation_doc_chunks k
        JOIN tb_liquidation_docs d ON d.id = k.doc_id AND d.removed_at IS NULL
        JOIN tb_liquidations l ON l.id = d.liquidation_id
-       LEFT JOIN tb_companies c ON lower(regexp_replace(btrim(c.name), '\\s+', ' ', 'g')) = l.company_key`,
+       LEFT JOIN tb_companies c ON ${companyKeySql('c.name')} = l.company_key`,
   );
   return rows;
 }

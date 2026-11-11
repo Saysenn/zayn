@@ -58,7 +58,7 @@ async function findAll({ q, group, page = 1, pageSize = 25 } = {}) {
                 ${setOf('sort_code')} AS sort_codes,
                 ARRAY_AGG(DISTINCT d.group_name ORDER BY d.group_name) AS groups,
                 COUNT(*)::int AS deal_count,
-                COUNT(DISTINCT (lower(btrim(COALESCE(d.group_name, ''))), lower(btrim(COALESCE(d.company, '')))))::int AS company_count,
+                COUNT(DISTINCT (lower(btrim(COALESCE(d.group_name, ''))), company_match_key(d.company)))::int AS company_count,
                 MIN(COALESCE(d.payment_start_on, d.assigned_on)) AS first_started,
                 MAX(d.stopped_on) AS last_stopped
            FROM tb_mastersheet d

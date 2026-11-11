@@ -1,6 +1,7 @@
 const repo = require('../../repos/liquidations.repo');
 const undoRepo = require('../../repos/agentUndo.repo');
 const { resolveCompanies } = require('./companies');
+const { companyKey } = require('../../shared/companyKey');
 const companiesRepo = require('../../repos/companies.repo');
 const { confirmFirst } = require('./confirmFirst');
 const { applyCompanyStatus, wouldStop, wouldResume, defaultReviewIds } = require('../../shared/companyStatus.helper');
@@ -154,8 +155,8 @@ const bare = (s) => fold(s).replace(/[.,]/g, '').replace(/\s+(?:ltd|limited|plc|
  * "Reliapay payroll". Close names are ASKED about (closeRows), never picked.
  */
 const sameCompany = (r, name) => {
-  const key = fold(name);
-  return key !== '' && (r.company_key === key || fold(r.company_name) === key);
+  const key = companyKey(name);
+  return key !== '' && (r.company_key === key || companyKey(r.company_name) === key);
 };
 /**
  * THEIR OWN WORDS SPELL IT CLOSE, NOT EXACT: the model sent "Quarry Lane" for
@@ -317,14 +318,14 @@ async function rowsFor(names, said) {
       // they say so; his rule 2026-11-04). Only an exact company off the page is found.
       // eslint-disable-next-line no-await-in-loop
       const company = await companiesRepo.findByKey(name).catch(() => null);
-      if (company) { notOnPage.push(company.name); offPage.push({ name: company.name, key: fold(company.name), said: name }); unknown.splice(unknown.indexOf(name), 1); }
+      if (company) { notOnPage.push(company.name); offPage.push({ name: company.name, key: companyKey(company.name), said: name }); unknown.splice(unknown.indexOf(name), 1); }
     }
   }
   if (unknown.length) {
     const sheet = await resolveCompanies(unknown, said ?? '');
     notOnPage.push(...sheet.found.map((f) => f.name));
     offPage.push(...sheet.found.map((f) => ({ name: f.name, key: f.key })));
-    for (const name of unknown.filter((n) => !sheet.found.some((f) => f.key === fold(n)))) {
+    for (const name of unknown.filter((n) => !sheet.found.some((f) => f.key === companyKey(n)))) {
       // CLOSE NAMES, ON THE PAGE OR OFF IT, ARE ONLY ASKED: nothing is read or
       // written for a name that is not exact. On "yes" she calls again with the exact name.
       // eslint-disable-next-line no-await-in-loop
@@ -339,7 +340,7 @@ async function rowsFor(names, said) {
       const theirs = await personsCompanies(`${fold(name)}'s company`).catch(() => []);
       if (theirs.length === 1) {
         const hit = rows.find((r) => bare(r.company_name) === bare(theirs[0]));
-        if (hit) { if (!found.includes(hit)) found.push(hit); } else { notOnPage.push(theirs[0]); offPage.push({ name: theirs[0], key: fold(theirs[0]) }); }
+        if (hit) { if (!found.includes(hit)) found.push(hit); } else { notOnPage.push(theirs[0]); offPage.push({ name: theirs[0], key: companyKey(theirs[0]) }); }
         continue;
       }
       if (theirs.length > 1) { corrections.push(`"${name}" is a person, not a company: they are at ${theirs.slice(0, -1).join(', ')} and ${theirs[theirs.length - 1]}. Which one?`); continue; }
@@ -373,7 +374,7 @@ async function closeCompanies(name) {
   const want = bare(name);
   if (want.length < 4) return [];
   const all = await everyCompany();
-  return all.filter((n) => fold(n) !== fold(name) && (bare(n) === want || bare(n).startsWith(`${want} `) || (want.length >= 5 && near(bare(n), want)))).slice(0, 4);
+  return all.filter((n) => companyKey(n) !== companyKey(name) && (bare(n) === want || bare(n).startsWith(`${want} `) || (want.length >= 5 && near(bare(n), want)))).slice(0, 4);
 }
 async function companyNear(name) {
   const want = bare(name);
@@ -954,7 +955,7 @@ const updateLiquidation = {
       const joins = [];
       for (const off of rest.offPage) {
         const its = args.items.filter((i) => sameCompany({ company_key: off.key, company_name: off.name }, i.company)
-          || (off.said && fold(off.said) === fold(i.company)));
+          || (off.said && companyKey(off.said) === companyKey(i.company)));
         const item = Object.assign({}, ...its);
         const s = item.stage !== undefined ? stageFrom(item.stage) : undefined;
         const kindStage = item.stageKind ? ['own_liq', 'hmrc_liq', 'dissolved', 'active_proposal'].find((st) => kindFrom(st, item.stageKind)) : undefined;
@@ -968,7 +969,7 @@ const updateLiquidation = {
       const stop = problems({ ...rest, notOnPage: rest.notOnPage.filter((n) => !joined.includes(n)) });
       if (stop) return { summary: stop };
       for (const { company, item } of joins) {
-        const row = { id: null, company_name: company.name, company_key: fold(company.name), stage: null, stage_kind: null, pay_status: company.status };
+        const row = { id: null, company_name: company.name, company_key: companyKey(company.name), stage: null, stage_kind: null, pay_status: company.status };
         targets.push({ row, item, company });
       }
       const byName = new Map();
